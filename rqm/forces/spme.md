@@ -47,11 +47,11 @@ SPME contributes two `Potential` slots to the `ForceField`:
   used by the spread and gather kernels. Unaffected by displacement;
   the reciprocal-space pipeline always runs separately.
 
-Both slots share the per-particle `charges` buffer on `ParticleBuffers`
-(see `particle-state.md`) and the shared `DeviceExclusionList` (see
-`topology.md`). The two slots are constructed together when `[spme]` is
-present in the config; they share the parsed `alpha` and per-particle
-charges but are otherwise independent.
+Both slots draw their per-particle charges from `posq.w` on
+`ParticleBuffers` (see `particle-state.md`) and share the
+`DeviceExclusionList` (see `topology.md`). The two slots are
+constructed together when `[spme]` is present in the config; they
+share the parsed `alpha` but are otherwise independent.
 
 The `[spme]` and `[coulomb]` tables are mutually exclusive in the config
 (see `io/config-schema.md`).
@@ -83,8 +83,8 @@ required when the table is present.
 The real-space slot is structurally analogous to `coulomb-pair-force.md`
 but evaluates `erfc(α · r) / r` instead of `1/r`. The slot uses the
 shared `NeighborListState` owned by `ForceField`, the per-particle
-`charges` buffer, and the shared `DeviceExclusionList`'s
-`atom_excl_coul_scales` array.
+charges carried in `posq.w` on `ParticleBuffers`, and the shared
+`DeviceExclusionList`'s `atom_excl_coul_scales` array.
 
 ### Algorithm <!-- rq-39b05bc9 -->
 
@@ -97,11 +97,13 @@ For lane `lane` of the warp handling particle `i` at sweep step `s`,
 when `k = s * 32 + lane` satisfies `k < neighbor_counts[i]` and
 `j = neighbor_list[i * max_neighbors + k]` is not equal to `i`:
 
-1. Compute the displacement `(dx, dy, dz) = positions[i] − positions[j]`
-   and apply the triclinic minimum-image algorithm of `simulation-box.md`.
+1. Load `posq[i]` and `posq[j]` (each as one 16-byte `Real4`
+   coalesced load). Compute the displacement
+   `(dx, dy, dz) = posq[i].xyz − posq[j].xyz` and apply the
+   triclinic minimum-image algorithm of `simulation-box.md`.
 2. Compute `r² = dx² + dy² + dz²`. If `r² > r_cut_real²`, the pair
    contributes nothing; the lane skips to its next assigned neighbour.
-3. Read `q_i = charges[i]`, `q_j = charges[j]`.
+3. Read `q_i = posq[i].w`, `q_j = posq[j].w`.
 4. Compute the screened Coulomb factor and energy:
 
    ```text
@@ -152,16 +154,18 @@ JIT-composed pair-force kernel (see `jit-composed-pair-force.md`),
 the fragment differs from the standalone kernel above in three
 ways:
 
-1. **Shared `(inv_r, r)` inputs.** The fragment's `evaluate`
-   signature is
-   `evaluate(Real r2, Real inv_r, Real r, unsigned int i,
-   unsigned int j, Real &factor, Real &energy, Real &virial)`.
-   `inv_r = rsqrtf(r²)` and `r = r² · inv_r` are computed once
-   per pair by the composer's outer loop and threaded into every
+1. **Shared `(inv_r, r, qi, qj)` inputs.** The fragment's
+   `evaluate` signature is
+   `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj,
+   unsigned int i, unsigned int j, Real &factor, Real &energy,
+   Real &virial)`. `inv_r = rsqrtf(r²)`, `r = r² · inv_r`,
+   `qi = posq[i].w`, and `qj = posq[j].w` are computed once per
+   pair by the composer's outer loop and threaded into every
    active fragment. The SPME-real fragment does not call
-   `Real_sqrt(r2)`, `1.0 / r2`, or `1.0 / inv_r`; it consumes the
-   composer-supplied scalars directly and derives `inv_r2 = inv_r
-   · inv_r` from them.
+   `Real_sqrt(r2)`, `1.0 / r2`, or `1.0 / inv_r`; it does not
+   read from a per-fragment `charges` array; it consumes the
+   composer-supplied scalars directly and derives
+   `inv_r2 = inv_r · inv_r` and `qq = qi · qj` from them.
 
 2. **Hastings polynomial for `erfc` in single precision.** Under
    the f32 precision feature (the default), the fragment computes
@@ -212,10 +216,7 @@ documented in `pair-force-kernel.md`:
 
 ```c
 extern "C" __global__ void spme_real_pair_force_f(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
+    const float4 *posq,
     unsigned int max_neighbors,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float k_coulomb,
@@ -232,10 +233,7 @@ extern "C" __global__ void spme_real_pair_force_f(
     unsigned int n);
 
 extern "C" __global__ void spme_real_pair_force_fev(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
+    const float4 *posq,
     unsigned int max_neighbors,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float k_coulomb,
@@ -368,9 +366,9 @@ The sorted order is materialised as a permutation
 `sorted_atom_index[t] = i` names the original atom index `i` to be
 processed at sorted slot `t`. Spread and gather kernels read this
 permutation with their block-id and use `i` to address
-`positions[i]`, `charges[i]`, and (for gather) the per-particle
-slot-output cells `slot_force_*[i]` / `slot_energy[i]` /
-`slot_virial[i]`.
+`posq[i]` (whose `.xyz` carries the position and `.w` the
+charge), and (for gather) the per-particle slot-output cells
+`slot_force_*[i]` / `slot_energy[i]` / `slot_virial[i]`.
 
 **Trigger protocol.** The sort runs at the start of every
 `SpmeReciprocalState::compute()` call where the framework's
@@ -989,10 +987,7 @@ extern "C" __global__ void spme_recip_reduce_partials(
     float scale);                       // 0.5 / N
 
 extern "C" __global__ void spme_spread_fixed_point(
-    const float        *positions_x,
-    const float        *positions_y,
-    const float        *positions_z,
-    const float        *charges,
+    const float4       *posq,
     const unsigned int *sorted_atom_index,  // length n
     const float        *lattice,            // length 6
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
@@ -1006,9 +1001,7 @@ extern "C" __global__ void spme_spread_finish(
     unsigned int M);
 
 extern "C" __global__ void spme_compute_bin_key(
-    const float  *positions_x,
-    const float  *positions_y,
-    const float  *positions_z,
+    const float4 *posq,
     const float  *lattice,           // length 6
     unsigned int  n_a, unsigned int n_b, unsigned int n_c,
     unsigned int *atom_bin_key,      // length n
@@ -1032,10 +1025,7 @@ extern "C" __global__ void spme_recip_apply_influence(
     unsigned int m_complex);
 
 extern "C" __global__ void spme_force_gather(
-    const float        *positions_x,
-    const float        *positions_y,
-    const float        *positions_z,
-    const float        *charges,
+    const float4       *posq,
     const float        *V,
     const unsigned int *sorted_atom_index,  // length n
     const float        *lattice,            // length 6

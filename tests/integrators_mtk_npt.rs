@@ -328,7 +328,7 @@ fn mtk_position_drift_identity_mode_matches_plain_drift() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // exp_b_dt = 1, phi_x_dt = 0.1 → x ← x + 0.1·v
     mtk_position_drift(&mut buffers, 1.0, 0.1).unwrap();
-    let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let px_post = buffers.download_positions().unwrap().0;
     for i in 0..n {
         let expected = snap_px[i] + 0.1 * snap_vx[i];
         assert!((px_post[i] - expected).abs() < 1.0e-5);
@@ -494,7 +494,7 @@ fn two_runs_with_identical_configs_are_byte_identical() {
                 .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
                 .unwrap();
         }
-        let px = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+        let px = buffers.download_positions().unwrap().0;
         (px, sim_box.lattice())
     }
 
@@ -602,7 +602,7 @@ fn mtk_approximate_time_reversibility_smoke() {
     }
 
     // --- Compare to the initial state ---
-    let px_final = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let px_final = buffers.download_positions().unwrap().0;
     let vx_final = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
 
     // Positions should return to within accumulated f32 round-off.
@@ -681,7 +681,7 @@ fn finite_step_keeps_velocities_and_positions_finite() {
     for v in &vx {
         assert!(v.is_finite(), "non-finite velocity {v}");
     }
-    let px = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let px = buffers.download_positions().unwrap().0;
     for p in &px {
         assert!(p.is_finite(), "non-finite position {p}");
     }

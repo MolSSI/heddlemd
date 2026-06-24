@@ -2162,9 +2162,7 @@ fn launch_composed_post_force(
         return Ok(());
     }
     let mut builder = crate::forces::ForceLaunchBuilder::new();
-    builder.push_device_buffer(&buffers.positions_x);
-    builder.push_device_buffer(&buffers.positions_y);
-    builder.push_device_buffer(&buffers.positions_z);
+    builder.push_device_buffer(&buffers.posq);
     builder.push_device_buffer(&buffers.images_x);
     builder.push_device_buffer(&buffers.images_y);
     builder.push_device_buffer(&buffers.images_z);

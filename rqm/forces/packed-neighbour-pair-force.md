@@ -109,34 +109,36 @@ The mapping from block position to original atom ID is
 `sorted_particle_ids[b · 32 + ℓ]`; no separate block-to-particle
 table is allocated.
 
-## Tile-Sorted Position View <!-- rq-512037ca -->
+## Tile-Sorted Posq View <!-- rq-512037ca -->
 
-`NeighborListState` carries a per-step-refreshed position view
+`NeighborListState` carries a per-step-refreshed posq view
 indexed by block position:
 
-- `tile_sorted_positions_x: CudaSlice<Real>` of length `N` (or
-  `1` when `N = 0`).
-- `tile_sorted_positions_y: CudaSlice<Real>` similarly.
-- `tile_sorted_positions_z: CudaSlice<Real>` similarly.
+- `tile_sorted_posq: CudaSlice<Real4>` of length `N` (or `1`
+  when `N = 0`).
 
 The semantics are
-`tile_sorted_positions_*[k] = positions_*[sorted_particle_ids[k]]`
-for every `k` in `[0, N)`. The kernel
-`scatter_positions_to_tile_order` writes these buffers once at
-the start of every `ForceField::step()` from the current
-`ParticleBuffers.positions_*` arrays. Inactive lanes in the
-partial last block receive `+∞` for all three coordinates so
-they trivially fail every cutoff test in the force kernel and
-the construction kernel.
+`tile_sorted_posq[k] = posq[sorted_particle_ids[k]]` for every
+`k` in `[0, N)`, so `tile_sorted_posq[k].xyz` is the wrapped
+position of the atom at block position `k` and
+`tile_sorted_posq[k].w` is that atom's charge. The kernel
+`scatter_positions_to_tile_order` writes this buffer once at the
+start of every `ForceField::step()` from the current
+`ParticleBuffers.posq` array. Inactive lanes in the partial last
+block receive `Real4 { x: +∞, y: +∞, z: +∞, w: 0 }` so they
+trivially fail every cutoff test in the force kernel and the
+construction kernel.
 
-The i-side position loads in the force kernel and the i-side and
-j-side position loads in the construction kernel read from this
-view (coalesced 32-element spans per warp). The j-side position
-loads in the force kernel read `positions_*[j_atom_id]` directly,
-where `j_atom_id` is the original atom ID stored in
-`interacting_atoms` (see below); these reads are uncoalesced but
-benefit from L1 cache locality when packed j-atoms are spatially
-clustered.
+The i-side posq loads in the force kernel and the i-side and
+j-side posq loads in the construction kernel read from this view
+(one 16-byte coalesced load per atom replaces what would
+otherwise be four scalar loads). The j-side posq loads in the
+force kernel read `posq[j_atom_id]` directly, where `j_atom_id`
+is the original atom ID stored in `interacting_atoms` (see
+below); these reads are uncoalesced but benefit from L1 cache
+locality when packed j-atoms are spatially clustered, and they
+still carry the j-atom's charge through `.w` so the fragment's
+`evaluate(…, qi, qj, …)` does not need a separate charges load.
 
 ## Block Bounding Boxes <!-- rq-bd3f4707 -->
 
@@ -266,13 +268,17 @@ on the device's default stream, after the cell-list pre-step has
 produced `sorted_particle_ids`:
 
 1. **`scatter_positions_to_tile_order`** — refresh
-   `tile_sorted_positions_*` from `positions_*` via
-   `sorted_particle_ids`. One thread per atom; block size 256.
-   (This kernel also runs every step, not only on rebuild — see
-   *Per-Step Pipeline* below.)
+   `tile_sorted_posq` from `posq` via `sorted_particle_ids`. One
+   thread per atom; block size 256. Each thread writes one
+   `Real4` value `posq[sorted_particle_ids[k]]` to
+   `tile_sorted_posq[k]`, carrying both the position and the
+   charge through in a single coalesced store. (This kernel also
+   runs every step, not only on rebuild — see *Per-Step Pipeline*
+   below.)
 2. **`compute_block_bbox`** — one warp per block; each warp's 32
-   lanes load 32 atom positions from `tile_sorted_positions_*` and
-   reduce min/max via `__shfl_xor_sync`. Writes `block_centre`,
+   lanes load 32 atom positions from `tile_sorted_posq` (reading
+   only the `.x/.y/.z` components) and reduce min/max via
+   `__shfl_xor_sync`. Writes `block_centre`,
    `block_bbox`, and the per-block bounding-sphere radius
    `block_centre[b].w`. Inactive lanes contribute `±∞` so they do
    not widen the box.
@@ -596,12 +602,8 @@ The composer emits the following common arguments for both
 `heddle_jit_composed_pair_force_fev`, in this order:
 
 ```text
-const Real *positions_x,
-const Real *positions_y,
-const Real *positions_z,
-const Real *tile_sorted_positions_x,
-const Real *tile_sorted_positions_y,
-const Real *tile_sorted_positions_z,
+const Real4 *posq,
+const Real4 *tile_sorted_posq,
 const unsigned int *sorted_particle_ids,
 const unsigned int *iblock_offset,
 const unsigned int *sorted_interacting_atoms,
@@ -634,9 +636,7 @@ extern "C" __global__ void heddle_jit_composed_pair_force_single_fev(...)
 Common arguments, in order:
 
 ```text
-const Real *positions_x,
-const Real *positions_y,
-const Real *positions_z,
+const Real4 *posq,
 const unsigned int *single_pair_atoms,
 unsigned int single_pair_count,
 const Real *lattice,
@@ -772,13 +772,13 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
 
 ### CUDA Kernels <!-- rq-2647cb7e -->
 
-- `scatter_positions_to_tile_order(positions_x, positions_y, <!-- rq-89245537 -->
-  positions_z, sorted_particle_ids, tile_sorted_positions_x,
-  tile_sorted_positions_y, tile_sorted_positions_z, n)` — one
-  thread per atom; block 256.
-- `compute_block_bbox(tile_sorted_positions_x, tile_sorted_positions_y, <!-- rq-9f947525 -->
-  tile_sorted_positions_z, tile_atom_count, block_centre,
-  block_bbox, n_blocks)` — one warp per block.
+- `scatter_positions_to_tile_order(posq, sorted_particle_ids, <!-- rq-89245537 -->
+  tile_sorted_posq, n)` — one thread per atom; block 256. Reads
+  one `Real4` from `posq[sorted_particle_ids[k]]` per thread and
+  writes it to `tile_sorted_posq[k]`.
+- `compute_block_bbox(tile_sorted_posq, tile_atom_count, <!-- rq-9f947525 -->
+  block_centre, block_bbox, n_blocks)` — one warp per block.
+  Reads `.x/.y/.z` from `tile_sorted_posq` and ignores `.w`.
 - `compute_sort_keys(block_bbox, sorted_blocks, n_blocks)` — one <!-- rq-e9ed7617 -->
   thread per block; preceded by a single-block reduction for the
   global bbox-sum range.
@@ -819,13 +819,11 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
 ### Functions <!-- rq-c85fa8d1 -->
 
 - `crate::gpu::scatter_positions_to_tile_order(kernels, buffers, <!-- rq-595e7ea4 -->
-  sorted_particle_ids, tile_sorted_positions_x, tile_sorted_positions_y,
-  tile_sorted_positions_z) -> Result<(), GpuError>` — launches
-  the scatter kernel.
-- `crate::gpu::compute_block_bbox(kernels, <!-- rq-3a31b3f0 -->
-  tile_sorted_positions_x, tile_sorted_positions_y,
-  tile_sorted_positions_z, tile_atom_count, block_centre,
-  block_bbox, n_blocks) -> Result<(), GpuError>`.
+  sorted_particle_ids, tile_sorted_posq) -> Result<(), GpuError>`
+  — launches the scatter kernel. Reads from `buffers.posq`.
+- `crate::gpu::compute_block_bbox(kernels, tile_sorted_posq, <!-- rq-3a31b3f0 -->
+  tile_atom_count, block_centre, block_bbox, n_blocks) ->
+  Result<(), GpuError>`.
 - `crate::gpu::sort_blocks_by_volume(kernels, block_bbox, <!-- rq-ad6f0de0 -->
   sorted_blocks, sorted_block_centre, sorted_block_bbox,
   n_blocks) -> Result<(), GpuError>` — runs the three sub-steps

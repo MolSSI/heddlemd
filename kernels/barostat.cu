@@ -49,9 +49,7 @@ extern "C" __global__ void virial_sum_reduce(
 // or `berendsen_compute_mu_and_rescale_lattice`) and never copied to
 // the host.
 extern "C" __global__ void rescale_positions_device_factor(
-    Real *positions_x,
-    Real *positions_y,
-    Real *positions_z,
+    Real4 *posq,
     const Real *factor,
     unsigned int n)
 {
@@ -60,9 +58,11 @@ extern "C" __global__ void rescale_positions_device_factor(
     return;
   }
   Real f = factor[0];
-  positions_x[i] *= f;
-  positions_y[i] *= f;
-  positions_z[i] *= f;
+  Real4 pq = posq[i];
+  pq.x *= f;
+  pq.y *= f;
+  pq.z *= f;
+  posq[i] = pq;
 }
 
 // Multiply every component of the six-element device-resident lattice
@@ -84,9 +84,7 @@ extern "C" __global__ void multiply_lattice_isotropic(
 }
 
 extern "C" __global__ void rescale_positions(
-    Real *positions_x,
-    Real *positions_y,
-    Real *positions_z,
+    Real4 *posq,
     Real factor,
     unsigned int n)
 {
@@ -94,9 +92,11 @@ extern "C" __global__ void rescale_positions(
   if (i >= n) {
     return;
   }
-  positions_x[i] *= factor;
-  positions_y[i] *= factor;
-  positions_z[i] *= factor;
+  Real4 pq = posq[i];
+  pq.x *= factor;
+  pq.y *= factor;
+  pq.z *= factor;
+  posq[i] = pq;
 }
 
 // C-rescale barostat: compute the box scale factor µ for one step

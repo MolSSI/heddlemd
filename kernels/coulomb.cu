@@ -5,7 +5,6 @@
 
 // rq-bfd7004c
 struct CoulombPairFunc {
-  const Real *charges;
   Real k_coulomb;
   Real cutoff;
   Real r_switch;
@@ -15,11 +14,9 @@ struct CoulombPairFunc {
   }
 
   __device__ inline void evaluate(
-      Real r2, unsigned int i, unsigned int j,
+      Real r2, Real qi, Real qj, unsigned int i, unsigned int j,
       Real &factor, Real &energy, Real &virial) const
   {
-    Real qi = charges[i];
-    Real qj = charges[j];
     Real qq = qi * qj;
 
     Real inv_r2 = R(1.0) / r2;
@@ -46,10 +43,7 @@ struct CoulombPairFunc {
 };
 
 extern "C" __global__ void coulomb_pair_force_f(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
-    const Real *charges,
+    const Real4 *posq,
     unsigned int max_neighbors,
     const Real *lattice,
     Real k_coulomb,
@@ -67,10 +61,10 @@ extern "C" __global__ void coulomb_pair_force_f(
 {
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
-  CoulombPairFunc f { charges, k_coulomb, cutoff, r_switch };
+  CoulombPairFunc f { k_coulomb, cutoff, r_switch };
   pair_compute_f(
       f, n, max_neighbors,
-      positions_x, positions_y, positions_z,
+      posq,
       neighbor_list, neighbor_counts,
       lx, ly, lz, xy, xz, yz,
       atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales,
@@ -78,10 +72,7 @@ extern "C" __global__ void coulomb_pair_force_f(
 }
 
 extern "C" __global__ void coulomb_pair_force_fev(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
-    const Real *charges,
+    const Real4 *posq,
     unsigned int max_neighbors,
     const Real *lattice,
     Real k_coulomb,
@@ -101,10 +92,10 @@ extern "C" __global__ void coulomb_pair_force_fev(
 {
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
-  CoulombPairFunc f { charges, k_coulomb, cutoff, r_switch };
+  CoulombPairFunc f { k_coulomb, cutoff, r_switch };
   pair_compute_fev(
       f, n, max_neighbors,
-      positions_x, positions_y, positions_z,
+      posq,
       neighbor_list, neighbor_counts,
       lx, ly, lz, xy, xz, yz,
       atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales,

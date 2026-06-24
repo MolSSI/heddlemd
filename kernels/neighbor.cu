@@ -37,7 +37,7 @@ __device__ static inline void parallelepiped_cell_indices(
 
 // rq-884b5cd6
 extern "C" __global__ void neighbor_displacement_squared(
-    const Real *positions_x, const Real *positions_y, const Real *positions_z,
+    const Real4 *posq,
     const Real *reference_x, const Real *reference_y, const Real *reference_z,
     const Real *lattice,
     Real *disp_sq,
@@ -49,9 +49,10 @@ extern "C" __global__ void neighbor_displacement_squared(
   if (i >= n) {
     return;
   }
-  Real dx = positions_x[i] - reference_x[i];
-  Real dy = positions_y[i] - reference_y[i];
-  Real dz = positions_z[i] - reference_z[i];
+  Real4 pq = posq[i];
+  Real dx = pq.x - reference_x[i];
+  Real dy = pq.y - reference_y[i];
+  Real dz = pq.z - reference_z[i];
   triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
   disp_sq[i] = dx * dx + dy * dy + dz * dz;
 }
@@ -74,7 +75,7 @@ extern "C" __global__ void neighbor_displacement_squared(
 //   shared_id: unsigned int[blockDim.x]
 // Total = 4 * blockDim.x * sizeof(Real).
 extern "C" __global__ void neighbor_list_build(
-    const Real *positions_x, const Real *positions_y, const Real *positions_z,
+    const Real4 *posq,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
     const Real *lattice,
@@ -129,9 +130,10 @@ extern "C" __global__ void neighbor_list_build(
     Real xi = R(0.0), yi = R(0.0), zi = R(0.0);
     if (active) {
       i = sorted_particle_ids[home_start + thread_atom];
-      xi = positions_x[i];
-      yi = positions_y[i];
-      zi = positions_z[i];
+      Real4 pq = posq[i];
+      xi = pq.x;
+      yi = pq.y;
+      zi = pq.z;
     }
     unsigned int count = 0u;
     unsigned int overflowed = 0u;
@@ -173,9 +175,10 @@ extern "C" __global__ void neighbor_list_build(
             if (threadIdx.x < chunk_size) {
               unsigned int j = sorted_particle_ids[chunk_base + threadIdx.x];
               shared_id[threadIdx.x] = j;
-              shared_x[threadIdx.x] = positions_x[j];
-              shared_y[threadIdx.x] = positions_y[j];
-              shared_z[threadIdx.x] = positions_z[j];
+              Real4 pq_j = posq[j];
+              shared_x[threadIdx.x] = pq_j.x;
+              shared_y[threadIdx.x] = pq_j.y;
+              shared_z[threadIdx.x] = pq_j.z;
             }
             __syncthreads();
 
@@ -222,7 +225,7 @@ extern "C" __global__ void neighbor_list_build(
 
 // rq-344f7af0
 extern "C" __global__ void copy_positions_into_reference(
-    const Real *positions_x, const Real *positions_y, const Real *positions_z,
+    const Real4 *posq,
     Real *reference_x, Real *reference_y, Real *reference_z,
     unsigned int n)
 {
@@ -230,15 +233,16 @@ extern "C" __global__ void copy_positions_into_reference(
   if (i >= n) {
     return;
   }
-  reference_x[i] = positions_x[i];
-  reference_y[i] = positions_y[i];
-  reference_z[i] = positions_z[i];
+  Real4 pq = posq[i];
+  reference_x[i] = pq.x;
+  reference_y[i] = pq.y;
+  reference_z[i] = pq.z;
 }
 
 #define SCAN_BLOCK_SIZE 256u
 
 extern "C" __global__ void compute_cell_indices_and_histogram(
-    const Real *positions_x, const Real *positions_y, const Real *positions_z,
+    const Real4 *posq,
     const Real *lattice,
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int *cell_indices,
@@ -252,7 +256,8 @@ extern "C" __global__ void compute_cell_indices_and_histogram(
     return;
   }
   unsigned int ca, cb, cc;
-  parallelepiped_cell_indices(positions_x[i], positions_y[i], positions_z[i],
+  Real4 pq = posq[i];
+  parallelepiped_cell_indices(pq.x, pq.y, pq.z,
                               lattice,
                               n_cells_a, n_cells_b, n_cells_c,
                               ca, cb, cc);
@@ -373,45 +378,41 @@ extern "C" __global__ void sort_cells_by_particle_id(
 
 #define TILE_SIZE 32u
 
-// Gathers per-particle positions into the tile-sorted view. One thread
-// per atom; block size 256. For partial-block padding lanes (index >=
+// Gathers per-particle posq into the tile-sorted view. One thread per
+// atom; block size 256. For partial-block padding lanes (index >=
 // particle_count), writes are out-of-range and so this kernel is
 // launched only over [0, particle_count).
 extern "C" __global__ void scatter_positions_to_tile_order(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     const unsigned int *sorted_particle_ids,
-    Real *tile_sorted_positions_x,
-    Real *tile_sorted_positions_y,
-    Real *tile_sorted_positions_z,
+    Real4 *tile_sorted_posq,
     unsigned int n)
 {
   unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
   if (k >= n) return;
   unsigned int pid = sorted_particle_ids[k];
-  tile_sorted_positions_x[k] = positions_x[pid];
-  tile_sorted_positions_y[k] = positions_y[pid];
-  tile_sorted_positions_z[k] = positions_z[pid];
+  tile_sorted_posq[k] = posq[pid];
 }
 
-// Fills the partial-block padding lanes of the tile-sorted positions
-// with +infinity so the construction kernel and force kernel treat
-// them as infinitely far from every other atom. Called once per build
-// after scatter_positions_to_tile_order. One thread per padding lane.
+// Fills the partial-block padding lanes of the tile-sorted posq with
+// +infinity (xyz) and zero (w) so the construction kernel and force
+// kernel treat them as infinitely far from every other atom. Called
+// once per build after scatter_positions_to_tile_order. One thread
+// per padding lane.
 extern "C" __global__ void fill_tile_position_padding(
-    Real *tile_sorted_positions_x,
-    Real *tile_sorted_positions_y,
-    Real *tile_sorted_positions_z,
+    Real4 *tile_sorted_posq,
     unsigned int n,
     unsigned int padded_n)
 {
   unsigned int k = n + blockIdx.x * blockDim.x + threadIdx.x;
   if (k >= padded_n) return;
   Real pos_inf = (Real) 3.4e38;
-  tile_sorted_positions_x[k] = pos_inf;
-  tile_sorted_positions_y[k] = pos_inf;
-  tile_sorted_positions_z[k] = pos_inf;
+  Real4 pad;
+  pad.x = pos_inf;
+  pad.y = pos_inf;
+  pad.z = pos_inf;
+  pad.w = R(0.0);
+  tile_sorted_posq[k] = pad;
 }
 
 // Computes per-block axis-aligned bounding boxes. One warp per block.
@@ -422,9 +423,7 @@ extern "C" __global__ void fill_tile_position_padding(
 // Layout: block_centre is 4 Reals per block (cx, cy, cz, max_disp_sq).
 // block_bbox is 3 Reals per block (dx, dy, dz).
 extern "C" __global__ void compute_block_bbox(
-    const Real *tile_sorted_positions_x,
-    const Real *tile_sorted_positions_y,
-    const Real *tile_sorted_positions_z,
+    const Real4 *tile_sorted_posq,
     const unsigned int *tile_atom_count,
     Real *block_centre,
     Real *block_bbox,
@@ -441,12 +440,13 @@ extern "C" __global__ void compute_block_bbox(
   unsigned int idx = b * TILE_SIZE + lane;
   Real pos_inf = (Real) 3.4e38;
   Real neg_inf = -pos_inf;
-  Real px = active ? tile_sorted_positions_x[idx] : pos_inf;
-  Real py = active ? tile_sorted_positions_y[idx] : pos_inf;
-  Real pz = active ? tile_sorted_positions_z[idx] : pos_inf;
-  Real qx = active ? tile_sorted_positions_x[idx] : neg_inf;
-  Real qy = active ? tile_sorted_positions_y[idx] : neg_inf;
-  Real qz = active ? tile_sorted_positions_z[idx] : neg_inf;
+  Real4 pq_lane = active ? tile_sorted_posq[idx] : (Real4){pos_inf, pos_inf, pos_inf, R(0.0)};
+  Real px = pq_lane.x;
+  Real py = pq_lane.y;
+  Real pz = pq_lane.z;
+  Real qx = active ? pq_lane.x : neg_inf;
+  Real qy = active ? pq_lane.y : neg_inf;
+  Real qz = active ? pq_lane.z : neg_inf;
 
   for (unsigned int off = 16u; off > 0u; off >>= 1) {
     Real ox = __shfl_xor_sync(0xFFFFFFFFu, px, off);
@@ -473,9 +473,9 @@ extern "C" __global__ void compute_block_bbox(
   // Compute max atom-to-centre distance squared.
   Real disp_sq = R(0.0);
   if (active) {
-    Real rx = tile_sorted_positions_x[idx] - cx;
-    Real ry = tile_sorted_positions_y[idx] - cy;
-    Real rz = tile_sorted_positions_z[idx] - cz;
+    Real rx = pq_lane.x - cx;
+    Real ry = pq_lane.y - cy;
+    Real rz = pq_lane.z - cz;
     disp_sq = rx * rx + ry * ry + rz * rz;
   }
   for (unsigned int off = 16u; off > 0u; off >>= 1) {
@@ -549,9 +549,7 @@ __device__ static inline Real packed_block_bbox_dist_sq(
 #endif
 
 extern "C" __global__ void find_blocks_with_interactions(
-    const Real *tile_sorted_positions_x,
-    const Real *tile_sorted_positions_y,
-    const Real *tile_sorted_positions_z,
+    const Real4 *tile_sorted_posq,
     const unsigned int *sorted_particle_ids,
     const Real *block_centre,
     const Real *block_bbox,
@@ -584,9 +582,10 @@ extern "C" __global__ void find_blocks_with_interactions(
   // partial-block padding lanes (b * 32 + lane >= n_atoms).
   unsigned int i_slot = b * TILE_SIZE + lane;
   bool i_in_range = i_slot < n_atoms;
-  Real ix = tile_sorted_positions_x[i_slot];
-  Real iy = tile_sorted_positions_y[i_slot];
-  Real iz = tile_sorted_positions_z[i_slot];
+  Real4 pq_i = tile_sorted_posq[i_slot];
+  Real ix = pq_i.x;
+  Real iy = pq_i.y;
+  Real iz = pq_i.z;
   unsigned int iid = i_in_range ? sorted_particle_ids[i_slot] : n_atoms;
   warp_ix[warp_in_block][lane] = ix;
   warp_iy[warp_in_block][lane] = iy;
@@ -637,9 +636,10 @@ extern "C" __global__ void find_blocks_with_interactions(
       // Load j-block's atoms (one per lane).
       unsigned int j_slot = jb * TILE_SIZE + lane;
       bool j_in_range = j_slot < n_atoms;
-      Real jx = tile_sorted_positions_x[j_slot];
-      Real jy = tile_sorted_positions_y[j_slot];
-      Real jz = tile_sorted_positions_z[j_slot];
+      Real4 pq_j = tile_sorted_posq[j_slot];
+      Real jx = pq_j.x;
+      Real jy = pq_j.y;
+      Real jz = pq_j.z;
       unsigned int jid = j_in_range ? sorted_particle_ids[j_slot] : n_atoms;
 
       // Test j-atom (this lane's) against all 32 i-atoms via lane sweep.

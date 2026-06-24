@@ -9,7 +9,7 @@ use crate::gpu::LosslessBuffers;
 use crate::gpu::{GpuError, Kernels, ParticleBuffers};
 use crate::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
-use crate::precision::Real;
+use crate::precision::{Real, Real4};
 
 const BLOCK_SIZE: u32 = 256;
 
@@ -46,9 +46,7 @@ pub fn vv_kick_drift(
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 &mut buffers.images_x,
                 &mut buffers.images_y,
                 &mut buffers.images_z,
@@ -218,9 +216,7 @@ pub fn lj_pair_force(
             func.launch(
                 cfg,
                 (
-                    &particle_buffers.positions_x,
-                    &particle_buffers.positions_y,
-                    &particle_buffers.positions_z,
+                    &particle_buffers.posq,
                     &particle_buffers.type_indices,
                     max_neighbors,
                     lattice,
@@ -249,9 +245,7 @@ pub fn lj_pair_force(
                 func.launch(
                     cfg,
                     (
-                        &particle_buffers.positions_x,
-                        &particle_buffers.positions_y,
-                        &particle_buffers.positions_z,
+                        &particle_buffers.posq,
                         &particle_buffers.type_indices,
                         max_neighbors,
                         lattice,
@@ -309,7 +303,6 @@ pub fn coulomb_pair_force(
     debug_assert_eq!(neighbor_counts.len(), n);
     debug_assert_eq!(atom_excl_offsets.len(), n + 1);
     debug_assert_eq!(atom_excl_partners.len(), atom_excl_coul_scales.len());
-    debug_assert_eq!(particle_buffers.charges.len(), n);
     debug_assert_eq!(output.force_x.len(), n);
 
     let n_u32 = n as u32;
@@ -326,10 +319,7 @@ pub fn coulomb_pair_force(
             func.launch(
                 cfg,
                 (
-                    &particle_buffers.positions_x,
-                    &particle_buffers.positions_y,
-                    &particle_buffers.positions_z,
-                    &particle_buffers.charges,
+                    &particle_buffers.posq,
                     max_neighbors,
                     lattice,
                     K_COULOMB_F32,
@@ -355,10 +345,7 @@ pub fn coulomb_pair_force(
                 func.launch(
                     cfg,
                     (
-                        &particle_buffers.positions_x,
-                        &particle_buffers.positions_y,
-                        &particle_buffers.positions_z,
-                        &particle_buffers.charges,
+                        &particle_buffers.posq,
                         max_neighbors,
                         lattice,
                         K_COULOMB_F32,
@@ -407,7 +394,6 @@ pub fn spme_real_pair_force(
     debug_assert_eq!(neighbor_counts.len(), n);
     debug_assert_eq!(atom_excl_offsets.len(), n + 1);
     debug_assert_eq!(atom_excl_partners.len(), atom_excl_coul_scales.len());
-    debug_assert_eq!(particle_buffers.charges.len(), n);
     debug_assert_eq!(output.force_x.len(), n);
 
     let n_u32 = n as u32;
@@ -424,10 +410,7 @@ pub fn spme_real_pair_force(
             func.launch(
                 cfg,
                 (
-                    &particle_buffers.positions_x,
-                    &particle_buffers.positions_y,
-                    &particle_buffers.positions_z,
-                    &particle_buffers.charges,
+                    &particle_buffers.posq,
                     max_neighbors,
                     lattice,
                     K_COULOMB_F32,
@@ -453,10 +436,7 @@ pub fn spme_real_pair_force(
                 func.launch(
                     cfg,
                     (
-                        &particle_buffers.positions_x,
-                        &particle_buffers.positions_y,
-                        &particle_buffers.positions_z,
-                        &particle_buffers.charges,
+                        &particle_buffers.posq,
                         max_neighbors,
                         lattice,
                         K_COULOMB_F32,
@@ -505,7 +485,6 @@ pub fn spme_spread_fixed_point(
     let n_c = grid[2];
     let m = n_a as usize * n_b as usize * n_c as usize;
     debug_assert_eq!(rho_fixed.len(), m);
-    debug_assert_eq!(particle_buffers.charges.len(), n);
     debug_assert_eq!(sorted_atom_index.len(), n);
 
     let n_u32 = n as u32;
@@ -523,10 +502,7 @@ pub fn spme_spread_fixed_point(
     let lattice = sim_box.lattice_device();
     let func = particle_buffers.kernels.spme_recip.spme_spread_fixed_point.clone();
     let args = (
-        &particle_buffers.positions_x,
-        &particle_buffers.positions_y,
-        &particle_buffers.positions_z,
-        &particle_buffers.charges,
+        &particle_buffers.posq,
         sorted_atom_index,
         lattice,
         n_a,
@@ -720,7 +696,6 @@ pub fn spme_force_gather(
         grid[0] as usize * grid[1] as usize * grid[2] as usize;
     debug_assert_eq!(v.len(), m);
     debug_assert_eq!(w_per_particle_virial.len(), 1);
-    debug_assert_eq!(particle_buffers.charges.len(), n);
     debug_assert_eq!(u_self_per_particle.len(), n);
     debug_assert_eq!(sorted_atom_index.len(), n);
     debug_assert_eq!(slot_force_x.len(), n);
@@ -737,10 +712,7 @@ pub fn spme_force_gather(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.charges,
+                &particle_buffers.posq,
                 v,
                 u_self_per_particle,
                 w_per_particle_virial,
@@ -795,9 +767,7 @@ pub fn spme_compute_bin_key(
     let lattice = sim_box.lattice_device();
     let func = particle_buffers.kernels.spme_recip.spme_compute_bin_key.clone();
     let args = (
-        &particle_buffers.positions_x,
-        &particle_buffers.positions_y,
-        &particle_buffers.positions_z,
+        &particle_buffers.posq,
         lattice,
         n_a,
         n_b,
@@ -1541,9 +1511,7 @@ pub fn rescale_positions_device_factor(
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 factor,
                 n_u32,
             ),
@@ -1615,9 +1583,7 @@ pub fn rescale_positions(
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 factor,
                 n_u32,
             ),
@@ -1685,9 +1651,7 @@ pub fn mtk_position_drift(
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 &particle_buffers.velocities_x,
                 &particle_buffers.velocities_y,
                 &particle_buffers.velocities_z,
@@ -1787,9 +1751,7 @@ pub fn neighbor_displacement_squared(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 reference_x,
                 reference_y,
                 reference_z,
@@ -1851,9 +1813,7 @@ pub fn neighbor_list_build(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 sorted_particle_ids,
                 cell_offsets,
                 lattice,
@@ -1894,9 +1854,7 @@ pub fn copy_positions_into_reference(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 reference_x,
                 reference_y,
                 reference_z,
@@ -1942,9 +1900,7 @@ pub fn compute_cell_indices_and_histogram(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 lattice,
                 n_cells[0],
                 n_cells[1],
@@ -2130,9 +2086,7 @@ pub fn scatter_positions_to_tile_order(
     kernels: &Kernels,
     particle_buffers: &ParticleBuffers,
     sorted_particle_ids: &CudaSlice<u32>,
-    tile_sorted_positions_x: &mut CudaSlice<Real>,
-    tile_sorted_positions_y: &mut CudaSlice<Real>,
-    tile_sorted_positions_z: &mut CudaSlice<Real>,
+    tile_sorted_posq: &mut CudaSlice<Real4>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -2145,13 +2099,9 @@ pub fn scatter_positions_to_tile_order(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 sorted_particle_ids,
-                &mut *tile_sorted_positions_x,
-                &mut *tile_sorted_positions_y,
-                &mut *tile_sorted_positions_z,
+                &mut *tile_sorted_posq,
                 n_u32,
             ),
         )
@@ -2162,9 +2112,7 @@ pub fn scatter_positions_to_tile_order(
 
 pub fn fill_tile_position_padding(
     kernels: &Kernels,
-    tile_sorted_positions_x: &mut CudaSlice<Real>,
-    tile_sorted_positions_y: &mut CudaSlice<Real>,
-    tile_sorted_positions_z: &mut CudaSlice<Real>,
+    tile_sorted_posq: &mut CudaSlice<Real4>,
     n: u32,
     padded_n: u32,
 ) -> Result<(), GpuError> {
@@ -2178,9 +2126,7 @@ pub fn fill_tile_position_padding(
         func.launch(
             cfg,
             (
-                &mut *tile_sorted_positions_x,
-                &mut *tile_sorted_positions_y,
-                &mut *tile_sorted_positions_z,
+                &mut *tile_sorted_posq,
                 n,
                 padded_n,
             ),
@@ -2192,9 +2138,7 @@ pub fn fill_tile_position_padding(
 
 pub fn compute_block_bbox(
     kernels: &Kernels,
-    tile_sorted_positions_x: &CudaSlice<Real>,
-    tile_sorted_positions_y: &CudaSlice<Real>,
-    tile_sorted_positions_z: &CudaSlice<Real>,
+    tile_sorted_posq: &CudaSlice<Real4>,
     tile_atom_count: &CudaSlice<u32>,
     block_centre: &mut CudaSlice<Real>,
     block_bbox: &mut CudaSlice<Real>,
@@ -2213,9 +2157,7 @@ pub fn compute_block_bbox(
         func.launch(
             cfg,
             (
-                tile_sorted_positions_x,
-                tile_sorted_positions_y,
-                tile_sorted_positions_z,
+                tile_sorted_posq,
                 tile_atom_count,
                 &mut *block_centre,
                 &mut *block_bbox,
@@ -2230,9 +2172,7 @@ pub fn compute_block_bbox(
 #[allow(clippy::too_many_arguments)]
 pub fn find_blocks_with_interactions(
     kernels: &Kernels,
-    tile_sorted_positions_x: &CudaSlice<Real>,
-    tile_sorted_positions_y: &CudaSlice<Real>,
-    tile_sorted_positions_z: &CudaSlice<Real>,
+    tile_sorted_posq: &CudaSlice<Real4>,
     sorted_particle_ids: &CudaSlice<u32>,
     block_centre: &CudaSlice<Real>,
     block_bbox: &CudaSlice<Real>,
@@ -2261,9 +2201,7 @@ pub fn find_blocks_with_interactions(
         func.launch(
             cfg,
             (
-                tile_sorted_positions_x,
-                tile_sorted_positions_y,
-                tile_sorted_positions_z,
+                tile_sorted_posq,
                 sorted_particle_ids,
                 block_centre,
                 block_bbox,
@@ -2423,9 +2361,7 @@ pub fn vv_kick_drift_lossless(
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 &mut buffers.images_x,
                 &mut buffers.images_y,
                 &mut buffers.images_z,
@@ -2470,9 +2406,7 @@ pub fn lan_drift_half(
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 &mut buffers.images_x,
                 &mut buffers.images_y,
                 &mut buffers.images_z,
@@ -2591,9 +2525,7 @@ pub fn shake_snapshot(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 group_atoms,
                 group_atom_offset,
                 group_atom_count,
@@ -2639,9 +2571,7 @@ pub fn shake_positions(
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 &mut particle_buffers.velocities_x,
                 &mut particle_buffers.velocities_y,
                 &mut particle_buffers.velocities_z,
@@ -2730,9 +2660,7 @@ pub fn shake_positions_no_velocity(
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 group_atoms,
                 group_atom_offset,
                 group_atom_count,
@@ -2778,9 +2706,7 @@ pub fn rattle_velocities(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 &mut particle_buffers.velocities_x,
                 &mut particle_buffers.velocities_y,
                 &mut particle_buffers.velocities_z,

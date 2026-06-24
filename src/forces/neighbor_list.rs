@@ -15,7 +15,7 @@ use crate::gpu::{
 use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{HostStage, KernelStage, Timings};
-use crate::precision::Real;
+use crate::precision::{Real, Real4};
 
 // rq-d8e4407a rq-e1ceb5c0 rq-6cf916af rq-1bbcf3b7
 #[derive(Debug, thiserror::Error)]
@@ -82,11 +82,10 @@ pub struct PackedNeighborData {
     pub tile_atom_count: CudaSlice<u32>,
     /// Per-block active-lane bitmask.
     pub tile_lane_mask: CudaSlice<u32>,
-    /// Block-order positions (refreshed every step by
+    /// Block-order interleaved `(x, y, z, q)` positions+charges
+    /// (refreshed every step by
     /// `scatter_positions_to_tile_order`). Length `n_blocks * 32`.
-    pub tile_sorted_positions_x: CudaSlice<Real>,
-    pub tile_sorted_positions_y: CudaSlice<Real>,
-    pub tile_sorted_positions_z: CudaSlice<Real>,
+    pub tile_sorted_posq: CudaSlice<Real4>,
     /// Per-block centre `(x, y, z, max_disp_sq)` packed as 4 `Real`.
     pub block_centre: CudaSlice<Real>,
     /// Per-block bbox half-extents `(dx, dy, dz)` packed as 3 `Real`.
@@ -214,14 +213,8 @@ fn alloc_packed_neighbor_data(
     let tile_lane_mask = device
         .htod_sync_copy(&lane_mask_host)
         .map_err(GpuError::from)?;
-    let tile_sorted_positions_x = device
-        .alloc_zeros::<Real>(padded_n)
-        .map_err(GpuError::from)?;
-    let tile_sorted_positions_y = device
-        .alloc_zeros::<Real>(padded_n)
-        .map_err(GpuError::from)?;
-    let tile_sorted_positions_z = device
-        .alloc_zeros::<Real>(padded_n)
+    let tile_sorted_posq = device
+        .alloc_zeros::<Real4>(padded_n)
         .map_err(GpuError::from)?;
     let block_centre = device
         .alloc_zeros::<Real>(n_blocks_alloc * 4)
@@ -276,9 +269,7 @@ fn alloc_packed_neighbor_data(
         n_blocks,
         tile_atom_count,
         tile_lane_mask,
-        tile_sorted_positions_x,
-        tile_sorted_positions_y,
-        tile_sorted_positions_z,
+        tile_sorted_posq,
         block_centre,
         block_bbox,
         trivial_sorted_particle_ids,
@@ -681,19 +672,16 @@ impl NeighborListState {
 
             // Populate the tile-sorted positions view's padding lanes
             // with +inf so the force kernel treats them as inactive.
-            let pos_inf = (3.4e38 as Real, 3.4e38 as Real, 3.4e38 as Real);
+            let pos_inf = 3.4e38 as Real;
             let padded_n = (n_blocks as usize) * 32;
             if padded_n > particle_count {
                 let pad_count = padded_n - particle_count;
-                let pad_x = vec![pos_inf.0; pad_count];
-                let pad_y = vec![pos_inf.1; pad_count];
-                let pad_z = vec![pos_inf.2; pad_count];
-                let mut view_x = packed.tile_sorted_positions_x.slice_mut(particle_count..);
-                let mut view_y = packed.tile_sorted_positions_y.slice_mut(particle_count..);
-                let mut view_z = packed.tile_sorted_positions_z.slice_mut(particle_count..);
-                device.htod_sync_copy_into(&pad_x, &mut view_x).map_err(GpuError::from)?;
-                device.htod_sync_copy_into(&pad_y, &mut view_y).map_err(GpuError::from)?;
-                device.htod_sync_copy_into(&pad_z, &mut view_z).map_err(GpuError::from)?;
+                let pad = vec![
+                    Real4 { x: pos_inf, y: pos_inf, z: pos_inf, w: 0.0 };
+                    pad_count
+                ];
+                let mut view = packed.tile_sorted_posq.slice_mut(particle_count..);
+                device.htod_sync_copy_into(&pad, &mut view).map_err(GpuError::from)?;
             }
             Some(packed)
         };
@@ -969,9 +957,7 @@ impl NeighborListState {
             &kernels,
             buffers,
             unsafe { &*sorted_view },
-            &mut packed.tile_sorted_positions_x,
-            &mut packed.tile_sorted_positions_y,
-            &mut packed.tile_sorted_positions_z,
+            &mut packed.tile_sorted_posq,
         )?;
 
         // 2. Fill partial-block padding lanes with +infinity so they
@@ -979,9 +965,7 @@ impl NeighborListState {
         let padded_n = n_blocks * 32;
         crate::gpu::fill_tile_position_padding(
             &kernels,
-            &mut packed.tile_sorted_positions_x,
-            &mut packed.tile_sorted_positions_y,
-            &mut packed.tile_sorted_positions_z,
+            &mut packed.tile_sorted_posq,
             particle_count as u32,
             padded_n,
         )?;
@@ -989,9 +973,7 @@ impl NeighborListState {
         // 3. Per-block bounding boxes.
         crate::gpu::compute_block_bbox(
             &kernels,
-            &packed.tile_sorted_positions_x,
-            &packed.tile_sorted_positions_y,
-            &packed.tile_sorted_positions_z,
+            &packed.tile_sorted_posq,
             &packed.tile_atom_count,
             &mut packed.block_centre,
             &mut packed.block_bbox,
@@ -1012,9 +994,7 @@ impl NeighborListState {
             let max_single_pairs = packed.single_pairs_capacity;
             crate::gpu::find_blocks_with_interactions(
                 &kernels,
-                &packed.tile_sorted_positions_x,
-                &packed.tile_sorted_positions_y,
-                &packed.tile_sorted_positions_z,
+                &packed.tile_sorted_posq,
                 unsafe { &*sorted_view },
                 &packed.block_centre,
                 &packed.block_bbox,

@@ -7,7 +7,6 @@ __device__ static const Real ONE_OVER_SQRT_PI = R(0.5641895835477563);
 
 // rq-9a512ed1
 struct SpmeRealPairFunc {
-  const Real *charges;
   Real k_coulomb;
   Real alpha;
   Real r_cut_real;
@@ -17,11 +16,9 @@ struct SpmeRealPairFunc {
   }
 
   __device__ inline void evaluate(
-      Real r2, unsigned int i, unsigned int j,
+      Real r2, Real qi, Real qj, unsigned int i, unsigned int j,
       Real &factor, Real &energy, Real &virial) const
   {
-    Real qi = charges[i];
-    Real qj = charges[j];
     Real qq = qi * qj;
 
     Real inv_r2 = R(1.0) / r2;
@@ -39,10 +36,7 @@ struct SpmeRealPairFunc {
 };
 
 extern "C" __global__ void spme_real_pair_force_f(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
-    const Real *charges,
+    const Real4 *posq,
     unsigned int max_neighbors,
     const Real *lattice,
     Real k_coulomb,
@@ -60,10 +54,10 @@ extern "C" __global__ void spme_real_pair_force_f(
 {
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
-  SpmeRealPairFunc f { charges, k_coulomb, alpha, r_cut_real };
+  SpmeRealPairFunc f { k_coulomb, alpha, r_cut_real };
   pair_compute_f(
       f, n, max_neighbors,
-      positions_x, positions_y, positions_z,
+      posq,
       neighbor_list, neighbor_counts,
       lx, ly, lz, xy, xz, yz,
       atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales,
@@ -71,10 +65,7 @@ extern "C" __global__ void spme_real_pair_force_f(
 }
 
 extern "C" __global__ void spme_real_pair_force_fev(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
-    const Real *charges,
+    const Real4 *posq,
     unsigned int max_neighbors,
     const Real *lattice,
     Real k_coulomb,
@@ -94,10 +85,10 @@ extern "C" __global__ void spme_real_pair_force_fev(
 {
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
-  SpmeRealPairFunc f { charges, k_coulomb, alpha, r_cut_real };
+  SpmeRealPairFunc f { k_coulomb, alpha, r_cut_real };
   pair_compute_fev(
       f, n, max_neighbors,
-      positions_x, positions_y, positions_z,
+      posq,
       neighbor_list, neighbor_counts,
       lx, ly, lz, xy, xz, yz,
       atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales,

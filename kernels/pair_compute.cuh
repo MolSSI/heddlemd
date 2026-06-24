@@ -57,9 +57,7 @@ __device__ static inline void pair_compute_f(
     PairFunc per_pair,
     unsigned int n,
     unsigned int max_neighbors,
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     const unsigned int *neighbor_list,
     const unsigned int *neighbor_counts,
     Real lx, Real ly, Real lz,
@@ -90,24 +88,28 @@ __device__ static inline void pair_compute_f(
   Real p_y = R(0.0);
   Real p_z = R(0.0);
 
-  Real pi_x = positions_x[i];
-  Real pi_y = positions_y[i];
-  Real pi_z = positions_z[i];
+  Real4 pq_i = posq[i];
+  Real pi_x = pq_i.x;
+  Real pi_y = pq_i.y;
+  Real pi_z = pq_i.z;
+  Real qi   = pq_i.w;
 
   for (unsigned int s = 0; s < sweep_end; s += PAIR_FORCE_WARP_SIZE) {
     unsigned int k = s + lane;
     if (k < count) {
       unsigned int j = neighbor_list[row_base + k];
       if (i != j) {
-        Real dx = pi_x - positions_x[j];
-        Real dy = pi_y - positions_y[j];
-        Real dz = pi_z - positions_z[j];
+        Real4 pq_j = posq[j];
+        Real dx = pi_x - pq_j.x;
+        Real dy = pi_y - pq_j.y;
+        Real dz = pi_z - pq_j.z;
+        Real qj = pq_j.w;
         triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
         Real r2 = dx * dx + dy * dy + dz * dz;
         Real r_c2 = per_pair.cutoff_squared(i, j);
         if (r2 <= r_c2) {
           Real factor, energy_unused, virial_unused;
-          per_pair.evaluate(r2, i, j, factor, energy_unused, virial_unused);
+          per_pair.evaluate(r2, qi, qj, i, j, factor, energy_unused, virial_unused);
           Real fx = factor * dx;
           Real fy = factor * dy;
           Real fz = factor * dz;
@@ -140,9 +142,7 @@ __device__ static inline void pair_compute_fev(
     PairFunc per_pair,
     unsigned int n,
     unsigned int max_neighbors,
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     const unsigned int *neighbor_list,
     const unsigned int *neighbor_counts,
     Real lx, Real ly, Real lz,
@@ -174,24 +174,28 @@ __device__ static inline void pair_compute_fev(
   Real p_e = R(0.0);
   Real p_w = R(0.0);
 
-  Real pi_x = positions_x[i];
-  Real pi_y = positions_y[i];
-  Real pi_z = positions_z[i];
+  Real4 pq_i = posq[i];
+  Real pi_x = pq_i.x;
+  Real pi_y = pq_i.y;
+  Real pi_z = pq_i.z;
+  Real qi   = pq_i.w;
 
   for (unsigned int s = 0; s < sweep_end; s += PAIR_FORCE_WARP_SIZE) {
     unsigned int k = s + lane;
     if (k < count) {
       unsigned int j = neighbor_list[row_base + k];
       if (i != j) {
-        Real dx = pi_x - positions_x[j];
-        Real dy = pi_y - positions_y[j];
-        Real dz = pi_z - positions_z[j];
+        Real4 pq_j = posq[j];
+        Real dx = pi_x - pq_j.x;
+        Real dy = pi_y - pq_j.y;
+        Real dz = pi_z - pq_j.z;
+        Real qj = pq_j.w;
         triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
         Real r2 = dx * dx + dy * dy + dz * dz;
         Real r_c2 = per_pair.cutoff_squared(i, j);
         if (r2 <= r_c2) {
           Real factor, energy, virial;
-          per_pair.evaluate(r2, i, j, factor, energy, virial);
+          per_pair.evaluate(r2, qi, qj, i, j, factor, energy, virial);
           Real fx = factor * dx;
           Real fy = factor * dy;
           Real fz = factor * dz;

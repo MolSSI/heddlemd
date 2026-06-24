@@ -75,9 +75,15 @@ identifying metadata. The snippet:
        // Per-pair functional form. Writes the three pair outputs.
        // `r2`, `inv_r = 1/r`, and `r` are computed once per pair
        // by the outer loop and threaded into every fragment's
-       // evaluate so they share work across fragments.
+       // evaluate so they share work across fragments. `qi` and
+       // `qj` are the per-pair charges, extracted from the outer
+       // loop's `posq_i.w` and `posq_j.w` loads so that fragments
+       // needing charges (SPME-real, truncated Coulomb) don't
+       // re-load them from device memory and fragments that don't
+       // (Lennard-Jones) simply ignore them.
        __device__ inline void evaluate(
            Real r2, Real inv_r, Real r,
+           Real qi, Real qj,
            unsigned int i, unsigned int j,
            Real &factor, Real &energy, Real &virial) const;
 
@@ -180,15 +186,24 @@ The lane:
 1. Computes `(dx, dy, dz, r²)` once via the minimum-image
    displacement, and (for exclusion-tile entries) the per-pair
    exclusion scale once.
-2. Computes the shared scalar intermediates once:
+2. Computes the shared scalar intermediates once. The outer
+   loop has already loaded `posq_i` and `posq_j` once each (one
+   16-byte coalesced `Real4` load per warp per atom, replacing
+   four separate scalar loads for the position + charge); the
+   per-pair scaffolding extracts the distance components from
+   `posq_i.xyz − posq_j.xyz` and the charges from `posq_i.w`
+   and `posq_j.w`:
    ```
    inv_r = rsqrtf(r²)
    r     = r² · inv_r
+   qi    = posq_i.w
+   qj    = posq_j.w
    ```
-   `inv_r` and `r` are threaded into every fragment's `evaluate`,
-   so each fragment reuses them instead of recomputing `1/r²`,
-   `sqrt(1/r²)`, or `1/r` from `r²` itself. `rsqrtf` is the
-   hardware reciprocal-square-root intrinsic.
+   `inv_r`, `r`, `qi`, and `qj` are threaded into every
+   fragment's `evaluate`, so each fragment reuses them instead of
+   recomputing `1/r²`, `sqrt(1/r²)`, `1/r` from `r²`, or
+   re-loading the charges from a separate `charges` array.
+   `rsqrtf` is the hardware reciprocal-square-root intrinsic.
 3. Computes the max-cutoff mask once:
    ```
    mask = (r² <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0)
@@ -203,7 +218,8 @@ The lane:
 4. Initialises a per-pair accumulator
    `factor = 0`, `energy = 0`, `virial = 0`.
 5. For each active fragment, in canonical slot order:
-   - The functor's `evaluate(r², inv_r, r, i, j, …)` produces its
+   - The functor's
+     `evaluate(r², inv_r, r, qi, qj, i, j, …)` produces its
      `(factor_slot, energy_slot, virial_slot)`. `evaluate` is
      called unconditionally for every pair; out-of-cutoff
      contributions are zeroed by the mask at step 7.
@@ -297,9 +313,7 @@ The exclusion-correction pass takes the following common
 arguments before the per-fragment args:
 
 ```text
-const Real *positions_x,
-const Real *positions_y,
-const Real *positions_z,
+const Real4 *posq,
 const unsigned int *excluded_pair_atoms,
 unsigned int excluded_pair_count,
 const Real *lattice,
@@ -921,12 +935,22 @@ Feature: JIT-composed pair-force kernel
   # --- Shared per-pair intermediates ---
 
   @rq-ecc1241f
-  Scenario: inv_r and r are computed once per pair and threaded into every fragment's evaluate
+  Scenario: inv_r, r, qi, qj are computed once per pair and threaded into every fragment's evaluate
     Given a ForceField with LJ and SPME-real both active
     And the composed kernel source captured for inspection
     Then the inner loop computes inv_r = rsqrtf(r2) and r = r2 * inv_r exactly once per pair
-    And every fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    And the inner loop extracts qi = posq_i.w and qj = posq_j.w exactly once per pair
+    And every fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
     And no fragment's evaluate body contains a call to Real_sqrt(r2) or computes 1.0 / r2
+    And no fragment's evaluate body reads from a per-fragment `charges` array (charges flow through qi/qj only)
+
+  @rq-03ec91b0
+  Scenario: Pair-force outer loop loads posq once per atom and reuses x/y/z/w
+    Given a ForceField with at least one fast-class pair-force fragment active
+    And the composed kernel source captured for inspection
+    Then the inner loop performs exactly one Real4 load from posq[i_atom_id] and one from posq[j_atom_id] per pair
+    And the inner loop does not perform separate loads from positions_x, positions_y, positions_z, or charges arrays
+    And the displacement components (dx, dy, dz) are computed as posq_i.xyz − posq_j.xyz
 
   @rq-15a42b50
   Scenario: SPME-real and LJ in-cutoff pair force matches the closed form within f32 round-off

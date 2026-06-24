@@ -227,10 +227,7 @@ fn rescale_positions_multiplies_components() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    rescale_positions(&mut buffers, 0.5).unwrap();
-    let x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
-    let y = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
-    let z = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    rescale_positions(&mut buffers, 0.5).unwrap();    let (x, y, z) = buffers.download_positions().unwrap();
     assert_eq!(x, vec![0.5, -2.0]);
     assert_eq!(y, vec![1.0, 2.5]);
     assert_eq!(z, vec![1.5, -3.0]);
@@ -260,7 +257,7 @@ fn rescale_positions_factor_one_is_identity() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     rescale_positions(&mut buffers, 1.0).unwrap();
-    let rx = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let rx = buffers.download_positions().unwrap().0;
     assert_eq!(rx, px);
 }
 
@@ -456,7 +453,7 @@ fn mu_equals_one_when_pressure_equals_target() {
     let rel = ((v_post - v_pre) / v_pre).abs() as f64;
     assert!(rel < 1.0e-3, "v_post = {v_post}, v_pre = {v_pre} (rel {rel})");
     // Positions effectively unchanged.
-    let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let px_post = buffers.download_positions().unwrap().0;
     for (a, b) in px_post.iter().zip(px.iter()) {
         let r = (a - b).abs() / b.abs().max(1.0e-12);
         assert!(r < 1.0e-3, "pos drift {a} vs {b}");
@@ -573,7 +570,7 @@ fn fractional_coordinates_invariant_under_apply() {
         .unwrap();
     sim_box.flush_from_device().unwrap();
     let lx_post = sim_box.lx();
-    let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let px_post = buffers.download_positions().unwrap().0;
     // Fractional coord (x / lx) must be invariant under uniform scaling.
     for (i, (a, b)) in px_post.iter().zip(px.iter()).enumerate() {
         let f_pre = (b / lx_pre) as f64;
@@ -756,7 +753,7 @@ fn two_runs_byte_identical() {
             baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
                 .unwrap();
         }
-        let positions_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+        let positions_x = buffers.download_positions().unwrap().0;
         (positions_x, sim_box.lattice())
     }
 

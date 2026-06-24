@@ -278,9 +278,7 @@ pub(crate) fn sd_compute_step(
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 &buffers.forces_x,
                 &buffers.forces_y,
                 &buffers.forces_z,
@@ -316,9 +314,7 @@ pub(crate) fn sd_snapshot(
         func.launch(
             cfg,
             (
-                &buffers.positions_x,
-                &buffers.positions_y,
-                &buffers.positions_z,
+                &buffers.posq,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,
@@ -352,9 +348,7 @@ pub(crate) fn sd_restore(
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,

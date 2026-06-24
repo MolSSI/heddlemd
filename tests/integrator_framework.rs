@@ -772,10 +772,10 @@ fn plan_returns_same_shape_across_repeated_calls() {
 fn plan_is_pure_does_not_launch_kernels_or_touch_buffers() {
     let registry = IntegratorRegistry::with_builtins();
     let (gpu, buffers, _sim_box, _ff, _timings) = fixture();
-    let pre_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let pre_x = buffers.download_positions().unwrap().0;
     let integ = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
     let _plan = integ.plan(0.1);
-    let post_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let post_x = buffers.download_positions().unwrap().0;
     assert_eq!(pre_x, post_x);
 }
 

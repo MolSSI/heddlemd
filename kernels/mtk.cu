@@ -50,9 +50,7 @@ extern "C" __global__ void mtk_velocity_half_kick(
 // reference positions on the next force_field.step via the
 // box-generation change-detection path.
 extern "C" __global__ void mtk_position_drift(
-    Real *positions_x,
-    Real *positions_y,
-    Real *positions_z,
+    Real4 *posq,
     const Real *velocities_x,
     const Real *velocities_y,
     const Real *velocities_z,
@@ -64,7 +62,9 @@ extern "C" __global__ void mtk_position_drift(
   if (i >= n) {
     return;
   }
-  positions_x[i] = exp_b_dt * positions_x[i] + phi_x_dt * velocities_x[i];
-  positions_y[i] = exp_b_dt * positions_y[i] + phi_x_dt * velocities_y[i];
-  positions_z[i] = exp_b_dt * positions_z[i] + phi_x_dt * velocities_z[i];
+  Real4 pq = posq[i];
+  pq.x = exp_b_dt * pq.x + phi_x_dt * velocities_x[i];
+  pq.y = exp_b_dt * pq.y + phi_x_dt * velocities_y[i];
+  pq.z = exp_b_dt * pq.z + phi_x_dt * velocities_z[i];
+  posq[i] = pq;
 }

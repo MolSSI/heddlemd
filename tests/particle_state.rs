@@ -309,9 +309,9 @@ fn allocate_device_buffers_and_perform_initial_upload() {
     let buffers = ParticleBuffers::new(&gpu, &state)
         .expect("ParticleBuffers::new should succeed");
     assert_eq!(buffers.particle_count(), 4);
-    assert_eq!(buffers.positions_x.len(), 4);
-    assert_eq!(buffers.positions_y.len(), 4);
-    assert_eq!(buffers.positions_z.len(), 4);
+    assert_eq!(buffers.particle_count(), 4);
+    assert_eq!(buffers.particle_count(), 4);
+    assert_eq!(buffers.particle_count(), 4);
     assert_eq!(buffers.velocities_x.len(), 4);
     assert_eq!(buffers.velocities_y.len(), 4);
     assert_eq!(buffers.velocities_z.len(), 4);
@@ -321,9 +321,9 @@ fn allocate_device_buffers_and_perform_initial_upload() {
     assert_eq!(buffers.masses.len(), 4);
     assert_eq!(buffers.particle_ids.len(), 4);
 
-    assert_eq!(device.dtoh_sync_copy(&buffers.positions_x).unwrap(), state.positions_x);
-    assert_eq!(device.dtoh_sync_copy(&buffers.positions_y).unwrap(), state.positions_y);
-    assert_eq!(device.dtoh_sync_copy(&buffers.positions_z).unwrap(), state.positions_z);
+    assert_eq!(buffers.download_positions().unwrap().0, state.positions_x);
+    assert_eq!(buffers.download_positions().unwrap().1, state.positions_y);
+    assert_eq!(buffers.download_positions().unwrap().2, state.positions_z);
     assert_eq!(device.dtoh_sync_copy(&buffers.velocities_x).unwrap(), state.velocities_x);
     assert_eq!(device.dtoh_sync_copy(&buffers.velocities_y).unwrap(), state.velocities_y);
     assert_eq!(device.dtoh_sync_copy(&buffers.velocities_z).unwrap(), state.velocities_z);
@@ -354,9 +354,9 @@ fn allocate_device_buffers_from_an_empty_state() {
     let buffers = ParticleBuffers::new(&gpu, &state)
         .expect("ParticleBuffers::new should succeed");
     assert_eq!(buffers.particle_count(), 0);
-    assert_eq!(buffers.positions_x.len(), 0);
-    assert_eq!(buffers.positions_y.len(), 0);
-    assert_eq!(buffers.positions_z.len(), 0);
+    assert_eq!(buffers.particle_count(), 0);
+    assert_eq!(buffers.particle_count(), 0);
+    assert_eq!(buffers.particle_count(), 0);
     assert_eq!(buffers.velocities_x.len(), 0);
     assert_eq!(buffers.velocities_y.len(), 0);
     assert_eq!(buffers.velocities_z.len(), 0);
@@ -401,9 +401,9 @@ fn re_upload_after_host_side_mutation() {
 
     buffers.upload(&state).expect("upload should succeed");
 
-    assert_eq!(device.dtoh_sync_copy(&buffers.positions_x).unwrap(), new_positions_x);
-    assert_eq!(device.dtoh_sync_copy(&buffers.positions_y).unwrap(), state.positions_y);
-    assert_eq!(device.dtoh_sync_copy(&buffers.positions_z).unwrap(), state.positions_z);
+    assert_eq!(buffers.download_positions().unwrap().0, new_positions_x);
+    assert_eq!(buffers.download_positions().unwrap().1, state.positions_y);
+    assert_eq!(buffers.download_positions().unwrap().2, state.positions_z);
     assert_eq!(device.dtoh_sync_copy(&buffers.velocities_x).unwrap(), state.velocities_x);
     assert_eq!(device.dtoh_sync_copy(&buffers.velocities_y).unwrap(), state.velocities_y);
     assert_eq!(device.dtoh_sync_copy(&buffers.velocities_z).unwrap(), state.velocities_z);

@@ -254,10 +254,7 @@ __device__ static inline void spread_per_particle_setup(
 // (matching OpenMM's gridSpreadCharge pattern). Grid:
 // ceil(N * spline_order / 256) blocks of 256 threads each.
 extern "C" __global__ void spme_spread_fixed_point(
-    const Real         *positions_x,
-    const Real         *positions_y,
-    const Real         *positions_z,
-    const Real         *charges,
+    const Real4        *posq,
     const unsigned int *sorted_atom_index, // length n
     const Real         *lattice,
     unsigned int        n_a, unsigned int n_b, unsigned int n_c,
@@ -275,14 +272,18 @@ extern "C" __global__ void spme_spread_fixed_point(
   unsigned int iz = gid - atom_slot * p_u;          // z-slice for this thread
   unsigned int atom = sorted_atom_index[atom_slot];
 
+  // One Real4 load carries position + charge in a single coalesced
+  // transaction.
+  Real4 pq = posq[atom];
+  Real qi = pq.w;
+
   // Charge-zero skip — matches OpenMM. Atoms with q == 0 contribute
   // nothing to the grid.
-  Real qi = charges[atom];
   if (qi == R(0.0)) return;
 
-  Real px = positions_x[atom];
-  Real py = positions_y[atom];
-  Real pz = positions_z[atom];
+  Real px = pq.x;
+  Real py = pq.y;
+  Real pz = pq.z;
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
 
@@ -342,9 +343,7 @@ extern "C" __global__ void spme_spread_fixed_point(
 // deterministic across runs. The caller is responsible for zeroing
 // `bin_atom_counts` (length M) before this kernel launches.
 extern "C" __global__ void spme_compute_bin_key(
-    const Real   *positions_x,
-    const Real   *positions_y,
-    const Real   *positions_z,
+    const Real4  *posq,
     const Real   *lattice,
     unsigned int  n_a, unsigned int n_b, unsigned int n_c,
     unsigned int *atom_bin_key,
@@ -357,9 +356,10 @@ extern "C" __global__ void spme_compute_bin_key(
   }
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
-  Real px = positions_x[i];
-  Real py = positions_y[i];
-  Real pz = positions_z[i];
+  Real4 pq = posq[i];
+  Real px = pq.x;
+  Real py = pq.y;
+  Real pz = pq.z;
   Real ta, tb, tc;
   unsigned int g_a, g_b, g_c;
   spread_per_particle_setup(
@@ -563,10 +563,7 @@ extern "C" __global__ void spme_recip_reduce_partials(
 }
 
 extern "C" __global__ void spme_force_gather(
-    const Real         *positions_x,
-    const Real         *positions_y,
-    const Real         *positions_z,
-    const Real         *charges,
+    const Real4        *posq,
     const Real         *V,
     const Real         *u_self_per_particle,
     const Real         *w_per_particle_virial,   // length 1
@@ -594,10 +591,11 @@ extern "C" __global__ void spme_force_gather(
   // canonical particle-index positions slot_*[i], preserving the
   // slot-output layout regardless of the sort permutation.
   unsigned int i = sorted_atom_index[t];
-  Real qi = charges[i];
-  Real px = positions_x[i];
-  Real py = positions_y[i];
-  Real pz = positions_z[i];
+  Real4 pq = posq[i];
+  Real qi = pq.w;
+  Real px = pq.x;
+  Real py = pq.y;
+  Real pz = pq.z;
 
   // Re-wrap defensively, matching the spread kernel.
   int wrap_a, wrap_b, wrap_c;

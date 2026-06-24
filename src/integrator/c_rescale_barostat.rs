@@ -239,9 +239,11 @@ impl Barostat for CRescaleBarostat {
             ),
             per_thread_body: String::from(
                 "        Real c_rescale_mu = c_rescale_mu_device[0];\n\
-                 \x20       positions_x[i] *= c_rescale_mu;\n\
-                 \x20       positions_y[i] *= c_rescale_mu;\n\
-                 \x20       positions_z[i] *= c_rescale_mu;",
+                 \x20       Real4 pq = posq[i];\n\
+                 \x20       pq.x *= c_rescale_mu;\n\
+                 \x20       pq.y *= c_rescale_mu;\n\
+                 \x20       pq.z *= c_rescale_mu;\n\
+                 \x20       posq[i] = pq;",
             ),
         })
     }

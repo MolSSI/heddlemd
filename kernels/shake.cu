@@ -48,9 +48,7 @@ __device__ static inline void min_image_to(
 // One thread per group; each thread writes group_atom_count[g] entries
 // into snapshot_* starting at group_atom_offset[g].
 extern "C" __global__ void shake_snapshot(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -67,9 +65,10 @@ extern "C" __global__ void shake_snapshot(
   unsigned int cnt = group_atom_count[g];
   for (unsigned int a = 0; a < cnt; ++a) {
     unsigned int atom_idx = group_atoms[off + a];
-    snapshot_x[off + a] = positions_x[atom_idx];
-    snapshot_y[off + a] = positions_y[atom_idx];
-    snapshot_z[off + a] = positions_z[atom_idx];
+    Real4 pq = posq[atom_idx];
+    snapshot_x[off + a] = pq.x;
+    snapshot_y[off + a] = pq.y;
+    snapshot_z[off + a] = pq.z;
   }
 }
 
@@ -107,9 +106,7 @@ __device__ static inline void weighted_com(
 // MAX_GROUP_CONSTRAINTS × (2 bytes pair + 1 Real r²). With caps 8/12
 // this is ~330 B per thread, comfortably in registers.
 extern "C" __global__ void shake_positions(
-    Real *positions_x,
-    Real *positions_y,
-    Real *positions_z,
+    Real4 *posq,
     Real *velocities_x,
     Real *velocities_y,
     Real *velocities_z,
@@ -157,9 +154,10 @@ extern "C" __global__ void shake_positions(
   for (unsigned int a = 0; a < acnt; ++a) {
     unsigned int i = group_atoms[aoff + a];
     atom_idx[a] = i;
-    x_u[a] = positions_x[i];
-    y_u[a] = positions_y[i];
-    z_u[a] = positions_z[i];
+    Real4 pq = posq[i];
+    x_u[a] = pq.x;
+    y_u[a] = pq.y;
+    z_u[a] = pq.z;
     x0[a] = snapshot_x[aoff + a];
     y0[a] = snapshot_y[aoff + a];
     z0[a] = snapshot_z[aoff + a];
@@ -265,19 +263,21 @@ extern "C" __global__ void shake_positions(
     velocities_x[i] += dxg * inv_dt;
     velocities_y[i] += dyg * inv_dt;
     velocities_z[i] += dzg * inv_dt;
+    Real4 pq = posq[i];
     if (a == 0) {
       // Atom 0 is the reference image; its lab-frame position
       // equals the local-frame x_c[0].
-      positions_x[i] = x_c[0];
-      positions_y[i] = y_c[0];
-      positions_z[i] = z_c[0];
+      pq.x = x_c[0];
+      pq.y = y_c[0];
+      pq.z = z_c[0];
     } else {
       // Atoms 1..n-1 use the delta-style update so the global
       // image bookkeeping stays valid.
-      positions_x[i] += dxg;
-      positions_y[i] += dyg;
-      positions_z[i] += dzg;
+      pq.x += dxg;
+      pq.y += dyg;
+      pq.z += dzg;
     }
+    posq[i] = pq;
 
     // Constraint-virial position-level half: (m / dt²) · (Δr · r_COM).
     // Compute in COM-relative coordinates for f32 stability.
@@ -295,9 +295,7 @@ extern "C" __global__ void shake_positions(
 // velocity-level constraint-virial contribution into the buffer that
 // shake_positions has already populated with the position-level half.
 extern "C" __global__ void rattle_velocities(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     Real *velocities_x,
     Real *velocities_y,
     Real *velocities_z,
@@ -339,9 +337,10 @@ extern "C" __global__ void rattle_velocities(
   for (unsigned int a = 0; a < acnt; ++a) {
     unsigned int i = group_atoms[aoff + a];
     atom_idx[a] = i;
-    px[a] = positions_x[i];
-    py[a] = positions_y[i];
-    pz[a] = positions_z[i];
+    Real4 pq = posq[i];
+    px[a] = pq.x;
+    py[a] = pq.y;
+    pz[a] = pq.z;
     vx[a] = velocities_x[i];
     vy[a] = velocities_y[i];
     vz[a] = velocities_z[i];
@@ -464,9 +463,7 @@ extern "C" __global__ void constraint_virial_scatter(
 // hook. The constraint-gradient direction is evaluated at the current
 // off-manifold positions rather than at a snapshot.
 extern "C" __global__ void shake_positions_no_velocity(
-    Real *positions_x,
-    Real *positions_y,
-    Real *positions_z,
+    Real4 *posq,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -497,9 +494,10 @@ extern "C" __global__ void shake_positions_no_velocity(
   for (unsigned int a = 0; a < acnt; ++a) {
     unsigned int i = group_atoms[aoff + a];
     atom_idx[a] = i;
-    x_u[a] = positions_x[i];
-    y_u[a] = positions_y[i];
-    z_u[a] = positions_z[i];
+    Real4 pq = posq[i];
+    x_u[a] = pq.x;
+    y_u[a] = pq.y;
+    z_u[a] = pq.z;
     Real m = atom_mass[i];
     inv_m[a] = (m > R(0.0)) ? R(1.0) / m : R(0.0);
   }
@@ -569,14 +567,16 @@ extern "C" __global__ void shake_positions_no_velocity(
     Real dxg = x_c[a] - x_u[a];
     Real dyg = y_c[a] - y_u[a];
     Real dzg = z_c[a] - z_u[a];
+    Real4 pq = posq[i];
     if (a == 0) {
-      positions_x[i] = x_c[0];
-      positions_y[i] = y_c[0];
-      positions_z[i] = z_c[0];
+      pq.x = x_c[0];
+      pq.y = y_c[0];
+      pq.z = z_c[0];
     } else {
-      positions_x[i] += dxg;
-      positions_y[i] += dyg;
-      positions_z[i] += dzg;
+      pq.x += dxg;
+      pq.y += dyg;
+      pq.z += dzg;
     }
+    posq[i] = pq;
   }
 }

@@ -551,10 +551,7 @@ fn rescale_velocities_does_not_modify_positions_masses_or_forces() {
     let snap_pz = state.positions_z.clone();
     let snap_masses = state.masses.clone();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    rescale_velocities(&mut buffers, 0.5).unwrap();
-    let px = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
-    let py = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
-    let pz = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    rescale_velocities(&mut buffers, 0.5).unwrap();    let (px, py, pz) = buffers.download_positions().unwrap();
     let masses = gpu.device.dtoh_sync_copy(&buffers.masses).unwrap();
     let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let fy = gpu.device.dtoh_sync_copy(&buffers.forces_y).unwrap();

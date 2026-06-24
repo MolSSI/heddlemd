@@ -171,14 +171,18 @@ the JIT-composed pair-force kernel (see
 `jit-composed-pair-force.md`), the fragment differs from the
 standalone kernel above in three ways:
 
-1. **Shared `(inv_r, r)` inputs.** The fragment's `evaluate`
-   signature is
-   `evaluate(Real r2, Real inv_r, Real r, unsigned int i,
-   unsigned int j, Real &factor, Real &energy, Real &virial)`.
-   `inv_r = rsqrtf(r²)` and `r = r² · inv_r` are computed once
-   per pair by the composer's outer loop and threaded into every
+1. **Shared `(inv_r, r, qi, qj)` inputs.** The fragment's
+   `evaluate` signature is
+   `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj,
+   unsigned int i, unsigned int j, Real &factor, Real &energy,
+   Real &virial)`. `inv_r = rsqrtf(r²)`, `r = r² · inv_r`,
+   `qi = posq[i].w`, and `qj = posq[j].w` are computed once per
+   pair by the composer's outer loop and threaded into every
    active fragment. The LJ fragment does not compute `1.0 / r2`;
-   it derives `inv_r2 = inv_r · inv_r` from `inv_r` directly.
+   it derives `inv_r2 = inv_r · inv_r` from `inv_r` directly. It
+   ignores `qi` and `qj` (the Lennard-Jones functional form does
+   not depend on charges; the parameters come from the per-pair-
+   type `type_sigma` and `type_epsilon` arrays instead).
 
 2. **Compile-time elision of the degenerate switch.** At fragment
    construction the builder inspects the
@@ -324,9 +328,7 @@ documented in `pair-force-kernel.md`.
 
 ```c
 extern "C" __global__ void lj_pair_force_f(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
+    const float4 *posq,
     const unsigned int *type_indices,
     unsigned int max_neighbors,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
@@ -346,9 +348,7 @@ extern "C" __global__ void lj_pair_force_f(
     unsigned int n);
 
 extern "C" __global__ void lj_pair_force_fev(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
+    const float4 *posq,
     const unsigned int *type_indices,
     unsigned int max_neighbors,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
@@ -369,6 +369,10 @@ extern "C" __global__ void lj_pair_force_fev(
     float *slot_virial,
     unsigned int n);
 ```
+
+The LJ kernels read positions from `posq[i].xyz` and ignore
+`posq[i].w`. Charges enter the LJ functional form only via the
+σ/ε parameter table; they are not consulted directly.
 
 `lj_pair_force_f` writes only the three per-particle force-component
 slot outputs; `lj_pair_force_fev` writes the three force components

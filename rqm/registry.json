@@ -262,6 +262,13 @@
     "title": "Build kernel signals overflow when an atom exceeds max_neighbors",
     "type": "scenario"
   },
+  "rq-01d1bb68": {
+    "decl": "Scenario: posq interleave preserves per-atom (x, y, z, charge) grouping",
+    "file": "particle-state",
+    "refs": [],
+    "title": "posq interleave preserves per-atom (x, y, z, charge) grouping",
+    "type": "scenario"
+  },
   "rq-0206fbeb": {
     "decl": "## Atom Blocks",
     "file": "forces/packed-neighbour-pair-force",
@@ -488,6 +495,13 @@
     "refs": [],
     "title": "Launch configuration",
     "type": "section"
+  },
+  "rq-03ec91b0": {
+    "decl": "Scenario: Pair-force outer loop loads posq once per atom and reuses x/y/z/w",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Pair-force outer loop loads posq once per atom and reuses x/y/z/w",
+    "type": "scenario"
   },
   "rq-03faaf24": {
     "decl": "## Exclusion Handling",
@@ -6738,7 +6752,7 @@
     "type": "scenario"
   },
   "rq-3a31b3f0": {
-    "decl": "- `crate::gpu::compute_block_bbox(kernels,",
+    "decl": "- `crate::gpu::compute_block_bbox(kernels, tile_sorted_posq,",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
     "title": "crate",
@@ -8241,7 +8255,7 @@
     "type": "section"
   },
   "rq-4a8de06c": {
-    "decl": "- `ParticleBuffers` — device-side mirror. Holds a `CudaSlice<f32>` for each",
+    "decl": "- `ParticleBuffers` — device-side mirror. Holds `posq:",
     "file": "particle-state",
     "refs": [
       {
@@ -8866,11 +8880,11 @@
     "type": "api-item"
   },
   "rq-512037ca": {
-    "decl": "## Tile-Sorted Position View",
+    "decl": "## Tile-Sorted Posq View",
     "file": "forces/packed-neighbour-pair-force",
     "level": 2,
     "refs": [],
-    "title": "Tile-Sorted Position View",
+    "title": "Tile-Sorted Posq View",
     "type": "section"
   },
   "rq-5137c6f5": {
@@ -14829,7 +14843,7 @@
     "type": "api-item"
   },
   "rq-89245537": {
-    "decl": "- `scatter_positions_to_tile_order(positions_x, positions_y,",
+    "decl": "- `scatter_positions_to_tile_order(posq, sorted_particle_ids,",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
     "title": "scatter_positions_to_tile_order",
@@ -17308,7 +17322,7 @@
     "type": "section"
   },
   "rq-9f947525": {
-    "decl": "- `compute_block_bbox(tile_sorted_positions_x, tile_sorted_positions_y,",
+    "decl": "- `compute_block_bbox(tile_sorted_posq, tile_atom_count,",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
     "title": "compute_block_bbox",
@@ -23322,6 +23336,13 @@
     "title": "Per-Step Interface",
     "type": "section"
   },
+  "rq-dabd2130": {
+    "decl": "Scenario: positions round-trip through ParticleBuffers via posq.xyz",
+    "file": "particle-state",
+    "refs": [],
+    "title": "positions round-trip through ParticleBuffers via posq.xyz",
+    "type": "scenario"
+  },
   "rq-dacb071c": {
     "decl": "Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells",
     "file": "forces/neighbor-list",
@@ -25203,6 +25224,13 @@
     "title": "Explicit 1-3 exclusion overrides the angle's implicit default",
     "type": "scenario"
   },
+  "rq-eaaddf05": {
+    "decl": "- `Real4` — packed 4-tuple of `Real` values used for `posq`. <!-- rq-real4-type -->",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Real4",
+    "type": "api-item"
+  },
   "rq-eadadcb4": {
     "decl": "# Column format: atom_1 atom_2 ... atom_k  constraint_type_name",
     "file": "forces/topology",
@@ -25382,10 +25410,10 @@
     "type": "api-item"
   },
   "rq-ecc1241f": {
-    "decl": "Scenario: inv_r and r are computed once per pair and threaded into every fragment's evaluate",
+    "decl": "Scenario: inv_r, r, qi, qj are computed once per pair and threaded into every fragment's evaluate",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "inv_r and r are computed once per pair and threaded into every fragment's evaluate",
+    "title": "inv_r, r, qi, qj are computed once per pair and threaded into every fragment's evaluate",
     "type": "scenario"
   },
   "rq-ecc664ff": {
@@ -25880,10 +25908,10 @@
     "type": "scenario"
   },
   "rq-f04e473c": {
-    "decl": "# Feature: SoA Particle State and GPU Buffers",
+    "decl": "# Feature: Particle State and GPU Buffers",
     "file": "particle-state",
     "refs": [],
-    "title": "Feature: SoA Particle State and GPU Buffers",
+    "title": "Feature: Particle State and GPU Buffers",
     "type": "file"
   },
   "rq-f062ec85": {
@@ -27350,7 +27378,7 @@
     "type": "section"
   },
   "rq-fdc02bdb": {
-    "decl": "Scenario: charges round-trip through ParticleBuffers",
+    "decl": "Scenario: charges round-trip through ParticleBuffers via posq.w",
     "file": "particle-state",
     "refs": [
       {
@@ -27358,7 +27386,7 @@
         "kind": "code"
       }
     ],
-    "title": "charges round-trip through ParticleBuffers",
+    "title": "charges round-trip through ParticleBuffers via posq.w",
     "type": "scenario"
   },
   "rq-fdc545da": {

@@ -77,12 +77,15 @@ For lane `lane` of the warp handling particle `i` at sweep step `s`,
 when `k = s * 32 + lane` satisfies `k < neighbor_counts[i]` and
 `j = neighbor_list[i * max_neighbors + k]` is not equal to `i`:
 
-1. Look up `q_i = charges[i]` and `q_j = charges[j]`.
-2. Compute the displacement `(dx, dy, dz) = positions[i] - positions[j]`
-   and apply the triclinic minimum-image convention using the six lattice
-   parameters `(lx, ly, lz, xy, xz, yz)` and the fractional-coordinate
-   wrap algorithm defined in `simulation-box.md`. For an orthorhombic
-   box (all tilts zero) this reduces to three independent per-axis wraps.
+1. Load `posq[i]` and `posq[j]` (each as one 16-byte `Real4`
+   coalesced load). Read `q_i = posq[i].w`, `q_j = posq[j].w`.
+2. Compute the displacement
+   `(dx, dy, dz) = posq[i].xyz - posq[j].xyz` and apply the
+   triclinic minimum-image convention using the six lattice
+   parameters `(lx, ly, lz, xy, xz, yz)` and the fractional-
+   coordinate wrap algorithm defined in `simulation-box.md`. For
+   an orthorhombic box (all tilts zero) this reduces to three
+   independent per-axis wraps.
 3. Compute `r2 = dx*dx + dy*dy + dz*dz`. If `r2 > cutoff * cutoff`, the
    pair contributes nothing; the lane skips to its next assigned
    neighbour.
@@ -264,10 +267,7 @@ documented in `pair-force-kernel.md`:
 
 ```c
 extern "C" __global__ void coulomb_pair_force_f(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
+    const float4 *posq,
     unsigned int max_neighbors,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float k_coulomb,
@@ -284,10 +284,7 @@ extern "C" __global__ void coulomb_pair_force_f(
     unsigned int n);
 
 extern "C" __global__ void coulomb_pair_force_fev(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
+    const float4 *posq,
     unsigned int max_neighbors,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float k_coulomb,

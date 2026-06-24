@@ -1076,12 +1076,12 @@ fn kernel_does_not_modify_positions_velocities_masses_charges_lj() {
 
     // Snapshot the input device buffers before the launch.
     let device = gpu.device.clone();
-    let snap_px = device.dtoh_sync_copy(&buffers.positions_x).unwrap();
-    let snap_py = device.dtoh_sync_copy(&buffers.positions_y).unwrap();
-    let snap_pz = device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    let snap_px = buffers.download_positions().unwrap().0;
+    let snap_py = buffers.download_positions().unwrap().1;
+    let snap_pz = buffers.download_positions().unwrap().2;
     let snap_vx = device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let snap_masses = device.dtoh_sync_copy(&buffers.masses).unwrap();
-    let snap_charges = device.dtoh_sync_copy(&buffers.charges).unwrap();
+    let snap_charges = buffers.download_charges().unwrap();
     let snap_nl = device.dtoh_sync_copy(&neighbor_list).unwrap();
     let snap_counts = device.dtoh_sync_copy(&neighbor_counts).unwrap();
 
@@ -1098,12 +1098,12 @@ fn kernel_does_not_modify_positions_velocities_masses_charges_lj() {
         AggregateLevel::ForcesAndScalars,
     );
 
-    let after_px = device.dtoh_sync_copy(&buffers.positions_x).unwrap();
-    let after_py = device.dtoh_sync_copy(&buffers.positions_y).unwrap();
-    let after_pz = device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    let after_px = buffers.download_positions().unwrap().0;
+    let after_py = buffers.download_positions().unwrap().1;
+    let after_pz = buffers.download_positions().unwrap().2;
     let after_vx = device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let after_masses = device.dtoh_sync_copy(&buffers.masses).unwrap();
-    let after_charges = device.dtoh_sync_copy(&buffers.charges).unwrap();
+    let after_charges = buffers.download_charges().unwrap();
     let after_nl = device.dtoh_sync_copy(&neighbor_list).unwrap();
     let after_counts = device.dtoh_sync_copy(&neighbor_counts).unwrap();
 

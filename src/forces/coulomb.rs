@@ -122,10 +122,9 @@ impl Potential for CoulombState {
 
     fn bind_pair_force_args(
         &self,
-        ctx: &PairForceBindContext<'_>,
+        _ctx: &PairForceBindContext<'_>,
         builder: &mut PairForceLaunchBuilder,
     ) {
-        builder.push_device_buffer(&ctx.buffers.charges);
         builder.push_scalar(K_COULOMB_F32);
         builder.push_scalar(self.params.cutoff);
         builder.push_scalar(self.params.r_switch);
@@ -180,7 +179,6 @@ impl PotentialBuilder for CoulombBuilder {
 pub fn coulomb_pair_force_fragment(cutoff: Real) -> PairForceFragment {
     let functor_source = r#"
 struct CoulombPairFunctor {
-    const Real *charges;
     Real k_coulomb;
     Real cutoff;
     Real r_switch;
@@ -194,11 +192,10 @@ struct CoulombPairFunctor {
 
     __device__ inline void evaluate(
         Real r2, Real inv_r, Real r,
+        Real qi, Real qj,
         unsigned int i, unsigned int j,
         Real &factor, Real &energy, Real &virial) const
     {
-        Real qi = charges[i];
-        Real qj = charges[j];
         Real qq = qi * qj;
         Real inv_r2 = inv_r * inv_r;
         energy = k_coulomb * qq * inv_r;
@@ -223,16 +220,14 @@ struct CoulombPairFunctor {
     }
 };
 "#;
-    let entry_point_args = r#"    const Real *coul_charges,
-    Real coul_k_coulomb,
+    let entry_point_args = r#"    Real coul_k_coulomb,
     Real coul_cutoff,
     Real coul_r_switch,
     const unsigned int *coul_excl_offsets,
     const unsigned int *coul_excl_partners,
     const Real *coul_excl_scales,
 "#;
-    let functor_init_source = r#"    composite.functor_coulomb.charges = coul_charges;
-    composite.functor_coulomb.k_coulomb = coul_k_coulomb;
+    let functor_init_source = r#"    composite.functor_coulomb.k_coulomb = coul_k_coulomb;
     composite.functor_coulomb.cutoff = coul_cutoff;
     composite.functor_coulomb.r_switch = coul_r_switch;
     composite.functor_coulomb.excl_offsets = coul_excl_offsets;

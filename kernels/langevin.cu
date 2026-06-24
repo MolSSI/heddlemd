@@ -11,7 +11,7 @@
 // --- A step: x <- x + v * (dt / 2), then wrap into the primary image. -------
 
 extern "C" __global__ void lan_drift_half(
-    Real *positions_x, Real *positions_y, Real *positions_z,
+    Real4 *posq,
     int *images_x, int *images_y, int *images_z,
     const Real *velocities_x, const Real *velocities_y, const Real *velocities_z,
     const Real *lattice,
@@ -24,9 +24,10 @@ extern "C" __global__ void lan_drift_half(
   if (i >= n) return;
 
   Real half_dt = dt * R(0.5);
-  Real px = positions_x[i] + velocities_x[i] * half_dt;
-  Real py = positions_y[i] + velocities_y[i] * half_dt;
-  Real pz = positions_z[i] + velocities_z[i] * half_dt;
+  Real4 pq = posq[i];
+  Real px = pq.x + velocities_x[i] * half_dt;
+  Real py = pq.y + velocities_y[i] * half_dt;
+  Real pz = pq.z + velocities_z[i] * half_dt;
 
   int nx = images_x[i];
   int ny = images_y[i];
@@ -37,9 +38,10 @@ extern "C" __global__ void lan_drift_half(
   ny += kb;
   nz += kc;
 
-  positions_x[i] = px;
-  positions_y[i] = py;
-  positions_z[i] = pz;
+  pq.x = px;
+  pq.y = py;
+  pq.z = pz;
+  posq[i] = pq;
   images_x[i] = nx;
   images_y[i] = ny;
   images_z[i] = nz;

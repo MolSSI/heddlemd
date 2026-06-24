@@ -106,9 +106,9 @@ struct FullSnapshot {
 fn capture_snapshot(buffers: &ParticleBuffers, lossless: &LosslessBuffers) -> FullSnapshot {
     let device = buffers.device.clone();
     FullSnapshot {
-        positions_x: device.dtoh_sync_copy(&buffers.positions_x).unwrap(),
-        positions_y: device.dtoh_sync_copy(&buffers.positions_y).unwrap(),
-        positions_z: device.dtoh_sync_copy(&buffers.positions_z).unwrap(),
+        positions_x: buffers.download_positions().unwrap().0,
+        positions_y: buffers.download_positions().unwrap().1,
+        positions_z: buffers.download_positions().unwrap().2,
         velocities_x: device.dtoh_sync_copy(&buffers.velocities_x).unwrap(),
         velocities_y: device.dtoh_sync_copy(&buffers.velocities_y).unwrap(),
         velocities_z: device.dtoh_sync_copy(&buffers.velocities_z).unwrap(),
@@ -208,7 +208,7 @@ fn vv_kick_drift_lossless_block_non_aligned() {
     let initial_positions_x = state.positions_x.clone();
     vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
 
-    let final_positions_x: Vec<Real> = device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let final_positions_x: Vec<Real> = buffers.download_positions().unwrap().0;
     let final_velocities_x: Vec<Real> = device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     for i in 0..n {
         assert_eq!(

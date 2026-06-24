@@ -566,10 +566,9 @@ impl Potential for SpmeRealSpaceState {
 
     fn bind_pair_force_args(
         &self,
-        ctx: &PairForceBindContext<'_>,
+        _ctx: &PairForceBindContext<'_>,
         builder: &mut PairForceLaunchBuilder,
     ) {
-        builder.push_device_buffer(&ctx.buffers.charges);
         builder.push_scalar(K_COULOMB_F32);
         builder.push_scalar(self.alpha);
         builder.push_scalar(self.r_cut_real);
@@ -591,7 +590,6 @@ pub fn spme_real_pair_force_fragment(r_cut_real: Real) -> PairForceFragment {
     //     would inject a 1.5e-7 bias well above f64 round-off.
     let functor_source = r#"
 struct SpmeRealPairFunctor {
-    const Real *charges;
     Real k_coulomb;
     Real alpha;
     Real r_cut_real;
@@ -605,11 +603,10 @@ struct SpmeRealPairFunctor {
 
     __device__ inline void evaluate(
         Real r2, Real inv_r, Real r,
+        Real qi, Real qj,
         unsigned int i, unsigned int j,
         Real &factor, Real &energy, Real &virial) const
     {
-        Real qi = charges[i];
-        Real qj = charges[j];
         Real qq = qi * qj;
         Real inv_r2 = inv_r * inv_r;
         Real ar = alpha * r;
@@ -639,16 +636,14 @@ struct SpmeRealPairFunctor {
     }
 };
 "#;
-    let entry_point_args = r#"    const Real *spme_real_charges,
-    Real spme_real_k_coulomb,
+    let entry_point_args = r#"    Real spme_real_k_coulomb,
     Real spme_real_alpha,
     Real spme_real_r_cut,
     const unsigned int *spme_real_excl_offsets,
     const unsigned int *spme_real_excl_partners,
     const Real *spme_real_excl_scales,
 "#;
-    let functor_init_source = r#"    composite.functor_spme_real.charges = spme_real_charges;
-    composite.functor_spme_real.k_coulomb = spme_real_k_coulomb;
+    let functor_init_source = r#"    composite.functor_spme_real.k_coulomb = spme_real_k_coulomb;
     composite.functor_spme_real.alpha = spme_real_alpha;
     composite.functor_spme_real.r_cut_real = spme_real_r_cut;
     composite.functor_spme_real.excl_offsets = spme_real_excl_offsets;

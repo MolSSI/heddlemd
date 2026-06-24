@@ -279,6 +279,7 @@ struct LjPairFunctor {{
 
     __device__ inline void evaluate(
         Real r2, Real inv_r, Real r,
+        Real /*qi*/, Real /*qj*/,
         unsigned int i, unsigned int j,
         Real &factor, Real &energy, Real &virial) const
     {{

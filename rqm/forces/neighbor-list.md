@@ -590,14 +590,14 @@ Neighbor-list-build pipeline:
 
 ```c
 extern "C" __global__ void neighbor_displacement_squared(
-    const float *positions_x, const float *positions_y, const float *positions_z,
+    const float4 *posq,
     const float *reference_x, const float *reference_y, const float *reference_z,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float *disp_sq,
     unsigned int n);
 
 extern "C" __global__ void neighbor_list_build(
-    const float *positions_x, const float *positions_y, const float *positions_z,
+    const float4 *posq,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
@@ -610,10 +610,18 @@ extern "C" __global__ void neighbor_list_build(
     unsigned int n);
 
 extern "C" __global__ void copy_positions_into_reference(
-    const float *positions_x, const float *positions_y, const float *positions_z,
+    const float4 *posq,
     float *reference_x, float *reference_y, float *reference_z,
     unsigned int n);
 ```
+
+The three kernels above read only `.xyz` from `posq`; they
+ignore the per-atom charge in `.w`. The reference-position
+arrays remain SoA: they store only positions (no charges), and
+the displacement-check kernel only consults them as scalar
+x/y/z. `copy_positions_into_reference` splits `posq.xyz` into
+the three scalar reference buffers at every neighbour-list
+rebuild.
 
 The six lattice parameters `(lx, ly, lz, xy, xz, yz)` carry the box's
 lower-triangular form (see `simulation-box.md`). Both
@@ -628,7 +636,7 @@ Spatial-hash pipeline (cell-list construction):
 
 ```c
 extern "C" __global__ void compute_cell_indices_and_histogram(
-    const float *positions_x, const float *positions_y, const float *positions_z,
+    const float4 *posq,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int *cell_indices,
@@ -792,10 +800,12 @@ to bit-exact reproducibility.
 - `neighbor_list_build` total work is `O(N · d_cell · 27)` where
   `d_cell` is the average per-cell occupancy: each home cell scans 27
   neighbour cells against its own atoms. Position loads from the
-  global `positions_x/y/z` arrays are coalesced (one block tile-loads
-  one neighbour cell into shared memory at a time and amortises that
-  load across all atoms in the home cell). The distance-check inner
-  loop reads exclusively from shared memory. There is no per-atom
+  global `posq` array are coalesced as one 16-byte transaction per
+  atom (one block tile-loads one neighbour cell's `Real4` values
+  into shared memory at a time and amortises that load across all
+  atoms in the home cell). The distance-check inner loop reads
+  exclusively from shared memory and ignores the `.w` charge
+  component. There is no per-atom
   sort: neighbours are written in the cell-sweep / within-cell order
   documented in *Neighbor List Construction*, which carries no
   superlinear cost in the per-atom partner count.
@@ -1287,7 +1297,7 @@ Feature: Cell-list neighbor list
   Scenario: NeighborListState rebuild performs no host-device particle transfers
     Given a NeighborListState in CellList mode
     When NeighborListState::rebuild is called
-    Then no host-side download of positions_x/y/z occurs
+    Then no host-side download of posq occurs
     And no host-side upload of sorted_particle_ids or cell_offsets occurs
 
   @rq-6fd5167a

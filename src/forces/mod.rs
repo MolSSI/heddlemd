@@ -982,16 +982,12 @@ impl ForceField {
                     &kernels,
                     buffers,
                     sorted_view,
-                    &mut packed.tile_sorted_positions_x,
-                    &mut packed.tile_sorted_positions_y,
-                    &mut packed.tile_sorted_positions_z,
+                    &mut packed.tile_sorted_posq,
                 )?;
                 // Refill +∞ padding for partial last block.
                 crate::gpu::fill_tile_position_padding(
                     &kernels,
-                    &mut packed.tile_sorted_positions_x,
-                    &mut packed.tile_sorted_positions_y,
-                    &mut packed.tile_sorted_positions_z,
+                    &mut packed.tile_sorted_posq,
                     n as u32,
                     n_blocks * 32,
                 )?;
@@ -1015,12 +1011,8 @@ impl ForceField {
             };
             let mut launch_builder = PairForceLaunchBuilder::new();
             // Common args, in the order the composer declares them.
-            launch_builder.push_device_buffer(&buffers.positions_x);
-            launch_builder.push_device_buffer(&buffers.positions_y);
-            launch_builder.push_device_buffer(&buffers.positions_z);
-            launch_builder.push_device_buffer(&packed.tile_sorted_positions_x);
-            launch_builder.push_device_buffer(&packed.tile_sorted_positions_y);
-            launch_builder.push_device_buffer(&packed.tile_sorted_positions_z);
+            launch_builder.push_device_buffer(&buffers.posq);
+            launch_builder.push_device_buffer(&packed.tile_sorted_posq);
             launch_builder.push_device_buffer(sorted_view);
             launch_builder.push_device_buffer(&packed.iblock_offset);
             launch_builder.push_device_buffer(&packed.sorted_interacting_atoms);
@@ -1066,9 +1058,7 @@ impl ForceField {
             if let Some(packed) = packed_opt {
                 if packed.single_pairs_capacity > 0 {
                     let mut single_pair_builder = PairForceLaunchBuilder::new();
-                    single_pair_builder.push_device_buffer(&buffers.positions_x);
-                    single_pair_builder.push_device_buffer(&buffers.positions_y);
-                    single_pair_builder.push_device_buffer(&buffers.positions_z);
+                    single_pair_builder.push_device_buffer(&buffers.posq);
                     single_pair_builder.push_device_buffer(&packed.single_pair_atoms);
                     single_pair_builder.push_device_buffer(&packed.interaction_count);
                     single_pair_builder.push_device_buffer(sim_box.lattice_device());
@@ -1100,9 +1090,7 @@ impl ForceField {
                 let mut correction_builder = PairForceLaunchBuilder::new();
                 // Common args for the correction entry point (order
                 // must match emit_correction_entry_point).
-                correction_builder.push_device_buffer(&buffers.positions_x);
-                correction_builder.push_device_buffer(&buffers.positions_y);
-                correction_builder.push_device_buffer(&buffers.positions_z);
+                correction_builder.push_device_buffer(&buffers.posq);
                 correction_builder.push_device_buffer(&self.excluded_pair_atoms);
                 correction_builder.push_scalar(self.excluded_pair_count);
                 correction_builder.push_device_buffer(sim_box.lattice_device());
@@ -1184,9 +1172,7 @@ impl ForceField {
                     continue;
                 }
                 let mut launch_builder = ForceLaunchBuilder::new();
-                launch_builder.push_device_buffer(&buffers.positions_x);
-                launch_builder.push_device_buffer(&buffers.positions_y);
-                launch_builder.push_device_buffer(&buffers.positions_z);
+                launch_builder.push_device_buffer(&buffers.posq);
                 launch_builder.push_device_buffer(scratch.bonds);
                 launch_builder.push_device_buffer(sim_box.lattice_device());
                 launch_builder.push_device_buffer(scratch.bond_pair_x);
@@ -1233,9 +1219,7 @@ impl ForceField {
                     continue;
                 }
                 let mut launch_builder = ForceLaunchBuilder::new();
-                launch_builder.push_device_buffer(&buffers.positions_x);
-                launch_builder.push_device_buffer(&buffers.positions_y);
-                launch_builder.push_device_buffer(&buffers.positions_z);
+                launch_builder.push_device_buffer(&buffers.posq);
                 launch_builder.push_device_buffer(scratch.angles);
                 launch_builder.push_device_buffer(sim_box.lattice_device());
                 launch_builder.push_device_buffer(scratch.angle_triple_x);

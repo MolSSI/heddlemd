@@ -181,9 +181,11 @@ impl Barostat for BerendsenBarostat {
             ),
             per_thread_body: String::from(
                 "        Real berendsen_baro_mu = berendsen_baro_mu_device[0];\n\
-                 \x20       positions_x[i] *= berendsen_baro_mu;\n\
-                 \x20       positions_y[i] *= berendsen_baro_mu;\n\
-                 \x20       positions_z[i] *= berendsen_baro_mu;",
+                 \x20       Real4 pq = posq[i];\n\
+                 \x20       pq.x *= berendsen_baro_mu;\n\
+                 \x20       pq.y *= berendsen_baro_mu;\n\
+                 \x20       pq.z *= berendsen_baro_mu;\n\
+                 \x20       posq[i] = pq;",
             ),
         })
     }

@@ -23,7 +23,7 @@ struct LjPairFunc {
   }
 
   __device__ inline void evaluate(
-      Real r2, unsigned int i, unsigned int j,
+      Real r2, Real /*qi*/, Real /*qj*/, unsigned int i, unsigned int j,
       Real &factor, Real &energy, Real &virial) const
   {
     unsigned int p = slot(i, j);
@@ -59,9 +59,7 @@ struct LjPairFunc {
 };
 
 extern "C" __global__ void lj_pair_force_f(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     const unsigned int *type_indices,
     unsigned int max_neighbors,
     const Real *lattice,
@@ -86,7 +84,7 @@ extern "C" __global__ void lj_pair_force_f(
                  type_cutoff, type_switch };
   pair_compute_f(
       f, n, max_neighbors,
-      positions_x, positions_y, positions_z,
+      posq,
       neighbor_list, neighbor_counts,
       lx, ly, lz, xy, xz, yz,
       atom_excl_offsets, atom_excl_partners, atom_excl_lj_scales,
@@ -94,9 +92,7 @@ extern "C" __global__ void lj_pair_force_f(
 }
 
 extern "C" __global__ void lj_pair_force_fev(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     const unsigned int *type_indices,
     unsigned int max_neighbors,
     const Real *lattice,
@@ -123,7 +119,7 @@ extern "C" __global__ void lj_pair_force_fev(
                  type_cutoff, type_switch };
   pair_compute_fev(
       f, n, max_neighbors,
-      positions_x, positions_y, positions_z,
+      posq,
       neighbor_list, neighbor_counts,
       lx, ly, lz, xy, xz, yz,
       atom_excl_offsets, atom_excl_partners, atom_excl_lj_scales,

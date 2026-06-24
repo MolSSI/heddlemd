@@ -359,7 +359,7 @@ fn vv_kick_drift_on_empty_state_is_noop() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     assert_eq!(buffers.particle_count(), 0);
-    assert_eq!(buffers.positions_x.len(), 0);
+    assert_eq!(buffers.particle_count(), 0);
 }
 
 // rq-386cfae3

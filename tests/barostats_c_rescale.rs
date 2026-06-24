@@ -305,8 +305,8 @@ fn two_barostats_at_same_seed_and_counter_produce_identical_outputs() {
     baro_b
         .apply(&mut buffers_b, &mut sim_box_b, (1.0e-15 / TIME_F as Real), &mut timings_b)
         .unwrap();
-    let px_a = gpu.device.dtoh_sync_copy(&buffers_a.positions_x).unwrap();
-    let px_b = gpu.device.dtoh_sync_copy(&buffers_b.positions_x).unwrap();
+    let (px_a, _, _) = buffers_a.download_positions().unwrap();
+    let (px_b, _, _) = buffers_b.download_positions().unwrap();
     assert_eq!(px_a, px_b);
     assert_eq!(sim_box_a.lattice(), sim_box_b.lattice());
 }
@@ -435,7 +435,7 @@ fn fractional_coordinates_invariant_under_apply() {
     rescale_positions_device_factor(&mut buffers, &baro.mu_device).unwrap();
     sim_box.flush_from_device().unwrap();
     let lx_post = sim_box.lx();
-    let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let (px_post, _, _) = buffers.download_positions().unwrap();
     for (i, (a, b)) in px_post.iter().zip(px.iter()).enumerate() {
         let f_pre = (b / lx_pre) as f64;
         let f_post = (a / lx_post) as f64;
@@ -621,7 +621,7 @@ fn two_runs_with_same_seed_are_byte_identical() {
             baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
                 .unwrap();
         }
-        let positions_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+        let (positions_x, _, _) = buffers.download_positions().unwrap();
         (positions_x, sim_box.lattice())
     }
 
@@ -669,7 +669,7 @@ fn different_seeds_produce_different_trajectories() {
                 .unwrap();
             rescale_positions_device_factor(&mut buffers, &baro.mu_device).unwrap();
         }
-        gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap()
+        buffers.download_positions().unwrap().0
     }
 
     let a = run_once(&gpu, &px, &vx, &masses, &virials, 1);

@@ -315,9 +315,7 @@ fn compose_post_force_source(fragments: &[PerParticleFragment]) -> String {
     s.push_str("\nextern \"C\" __global__ void ");
     s.push_str(POST_FORCE_ENTRY);
     s.push_str("(\n");
-    s.push_str("    Real *positions_x,\n");
-    s.push_str("    Real *positions_y,\n");
-    s.push_str("    Real *positions_z,\n");
+    s.push_str("    Real4 *posq,\n");
     s.push_str("    int *images_x,\n");
     s.push_str("    int *images_y,\n");
     s.push_str("    int *images_z,\n");
@@ -789,7 +787,7 @@ fn compose_source(
     s.push_str("__device__ static inline void heddle_jit_eval_pair_sum(\n");
     s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
     s.push_str(
-        "    Real r2, Real inv_r, Real r, unsigned int i, unsigned int j,\n",
+        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i, unsigned int j,\n",
     );
     s.push_str("    Real &factor, Real &energy, Real &virial)\n");
     s.push_str("{\n");
@@ -798,7 +796,7 @@ fn compose_source(
         let field = functor_field_name(f.label);
         let body = format!(
             "Real s_factor, s_energy, s_virial;\n            \
-             composite.{f}.evaluate(r2, inv_r, r, i, j, s_factor, s_energy, s_virial);\n            \
+             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i, j, s_factor, s_energy, s_virial);\n            \
              factor += s_factor;\n            \
              if (WriteEv) {{ energy += s_energy; virial += s_virial; }}",
             f = field
@@ -846,7 +844,7 @@ fn compose_source(
     s.push_str("__device__ static inline void heddle_jit_eval_pair_correction(\n");
     s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
     s.push_str(
-        "    Real r2, Real inv_r, Real r, unsigned int i, unsigned int j,\n",
+        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i, unsigned int j,\n",
     );
     s.push_str("    Real &factor, Real &energy, Real &virial)\n");
     s.push_str("{\n");
@@ -855,7 +853,7 @@ fn compose_source(
         let field = functor_field_name(f.label);
         let body = format!(
             "Real s_factor, s_energy, s_virial;\n            \
-             composite.{f}.evaluate(r2, inv_r, r, i, j, s_factor, s_energy, s_virial);\n            \
+             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i, j, s_factor, s_energy, s_virial);\n            \
              Real correction_scale = composite.{f}.exclusion_scale(i, j) - R(1.0);\n            \
              factor += s_factor * correction_scale;\n            \
              if (WriteEv) {{ energy += s_energy * correction_scale; virial += s_virial * correction_scale; }}",
@@ -917,9 +915,7 @@ fn emit_correction_entry_point(
     s.push_str("\nextern \"C\" __global__ void ");
     s.push_str(entry_name);
     s.push_str("(\n");
-    s.push_str("    const Real *positions_x,\n");
-    s.push_str("    const Real *positions_y,\n");
-    s.push_str("    const Real *positions_z,\n");
+    s.push_str("    const Real4 *posq,\n");
     s.push_str("    const unsigned int *excluded_pair_atoms,\n");
     s.push_str("    unsigned int excluded_pair_count,\n");
     s.push_str("    const Real *lattice,\n");
@@ -941,7 +937,7 @@ fn emit_correction_entry_point(
     s.push_str(if write_ev { "true" } else { "false" });
     s.push_str(">(\n");
     s.push_str("        composite, excluded_pair_atoms, excluded_pair_count,\n");
-    s.push_str("        positions_x, positions_y, positions_z,\n");
+    s.push_str("        posq,\n");
     s.push_str("        lattice,\n");
     s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
     s.push_str("        fast_energy_fp, fast_virial_fp,\n");
@@ -962,9 +958,7 @@ fn emit_single_pair_entry_point(
     s.push_str("\nextern \"C\" __global__ void ");
     s.push_str(entry_name);
     s.push_str("(\n");
-    s.push_str("    const Real *positions_x,\n");
-    s.push_str("    const Real *positions_y,\n");
-    s.push_str("    const Real *positions_z,\n");
+    s.push_str("    const Real4 *posq,\n");
     s.push_str("    const unsigned int *single_pair_atoms,\n");
     s.push_str("    const unsigned int *interaction_count_ptr,\n");
     s.push_str("    const Real *lattice,\n");
@@ -986,7 +980,7 @@ fn emit_single_pair_entry_point(
     s.push_str(if write_ev { "true" } else { "false" });
     s.push_str(">(\n");
     s.push_str("        composite, single_pair_atoms, interaction_count_ptr,\n");
-    s.push_str("        positions_x, positions_y, positions_z,\n");
+    s.push_str("        posq,\n");
     s.push_str("        lattice,\n");
     s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
     s.push_str("        fast_energy_fp, fast_virial_fp,\n");
@@ -1003,12 +997,8 @@ fn emit_entry_point(
     s.push_str("\nextern \"C\" __global__ void ");
     s.push_str(entry_name);
     s.push_str("(\n");
-    s.push_str("    const Real *positions_x,\n");
-    s.push_str("    const Real *positions_y,\n");
-    s.push_str("    const Real *positions_z,\n");
-    s.push_str("    const Real *tile_sorted_positions_x,\n");
-    s.push_str("    const Real *tile_sorted_positions_y,\n");
-    s.push_str("    const Real *tile_sorted_positions_z,\n");
+    s.push_str("    const Real4 *posq,\n");
+    s.push_str("    const Real4 *tile_sorted_posq,\n");
     s.push_str("    const unsigned int *sorted_particle_ids,\n");
     s.push_str("    const unsigned int *iblock_offset,\n");
     s.push_str("    const unsigned int *sorted_interacting_atoms,\n");
@@ -1032,10 +1022,8 @@ fn emit_entry_point(
     s.push_str(if write_ev { "true" } else { "false" });
     s.push_str(">(\n");
     s.push_str("        composite, iblock_offset, n_iblocks,\n");
-    s.push_str("        positions_x, positions_y, positions_z,\n");
-    s.push_str(
-        "        tile_sorted_positions_x, tile_sorted_positions_y, tile_sorted_positions_z,\n",
-    );
+    s.push_str("        posq,\n");
+    s.push_str("        tile_sorted_posq,\n");
     s.push_str("        sorted_particle_ids,\n");
     s.push_str("        sorted_interacting_atoms,\n");
     s.push_str("        lattice,\n");
@@ -1055,6 +1043,7 @@ fn emit_entry_point(
 const PREAMBLE: &str = r#"// Heddle JIT-composed pair-force kernel preamble.
 #ifdef HEDDLE_REAL_F64
 typedef double Real;
+typedef double4 Real4;
 #define R(x) ((Real)(x))
 __device__ __forceinline__ Real Real_sqrt(Real x) { return sqrt(x); }
 __device__ __forceinline__ Real Real_rsqrt(Real x) { return rsqrt(x); }
@@ -1066,6 +1055,7 @@ __device__ __forceinline__ Real Real_erfc(Real x) { return erfc(x); }
 __device__ __forceinline__ Real Real_atan2(Real y, Real x) { return atan2(y, x); }
 #else
 typedef float Real;
+typedef float4 Real4;
 #define R(x) ((Real)(x))
 __device__ __forceinline__ Real Real_sqrt(Real x) { return sqrtf(x); }
 __device__ __forceinline__ Real Real_rsqrt(Real x) { return rsqrtf(x); }
@@ -1191,12 +1181,8 @@ __device__ static inline void heddle_jit_outer_loop(
     const HeddleJitComposedPairFunc &composite,
     const unsigned int *iblock_offset,
     unsigned int n_iblocks,
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
-    const Real *tile_sorted_positions_x,
-    const Real *tile_sorted_positions_y,
-    const Real *tile_sorted_positions_z,
+    const Real4 *posq,
+    const Real4 *tile_sorted_posq,
     const unsigned int *sorted_particle_ids,
     const unsigned int *sorted_interacting_atoms,
     const Real *lattice,
@@ -1241,9 +1227,11 @@ __device__ static inline void heddle_jit_outer_loop(
   unsigned int i_slot = i_block * 32u + lane;
   bool i_valid = i_slot < n;
   unsigned int i_atom_id = i_valid ? sorted_particle_ids[i_slot] : n;
-  Real pi_x = tile_sorted_positions_x[i_slot];
-  Real pi_y = tile_sorted_positions_y[i_slot];
-  Real pi_z = tile_sorted_positions_z[i_slot];
+  Real4 pq_i_load = tile_sorted_posq[i_slot];
+  Real pi_x = pq_i_load.x;
+  Real pi_y = pq_i_load.y;
+  Real pi_z = pq_i_load.z;
+  Real qi   = pq_i_load.w;
 
   // Per-warp register accumulator persists across every entry this
   // warp processes — this is the register-staging optimization that
@@ -1261,9 +1249,16 @@ __device__ static inline void heddle_jit_outer_loop(
     // from the canonical particle-id-ordered positions array.
     unsigned int j_atom_id = sorted_interacting_atoms[e * 32u + lane];
     bool j_valid = j_atom_id < n;
-    Real pj_x = j_valid ? positions_x[j_atom_id] : R(0.0);
-    Real pj_y = j_valid ? positions_y[j_atom_id] : R(0.0);
-    Real pj_z = j_valid ? positions_z[j_atom_id] : R(0.0);
+    Real4 pq_j_load;
+    if (j_valid) {
+      pq_j_load = posq[j_atom_id];
+    } else {
+      pq_j_load.x = R(0.0); pq_j_load.y = R(0.0); pq_j_load.z = R(0.0); pq_j_load.w = R(0.0);
+    }
+    Real pj_x = pq_j_load.x;
+    Real pj_y = pq_j_load.y;
+    Real pj_z = pq_j_load.z;
+    Real qj   = pq_j_load.w;
 
     // Self-block detection. For self-block entries, the j-atoms ARE
     // the i-block's atoms in the same lane order. Newton's 3rd via
@@ -1303,6 +1298,7 @@ __device__ static inline void heddle_jit_outer_loop(
 
         Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
         heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r,
+                                           qi, qj,
                                            i_atom_id, j_atom_id,
                                            factor, energy, virial);
         factor *= cutoff_mask;
@@ -1333,6 +1329,7 @@ __device__ static inline void heddle_jit_outer_loop(
       pj_x = __shfl_sync(0xFFFFFFFFu, pj_x, src_lane);
       pj_y = __shfl_sync(0xFFFFFFFFu, pj_y, src_lane);
       pj_z = __shfl_sync(0xFFFFFFFFu, pj_z, src_lane);
+      qj   = __shfl_sync(0xFFFFFFFFu, qj,   src_lane);
       j_atom_id = __shfl_sync(0xFFFFFFFFu, j_atom_id, src_lane);
       j_valid = j_atom_id < n;
       j_fx = __shfl_sync(0xFFFFFFFFu, j_fx, src_lane);
@@ -1414,9 +1411,7 @@ __device__ static inline void heddle_jit_correction_loop(
     const HeddleJitComposedPairFunc &composite,
     const unsigned int *excluded_pair_atoms,
     unsigned int excluded_pair_count,
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     const Real *lattice,
     unsigned long long *fast_force_x_fp,
     unsigned long long *fast_force_y_fp,
@@ -1434,16 +1429,14 @@ __device__ static inline void heddle_jit_correction_loop(
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
 
-  Real pi_x = positions_x[atom_i];
-  Real pi_y = positions_y[atom_i];
-  Real pi_z = positions_z[atom_i];
-  Real pj_x = positions_x[atom_j];
-  Real pj_y = positions_y[atom_j];
-  Real pj_z = positions_z[atom_j];
+  Real4 pq_i = posq[atom_i];
+  Real4 pq_j = posq[atom_j];
+  Real qi = pq_i.w;
+  Real qj = pq_j.w;
 
-  Real dx = pi_x - pj_x;
-  Real dy = pi_y - pj_y;
-  Real dz = pi_z - pj_z;
+  Real dx = pq_i.x - pq_j.x;
+  Real dy = pq_i.y - pq_j.y;
+  Real dz = pq_i.z - pq_j.z;
   heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
   Real r2 = dx * dx + dy * dy + dz * dz;
   Real inv_r = Real_rsqrt(r2);
@@ -1457,7 +1450,7 @@ __device__ static inline void heddle_jit_correction_loop(
 
   Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
   heddle_jit_eval_pair_correction<WriteEv>(
-      composite, r2, inv_r, r, atom_i, atom_j, factor, energy, virial);
+      composite, r2, inv_r, r, qi, qj, atom_i, atom_j, factor, energy, virial);
   factor *= cutoff_mask;
   if (WriteEv) {
     energy *= cutoff_mask;
@@ -1507,9 +1500,7 @@ __device__ static inline void heddle_jit_single_pair_loop(
     const HeddleJitComposedPairFunc &composite,
     const unsigned int *single_pair_atoms,
     const unsigned int *interaction_count_ptr,
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     const Real *lattice,
     unsigned long long *fast_force_x_fp,
     unsigned long long *fast_force_y_fp,
@@ -1533,16 +1524,14 @@ __device__ static inline void heddle_jit_single_pair_loop(
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
 
-  Real pi_x = positions_x[atom_i];
-  Real pi_y = positions_y[atom_i];
-  Real pi_z = positions_z[atom_i];
-  Real pj_x = positions_x[atom_j];
-  Real pj_y = positions_y[atom_j];
-  Real pj_z = positions_z[atom_j];
+  Real4 pq_i = posq[atom_i];
+  Real4 pq_j = posq[atom_j];
+  Real qi = pq_i.w;
+  Real qj = pq_j.w;
 
-  Real dx = pi_x - pj_x;
-  Real dy = pi_y - pj_y;
-  Real dz = pi_z - pj_z;
+  Real dx = pq_i.x - pq_j.x;
+  Real dy = pq_i.y - pq_j.y;
+  Real dz = pq_i.z - pq_j.z;
   heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
   Real r2 = dx * dx + dy * dy + dz * dz;
   Real inv_r = Real_rsqrt(r2);
@@ -1552,7 +1541,7 @@ __device__ static inline void heddle_jit_single_pair_loop(
 
   Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
   heddle_jit_eval_pair_sum<WriteEv>(
-      composite, r2, inv_r, r, atom_i, atom_j, factor, energy, virial);
+      composite, r2, inv_r, r, qi, qj, atom_i, atom_j, factor, energy, virial);
   factor *= cutoff_mask;
   if (WriteEv) {
     energy *= cutoff_mask;
@@ -1661,7 +1650,7 @@ impl JitComposedBondedForce {
     ///
     /// # Safety
     /// `builder`'s argument list must match the entry point's
-    /// signature: common args (positions_x/y/z, bonds, lattice,
+    /// signature: common args (posq, bonds, lattice,
     /// bond_pair_x/y/z[, bond_pair_energy, bond_pair_virial when
     /// `use_fev`], per-fragment args, n_bonds). The framework's
     /// per-step dispatch is responsible for that invariant.
@@ -1726,9 +1715,7 @@ fn emit_bonded_entry_point(
     s.push_str("\nextern \"C\" __global__ void ");
     s.push_str(&entry_name);
     s.push_str("(\n");
-    s.push_str("    const Real *positions_x,\n");
-    s.push_str("    const Real *positions_y,\n");
-    s.push_str("    const Real *positions_z,\n");
+    s.push_str("    const Real4 *posq,\n");
     s.push_str("    const unsigned int *bonds,\n");
     s.push_str("    const Real *lattice,\n");
     s.push_str("    Real *bond_pair_x,\n");
@@ -1753,9 +1740,11 @@ fn emit_bonded_entry_point(
     s.push_str("    unsigned int atom_i = bonds[3u * k + 0u];\n");
     s.push_str("    unsigned int atom_j = bonds[3u * k + 1u];\n");
     s.push_str("    unsigned int type_idx = bonds[3u * k + 2u];\n");
-    s.push_str("    Real dx = positions_x[atom_i] - positions_x[atom_j];\n");
-    s.push_str("    Real dy = positions_y[atom_i] - positions_y[atom_j];\n");
-    s.push_str("    Real dz = positions_z[atom_i] - positions_z[atom_j];\n");
+    s.push_str("    Real4 pq_i = posq[atom_i];\n");
+    s.push_str("    Real4 pq_j = posq[atom_j];\n");
+    s.push_str("    Real dx = pq_i.x - pq_j.x;\n");
+    s.push_str("    Real dy = pq_i.y - pq_j.y;\n");
+    s.push_str("    Real dz = pq_i.z - pq_j.z;\n");
     s.push_str("    heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);\n");
     s.push_str("    Real r2 = dx * dx + dy * dy + dz * dz;\n");
     s.push_str("    if (r2 == R(0.0)) {\n");
@@ -1941,9 +1930,7 @@ fn emit_angle_entry_point(
     s.push_str("\nextern \"C\" __global__ void ");
     s.push_str(&entry_name);
     s.push_str("(\n");
-    s.push_str("    const Real *positions_x,\n");
-    s.push_str("    const Real *positions_y,\n");
-    s.push_str("    const Real *positions_z,\n");
+    s.push_str("    const Real4 *posq,\n");
     s.push_str("    const unsigned int *angles,\n");
     s.push_str("    const Real *lattice,\n");
     s.push_str("    Real *angle_triple_x,\n");
@@ -1969,12 +1956,15 @@ fn emit_angle_entry_point(
     s.push_str("    unsigned int atom_j = angles[4u * m + 1u];\n");
     s.push_str("    unsigned int atom_k = angles[4u * m + 2u];\n");
     s.push_str("    unsigned int type_idx = angles[4u * m + 3u];\n");
-    s.push_str("    Real dx_ij = positions_x[atom_i] - positions_x[atom_j];\n");
-    s.push_str("    Real dy_ij = positions_y[atom_i] - positions_y[atom_j];\n");
-    s.push_str("    Real dz_ij = positions_z[atom_i] - positions_z[atom_j];\n");
-    s.push_str("    Real dx_kj = positions_x[atom_k] - positions_x[atom_j];\n");
-    s.push_str("    Real dy_kj = positions_y[atom_k] - positions_y[atom_j];\n");
-    s.push_str("    Real dz_kj = positions_z[atom_k] - positions_z[atom_j];\n");
+    s.push_str("    Real4 pq_i = posq[atom_i];\n");
+    s.push_str("    Real4 pq_j = posq[atom_j];\n");
+    s.push_str("    Real4 pq_k = posq[atom_k];\n");
+    s.push_str("    Real dx_ij = pq_i.x - pq_j.x;\n");
+    s.push_str("    Real dy_ij = pq_i.y - pq_j.y;\n");
+    s.push_str("    Real dz_ij = pq_i.z - pq_j.z;\n");
+    s.push_str("    Real dx_kj = pq_k.x - pq_j.x;\n");
+    s.push_str("    Real dy_kj = pq_k.y - pq_j.y;\n");
+    s.push_str("    Real dz_kj = pq_k.z - pq_j.z;\n");
     s.push_str("    heddle_jit_triclinic_min_image(dx_ij, dy_ij, dz_ij, lx, ly, lz, xy, xz, yz);\n");
     s.push_str("    heddle_jit_triclinic_min_image(dx_kj, dy_kj, dz_kj, lx, ly, lz, xy, xz, yz);\n");
     s.push_str("    Real fix, fiy, fiz, fkx, fky, fkz, u_m, w_m;\n");
