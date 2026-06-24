@@ -194,6 +194,9 @@ pub struct ShakeConstraintsState {
     pub group_count: usize,
     pub particle_count: usize,
     pub atom_slot_count: usize,
+    /// Largest atom count of any constraint group. Sizes the dynamic
+    /// shared-memory staging buffer in `rattle_velocities`. rq-53800cef
+    pub max_group_atoms: u32,
     pub group_atoms: CudaSlice<u32>,
     pub group_atom_offset: CudaSlice<u32>,
     pub group_atom_count: CudaSlice<u32>,
@@ -309,6 +312,7 @@ impl ShakeConstraintsState {
         }
 
         let atom_slot_count = group_atoms_host.len();
+        let max_group_atoms = group_atom_count_host.iter().copied().max().unwrap_or(0);
 
         // Per-atom mass array of length particle_count. Atoms not
         // referenced by any group are populated harmlessly with their
@@ -363,6 +367,7 @@ impl ShakeConstraintsState {
             group_count: n_groups,
             particle_count: list.particle_count,
             atom_slot_count,
+            max_group_atoms,
             group_atoms,
             group_atom_offset,
             group_atom_count,
@@ -476,6 +481,7 @@ impl Constraint for ShakeConstraintsState {
             dt,
             &mut self.constraint_virial,
             self.group_count,
+            self.max_group_atoms,
         )?;
         timings.kernel_stop(KernelStage::RATTLE_VELOCITIES)?;
         timings.kernel_start(KernelStage::CONSTRAINT_VIRIAL_SCATTER)?;
@@ -513,6 +519,7 @@ impl Constraint for ShakeConstraintsState {
             0.0,
             &mut self.constraint_virial,
             self.group_count,
+            self.max_group_atoms,
         )?;
         timings.kernel_stop(KernelStage::RATTLE_VELOCITIES)?;
         Ok(())

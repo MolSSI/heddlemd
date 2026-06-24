@@ -202,6 +202,40 @@ the constraint slot is composable with the SPME `recip_stream` without
 extra synchronisation (the constraint slot writes only to
 particle-state buffers that the default stream owns).
 
+## RATTLE Shared-Memory Staging <!-- rq-115e5926 -->
+
+`rattle_velocities` runs one thread per constraint group, grouped into
+blocks of `RATTLE_BLOCK_SIZE = 128`. Because `group_atom_offset` is
+cumulative, a block of consecutive groups owns a *contiguous* slice
+`[atom_base, atom_base + n_block_atoms)` of `group_atoms`. The kernel:
+
+1. **Stages** the block's per-atom data into dynamic shared memory with
+   coalesced global loads — for each block-atom slot `t`, thread
+   `t mod blockDim` reads `group_atoms[atom_base + t]` and loads that
+   atom's position, the three velocity components, mass, and inverse
+   mass, and zeroes its velocity-correction accumulators. For a
+   molecule-ordered topology (`group_atoms` an identity-like permutation)
+   these global reads are fully coalesced.
+2. **Solves** each group's RATTLE iteration on the shared-resident
+   per-atom state (each thread owns a disjoint atom range, so no
+   intra-block synchronisation is needed during the solve).
+3. **Writes back** the updated velocities to global memory with the same
+   coalesced block-cooperative pattern.
+
+The shared allocation is `RATTLE_BLOCK_SIZE × max_group_atoms × 11`
+`Real`s (eleven per-atom values: position `x/y/z`, velocity `x/y/z`,
+velocity-correction `x/y/z`, mass, inverse mass), sized by the host from
+the largest group's atom count; `n_block_atoms` never exceeds that
+bound. The per-group constraint metadata (`local_i/j`, direction, squared
+length, inverse reduced mass) remains in per-thread storage.
+
+This staging replaces a per-thread stride-`group_size` gather of the
+SoA particle arrays (and the per-group working set's local-memory
+spill). It is a pure memory-layout change: the floating-point operation
+sequence per group is **identical** to the per-thread gather, so RATTLE
+results are bit-identical and the *Reproducibility* guarantee above is
+preserved. `shake_positions` retains the per-thread-gather form.
+
 ## Group-Size Caps <!-- rq-81ce46b3 -->
 
 `MAX_GROUP_ATOMS = 8` and `MAX_GROUP_CONSTRAINTS = 12` are kernel
@@ -211,7 +245,11 @@ registers: each atom carries six floats (post-drift constrained
 `1/m`); each constraint carries an integer pair `(local_i, local_j)`
 and a target squared distance `d_k²`. Total per-thread state at the
 caps is `8 × 7 × 4 + 12 × (2 + 4) = 296 B`, well inside the per-thread
-register budget of contemporary GPUs.
+register budget of contemporary GPUs. This per-thread figure applies to
+the gather-form kernels (`shake_positions`, `shake_snapshot`);
+`rattle_velocities` holds the per-atom portion in shared memory instead
+(see *RATTLE Shared-Memory Staging*), keeping only the per-group
+constraint metadata per thread.
 
 Groups whose atom count exceeds `MAX_GROUP_ATOMS` or whose constraint
 count exceeds `MAX_GROUP_CONSTRAINTS` are rejected at slot

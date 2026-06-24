@@ -2113,6 +2113,19 @@
     "title": "Bit-exact pipeline reproducibility in the default build",
     "type": "scenario"
   },
+  "rq-115e5926": {
+    "decl": "## RATTLE Shared-Memory Staging",
+    "file": "integration/shake",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "RATTLE Shared-Memory Staging",
+    "type": "section"
+  },
   "rq-1163481e": {
     "decl": "- `log_column_names() -> &'static [\"andersen_conserved\"]`.",
     "file": "integration/andersen",
@@ -9271,6 +9284,10 @@
     "refs": [
       {
         "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/shake.rs",
         "kind": "code"
       }
     ],

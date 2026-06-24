@@ -76,10 +76,10 @@ extern "C" __global__ void shake_snapshot(
 // the constraint-virial computation to express per-atom positions in
 // COM-relative form (f32-stable arithmetic).
 __device__ static inline void weighted_com(
-    const Real (&x)[MAX_GROUP_ATOMS],
-    const Real (&y)[MAX_GROUP_ATOMS],
-    const Real (&z)[MAX_GROUP_ATOMS],
-    const Real (&m)[MAX_GROUP_ATOMS],
+    const Real *x,
+    const Real *y,
+    const Real *z,
+    const Real *m,
     unsigned int n,
     Real &cx, Real &cy, Real &cz)
 {
@@ -312,130 +312,169 @@ extern "C" __global__ void rattle_velocities(
     Real *constraint_virial,
     unsigned int n_groups)
 {
+  // Group-contiguous shared-memory staging. One thread per constraint
+  // group (water molecule). Each block owns a contiguous slice of
+  // groups, hence — because group_atom_offset is cumulative — a
+  // contiguous slice of `group_atoms`. The block cooperatively loads
+  // every atom it needs into shared memory with coalesced global reads
+  // (contiguous atom ids for molecule-ordered topologies), the per-group
+  // RATTLE solve runs on the shared-resident per-atom state (replacing
+  // the previous local-memory arrays and the stride-3 global gather),
+  // and the updated velocities are stored back coalesced. The
+  // floating-point operation sequence per group is unchanged, so results
+  // are bit-identical to a per-thread gather. See
+  // `rqm/integration/shake.md` *RATTLE Shared-Memory Staging*.
+  // rq-115e5926
+  extern __shared__ Real smem[];
+
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
-  unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
-  if (g >= n_groups) {
-    return;
-  }
 
-  unsigned int aoff = group_atom_offset[g];
-  unsigned int acnt = group_atom_count[g];
-  unsigned int coff = group_constraint_offset[g];
-  unsigned int ccnt = group_constraint_count[g];
+  unsigned int G0 = blockIdx.x * blockDim.x;        // first group of the block
+  unsigned int g = G0 + threadIdx.x;
+  bool active = (g < n_groups);
 
-  unsigned int atom_idx[MAX_GROUP_ATOMS];
-  Real px[MAX_GROUP_ATOMS], py[MAX_GROUP_ATOMS], pz[MAX_GROUP_ATOMS];
-  Real vx[MAX_GROUP_ATOMS], vy[MAX_GROUP_ATOMS], vz[MAX_GROUP_ATOMS];
-  // Cumulative velocity correction per atom (for virial).
-  Real dvx[MAX_GROUP_ATOMS] = {R(0.0)};
-  Real dvy[MAX_GROUP_ATOMS] = {R(0.0)};
-  Real dvz[MAX_GROUP_ATOMS] = {R(0.0)};
-  Real m_atom[MAX_GROUP_ATOMS];
-  Real inv_m[MAX_GROUP_ATOMS];
+  // The block's contiguous atom range [atom_base, atom_base+n_block_atoms).
+  unsigned int last_g = (G0 + blockDim.x <= n_groups) ? (G0 + blockDim.x - 1)
+                                                      : (n_groups - 1);
+  unsigned int atom_base = group_atom_offset[G0];
+  unsigned int n_block_atoms =
+      group_atom_offset[last_g] + group_atom_count[last_g] - atom_base;
 
-  for (unsigned int a = 0; a < acnt; ++a) {
-    unsigned int i = group_atoms[aoff + a];
-    atom_idx[a] = i;
+  // Partition dynamic shared into 11 per-atom arrays (host sizes the
+  // allocation to blockDim * max_group_atoms * 11 Reals; n_block_atoms
+  // never exceeds that bound).
+  Real *s_px  = smem;
+  Real *s_py  = s_px  + n_block_atoms;
+  Real *s_pz  = s_py  + n_block_atoms;
+  Real *s_vx  = s_pz  + n_block_atoms;
+  Real *s_vy  = s_vx  + n_block_atoms;
+  Real *s_vz  = s_vy  + n_block_atoms;
+  Real *s_dvx = s_vz  + n_block_atoms;
+  Real *s_dvy = s_dvx + n_block_atoms;
+  Real *s_dvz = s_dvy + n_block_atoms;
+  Real *s_m   = s_dvz + n_block_atoms;
+  Real *s_im  = s_m   + n_block_atoms;
+
+  // Coalesced staging load.
+  for (unsigned int t = threadIdx.x; t < n_block_atoms; t += blockDim.x) {
+    unsigned int i = group_atoms[atom_base + t];
     Real4 pq = posq[i];
-    px[a] = pq.x;
-    py[a] = pq.y;
-    pz[a] = pq.z;
-    vx[a] = velocities_x[i];
-    vy[a] = velocities_y[i];
-    vz[a] = velocities_z[i];
-    m_atom[a] = atom_mass[i];
-    inv_m[a] = (m_atom[a] > R(0.0)) ? R(1.0) / m_atom[a] : R(0.0);
+    s_px[t] = pq.x; s_py[t] = pq.y; s_pz[t] = pq.z;
+    s_vx[t] = velocities_x[i];
+    s_vy[t] = velocities_y[i];
+    s_vz[t] = velocities_z[i];
+    Real m = atom_mass[i];
+    s_m[t]  = m;
+    s_im[t] = (m > R(0.0)) ? R(1.0) / m : R(0.0);
+    s_dvx[t] = R(0.0); s_dvy[t] = R(0.0); s_dvz[t] = R(0.0);
   }
+  __syncthreads();
 
-  // Same-image alignment as shake_positions.
-  for (unsigned int a = 1; a < acnt; ++a) {
-    min_image_to(px[0], py[0], pz[0], px[a], py[a], pz[a],
-                 lx, ly, lz, xy, xz, yz);
-  }
+  if (active) {
+    unsigned int aoff = group_atom_offset[g];
+    unsigned int acnt = group_atom_count[g];
+    unsigned int coff = group_constraint_offset[g];
+    unsigned int ccnt = group_constraint_count[g];
+    unsigned int lb = aoff - atom_base;   // block-local base for this group
 
-  // Constraint-gradient directions at the (now constrained) positions.
-  unsigned char ci[MAX_GROUP_CONSTRAINTS], cj[MAX_GROUP_CONSTRAINTS];
-  Real dx[MAX_GROUP_CONSTRAINTS], dy[MAX_GROUP_CONSTRAINTS], dz[MAX_GROUP_CONSTRAINTS];
-  Real d2[MAX_GROUP_CONSTRAINTS];
-  Real inv_pair[MAX_GROUP_CONSTRAINTS];
-  for (unsigned int k = 0; k < ccnt; ++k) {
-    unsigned char li = group_constraints_local_i[coff + k];
-    unsigned char lj = group_constraints_local_j[coff + k];
-    ci[k] = li;
-    cj[k] = lj;
-    dx[k] = px[li] - px[lj];
-    dy[k] = py[li] - py[lj];
-    dz[k] = pz[li] - pz[lj];
-    d2[k] = dx[k] * dx[k] + dy[k] * dy[k] + dz[k] * dz[k];
-    inv_pair[k] = inv_m[li] + inv_m[lj];
-  }
+    // Per-group shared views (each thread owns a disjoint atom range, so
+    // no synchronisation is needed within the solve).
+    Real *px = &s_px[lb], *py = &s_py[lb], *pz = &s_pz[lb];
+    Real *vx = &s_vx[lb], *vy = &s_vy[lb], *vz = &s_vz[lb];
+    Real *dvx = &s_dvx[lb], *dvy = &s_dvy[lb], *dvz = &s_dvz[lb];
+    Real *m_atom = &s_m[lb], *inv_m = &s_im[lb];
 
-  // RATTLE_TOL on |v_rel · d_k|. rqm-documented value is 1.0e-20 m²/s.
-  // Converted to atomic units (a_0² / atu): 1.0e-20 × (1/5.29177e-11)²
-  // × 2.4189e-17 ≈ 8.63e-17 a_0²/atu. The constant below is the
-  // engine's atomic-unit equivalent.
-  const Real RATTLE_TOL = R(8.63e-17);
-  const int RATTLE_MAX_ITER = 32;
+    // Same-image alignment as shake_positions.
+    for (unsigned int a = 1; a < acnt; ++a) {
+      min_image_to(px[0], py[0], pz[0], px[a], py[a], pz[a],
+                   lx, ly, lz, xy, xz, yz);
+    }
 
-  for (int iter = 0; iter < RATTLE_MAX_ITER; ++iter) {
-    bool converged = true;
+    // Constraint-gradient directions at the (now constrained) positions.
+    unsigned char ci[MAX_GROUP_CONSTRAINTS], cj[MAX_GROUP_CONSTRAINTS];
+    Real dx[MAX_GROUP_CONSTRAINTS], dy[MAX_GROUP_CONSTRAINTS], dz[MAX_GROUP_CONSTRAINTS];
+    Real d2[MAX_GROUP_CONSTRAINTS];
+    Real inv_pair[MAX_GROUP_CONSTRAINTS];
     for (unsigned int k = 0; k < ccnt; ++k) {
-      unsigned char li = ci[k];
-      unsigned char lj = cj[k];
-      Real vxr = vx[li] - vx[lj];
-      Real vyr = vy[li] - vy[lj];
-      Real vzr = vz[li] - vz[lj];
-      Real vrel = vxr * dx[k] + vyr * dy[k] + vzr * dz[k];
-      if (Real_fabs(vrel) > RATTLE_TOL) {
-        converged = false;
-        Real denom = d2[k] * inv_pair[k];
-        if (denom == R(0.0)) {
-          continue;
+      unsigned char li = group_constraints_local_i[coff + k];
+      unsigned char lj = group_constraints_local_j[coff + k];
+      ci[k] = li;
+      cj[k] = lj;
+      dx[k] = px[li] - px[lj];
+      dy[k] = py[li] - py[lj];
+      dz[k] = pz[li] - pz[lj];
+      d2[k] = dx[k] * dx[k] + dy[k] * dy[k] + dz[k] * dz[k];
+      inv_pair[k] = inv_m[li] + inv_m[lj];
+    }
+
+    // RATTLE_TOL on |v_rel · d_k|. rqm-documented value is 1.0e-20 m²/s.
+    // Converted to atomic units (a_0² / atu): 1.0e-20 × (1/5.29177e-11)²
+    // × 2.4189e-17 ≈ 8.63e-17 a_0²/atu. The constant below is the
+    // engine's atomic-unit equivalent.
+    const Real RATTLE_TOL = R(8.63e-17);
+    const int RATTLE_MAX_ITER = 32;
+
+    for (int iter = 0; iter < RATTLE_MAX_ITER; ++iter) {
+      bool converged = true;
+      for (unsigned int k = 0; k < ccnt; ++k) {
+        unsigned char li = ci[k];
+        unsigned char lj = cj[k];
+        Real vxr = vx[li] - vx[lj];
+        Real vyr = vy[li] - vy[lj];
+        Real vzr = vz[li] - vz[lj];
+        Real vrel = vxr * dx[k] + vyr * dy[k] + vzr * dz[k];
+        if (Real_fabs(vrel) > RATTLE_TOL) {
+          converged = false;
+          Real denom = d2[k] * inv_pair[k];
+          if (denom == R(0.0)) {
+            continue;
+          }
+          Real mu = vrel / denom;
+          Real ki = mu * inv_m[li];
+          Real kj = mu * inv_m[lj];
+          vx[li] -= ki * dx[k];
+          vy[li] -= ki * dy[k];
+          vz[li] -= ki * dz[k];
+          vx[lj] += kj * dx[k];
+          vy[lj] += kj * dy[k];
+          vz[lj] += kj * dz[k];
+          dvx[li] -= ki * dx[k];
+          dvy[li] -= ki * dy[k];
+          dvz[li] -= ki * dz[k];
+          dvx[lj] += kj * dx[k];
+          dvy[lj] += kj * dy[k];
+          dvz[lj] += kj * dz[k];
         }
-        Real mu = vrel / denom;
-        Real ki = mu * inv_m[li];
-        Real kj = mu * inv_m[lj];
-        vx[li] -= ki * dx[k];
-        vy[li] -= ki * dy[k];
-        vz[li] -= ki * dz[k];
-        vx[lj] += kj * dx[k];
-        vy[lj] += kj * dy[k];
-        vz[lj] += kj * dz[k];
-        dvx[li] -= ki * dx[k];
-        dvy[li] -= ki * dy[k];
-        dvz[li] -= ki * dz[k];
-        dvx[lj] += kj * dx[k];
-        dvy[lj] += kj * dy[k];
-        dvz[lj] += kj * dz[k];
+      }
+      if (converged) {
+        break;
       }
     }
-    if (converged) {
-      break;
+
+    // Velocity-level constraint-virial contribution.
+    if (dt > R(0.0)) {
+      Real inv_dt = R(1.0) / dt;
+      Real cx, cy, cz;
+      weighted_com(px, py, pz, m_atom, acnt, cx, cy, cz);
+      for (unsigned int a = 0; a < acnt; ++a) {
+        Real rx = px[a] - cx;
+        Real ry = py[a] - cy;
+        Real rz = pz[a] - cz;
+        Real scale = m_atom[a] * inv_dt;
+        Real w = scale * (dvx[a] * rx + dvy[a] * ry + dvz[a] * rz);
+        constraint_virial[aoff + a] += w;
+      }
     }
   }
+  __syncthreads();
 
-  // Write back velocities.
-  for (unsigned int a = 0; a < acnt; ++a) {
-    unsigned int i = atom_idx[a];
-    velocities_x[i] = vx[a];
-    velocities_y[i] = vy[a];
-    velocities_z[i] = vz[a];
-  }
-
-  // Velocity-level constraint-virial contribution.
-  if (dt > R(0.0)) {
-    Real inv_dt = R(1.0) / dt;
-    Real cx, cy, cz;
-    weighted_com(px, py, pz, m_atom, acnt, cx, cy, cz);
-    for (unsigned int a = 0; a < acnt; ++a) {
-      Real rx = px[a] - cx;
-      Real ry = py[a] - cy;
-      Real rz = pz[a] - cz;
-      Real scale = m_atom[a] * inv_dt;
-      Real w = scale * (dvx[a] * rx + dvy[a] * ry + dvz[a] * rz);
-      constraint_virial[aoff + a] += w;
-    }
+  // Coalesced write-back of the updated velocities.
+  for (unsigned int t = threadIdx.x; t < n_block_atoms; t += blockDim.x) {
+    unsigned int i = group_atoms[atom_base + t];
+    velocities_x[i] = s_vx[t];
+    velocities_y[i] = s_vy[t];
+    velocities_z[i] = s_vz[t];
   }
 }
 
