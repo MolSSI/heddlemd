@@ -672,7 +672,7 @@ pub fn spme_recip_reduce_partials(
     Ok(())
 }
 
-// rq-9ca00d25 rq-35b76155 rq-c6f6a13c
+// rq-9ca00d25 rq-35b76155 rq-c6f6a13c rq-df8766ae
 #[allow(clippy::too_many_arguments)]
 pub fn spme_force_gather(
     particle_buffers: &ParticleBuffers,

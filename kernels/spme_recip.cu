@@ -251,6 +251,17 @@ __device__ static inline void spread_per_particle_setup(
 // (d_a, d_b, iz) contribution issues one atomicAdd<i64> into
 // rho_fixed, with a v_fixed != 0 zero-skip guard to elide the
 // contribution when the fixed-point quantisation rounds to zero.
+//
+// The per-axis a/b-axis weights wa[0..p) / wb[0..p) are hoisted out of
+// the (d_a, d_b) loop and evaluated once per thread; only wc[iz] (the
+// thread's own z-slice) is needed for the c axis. Splitting the p^3
+// support across p z-slice threads is deliberate: it parallelises the
+// atomicAdd traffic across the warp, which dominates the kernel's cost.
+// Collapsing to one thread per atom would remove the inter-thread
+// recomputation of wa/wb but serialise all p^3 atomics through a single
+// thread, a net loss measured at this grid size — so the per-slice
+// mapping is kept.
+//
 // Grid: ceil(N * spline_order / 256) blocks of 256 threads each.
 extern "C" __global__ void spme_spread_fixed_point(
     const Real4        *posq,
@@ -616,35 +627,49 @@ extern "C" __global__ void spme_force_gather(
   Real tc = uc - (Real) gc0;
 
   int p = (int) spline_order;
+
+  // Per-axis B-spline weights, derivatives, and wrapped grid indices,
+  // each evaluated once (p evaluations per axis). The straightforward
+  // nested loop would recompute the b-axis terms p times and the c-axis
+  // terms p^2 times (Cox-de Boor is O(p^2) each); hoisting them here
+  // removes that redundancy. The inner accumulation only reads these
+  // arrays, so its arithmetic — and therefore the bit-exact reduction
+  // order — is identical to the unhoisted form.
+  Real wa_arr[8], dwa_arr[8], wb_arr[8], dwb_arr[8], wc_arr[8], dwc_arr[8];
+  int ga_arr[8], gb_arr[8], gc_arr[8];
+  for (int d = 0; d < p; ++d) {
+    bspline_weight_and_deriv(p, (Real) d + ta, wa_arr[d], dwa_arr[d]);
+    bspline_weight_and_deriv(p, (Real) d + tb, wb_arr[d], dwb_arr[d]);
+    bspline_weight_and_deriv(p, (Real) d + tc, wc_arr[d], dwc_arr[d]);
+    int g_a = ga0 - d;
+    ga_arr[d] = ((g_a % (int) n_a) + (int) n_a) % (int) n_a;
+    int g_b = gb0 - d;
+    gb_arr[d] = ((g_b % (int) n_b) + (int) n_b) % (int) n_b;
+    int g_c = gc0 - d;
+    gc_arr[d] = ((g_c % (int) n_c) + (int) n_c) % (int) n_c;
+  }
+
   Real accum_phi    = R(0.0);
   Real accum_grad_a = R(0.0);  // dΦ/dt_a (in fractional-grid units)
   Real accum_grad_b = R(0.0);
   Real accum_grad_c = R(0.0);
-
+  // dM_p(d+t)/dt = M_p'(d+t). Since u = s' · n and d+t = u - g,
+  // d(d+t)/du = 1, so d(w)/du = dw. The chain rule into Cartesian comes
+  // below via the reciprocal lattice.
   for (int da = 0; da < p; ++da) {
-    Real wa, dwa;
-    bspline_weight_and_deriv(p, (Real) da + ta, wa, dwa);
-    int g_a = ga0 - da;
-    g_a = ((g_a % (int) n_a) + (int) n_a) % (int) n_a;
+    Real wa = wa_arr[da], dwa = dwa_arr[da];
+    int g_a = ga_arr[da];
     for (int db = 0; db < p; ++db) {
-      Real wb, dwb;
-      bspline_weight_and_deriv(p, (Real) db + tb, wb, dwb);
-      int g_b = gb0 - db;
-      g_b = ((g_b % (int) n_b) + (int) n_b) % (int) n_b;
+      Real wb = wb_arr[db], dwb = dwb_arr[db];
+      int g_b = gb_arr[db];
       for (int dc = 0; dc < p; ++dc) {
-        Real wc, dwc;
-        bspline_weight_and_deriv(p, (Real) dc + tc, wc, dwc);
-        int g_c = gc0 - dc;
-        g_c = ((g_c % (int) n_c) + (int) n_c) % (int) n_c;
+        Real wc = wc_arr[dc], dwc = dwc_arr[dc];
+        int g_c = gc_arr[dc];
         unsigned int g_idx =
             ((unsigned int) g_a * n_b + (unsigned int) g_b) * n_c
             + (unsigned int) g_c;
         Real v = V[g_idx];
         accum_phi    += v * wa * wb * wc;
-        // dM_p(da+t)/dt = M_p'(da+t). But we want d/d(s_a · n_a) = d/du_a.
-        // Since u_a = s_a' · n_a and da+t = u_a - g_a, d(da+t)/du_a = 1.
-        // So d(wa)/du_a = dwa. The chain rule into Cartesian comes
-        // below via the reciprocal lattice.
         accum_grad_a += v * dwa * wb  * wc;
         accum_grad_b += v * wa  * dwb * wc;
         accum_grad_c += v * wa  * wb  * dwc;

@@ -469,6 +469,16 @@ The two stages:
    thread is independent: no `__shfl_sync` broadcasts, no
    `__syncwarp`, no per-warp coordination.
 
+   The `p`-threads-per-atom mapping (rather than one thread sweeping
+   the full `p³` cube) is deliberate: it parallelises the `atomicAdd`
+   traffic — the kernel's dominant cost — across `p` threads. The
+   per-thread `wa[0..p)` / `wb[0..p)` evaluation is hoisted out of the
+   `(d_a, d_b)` loop, so the only redundancy is that the `p` z-slice
+   threads of one atom each evaluate those `a`/`b`-axis weights.
+   Collapsing to one thread per atom would remove that redundancy but
+   serialise all `p³` atomics through a single thread — a measured net
+   loss at production grid sizes — so the per-slice mapping is kept.
+
    For its assigned atom, the thread reads `i =
    sorted_atom_index[atom_slot]`, then reads particle `i`'s charge
    `q_i`. **Charge-zero skip:** if `q_i == 0`, the thread returns
@@ -694,11 +704,17 @@ then:
 
 1. Reads particle `i`'s wrapped position and computes the fractional
    coordinates `(s_a, s_b, s_c)`.
-2. Determines its primary bin and iterates the `p × p × p` neighbouring
-   bins of grid points (wrapping modulo `n_d`).
-3. For each grid point `g` in the support, computes the 1D B-spline
-   weights `w_a, w_b, w_c` and the corresponding 1D derivatives
-   `dw_a, dw_b, dw_c`.
+2. Evaluates the per-axis 1D B-spline weights and derivatives once per
+   axis into small arrays — `w_a[0..p)`, `dw_a[0..p)`, and likewise for
+   the `b` and `c` axes (`p` evaluations per axis) — together with the
+   wrapped grid index for each axis offset. These are hoisted out of the
+   `p³` sweep; evaluating them per grid point instead would recompute the
+   `b`-axis terms `p` times and the `c`-axis terms `p²` times (each
+   B-spline evaluation is an O(p²) Cox-de Boor recursion).
+3. Sweeps the `p × p × p` neighbouring grid points (wrapping modulo
+   `n_d`); for each grid point `g` it reads `V[g]` and indexes the
+   precomputed per-axis weights `(w_a[d_a], w_b[d_b], w_c[d_c])` and
+   derivatives `(dw_a[d_a], dw_b[d_b], dw_c[d_c])`.
 4. Accumulates per-particle force components from the gradient
    contribution `V[g] · (dw_a · w_b · w_c, w_a · dw_b · w_c, w_a · w_b · dw_c)`
    scaled by `−q_i · n_d` (the chain-rule factor for the fractional-to-
