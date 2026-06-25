@@ -2114,7 +2114,7 @@
     "type": "scenario"
   },
   "rq-115e5926": {
-    "decl": "## RATTLE Shared-Memory Staging",
+    "decl": "## SHAKE/RATTLE Shared-Memory Staging",
     "file": "integration/shake",
     "level": 2,
     "refs": [
@@ -2123,7 +2123,7 @@
         "kind": "code"
       }
     ],
-    "title": "RATTLE Shared-Memory Staging",
+    "title": "SHAKE/RATTLE Shared-Memory Staging",
     "type": "section"
   },
   "rq-1163481e": {

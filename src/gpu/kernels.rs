@@ -2565,13 +2565,29 @@ pub fn shake_positions(
     dt: Real,
     constraint_virial: &mut CudaSlice<Real>,
     n_groups: usize,
+    max_group_atoms: u32,
 ) -> Result<(), GpuError> {
     if n_groups == 0 {
         return Ok(());
     }
     let n_u32 = n_groups as u32;
     let func = particle_buffers.kernels.shake.shake_positions.clone();
-    let cfg = launch_config(n_u32);
+    // rq-115e5926
+    // One thread per group, in blocks of SHAKE_POS_BLOCK_SIZE. Each block
+    // stages its groups' atoms into dynamic shared memory (16 Reals per
+    // atom). The block size is kept at 64 so the reservation
+    // `block * max_group_atoms * 16 * sizeof(Real)` stays within the 48 KB
+    // default shared budget even at MAX_GROUP_ATOMS = 8.
+    const SHAKE_POS_BLOCK_SIZE: u32 = 64;
+    let block = SHAKE_POS_BLOCK_SIZE;
+    let grid = n_u32.div_ceil(block);
+    let shared_atoms = block * max_group_atoms.max(1);
+    let shared_mem_bytes = shared_atoms * 16 * (std::mem::size_of::<Real>() as u32);
+    let cfg = LaunchConfig {
+        grid_dim: (grid, 1, 1),
+        block_dim: (block, 1, 1),
+        shared_mem_bytes,
+    };
     let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(

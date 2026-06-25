@@ -451,6 +451,7 @@ impl Constraint for ShakeConstraintsState {
             dt,
             &mut self.constraint_virial,
             self.group_count,
+            self.max_group_atoms,
         )?;
         timings.kernel_stop(KernelStage::SHAKE_POSITIONS)?;
         Ok(())
