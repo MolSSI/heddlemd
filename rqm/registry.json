@@ -11646,6 +11646,10 @@
       {
         "file": "src/forces/jit_composed.rs",
         "kind": "code"
+      },
+      {
+        "file": "tests/determinism.rs",
+        "kind": "code"
       }
     ],
     "title": "Composed-Kernel Structure",
@@ -21202,10 +21206,15 @@
     "type": "section"
   },
   "rq-c156295f": {
-    "decl": "Scenario: Three-pass composition is run-to-run byte-identical",
+    "decl": "Scenario: Repeated runs of a disordered system are byte-identical",
     "file": "forces/jit-composed-pair-force",
-    "refs": [],
-    "title": "Three-pass composition is run-to-run byte-identical",
+    "refs": [
+      {
+        "file": "tests/determinism.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Repeated runs of a disordered system are byte-identical",
     "type": "scenario"
   },
   "rq-c15b187c": {

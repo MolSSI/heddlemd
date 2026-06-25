@@ -1056,10 +1056,19 @@ Feature: JIT-composed pair-force kernel
     Then the per-particle forces, energies, and virials are byte-identical between the two runs
 
   @rq-c156295f
-  Scenario: Three-pass composition is run-to-run byte-identical
-    Given a ForceField configuration with LJ + SPME-real + topology exclusions + sparse-tile candidates
-    When ForceField::step(...) is called on two independent ForceField instances built from byte-identical inputs
-    Then run A's per-particle forces, energies, and virials are byte-identical to run B's
+  Scenario: Repeated runs of a disordered system are byte-identical
+    Given a disordered (liquid-like) fast-class configuration that spans
+      many atom-blocks and populates multi-entry dense tiles
+    When the same simulation is run several times from byte-identical
+      inputs on the same GPU
+    Then every run's trajectory (and hence its per-particle forces) is
+      byte-identical to the first run's
+    # The configuration must be disordered and span many blocks, and the
+    # run must be repeated several times. A perfect crystal or a tiny
+    # system has too-regular neighbour packing and stays bit-identical
+    # even when the i-side accumulation is order-dependent (it would not
+    # expose the scheduling race that made b17aee1's float i-side
+    # accumulation non-deterministic).
 
   # --- displaces() under JIT composition ---
 
