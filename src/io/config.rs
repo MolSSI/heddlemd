@@ -143,6 +143,20 @@ pub struct SimulationConfig {
     /// graph-capture compatibility is in place).
     #[serde(default)]
     pub cuda_graphs_disable: bool,
+    /// When `true`, JIT-compiled CUDA kernels are built with
+    /// `--use_fast_math`. Default `true`. Fast-math is bit-reproducible
+    /// run-to-run on a fixed GPU (the load-bearing reproducibility
+    /// invariant still holds); it trades a few ULP of
+    /// transcendental/division precision — within the engine's f32 error
+    /// class — for faster pair-force evaluation. Set `false` to compile
+    /// the precise-IEEE kernels instead. See `precision.md`.
+    #[serde(default = "default_fast_math")]
+    pub fast_math: bool,
+}
+
+// rq-a84e1c76
+fn default_fast_math() -> bool {
+    true
 }
 
 fn default_graph_batch_size() -> u32 {
@@ -1220,6 +1234,7 @@ fn build_config(
         temperature: to_au_temperature(raw.simulation.temperature),
         graph_batch_size: raw.simulation.graph_batch_size,
         cuda_graphs_disable: raw.simulation.cuda_graphs_disable,
+        fast_math: raw.simulation.fast_math,
     };
 
     let particle_types: Vec<ParticleTypeConfig> = raw

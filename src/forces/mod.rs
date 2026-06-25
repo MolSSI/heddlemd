@@ -32,6 +32,7 @@ pub use jit_composed::{
     ForceLaunchBuilder, ForceLaunchContext, JitComposedAngleForce, JitComposedBondedForce,
     JitComposedPairForce, JitComposedPostForcePerParticle, PairForceBindContext,
     PairForceFragment, PairForceLaunchBuilder, PerParticleFragment, PostForceBindContext,
+    set_jit_fast_math,
 };
 pub use spme::{
     SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,

@@ -184,6 +184,7 @@ pub(crate) fn compile_spme_ptx(
     }
     #[cfg(feature = "f64")]
     options.push("--define-macro=REAL_F64".to_string());
+    crate::forces::jit_composed::push_jit_fast_math(&mut options);
     let opts = CompileOptions {
         options,
         ..Default::default()

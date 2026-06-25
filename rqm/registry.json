@@ -18475,6 +18475,18 @@
     "title": "UnitSystem",
     "type": "api-item"
   },
+  "rq-a77dffe7": {
+    "decl": "Scenario: fast_math defaults to true and can be disabled",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "fast_math defaults to true and can be disabled",
+    "type": "scenario"
+  },
   "rq-a77e722d": {
     "decl": "## Out of Scope",
     "file": "integration/jit-composed-post-force",
@@ -18549,7 +18561,20 @@
     "decl": "#### `[simulation]`",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[simulation]`",
     "type": "section"
   },

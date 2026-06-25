@@ -284,9 +284,9 @@ and ordering invariants hold regardless of the chosen unit system.
 
 The `[simulation]` table carries the settings that apply to the
 **initial-velocity sampling** performed once at phase-0 entry plus the
-run-wide CUDA graph execution knobs. Per-step settings (timestep, step
-count, integrator/thermostat/barostat composition, output cadences)
-live in the `[[phase]]` array.
+run-wide CUDA graph execution and JIT-compilation knobs. Per-step
+settings (timestep, step count, integrator/thermostat/barostat
+composition, output cadences) live in the `[[phase]]` array.
 
 - `seed: u64` — RNG seed used for Maxwell-Boltzmann velocity
   generation. Required even when the init file supplies explicit
@@ -312,6 +312,19 @@ live in the `[[phase]]` array.
   phase runs the per-step launch loop with full per-kernel
   `Timings`. Default `false`. Provided as a diagnostic escape hatch;
   see `cuda-graphs.md`.
+- `fast_math: bool` — optional. When `true`, every JIT-compiled CUDA
+  kernel (the composed pair / bonded / angle / post-force kernels and
+  the SPME reciprocal kernels) is built with `nvcc`'s `--use_fast_math`.
+  Default `true`. Fast-math is **bit-reproducible run-to-run on a fixed
+  GPU** — the reproducibility invariant holds, because the deterministic
+  fixed-point force accumulation does not depend on the per-pair
+  transcendental/division precision. It trades a few ULP in division and
+  the SPME-real `erfc` reciprocal — within the engine's existing f32
+  error class — for roughly 13% faster pair-force evaluation. Set
+  `false` to compile the precise-IEEE kernels. A run with
+  `fast_math = true` follows a different f32 trajectory than one with
+  `fast_math = false`; each is independently reproducible. The setting
+  is applied process-wide before any kernel is compiled.
 
 #### `[[phase]]` (array of tables, >= 1 entry) <!-- rq-18441e33 -->
 
@@ -1674,6 +1687,15 @@ Feature: TOML simulation config schema
     And config.phases[0].output.log_path equals "/tmp/sim/argon.out.log"
     And config.phases[0].output.log_every equals 100
     And config.phases[0].output.timings_path equals "/tmp/sim/argon.out.timings"
+
+  @rq-a77dffe7
+  Scenario: fast_math defaults to true and can be disabled
+    Given the Background config with no [simulation].fast_math field
+    When load_config is called
+    Then config.simulation.fast_math equals true
+    Given an otherwise-identical config with [simulation].fast_math = false
+    When load_config is called
+    Then config.simulation.fast_math equals false
 
   @rq-0622d4b0
   Scenario: Default output paths drop a single trailing `.in` from the config-file root

@@ -127,6 +127,24 @@ fn assert_parse_path_and_field(err: &ConfigError, expected_path: &str, unknown_f
     }
 }
 
+// rq-a77dffe7
+#[test]
+fn fast_math_defaults_true_and_can_be_disabled() {
+    let dir = tmp_path("fast_math_config");
+    // Omitted -> defaults to true.
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.simulation.fast_math);
+    // Explicit false is honored.
+    let body = minimal_config().replace(
+        "temperature = 300.0",
+        "temperature = 300.0\nfast_math = false",
+    );
+    let path = write_config_named(&dir, "nofm.in.toml", &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(!cfg.simulation.fast_math);
+}
+
 // rq-7df1515f rq-993ec182 rq-9ce1bd52
 #[test]
 fn load_valid_minimal_config() {

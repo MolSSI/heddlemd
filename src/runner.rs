@@ -1023,6 +1023,11 @@ fn simulation_setup_finish_gpu(
         }
     }
 
+    // Select the JIT fast-math compile mode before any kernel is built
+    // (ForceField::new compiles the composed pair/bonded/angle and SPME
+    // kernels; the post-force composer is built further below). rq-a84e1c76
+    crate::forces::set_jit_fast_math(config.simulation.fast_math);
+
     // ForceField persists across phases.
     let force_field = ForceField::new(
         &registries.potentials,

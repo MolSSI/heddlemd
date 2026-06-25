@@ -30,6 +30,35 @@ use crate::precision::Real;
 
 use super::{ForceFieldError, NeighborListState};
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Whether JIT-compiled CUDA kernels are built with `--use_fast_math`.
+/// Set once at startup from `[simulation].fast_math` (default `true`) and
+/// read by every JIT compile site (pair force, bonded, angle, post-force,
+/// and the SPME reciprocal). Defaults to `true` so an embedder that never
+/// calls `set_jit_fast_math` gets the production default. rq-a84e1c76
+static JIT_FAST_MATH: AtomicBool = AtomicBool::new(true);
+
+/// Select whether subsequent JIT compilations use `--use_fast_math`.
+/// Called once during startup from the parsed configuration, before any
+/// kernel is compiled.
+pub fn set_jit_fast_math(enabled: bool) {
+    JIT_FAST_MATH.store(enabled, Ordering::Relaxed);
+}
+
+/// Whether JIT compilations currently use `--use_fast_math`.
+pub fn jit_fast_math_enabled() -> bool {
+    JIT_FAST_MATH.load(Ordering::Relaxed)
+}
+
+/// Append `--use_fast_math` to a JIT option list when fast-math is on.
+/// Shared by every JIT compile site so the flag is applied uniformly.
+pub(crate) fn push_jit_fast_math(options: &mut Vec<String>) {
+    if jit_fast_math_enabled() {
+        options.push("--use_fast_math".to_string());
+    }
+}
+
 /// Declares whether a pair-force fragment uses a single cutoff for
 /// every pair (and what that cutoff is) or a per-pair cutoff. The
 /// composer uses this to elide the per-fragment
@@ -474,6 +503,7 @@ impl JitComposedPairForce {
         }
         #[cfg(feature = "f64")]
         options.push("--define-macro=HEDDLE_REAL_F64".to_string());
+        push_jit_fast_math(&mut options);
         let opts = CompileOptions {
             options,
             ..Default::default()
@@ -2136,6 +2166,7 @@ where
     }
     #[cfg(feature = "f64")]
     options.push("--define-macro=HEDDLE_REAL_F64".to_string());
+    push_jit_fast_math(&mut options);
     let opts = CompileOptions {
         options,
         ..Default::default()
