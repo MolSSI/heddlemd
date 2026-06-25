@@ -594,6 +594,7 @@ pub fn spme_recip_apply_influence(
 /// schedule downstream consumers (`spme_charge_spread`,
 /// `spme_recip_apply_influence`) on the same stream so the writes are
 /// visible without additional synchronization.
+// rq-e7b74f7a
 #[allow(clippy::too_many_arguments)]
 pub fn spme_recip_compute_influence(
     kernels: &Kernels,

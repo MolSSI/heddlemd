@@ -583,12 +583,19 @@ kernel takes the current box lattice as scalar kernel arguments
 (`lx, ly, lz, xy, xz, yz`), the precomputed device-resident
 `b_factors_*` buffers, the grid dimensions, and `α`. One thread per
 complex grid cell evaluates the formulae above; threads do not
-communicate. All inner arithmetic uses `double` precision (the
-reciprocal-lattice inversion, the K-vector dot product, the exponential,
-and the B-spline-correction product) and the final value is cast to the
-storage `Real` at the device-store site, matching the precision policy
-of every other f32 kernel that performs accuracy-sensitive transcendental
-arithmetic on device.
+communicate. All inner arithmetic uses `Real` — the same f32 width as
+the stored `influence_G` / `virial_factor` buffers — including the
+reciprocal-lattice inversion, the K-vector dot product, the exponential
+(`Real_exp` = `expf`), and the B-spline-correction product. `K²` is a
+sum of squares with no catastrophic cancellation for physical boxes, so
+single precision is accurate to the stored width; f64 internals would
+only refine rounding the `Real` store immediately discards. The f32 form
+is also markedly faster on hardware where double-precision throughput is
+a small fraction of single (consumer GPUs are commonly ≈ 1:64), which
+matters because the kernel evaluates one `exp` over `M_complex ≈ 10⁶`
+cells each time it runs. Determinism is unaffected: one thread per cell,
+no inter-thread communication, no atomics, so two runs on the same GPU
+produce byte-identical buffers.
 
 `spme_recip_compute_influence` runs:
 

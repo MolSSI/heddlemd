@@ -25219,7 +25219,12 @@
     "decl": "### Influence function",
     "file": "forces/spme",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Influence function",
     "type": "section"
   },

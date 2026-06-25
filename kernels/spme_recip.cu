@@ -80,9 +80,9 @@ __device__ static inline void bspline_weight_and_deriv(
 // conditions.
 //
 // Determinism: one thread per cell with no inter-thread communication
-// and no atomics. All inner arithmetic is `double` precision; the
-// final value is cast to `Real` at the device-store site. Two runs on
-// the same GPU with byte-identical inputs produce byte-identical
+// and no atomics. All inner arithmetic is `Real` (f32) — the same width
+// as the stored `influence_G` / `virial_factor` buffers. Two runs on the
+// same GPU with byte-identical inputs produce byte-identical
 // `influence_G` and `virial_factor`.
 extern "C" __global__ void spme_recip_compute_influence(
     const Real *b_factors_a,           // length n_a
@@ -109,58 +109,58 @@ extern "C" __global__ void spme_recip_compute_influence(
   unsigned int kb = kab % n_b;
   unsigned int ka = kab / n_b;
 
-  // f64 internal arithmetic.
-  double lx_d = (double) lx;
-  double ly_d = (double) ly;
-  double lz_d = (double) lz;
-  double xy_d = (double) xy;
-  double xz_d = (double) xz;
-  double yz_d = (double) yz;
-  double alpha_d = (double) alpha;
-  double v_box = lx_d * ly_d * lz_d;
-  double four_alpha2 = 4.0 * alpha_d * alpha_d;
-  const double pi_d = 3.141592653589793238;
-  double four_pi = 4.0 * pi_d;
-  double two_pi = 2.0 * pi_d;
-  double prefactor = (double) k_coulomb / v_box;
+  // f32 (`Real`) internal arithmetic. `influence_G` / `virial_factor`
+  // are stored as `Real`, so f64 internals would only protect rounding
+  // that the f32 store immediately discards. On consumer GPUs f64 runs
+  // at ~1:64 of f32, so the per-step refresh (one f64 `exp` over ~10^6
+  // cells under NPT) was the SPME pipeline's dominant cost; f32 with
+  // `Real_exp` (= `expf`) is accurate to the stored width because `k2`
+  // is a sum of squares with no catastrophic cancellation for physical
+  // boxes. rq-e7b74f7a
+  Real v_box = lx * ly * lz;
+  Real four_alpha2 = R(4.0) * alpha * alpha;
+  const Real pi_r = R(3.14159265358979);
+  Real four_pi = R(4.0) * pi_r;
+  Real two_pi = R(2.0) * pi_r;
+  Real prefactor = k_coulomb / v_box;
 
-  double m_a = (ka <= n_a / 2u) ? (double) ka : (double) ka - (double) n_a;
-  double m_b = (kb <= n_b / 2u) ? (double) kb : (double) kb - (double) n_b;
-  double m_c = (kc <= n_c / 2u) ? (double) kc : (double) kc - (double) n_c;
+  Real m_a = (ka <= n_a / 2u) ? (Real) ka : (Real) ka - (Real) n_a;
+  Real m_b = (kb <= n_b / 2u) ? (Real) kb : (Real) kb - (Real) n_b;
+  Real m_c = (kc <= n_c / 2u) ? (Real) kc : (Real) kc - (Real) n_c;
 
-  // Reciprocal lattice rows of H^(-T) in f64. Matches the host-side
-  // closed form for lower-triangular H.
-  double inv_lx = 1.0 / lx_d;
-  double inv_ly = 1.0 / ly_d;
-  double inv_lz = 1.0 / lz_d;
-  double recip_a_x = inv_lx;
-  double recip_a_y = -xy_d * inv_lx * inv_ly;
-  double recip_a_z = (xy_d * yz_d - xz_d * ly_d) * inv_lx * inv_ly * inv_lz;
-  double recip_b_y = inv_ly;
-  double recip_b_z = -yz_d * inv_ly * inv_lz;
-  double recip_c_z = inv_lz;
+  // Reciprocal lattice rows of H^(-T). Matches the host-side closed form
+  // for lower-triangular H.
+  Real inv_lx = R(1.0) / lx;
+  Real inv_ly = R(1.0) / ly;
+  Real inv_lz = R(1.0) / lz;
+  Real recip_a_x = inv_lx;
+  Real recip_a_y = -xy * inv_lx * inv_ly;
+  Real recip_a_z = (xy * yz - xz * ly) * inv_lx * inv_ly * inv_lz;
+  Real recip_b_y = inv_ly;
+  Real recip_b_z = -yz * inv_ly * inv_lz;
+  Real recip_c_z = inv_lz;
 
-  double kx = two_pi * (m_a * recip_a_x);
-  double ky = two_pi * (m_a * recip_a_y + m_b * recip_b_y);
-  double kz = two_pi
-              * (m_a * recip_a_z + m_b * recip_b_z + m_c * recip_c_z);
-  double k2 = kx * kx + ky * ky + kz * kz;
+  Real kx = two_pi * (m_a * recip_a_x);
+  Real ky = two_pi * (m_a * recip_a_y + m_b * recip_b_y);
+  Real kz = two_pi
+            * (m_a * recip_a_z + m_b * recip_b_z + m_c * recip_c_z);
+  Real k2 = kx * kx + ky * ky + kz * kz;
 
   Real g_out;
   Real vf_out;
-  if (k2 == 0.0) {
+  if (k2 == R(0.0)) {
     g_out = R(0.0);
     vf_out = R(0.0);
   } else {
-    double b_a = (double) b_factors_a[ka];
-    double b_b = (double) b_factors_b[kb];
-    double b_c = (double) b_factors_c[kc];
-    double g = prefactor * (four_pi / k2)
-               * exp(-k2 / four_alpha2)
-               * b_a * b_b * b_c;
-    double virial_term = 1.0 - k2 / (2.0 * alpha_d * alpha_d);
-    g_out = (Real) g;
-    vf_out = (Real)(g * virial_term);
+    Real b_a = b_factors_a[ka];
+    Real b_b = b_factors_b[kb];
+    Real b_c = b_factors_c[kc];
+    Real g = prefactor * (four_pi / k2)
+             * Real_exp(-k2 / four_alpha2)
+             * b_a * b_b * b_c;
+    Real virial_term = R(1.0) - k2 / (R(2.0) * alpha * alpha);
+    g_out = g;
+    vf_out = g * virial_term;
   }
   influence_G[idx] = g_out;
   virial_factor[idx] = vf_out;
