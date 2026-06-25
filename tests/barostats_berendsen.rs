@@ -5,6 +5,7 @@
 // and `rescale_positions` helpers are also exercised directly, and
 // `SimulationBox::rescale_isotropic` is unit-tested host-side.
 
+use heddle_md::registry::KindedBuilder;
 use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{
     GpuContext, ParticleBuffers, compute_total_virial, init_device, rescale_positions,
@@ -141,7 +142,7 @@ fn barostat_with_builtins_exposes_berendsen() {
     let registry = BarostatRegistry::with_builtins();
     assert!(
         registry
-            .builders
+            .builders()
             .iter()
             .any(|b| b.kind_name() == "berendsen")
     );

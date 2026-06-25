@@ -467,25 +467,16 @@ second receives an empty index set and contributes no slot.
   `constraint_types[group.constraint_type_index].kind` (the
   `NamedSlotConfig`'s `kind` string), not stored on the list itself.
 
-- `ConstraintRegistry` — host-side registry of constraint builders. <!-- rq-3cca2cb1 -->
-  Holds `builders: Vec<Box<dyn ConstraintBuilder>>`.
-
-  Methods:
-
-  - `ConstraintRegistry::with_builtins() -> ConstraintRegistry` —
-    constructs a registry pre-populated with the builders for every
-    `kind` value in the table above. In v1 this is the single `shake`
-    builder.
-  - `ConstraintRegistry::register(&mut self, builder: Box<dyn ConstraintBuilder>)`
-    — appends a builder. Two builders sharing the same `kind_name()`
-    are not detected at registration; the lookup returns the first
-    match.
-  - `ConstraintRegistry::lookup(&self, kind: &str) -> Option<&dyn ConstraintBuilder>`
-    — returns the first registered builder whose `kind_name()` equals
-    `kind`. The topology parser uses this to call
-    `expected_atom_count(&params)` per constraint-type entry; the
-    runner uses it to drive `validate_params` and
-    `validate_group_shape` at config-validation time.
+- `ConstraintRegistry` — `Registry<dyn ConstraintBuilder>` (the generic <!-- rq-3cca2cb1 -->
+  container; see `registry-framework.md`). A named-selection registry
+  (each `[[constraint_types]]` entry names its `kind`), so the generic
+  `new`, `register`, `lookup(kind)`, `Clone`, and `Default` apply.
+  `with_builtins()` pre-populates the builders for every `kind` in the
+  table above; in v1 this is the single `shake` builder. The topology
+  parser uses `lookup` to call `expected_atom_count(&params)` per
+  constraint-type entry; the runner uses it to drive `validate_params`
+  and `validate_group_shape` at config-validation time. Construction
+  dispatch is subsystem-specific:
   - `ConstraintRegistry::build_optional(&self, list: &ConstraintList, gpu: &GpuContext, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`
     — when `list.is_empty()`, returns `Ok(None)`. Otherwise verifies
     that every group's algorithm has a registered builder (returns
@@ -502,10 +493,12 @@ second receives an empty index set and contributes no slot.
   construction time.
 
   ```rust
-  pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
-      /// Lookup key used by ConstraintRegistry to dispatch a
-      /// `NamedSlotConfig`'s `kind` string to this builder.
-      fn kind_name(&self) -> &'static str;
+  pub trait ConstraintBuilder:
+      KindedBuilder + ConstraintBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` (the `NamedSlotConfig` `kind` lookup key) is
+      // inherited from `KindedBuilder`; cloning from the generated `ConstraintBuilderClone` helper. See
+      // `registry-framework.md`.
 
       /// Validate the kind-specific parameters of a
       /// `[[constraint_types]]` entry at config-load time. Called by

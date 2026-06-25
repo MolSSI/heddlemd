@@ -522,11 +522,14 @@ impl Integrator for MtkNptIntegrator {
 #[derive(Debug, Clone)]
 pub struct MtkNptBuilder;
 
-impl IntegratorBuilder for MtkNptBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for MtkNptBuilder {
     fn kind_name(&self) -> &'static str {
         "mtk-npt"
-    }
+    }}
 
+impl IntegratorBuilder for MtkNptBuilder {
     fn graph_compatible(&self, _params: &toml::Value) -> bool {
         // MTK-NPT's sub-step executor mutates `self.eps` between
         // sub-steps and reads `sim_box.volume()` post-drift — both are
@@ -587,10 +590,6 @@ impl IntegratorBuilder for MtkNptBuilder {
             p.n_resp,
         )?;
         Ok(Box::new(state))
-    }
-
-    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
-        Box::new(self.clone())
     }
 }
 

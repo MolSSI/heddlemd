@@ -17,6 +17,7 @@ use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, combine_class_totals,
 };
 use crate::kernels;
+use crate::registry::{Builtins, Registry};
 use crate::io::config::{
     AngleTypeConfig, BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig,
     ParticleTypeConfig, SpmeConfig,
@@ -237,13 +238,18 @@ pub struct PotentialBuildContext<'a> {
 }
 
 // rq-e8550f96
-pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
+//
+// `PotentialBuilder` carries no `KindedBuilder` bound: potentials are
+// activated compositionally by configuration presence, not selected by
+// a `kind` key, so `PotentialRegistry` has no `lookup`. See
+// `rqm/registry-framework.md`.
+pub trait PotentialBuilder:
+    PotentialBuilderClone + std::fmt::Debug + Send + Sync
+{
     fn build(
         &self,
         cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError>;
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder>;
 
     fn displaces(&self) -> &'static [&'static str] {
         &[]
@@ -251,47 +257,22 @@ pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
 }
 
 // rq-50f0a96a
-#[derive(Debug)]
-pub struct PotentialRegistry {
-    pub builders: Vec<Box<dyn PotentialBuilder>>,
-}
+pub type PotentialRegistry = Registry<dyn PotentialBuilder>;
 
-impl Clone for PotentialRegistry {
-    fn clone(&self) -> Self {
-        PotentialRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn PotentialBuilder {
+    fn builtins() -> Vec<Box<dyn PotentialBuilder>> {
+        vec![
+            Box::new(LennardJonesBuilder),
+            Box::new(CoulombBuilder),
+            Box::new(SpmeRealBuilder),
+            Box::new(SpmeReciprocalBuilder),
+            Box::new(MorseBondedBuilder),
+            Box::new(HarmonicAngleBuilder),
+        ]
     }
 }
 
-impl PotentialRegistry {
-    pub fn new() -> Self {
-        PotentialRegistry { builders: Vec::new() }
-    }
-
-    pub fn with_builtins() -> Self {
-        PotentialRegistry {
-            builders: vec![
-                Box::new(LennardJonesBuilder),
-                Box::new(CoulombBuilder),
-                Box::new(SpmeRealBuilder),
-                Box::new(SpmeReciprocalBuilder),
-                Box::new(MorseBondedBuilder),
-                Box::new(HarmonicAngleBuilder),
-            ],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn PotentialBuilder>) {
-        self.builders.push(builder);
-    }
-}
-
-impl Default for PotentialRegistry {
-    fn default() -> Self {
-        PotentialRegistry::with_builtins()
-    }
-}
+crate::registry_builder_clone!(pub PotentialBuilderClone for PotentialBuilder);
 
 pub(crate) fn max_neighbors_from(cfg: &NeighborListConfig, particle_count: usize) -> u32 {
     // The packed-neighbour pair-force pipeline (see
@@ -427,7 +408,7 @@ impl ForceField {
         // longer produces fragments.
         type BuilderEntry = (Box<dyn Potential>, &'static [&'static str]);
         let mut built: Vec<BuilderEntry> = Vec::new();
-        for builder in &registry.builders {
+        for builder in registry.builders() {
             if let Some(slot) = builder.build(&cx)? {
                 built.push((slot, builder.displaces()));
             }

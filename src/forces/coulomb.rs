@@ -197,10 +197,6 @@ impl PotentialBuilder for CoulombBuilder {
         )?;
         Ok(Some(Box::new(state)))
     }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
 }
 
 /// Truncated Coulomb with CHARMM C¹ switching fragment for the

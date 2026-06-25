@@ -367,11 +367,6 @@ impl PotentialBuilder for StubBuilder {
             call_count: self.call_count.clone(),
         })))
     }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
-
     fn displaces(&self) -> &'static [&'static str] {
         self.displaces
     }
@@ -718,8 +713,8 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
 #[test]
 fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
     let r = PotentialRegistry::with_builtins();
-    assert_eq!(r.builders.len(), 6);
-    let names: Vec<String> = r.builders.iter().map(|b| format!("{:?}", b)).collect();
+    assert_eq!(r.builders().len(), 6);
+    let names: Vec<String> = r.builders().iter().map(|b| format!("{:?}", b)).collect();
     assert!(names[0].contains("LennardJones"), "builder 0 = {}", names[0]);
     assert!(names[1].contains("Coulomb"), "builder 1 = {}", names[1]);
     assert!(names[2].contains("SpmeReal"), "builder 2 = {}", names[2]);
@@ -732,7 +727,7 @@ fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
 #[test]
 fn registry_new_starts_empty() {
     let r = PotentialRegistry::new();
-    assert!(r.builders.is_empty());
+    assert!(r.builders().is_empty());
 }
 
 // rq-51af5f97
@@ -740,8 +735,8 @@ fn registry_new_starts_empty() {
 fn register_appends_a_builder_at_the_end() {
     let mut r = PotentialRegistry::with_builtins();
     r.register(Box::new(StubBuilder::new("custom")));
-    assert_eq!(r.builders.len(), 7);
-    let last = format!("{:?}", r.builders[6]);
+    assert_eq!(r.builders().len(), 7);
+    let last = format!("{:?}", r.builders()[6]);
     assert!(last.contains("custom"), "last builder = {}", last);
 }
 
@@ -841,10 +836,6 @@ impl PotentialBuilder for InspectBuilder {
         let _ = cx.exclusion_list;
         let _ = cx.neighbor_list_config;
         Ok(None)
-    }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
     }
 }
 
@@ -1317,9 +1308,6 @@ impl PotentialBuilder for CutoffInspectingBuilder {
             cutoff: self.cutoff,
             saw_neighbor_list: self.saw_neighbor_list.clone(),
         })))
-    }
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
     }
 }
 

@@ -26,11 +26,14 @@ struct RdfParams {
 #[derive(Debug, Clone)]
 pub struct RdfBuilder;
 
-impl AnalysisBuilder for RdfBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for RdfBuilder {
     fn kind_name(&self) -> &'static str {
         "rdf"
-    }
+    }}
 
+impl AnalysisBuilder for RdfBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), AnalyzeError> {
         let p: RdfParams = match params.clone().try_into() {
             Ok(p) => p,
@@ -164,10 +167,6 @@ impl AnalysisBuilder for RdfBuilder {
             histogram: vec![0u64; p.n_bins as usize],
             frames_consumed: 0,
         }))
-    }
-
-    fn box_clone(&self) -> Box<dyn AnalysisBuilder> {
-        Box::new(self.clone())
     }
 }
 

@@ -776,7 +776,9 @@ the additive identity. The rest of the pipeline runs normally.
   factory. Each builder is responsible for at most one slot.
 
   ```rust
-  pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
+  pub trait PotentialBuilder:
+      PotentialBuilderClone + std::fmt::Debug + Send + Sync
+  {
       fn build(
           &self,
           cx: &PotentialBuildContext<'_>,
@@ -791,7 +793,12 @@ the additive identity. The rest of the pipeline runs normally.
   A builder produces a slot from the build context; the slot itself
   declares its JIT-composed participation and carries its source
   fragment (see `Potential::jit_participant` and the capability traits
-  above). The builder has no fragment methods.
+  above). The builder has no fragment methods. `PotentialBuilder` does
+  **not** carry the `KindedBuilder` bound — potentials are activated
+  compositionally by configuration presence, not selected by a `kind`
+  key — so `PotentialRegistry` has no `lookup`. The generated
+  `PotentialBuilderClone` supertrait provides boxed-trait-object cloning;
+  a builder needs only `#[derive(Clone)]`. See `registry-framework.md`.
 
   - `build` inspects `cx` and returns `Ok(Some(slot))` if this builder's
     activation condition (see *Slots*) is satisfied, or `Ok(None)` if
@@ -818,28 +825,15 @@ the additive identity. The rest of the pipeline runs normally.
     slot continues to run; the framework does not silently fall back
     on the composite's behalf.
 
-- `PotentialRegistry` — open-extensible registry of `PotentialBuilder`s. <!-- rq-50f0a96a -->
-  The registry's iteration order is the slot evaluation order. Fields:
-
-  ```rust
-  pub struct PotentialRegistry {
-      pub builders: Vec<Box<dyn PotentialBuilder>>,
-  }
-  ```
-
-  Methods:
-  - `PotentialRegistry::new() -> Self` — constructs an empty registry.
-  - `PotentialRegistry::with_builtins() -> Self` — constructs a registry
-    pre-populated with the six built-in `PotentialBuilder`s in the
-    canonical evaluation order: `LennardJonesBuilder`, `CoulombBuilder`,
-    `SpmeRealBuilder`, `SpmeReciprocalBuilder`, `MorseBondedBuilder`,
-    `HarmonicAngleBuilder`.
-  - `register(&mut self, builder: Box<dyn PotentialBuilder>)` — appends
-    a builder to the end of the registry. `ForceField::new` calls this
-    indirectly via `heddle_md::Registries::register_potential` when the
-    caller assembles a custom bundle, or directly via
-    `PotentialRegistry::register` for one-registry-at-a-time
-    composition.
+- `PotentialRegistry` — `Registry<dyn PotentialBuilder>` (the generic <!-- rq-50f0a96a -->
+  container; see `registry-framework.md`). A compositional-activation
+  registry: it carries no keyed `lookup`, and registration order is the
+  slot evaluation order. `with_builtins()` pre-populates the six built-in
+  builders in canonical evaluation order — `LennardJonesBuilder`,
+  `CoulombBuilder`, `SpmeRealBuilder`, `SpmeReciprocalBuilder`,
+  `MorseBondedBuilder`, `HarmonicAngleBuilder`. `ForceField::new`
+  iterates `registry.builders()` and builds each against the
+  `PotentialBuildContext`, collecting every builder that activates.
 
   `PotentialRegistry` is also reachable as the `potentials` field of
   the runner-level `heddle_md::Registries` bundle (see

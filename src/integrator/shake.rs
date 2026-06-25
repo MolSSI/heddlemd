@@ -563,11 +563,14 @@ impl Constraint for ShakeConstraintsState {
 #[derive(Debug, Clone)]
 pub struct ShakeBuilder;
 
-impl ConstraintBuilder for ShakeBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for ShakeBuilder {
     fn kind_name(&self) -> &'static str {
         "shake"
-    }
+    }}
 
+impl ConstraintBuilder for ShakeBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         // Use a placeholder name; the registry-level error path
@@ -664,10 +667,6 @@ impl ConstraintBuilder for ShakeBuilder {
     ) -> Result<Box<dyn Constraint>, ConstraintError> {
         let state = ShakeConstraintsState::new(device, list, masses, constraint_types)?;
         Ok(Box::new(state))
-    }
-
-    fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
-        Box::new(self.clone())
     }
 }
 

@@ -571,8 +571,10 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
     // surface this as IncompatibleConstraint at config-load time.
     #[derive(Debug, Clone)]
     struct NoProjectionBuilder;
+        impl heddle_md::registry::KindedBuilder for NoProjectionBuilder {
+        fn kind_name(&self) -> &'static str { "fictional-cluster" }        }
+
     impl ConstraintBuilder for NoProjectionBuilder {
-        fn kind_name(&self) -> &'static str { "fictional-cluster" }
         fn validate_params(&self, _p: &toml::Value) -> Result<(), ConfigError> { Ok(()) }
         fn supports_position_projection_only(&self, _p: &toml::Value) -> bool { false }
         fn expected_atom_count(&self, _p: &toml::Value) -> usize { 1 }
@@ -594,9 +596,6 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
             _constraint_types: &[NamedSlotConfig],
         ) -> Result<Box<dyn Constraint>, ConstraintError> {
             unreachable!("rejected before construction")
-        }
-        fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
-            Box::new(self.clone())
         }
     }
 
@@ -702,8 +701,10 @@ fn custom_minimizer_builder_is_selectable() {
     }
     #[derive(Debug, Clone)]
     struct StubBuilder;
+        impl heddle_md::registry::KindedBuilder for StubBuilder {
+        fn kind_name(&self) -> &'static str { "test-stub" }        }
+
     impl MinimizerBuilder for StubBuilder {
-        fn kind_name(&self) -> &'static str { "test-stub" }
         fn validate_params(&self, _p: &toml::Value) -> Result<(), heddle_md::io::config::ConfigError> {
             Ok(())
         }
@@ -715,9 +716,6 @@ fn custom_minimizer_builder_is_selectable() {
             _params: &toml::Value,
         ) -> Result<Box<dyn Minimizer>, MinimizerError> {
             Ok(Box::new(StubMinimizer))
-        }
-        fn box_clone(&self) -> Box<dyn MinimizerBuilder> {
-            Box::new(self.clone())
         }
     }
     let mut registry = MinimizerRegistry::with_builtins();

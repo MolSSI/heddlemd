@@ -229,11 +229,14 @@ impl Barostat for BerendsenBarostat {
 #[derive(Debug, Clone)]
 pub struct BerendsenBarostatBuilder;
 
-impl BarostatBuilder for BerendsenBarostatBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for BerendsenBarostatBuilder {
     fn kind_name(&self) -> &'static str {
         "berendsen"
-    }
+    }}
 
+impl BarostatBuilder for BerendsenBarostatBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite("barostat.pressure", p.pressure)?;
@@ -260,9 +263,5 @@ impl BarostatBuilder for BerendsenBarostatBuilder {
             p.compressibility,
         )?;
         Ok(Box::new(state))
-    }
-
-    fn box_clone(&self) -> Box<dyn BarostatBuilder> {
-        Box::new(self.clone())
     }
 }

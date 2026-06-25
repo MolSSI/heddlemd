@@ -255,10 +255,6 @@ impl PotentialBuilder for MorseBondedBuilder {
         let state = MorseBondedState::new(cx.gpu, cx.bond_list, cx.bond_types)?;
         Ok(Some(Box::new(state)))
     }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
 }
 
 /// Morse per-bond force fragment for the JIT-composed bonded module.

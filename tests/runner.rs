@@ -775,22 +775,22 @@ use heddle_md::runner::run_simulation_with_registries;
 #[test]
 fn registries_new_starts_every_inner_registry_empty() {
     let registries = Registries::new();
-    assert!(registries.integrators.builders.is_empty());
-    assert!(registries.thermostats.builders.is_empty());
-    assert!(registries.barostats.builders.is_empty());
-    assert!(registries.constraint_types.builders.is_empty());
-    assert!(registries.potentials.builders.is_empty());
+    assert!(registries.integrators.builders().is_empty());
+    assert!(registries.thermostats.builders().is_empty());
+    assert!(registries.barostats.builders().is_empty());
+    assert!(registries.constraint_types.builders().is_empty());
+    assert!(registries.potentials.builders().is_empty());
 }
 
 // rq-5f8f7d00
 #[test]
 fn registries_with_builtins_populates_every_inner_registry() {
     let registries = Registries::with_builtins();
-    assert!(!registries.integrators.builders.is_empty());
-    assert!(!registries.thermostats.builders.is_empty());
-    assert!(!registries.barostats.builders.is_empty());
-    assert!(!registries.constraint_types.builders.is_empty());
-    assert!(!registries.potentials.builders.is_empty());
+    assert!(!registries.integrators.builders().is_empty());
+    assert!(!registries.thermostats.builders().is_empty());
+    assert!(!registries.barostats.builders().is_empty());
+    assert!(!registries.constraint_types.builders().is_empty());
+    assert!(!registries.potentials.builders().is_empty());
 }
 
 // rq-bbb25583
@@ -808,15 +808,12 @@ fn register_potential_appends_to_potentials() {
         ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
             Ok(None)
         }
-        fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-            Box::new(self.clone())
-        }
     }
     let mut registries = Registries::with_builtins();
-    let before = registries.potentials.builders.len();
+    let before = registries.potentials.builders().len();
     registries.register_potential(Box::new(NoopBuilder));
-    assert_eq!(registries.potentials.builders.len(), before + 1);
-    let last = &registries.potentials.builders[before];
+    assert_eq!(registries.potentials.builders().len(), before + 1);
+    let last = &registries.potentials.builders()[before];
     assert_eq!(format!("{last:?}"), "NoopBuilder");
 }
 
@@ -948,10 +945,12 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
     struct CountingStubBuilder {
         plan_calls: Arc<AtomicU64>,
     }
-    impl IntegratorBuilder for CountingStubBuilder {
+        impl heddle_md::registry::KindedBuilder for CountingStubBuilder {
         fn kind_name(&self) -> &'static str {
             "custom-stub"
-        }
+        }        }
+
+    impl IntegratorBuilder for CountingStubBuilder {
         fn validate_params(
             &self,
             _params: &toml::Value,
@@ -968,9 +967,6 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
             Ok(Box::new(CountingStubIntegrator {
                 plan_calls: self.plan_calls.clone(),
             }))
-        }
-        fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
-            Box::new(self.clone())
         }
     }
 
@@ -1164,9 +1160,6 @@ fn run_simulation_with_registries_dispatches_user_registered_potential() {
             Ok(Some(Box::new(CountingStubPotential {
                 contribute_calls: self.contribute_calls.clone(),
             })))
-        }
-        fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-            Box::new(self.clone())
         }
     }
 

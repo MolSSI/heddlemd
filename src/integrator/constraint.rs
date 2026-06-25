@@ -8,6 +8,7 @@ use crate::forces::{ConstraintList, GroupConstraint};
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::io::config::{ConfigError, NamedSlotConfig};
 use crate::pbc::SimulationBox;
+use crate::registry::{Builtins, KindedBuilder, Registry};
 use crate::timings::{Timings, TimingsError};
 use crate::precision::Real;
 
@@ -121,9 +122,9 @@ pub trait Constraint: std::fmt::Debug + Send {
 // rq-3d5f2e98 — builder trait. Concrete slots register a builder in
 // `ConstraintRegistry::with_builtins()`.
 // rq-7896e33a
-pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait ConstraintBuilder:
+    KindedBuilder + ConstraintBuilderClone + std::fmt::Debug + Send + Sync
+{
     /// Validate the kind-specific parameters of a
     /// `[[constraint_types]]` entry at config-load time. Called by
     /// `Config::validate_against(&registries)` before any GPU work.
@@ -196,50 +197,20 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
         masses: &[Real],
         constraint_types: &[NamedSlotConfig],
     ) -> Result<Box<dyn Constraint>, ConstraintError>;
-
-    fn box_clone(&self) -> Box<dyn ConstraintBuilder>;
 }
 
 // rq-3d5f2e98 rq-3cca2cb1
-#[derive(Debug)]
-pub struct ConstraintRegistry {
-    pub builders: Vec<Box<dyn ConstraintBuilder>>,
-}
+pub type ConstraintRegistry = Registry<dyn ConstraintBuilder>;
 
-impl Clone for ConstraintRegistry {
-    fn clone(&self) -> Self {
-        ConstraintRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn ConstraintBuilder {
+    fn builtins() -> Vec<Box<dyn ConstraintBuilder>> {
+        vec![Box::new(crate::integrator::shake::ShakeBuilder)]
     }
 }
 
-impl ConstraintRegistry {
-    pub fn new() -> Self {
-        ConstraintRegistry {
-            builders: Vec::new(),
-        }
-    }
+crate::registry_builder_clone!(pub ConstraintBuilderClone for ConstraintBuilder);
 
-    pub fn with_builtins() -> Self {
-        ConstraintRegistry {
-            builders: vec![Box::new(crate::integrator::shake::ShakeBuilder)],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn ConstraintBuilder>) {
-        self.builders.push(builder);
-    }
-
-    pub fn lookup(&self, kind: &str) -> Option<&dyn ConstraintBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn ConstraintBuilder> {
     // rq-b004196f
     /// Construct the constraint slot, if any, that handles every group
     /// in `list`. Returns `Ok(None)` when `list.is_empty()`. Verifies
@@ -284,7 +255,7 @@ impl ConstraintRegistry {
         // contributing builder receives a sub-list of only its own
         // groups.
         let mut slots: Vec<Box<dyn Constraint>> = Vec::new();
-        for builder in &self.builders {
+        for builder in self.builders() {
             let kind = builder.kind_name();
             let group_indices: Vec<usize> = list
                 .groups
@@ -392,11 +363,5 @@ impl Constraint for CompositeConstraint {
 
     fn group_count(&self) -> usize {
         self.slots.iter().map(|s| s.group_count()).sum()
-    }
-}
-
-impl Default for ConstraintRegistry {
-    fn default() -> Self {
-        ConstraintRegistry::with_builtins()
     }
 }

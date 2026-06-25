@@ -201,11 +201,14 @@ impl Thermostat for BerendsenThermostat {
 #[derive(Debug, Clone)]
 pub struct BerendsenBuilder;
 
-impl ThermostatBuilder for BerendsenBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for BerendsenBuilder {
     fn kind_name(&self) -> &'static str {
         "berendsen"
-    }
+    }}
 
+impl ThermostatBuilder for BerendsenBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite_positive("thermostat.temperature", p.temperature)?;
@@ -230,9 +233,5 @@ impl ThermostatBuilder for BerendsenBuilder {
             p.tau,
         )?;
         Ok(Box::new(state))
-    }
-
-    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
-        Box::new(self.clone())
     }
 }

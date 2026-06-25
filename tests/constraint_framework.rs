@@ -193,10 +193,12 @@ struct StubBuilder {
     recorder: Arc<Mutex<Recorder>>,
 }
 
-impl ConstraintBuilder for StubBuilder {
+    impl heddle_md::registry::KindedBuilder for StubBuilder {
     fn kind_name(&self) -> &'static str {
         self.kind
-    }
+    }    }
+
+impl ConstraintBuilder for StubBuilder {
     fn validate_params(&self, _params: &toml::Value) -> Result<(), ConfigError> {
         Ok(())
     }
@@ -233,10 +235,6 @@ impl ConstraintBuilder for StubBuilder {
             recorder: self.recorder.clone(),
             group_count,
         }))
-    }
-
-    fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
-        Box::new(self.clone())
     }
 }
 

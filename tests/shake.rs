@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use heddle_md::registry::KindedBuilder;
 use heddle_md::integrator::IntegratorStepExt;
 use heddle_md::forces::{ConstraintGroup, ConstraintList, GroupConstraint, PotentialRegistry};
 use heddle_md::gpu::{ParticleBuffers, init_device};

@@ -315,11 +315,14 @@ const ANDERSEN_PER_THREAD_BODY: &str = r#"
 #[derive(Debug, Clone)]
 pub struct AndersenBuilder;
 
-impl ThermostatBuilder for AndersenBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for AndersenBuilder {
     fn kind_name(&self) -> &'static str {
         "andersen"
-    }
+    }}
 
+impl ThermostatBuilder for AndersenBuilder {
     fn graph_compatible(&self, _params: &toml::Value) -> bool {
         // Andersen now does no host-side work in `apply_post` (no KE
         // dtoh; the resample is dispatched by the composed kernel).
@@ -351,10 +354,6 @@ impl ThermostatBuilder for AndersenBuilder {
             p.seed,
         )?;
         Ok(Box::new(state))
-    }
-
-    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
-        Box::new(self.clone())
     }
 }
 

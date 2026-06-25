@@ -6,6 +6,7 @@
 // `SimulationBox::rescale_isotropic` convenience are covered in
 // `tests/barostats_berendsen.rs` and not re-tested here.
 
+use heddle_md::registry::KindedBuilder;
 use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::integrator::IntegratorStepExt;
@@ -186,13 +187,13 @@ fn barostat_registry_exposes_berendsen_and_c_rescale() {
     let registry = BarostatRegistry::with_builtins();
     assert!(
         registry
-            .builders
+            .builders()
             .iter()
             .any(|b| b.kind_name() == "berendsen")
     );
     assert!(
         registry
-            .builders
+            .builders()
             .iter()
             .any(|b| b.kind_name() == "c-rescale")
     );

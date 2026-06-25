@@ -389,11 +389,14 @@ impl Thermostat for NoseHooverChainThermostat {
 #[derive(Debug, Clone)]
 pub struct NoseHooverChainBuilder;
 
-impl ThermostatBuilder for NoseHooverChainBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for NoseHooverChainBuilder {
     fn kind_name(&self) -> &'static str {
         "nose-hoover-chain"
-    }
+    }}
 
+impl ThermostatBuilder for NoseHooverChainBuilder {
     fn graph_compatible(&self, _params: &toml::Value) -> bool {
         // NHC iterates a Yoshida chain integration over `xi` / `p_xi`
         // host scalars between sub-step kernel launches and uses
@@ -449,10 +452,6 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
             p.n_resp,
         )?;
         Ok(Box::new(state))
-    }
-
-    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
-        Box::new(self.clone())
     }
 }
 

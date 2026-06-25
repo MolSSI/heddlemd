@@ -229,10 +229,6 @@ impl PotentialBuilder for LennardJonesBuilder {
         )?;
         Ok(Some(Box::new(state)))
     }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
 }
 
 /// LJ-12-6 (optionally with CHARMM C¹ switching) fragment for the

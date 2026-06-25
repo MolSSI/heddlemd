@@ -7,6 +7,7 @@
 use crate::forces::{ForceField, ForceFieldError};
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::io::config::{ConfigError, SlotConfig};
+use crate::registry::{Builtins, KindedBuilder, Registry};
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
 use crate::precision::Real;
@@ -697,9 +698,9 @@ impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
 }
 
 // rq-29e08cb5
-pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait IntegratorBuilder:
+    KindedBuilder + IntegratorBuilderClone + std::fmt::Debug + Send + Sync
+{
     /// Validate the kind-specific parameters of an `[integrator]`
     /// section at config-load time. Implementations deserialise the
     /// `toml::Value` into their typed parameter struct and surface
@@ -745,59 +746,24 @@ pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError>;
-
-    /// Return a clone of `self` boxed as a trait object. Used to
-    /// implement `Clone` for `IntegratorRegistry` (which holds
-    /// `Vec<Box<dyn IntegratorBuilder>>`).
-    fn box_clone(&self) -> Box<dyn IntegratorBuilder>;
 }
 
 // rq-4901507f
-#[derive(Debug)]
-pub struct IntegratorRegistry {
-    pub builders: Vec<Box<dyn IntegratorBuilder>>,
-}
+pub type IntegratorRegistry = Registry<dyn IntegratorBuilder>;
 
-impl Clone for IntegratorRegistry {
-    fn clone(&self) -> Self {
-        IntegratorRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn IntegratorBuilder {
+    fn builtins() -> Vec<Box<dyn IntegratorBuilder>> {
+        vec![
+            Box::new(VelocityVerletBuilder),
+            Box::new(LangevinBaoabBuilder),
+            Box::new(MtkNptBuilder),
+        ]
     }
 }
 
-impl IntegratorRegistry {
-    pub fn new() -> Self {
-        IntegratorRegistry { builders: Vec::new() }
-    }
+crate::registry_builder_clone!(pub IntegratorBuilderClone for IntegratorBuilder);
 
-    // rq-4901507f
-    pub fn with_builtins() -> Self {
-        IntegratorRegistry {
-            builders: vec![
-                Box::new(VelocityVerletBuilder),
-                Box::new(LangevinBaoabBuilder),
-                Box::new(MtkNptBuilder),
-            ],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn IntegratorBuilder>) {
-        self.builders.push(builder);
-    }
-
-    /// Return the first registered builder whose `kind_name()` equals
-    /// `kind`. The runner uses this both to query compatibility
-    /// predicates and to drive `validate_params` at config-load time.
-    pub fn lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn IntegratorBuilder> {
     // rq-24f6b8b9 rq-1e30bbf4
     pub fn build(
         &self,
@@ -810,12 +776,6 @@ impl IntegratorRegistry {
             .lookup(&slot.kind)
             .ok_or_else(|| IntegratorError::UnknownKind(slot.kind.clone()))?;
         b.build(gpu, particle_count, n_constraints, &slot.params)
-    }
-}
-
-impl Default for IntegratorRegistry {
-    fn default() -> Self {
-        IntegratorRegistry::with_builtins()
     }
 }
 
@@ -879,9 +839,9 @@ pub trait Thermostat: std::fmt::Debug + Send {
 }
 
 // rq-29e08cb5
-pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait ThermostatBuilder:
+    KindedBuilder + ThermostatBuilderClone + std::fmt::Debug + Send + Sync
+{
     /// Validate the kind-specific parameters of a `[thermostat]`
     /// section at config-load time.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
@@ -902,55 +862,25 @@ pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError>;
-
-    fn box_clone(&self) -> Box<dyn ThermostatBuilder>;
 }
 
 // rq-4901507f
-#[derive(Debug)]
-pub struct ThermostatRegistry {
-    pub builders: Vec<Box<dyn ThermostatBuilder>>,
-}
+pub type ThermostatRegistry = Registry<dyn ThermostatBuilder>;
 
-impl Clone for ThermostatRegistry {
-    fn clone(&self) -> Self {
-        ThermostatRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn ThermostatBuilder {
+    fn builtins() -> Vec<Box<dyn ThermostatBuilder>> {
+        vec![
+            Box::new(NoseHooverChainBuilder),
+            Box::new(CsvrBuilder),
+            Box::new(AndersenBuilder),
+            Box::new(BerendsenBuilder),
+        ]
     }
 }
 
-impl ThermostatRegistry {
-    pub fn new() -> Self {
-        ThermostatRegistry { builders: Vec::new() }
-    }
+crate::registry_builder_clone!(pub ThermostatBuilderClone for ThermostatBuilder);
 
-    // rq-4901507f
-    pub fn with_builtins() -> Self {
-        ThermostatRegistry {
-            builders: vec![
-                Box::new(NoseHooverChainBuilder),
-                Box::new(CsvrBuilder),
-                Box::new(AndersenBuilder),
-                Box::new(BerendsenBuilder),
-            ],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn ThermostatBuilder>) {
-        self.builders.push(builder);
-    }
-
-    // rq-c44b25af
-    pub fn lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn ThermostatBuilder> {
     // rq-678c233d
     pub fn build_optional(
         &self,
@@ -964,12 +894,6 @@ impl ThermostatRegistry {
             .lookup(&slot.kind)
             .ok_or_else(|| ThermostatError::UnknownKind(slot.kind.clone()))?;
         Ok(Some(b.build(gpu, particle_count, n_constraints, &slot.params)?))
-    }
-}
-
-impl Default for ThermostatRegistry {
-    fn default() -> Self {
-        ThermostatRegistry::with_builtins()
     }
 }
 
@@ -1024,9 +948,9 @@ pub trait Barostat: std::fmt::Debug + Send {
 }
 
 // rq-29e08cb5
-pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait BarostatBuilder:
+    KindedBuilder + BarostatBuilderClone + std::fmt::Debug + Send + Sync
+{
     /// Validate the kind-specific parameters of a `[barostat]`
     /// section at config-load time.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
@@ -1046,53 +970,23 @@ pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Barostat>, BarostatError>;
-
-    fn box_clone(&self) -> Box<dyn BarostatBuilder>;
 }
 
 // rq-4901507f
-#[derive(Debug)]
-pub struct BarostatRegistry {
-    pub builders: Vec<Box<dyn BarostatBuilder>>,
-}
+pub type BarostatRegistry = Registry<dyn BarostatBuilder>;
 
-impl Clone for BarostatRegistry {
-    fn clone(&self) -> Self {
-        BarostatRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn BarostatBuilder {
+    fn builtins() -> Vec<Box<dyn BarostatBuilder>> {
+        vec![
+            Box::new(BerendsenBarostatBuilder),
+            Box::new(CRescaleBarostatBuilder),
+        ]
     }
 }
 
-impl BarostatRegistry {
-    pub fn new() -> Self {
-        BarostatRegistry { builders: Vec::new() }
-    }
+crate::registry_builder_clone!(pub BarostatBuilderClone for BarostatBuilder);
 
-    // rq-4901507f
-    pub fn with_builtins() -> Self {
-        BarostatRegistry {
-            builders: vec![
-                Box::new(BerendsenBarostatBuilder),
-                Box::new(CRescaleBarostatBuilder),
-            ],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn BarostatBuilder>) {
-        self.builders.push(builder);
-    }
-
-    // rq-acbb6d0e
-    pub fn lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn BarostatBuilder> {
     // rq-9548bc1a
     pub fn build_optional(
         &self,
@@ -1106,12 +1000,6 @@ impl BarostatRegistry {
             .lookup(&slot.kind)
             .ok_or_else(|| BarostatError::UnknownKind(slot.kind.clone()))?;
         Ok(Some(b.build(gpu, particle_count, n_constraints, &slot.params)?))
-    }
-}
-
-impl Default for BarostatRegistry {
-    fn default() -> Self {
-        BarostatRegistry::with_builtins()
     }
 }
 

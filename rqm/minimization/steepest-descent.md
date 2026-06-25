@@ -560,18 +560,14 @@ produce byte-identical post-minimization positions and byte-identical
 - `MinimizerRegistry` — host-side registry of minimizer builders. <!-- rq-d5b07d2a -->
   Holds `builders: Vec<Box<dyn MinimizerBuilder>>`.
 
-  Methods:
+  `MinimizerRegistry` is `Registry<dyn MinimizerBuilder>` (the generic
+  container; see `registry-framework.md`). A named-selection registry,
+  so the generic `new`, `register`, `lookup(kind)`, `Clone`, and
+  `Default` apply. `with_builtins()` pre-populates the
+  `steepest-descent` builder. Construction dispatch is
+  subsystem-specific:
 
-  - `MinimizerRegistry::with_builtins() -> MinimizerRegistry` —
-    constructs a registry pre-populated with the `steepest-descent`
-    builder.
-  - `MinimizerRegistry::register(&mut self, builder: Box<dyn MinimizerBuilder>)`
-    — appends a builder. Duplicate `kind_name()` is not detected at
-    registration; the lookup returns the first match.
-  - `MinimizerRegistry::lookup(&self, kind: &str) -> Option<&dyn MinimizerBuilder>`
-    — returns the first registered builder whose `kind_name()`
-    equals `kind`.
-  - `MinimizerRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Minimizer>, MinimizerError>`
+  - `Registry<dyn MinimizerBuilder>::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Minimizer>, MinimizerError>`
     — looks up the builder whose `kind_name()` equals `slot.kind` and
     delegates `build(gpu, particle_count, n_constraints,
     &slot.params)`. Returns
@@ -588,9 +584,11 @@ produce byte-identical post-minimization positions and byte-identical
   construction time.
 
   ```rust
-  pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
-      fn kind_name(&self) -> &'static str;
-
+  pub trait MinimizerBuilder:
+      KindedBuilder + MinimizerBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` from `KindedBuilder`; cloning from the generated `MinimizerBuilderClone` helper.
+      // See `registry-framework.md`.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
 

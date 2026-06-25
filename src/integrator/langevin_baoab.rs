@@ -187,11 +187,14 @@ impl Integrator for LangevinBaoabState {
 #[derive(Debug, Clone)]
 pub struct LangevinBaoabBuilder;
 
-impl IntegratorBuilder for LangevinBaoabBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for LangevinBaoabBuilder {
     fn kind_name(&self) -> &'static str {
         "langevin-baoab"
-    }
+    }}
 
+impl IntegratorBuilder for LangevinBaoabBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite_positive("integrator.friction", p.friction)?;
@@ -224,10 +227,6 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
             draw_counter: 0,
             draw_counter_device,
         }))
-    }
-
-    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
-        Box::new(self.clone())
     }
 }
 

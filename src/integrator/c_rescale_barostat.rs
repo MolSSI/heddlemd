@@ -306,11 +306,14 @@ impl Barostat for CRescaleBarostat {
 #[derive(Debug, Clone)]
 pub struct CRescaleBarostatBuilder;
 
-impl BarostatBuilder for CRescaleBarostatBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for CRescaleBarostatBuilder {
     fn kind_name(&self) -> &'static str {
         "c-rescale"
-    }
+    }}
 
+impl BarostatBuilder for CRescaleBarostatBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite("barostat.pressure", p.pressure)?;
@@ -340,9 +343,5 @@ impl BarostatBuilder for CRescaleBarostatBuilder {
             p.seed,
         )?;
         Ok(Box::new(state))
-    }
-
-    fn box_clone(&self) -> Box<dyn BarostatBuilder> {
-        Box::new(self.clone())
     }
 }

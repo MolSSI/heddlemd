@@ -240,11 +240,14 @@ impl ConstraintCapableIntegrator for VelocityVerletState {
 #[derive(Debug, Clone)]
 pub struct VelocityVerletBuilder;
 
-impl IntegratorBuilder for VelocityVerletBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for VelocityVerletBuilder {
     fn kind_name(&self) -> &'static str {
         "velocity-verlet"
-    }
+    }}
 
+impl IntegratorBuilder for VelocityVerletBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         #[cfg(feature = "f64")]
@@ -286,10 +289,6 @@ impl IntegratorBuilder for VelocityVerletBuilder {
             let _ = (gpu, particle_count, params);
             return Ok(Box::new(VelocityVerletState {}));
         }
-    }
-
-    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
-        Box::new(self.clone())
     }
 }
 

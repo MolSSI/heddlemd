@@ -252,10 +252,6 @@ impl PotentialBuilder for HarmonicAngleBuilder {
         let state = HarmonicAngleState::new(cx.gpu, cx.angle_list, cx.angle_types)?;
         Ok(Some(Box::new(state)))
     }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
 }
 
 /// Harmonic angle force fragment for the JIT-composed angle module.

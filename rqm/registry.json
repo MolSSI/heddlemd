@@ -673,6 +673,13 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-0541ebd8": {
+    "decl": "Scenario: lookup returns None for an unknown kind",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "lookup returns None for an unknown kind",
+    "type": "scenario"
+  },
   "rq-05691d2f": {
     "decl": "Scenario: init_device succeeds on a machine with a CUDA GPU",
     "file": "build-pipeline",
@@ -1806,6 +1813,18 @@
     "title": "Thermostat slot",
     "type": "section"
   },
+  "rq-0f6b7b7a": {
+    "decl": "- `KindedBuilder` — the keyed-lookup capability a named-selection builder",
+    "file": "registry-framework",
+    "refs": [
+      {
+        "file": "src/registry.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "KindedBuilder",
+    "type": "api-item"
+  },
   "rq-0f761603": {
     "decl": "Scenario: SPME-real JIT fragment uses the composer-supplied inv_r and r",
     "file": "forces/spme",
@@ -2297,6 +2316,13 @@
     "title": "Single-scale form sets both LJ and Coulomb scales equally",
     "type": "scenario"
   },
+  "rq-12341b3f": {
+    "decl": "Scenario: PotentialBuilder is not a KindedBuilder",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "PotentialBuilder is not a KindedBuilder",
+    "type": "scenario"
+  },
   "rq-1254cd3a": {
     "decl": "- `OutputConfig`",
     "file": "io/config-schema",
@@ -2764,6 +2790,13 @@
     "title": "Triclinic shape is preserved under apply",
     "type": "scenario"
   },
+  "rq-1634cab7": {
+    "decl": "Scenario: Cloning a registry deep-copies its builders",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "Cloning a registry deep-copies its builders",
+    "type": "scenario"
+  },
   "rq-1658f77d": {
     "decl": "## File Format",
     "file": "io/trajectory-output",
@@ -3088,6 +3121,13 @@
       }
     ],
     "title": "trajectory_every > n_steps writes only the step-0 frame",
+    "type": "scenario"
+  },
+  "rq-19128587": {
+    "decl": "Scenario: lookup returns the builder whose kind_name matches",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "lookup returns the builder whose kind_name matches",
     "type": "scenario"
   },
   "rq-191d86df": {
@@ -3977,6 +4017,13 @@
     "title": "PairForceFragment",
     "type": "api-item"
   },
+  "rq-1ff7fac0": {
+    "decl": "Scenario: A derive-Clone builder needs no explicit clone method",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "A derive-Clone builder needs no explicit clone method",
+    "type": "scenario"
+  },
   "rq-202493a5": {
     "decl": "# Feature: Smooth Particle-Mesh Ewald (SPME)",
     "file": "forces/spme",
@@ -4293,6 +4340,14 @@
     ],
     "title": "Missing [simulation].dt",
     "type": "scenario"
+  },
+  "rq-223901a4": {
+    "decl": "## Concrete Registries",
+    "file": "registry-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Concrete Registries",
+    "type": "section"
   },
   "rq-2249f685": {
     "decl": "### Sampling order",
@@ -4614,6 +4669,21 @@
     ],
     "title": "IntegratorRegistry",
     "type": "api-item"
+  },
+  "rq-24fb4604": {
+    "decl": "### Behaviours",
+    "file": "registry-framework",
+    "level": 3,
+    "refs": [],
+    "title": "Behaviours",
+    "type": "section"
+  },
+  "rq-250be957": {
+    "decl": "# Feature: Registry Framework",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "Feature: Registry Framework",
+    "type": "file"
   },
   "rq-25185894": {
     "decl": "### Output format",
@@ -5730,6 +5800,13 @@
     "refs": [],
     "title": "ForceField",
     "type": "api-item"
+  },
+  "rq-2e62134d": {
+    "decl": "Scenario: A built-in is not overridden by a later same-kind registration",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "A built-in is not overridden by a later same-kind registration",
+    "type": "scenario"
   },
   "rq-2e98a75d": {
     "decl": "# ignored.",
@@ -7189,7 +7266,7 @@
     "type": "section"
   },
   "rq-3cca2cb1": {
-    "decl": "- `ConstraintRegistry` — host-side registry of constraint builders.",
+    "decl": "- `ConstraintRegistry` — `Registry<dyn ConstraintBuilder>` (the generic",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -7710,7 +7787,12 @@
   "rq-4187d20f": {
     "decl": "- `PostForcePerParticle` — capability trait carrying both an <!-- inline -->",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PostForcePerParticle",
     "type": "api-item"
   },
@@ -9057,7 +9139,7 @@
     "type": "scenario"
   },
   "rq-50f0a96a": {
-    "decl": "- `PotentialRegistry` — open-extensible registry of `PotentialBuilder`s.",
+    "decl": "- `PotentialRegistry` — `Registry<dyn PotentialBuilder>` (the generic",
     "file": "forces/framework",
     "refs": [
       {
@@ -9471,6 +9553,19 @@
     "title": "RNG",
     "type": "section"
   },
+  "rq-54fc86d6": {
+    "decl": "## Feature API",
+    "file": "registry-framework",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/registry.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-550aebeb": {
     "decl": "### Extra columns",
     "file": "io/log-output",
@@ -9554,6 +9649,14 @@
     "refs": [],
     "title": "Reduction summation order is sorted bond index",
     "type": "scenario"
+  },
+  "rq-55fd6f39": {
+    "decl": "## Built-in Rosters",
+    "file": "registry-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Built-in Rosters",
+    "type": "section"
   },
   "rq-56043142": {
     "decl": "Scenario: Repeated kernel_start/kernel_stop pairs accumulate",
@@ -10903,6 +11006,14 @@
     ],
     "title": "Construct a ForceField with zero slots",
     "type": "scenario"
+  },
+  "rq-6107e6c9": {
+    "decl": "## Gherkin Scenarios",
+    "file": "registry-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-6112a43b": {
     "decl": "## Determinism",
@@ -14907,7 +15018,12 @@
   "rq-8571bd3e": {
     "decl": "- `JitParticipant<'a>` — single-shape tag a slot returns from",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "JitParticipant",
     "type": "api-item"
   },
@@ -15118,6 +15234,14 @@
     "title": "step_class(Slow) does not launch the composed kernel",
     "type": "scenario"
   },
+  "rq-87d01d67": {
+    "decl": "## Builder Trait Layering",
+    "file": "registry-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Builder Trait Layering",
+    "type": "section"
+  },
   "rq-880349c0": {
     "decl": "Scenario: Accept any sign of pressure",
     "file": "integration/mtk-npt",
@@ -15186,6 +15310,13 @@
     ],
     "title": "neighbor_displacement_check_flag",
     "type": "api-item"
+  },
+  "rq-888ed181": {
+    "decl": "Scenario: Every potential builder is consulted for activation",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "Every potential builder is consulted for activation",
+    "type": "scenario"
   },
   "rq-889076d5": {
     "decl": "Scenario: Kernel failure mid-loop returns exit code 2",
@@ -16198,6 +16329,13 @@
     "refs": [],
     "title": "CUDA events",
     "type": "section"
+  },
+  "rq-91e03d20": {
+    "decl": "Scenario: with_builtins populates the canonical roster",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "with_builtins populates the canonical roster",
+    "type": "scenario"
   },
   "rq-91f5f34e": {
     "decl": "Scenario: Config rejected by the filename convention",
@@ -17991,6 +18129,13 @@
     "title": "Builder",
     "type": "section"
   },
+  "rq-a0de1254": {
+    "decl": "Scenario: A new registry is empty",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "A new registry is empty",
+    "type": "scenario"
+  },
   "rq-a109cbb7": {
     "decl": "Scenario: VelocityVerletState with lossless=false accepts constraint hooks at runtime",
     "file": "integration/constraint-framework",
@@ -19213,12 +19358,7 @@
   "rq-acbb6d0e": {
     "decl": "- `BarostatRegistry::lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder>`",
     "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator/mod.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "BarostatRegistry",
     "type": "api-item"
   },
@@ -19455,6 +19595,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Reject grid dimension below 2*spline_order",
+    "type": "scenario"
+  },
+  "rq-aed77b12": {
+    "decl": "Scenario: PotentialRegistry has no keyed lookup",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "PotentialRegistry has no keyed lookup",
     "type": "scenario"
   },
   "rq-aeee8e44": {
@@ -20055,6 +20202,13 @@
     "title": "Composed kernel is compiled when an integrator is active",
     "type": "scenario"
   },
+  "rq-b3e0f901": {
+    "decl": "- `register` never deduplicates: two builders of the same kind may both be",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "register",
+    "type": "api-item"
+  },
   "rq-b3f2381a": {
     "decl": "Scenario: B-spline correction factors are finite for odd spline orders",
     "file": "forces/spme",
@@ -20426,6 +20580,18 @@
     "refs": [],
     "title": "PotentialBuildContext exposes every parsed-config input by reference",
     "type": "scenario"
+  },
+  "rq-b775df32": {
+    "decl": "- `registry_builder_clone!($vis $helper for $trait)` — macro that makes",
+    "file": "registry-framework",
+    "refs": [
+      {
+        "file": "src/registry.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "registry_builder_clone",
+    "type": "api-item"
   },
   "rq-b77f10a0": {
     "decl": "- `BondedForceFragment` — self-contained CUDA C++ source fragment",
@@ -21233,6 +21399,18 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-c00689e6": {
+    "decl": "- `Builtins` — the per-trait built-in roster.",
+    "file": "registry-framework",
+    "refs": [
+      {
+        "file": "src/registry.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Builtins",
+    "type": "api-item"
+  },
   "rq-c011e5e2": {
     "decl": "### Error variants",
     "file": "forces/jit-composed-pair-force",
@@ -21298,6 +21476,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
+    "type": "scenario"
+  },
+  "rq-c0e4b4d6": {
+    "decl": "Scenario: Default equals with_builtins for a Builtins registry",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "Default equals with_builtins for a Builtins registry",
     "type": "scenario"
   },
   "rq-c0f2daca": {
@@ -21539,6 +21724,14 @@
     "title": "__device__",
     "type": "api-item"
   },
+  "rq-c4300389": {
+    "decl": "## Out of Scope",
+    "file": "registry-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-c43dd1ab": {
     "decl": "Scenario: Displacement-check kernel sets the flag when any particle exceeds threshold",
     "file": "forces/neighbor-list",
@@ -21554,12 +21747,7 @@
   "rq-c44b25af": {
     "decl": "- `ThermostatRegistry::lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder>`",
     "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator/mod.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "ThermostatRegistry",
     "type": "api-item"
   },
@@ -22406,6 +22594,13 @@
     "refs": [],
     "title": "Launch Configuration",
     "type": "section"
+  },
+  "rq-cb2f6a59": {
+    "decl": "- `lookup` matches on `kind_name()` equality and returns the **first** match",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "lookup",
+    "type": "api-item"
   },
   "rq-cb31286f": {
     "decl": "- `Barostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline -->",
@@ -23456,6 +23651,13 @@
     "title": "Reject non-positive tau",
     "type": "scenario"
   },
+  "rq-d5450728": {
+    "decl": "Scenario: lookup returns the first builder of a duplicated kind",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "lookup returns the first builder of a duplicated kind",
+    "type": "scenario"
+  },
   "rq-d572a90a": {
     "decl": "Scenario: MtkNpt missing tau_p is rejected",
     "file": "io/config-schema",
@@ -23708,7 +23910,12 @@
   "rq-d7ddc1ac": {
     "decl": "- `BondedPotential` — capability trait a bonded slot implements,",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "BondedPotential",
     "type": "api-item"
   },
@@ -23849,6 +24056,14 @@
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
   },
+  "rq-d9344e8e": {
+    "decl": "### Types",
+    "file": "registry-framework",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-d93afc32": {
     "decl": "Scenario: First slot in class adds into a zeroed accumulator, subsequent slots add on top",
     "file": "forces/framework",
@@ -23944,7 +24159,12 @@
   "rq-da327920": {
     "decl": "- `AnglePotential` — capability trait an angle slot implements,",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnglePotential",
     "type": "api-item"
   },
@@ -24403,6 +24623,13 @@
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
+  "rq-dd965dfc": {
+    "decl": "Scenario: register appends a builder in registration order",
+    "file": "registry-framework",
+    "refs": [],
+    "title": "register appends a builder in registration order",
+    "type": "scenario"
+  },
   "rq-dd995812": {
     "decl": "Scenario: Composed kernel is compiled at ForceField::new when at least one fast-class pair-force slot is present",
     "file": "forces/jit-composed-pair-force",
@@ -24735,6 +24962,18 @@
     "file": "forces/spme",
     "refs": [],
     "title": "spme_recip_reduce_partials",
+    "type": "api-item"
+  },
+  "rq-e0ea3802": {
+    "decl": "- `Registry<B: ?Sized>` — generic host-side container of boxed builders.",
+    "file": "registry-framework",
+    "refs": [
+      {
+        "file": "src/registry.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Registry",
     "type": "api-item"
   },
   "rq-e0ef1221": {
@@ -25077,7 +25316,7 @@
     "type": "scenario"
   },
   "rq-e3ba8c3b": {
-    "decl": "- `AnalysisRegistry` — open-builder registry, mirrors",
+    "decl": "- `AnalysisRegistry` — `Registry<dyn AnalysisBuilder>` (the generic",
     "file": "analysis/framework",
     "refs": [
       {
@@ -25241,7 +25480,12 @@
   "rq-e533174d": {
     "decl": "- `PairForcePotential` — capability trait a pair-force slot implements",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PairForcePotential",
     "type": "api-item"
   },

@@ -311,11 +311,14 @@ impl Minimizer for SteepestDescentMinimizer {
 #[derive(Debug, Clone)]
 pub struct SteepestDescentBuilder;
 
-impl MinimizerBuilder for SteepestDescentBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for SteepestDescentBuilder {
     fn kind_name(&self) -> &'static str {
         "steepest-descent"
-    }
+    }}
 
+impl MinimizerBuilder for SteepestDescentBuilder {
     // rq-e2bb500b — schema cross-validation: domain checks on every algorithm field.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
@@ -395,10 +398,6 @@ impl MinimizerBuilder for SteepestDescentBuilder {
         })?;
         let m = SteepestDescentMinimizer::new(gpu, particle_count, &p)?;
         Ok(Box::new(m))
-    }
-
-    fn box_clone(&self) -> Box<dyn MinimizerBuilder> {
-        Box::new(self.clone())
     }
 }
 

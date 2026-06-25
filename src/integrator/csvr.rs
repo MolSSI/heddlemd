@@ -276,11 +276,14 @@ impl Thermostat for CsvrThermostat {
 #[derive(Debug, Clone)]
 pub struct CsvrBuilder;
 
-impl ThermostatBuilder for CsvrBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for CsvrBuilder {
     fn kind_name(&self) -> &'static str {
         "csvr"
-    }
+    }}
 
+impl ThermostatBuilder for CsvrBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite_positive("thermostat.temperature", p.temperature)?;
@@ -300,9 +303,5 @@ impl ThermostatBuilder for CsvrBuilder {
         let state =
             CsvrThermostat::new(gpu, particle_count, n_constraints, p.temperature, p.tau, p.seed)?;
         Ok(Box::new(state))
-    }
-
-    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
-        Box::new(self.clone())
     }
 }

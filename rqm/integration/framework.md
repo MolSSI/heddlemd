@@ -584,10 +584,12 @@ successfully.
   trait object on demand.
 
   ```rust
-  pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
-      /// Lookup key used by `IntegratorRegistry` to dispatch a parsed
-      /// `SlotConfig` to this builder. Matches the TOML `kind` field.
-      fn kind_name(&self) -> &'static str;
+  pub trait IntegratorBuilder:
+      KindedBuilder + IntegratorBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` (the TOML `kind` lookup key) is inherited from
+      // `KindedBuilder`; cloning from the generated `…BuilderClone` helper. See
+      // `registry-framework.md`.
 
       /// Validate the kind-specific parameters at config-load time,
       /// before any GPU setup runs. Implementations deserialise the
@@ -643,8 +645,10 @@ successfully.
       ) -> Result<Box<dyn Integrator>, IntegratorError>;
   }
 
-  pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
-      fn kind_name(&self) -> &'static str;
+  pub trait ThermostatBuilder:
+      KindedBuilder + ThermostatBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` from `KindedBuilder`; cloning from the generated `…BuilderClone` helper.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
 
@@ -667,8 +671,10 @@ successfully.
       ) -> Result<Box<dyn Thermostat>, ThermostatError>;
   }
 
-  pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
-      fn kind_name(&self) -> &'static str;
+  pub trait BarostatBuilder:
+      KindedBuilder + BarostatBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` from `KindedBuilder`; cloning from the generated `…BuilderClone` helper.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
 
@@ -707,36 +713,25 @@ successfully.
     below) chain the two calls.
 
 - `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` — <!-- rq-4901507f -->
-  parallel host-side registries of builders. Each holds:
-  - `builders: Vec<Box<dyn *Builder>>`
+  `Registry<dyn IntegratorBuilder>` / `Registry<dyn ThermostatBuilder>` /
+  `Registry<dyn BarostatBuilder>` (the generic container; see
+  `registry-framework.md`). All three are named-selection registries:
+  their builder traits carry `KindedBuilder`, so the generic `lookup(kind)`,
+  `with_builtins()`, `register`, `Clone`, and `Default` apply. Per-registry
+  built-in rosters: the integrator registry carries a builder for every
+  `kind` in the slot's "Slots" table; the thermostat registry carries
+  `nose-hoover-chain`, `csvr`, `andersen`, `berendsen`; the barostat
+  registry carries `berendsen` and `c-rescale`.
 
-  Methods (illustrated for the integrator registry; the thermostat
-  and barostat registries follow the same shape with the
-  corresponding types):
-
-  - `IntegratorRegistry::with_builtins() -> IntegratorRegistry` —
-    constructs a registry pre-populated with builders for every
-    `kind` value in the slot's "Slots" table above.
-    `ThermostatRegistry::with_builtins()` pre-populates
-    `nose-hoover-chain`, `csvr`, `andersen`, `berendsen`.
-    `BarostatRegistry::with_builtins()` pre-populates `berendsen`
-    and `c-rescale`.
-  - `IntegratorRegistry::register(&mut self, builder: Box<dyn
-    IntegratorBuilder>)` — appends a builder. Two builders sharing
-    the same `kind_name()` are not detected at registration; the
-    lookup returns the first match.
-  - `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>`
-    — returns the first registered builder whose `kind_name()`
-    equals `kind`, or `None` when no builder matches. The runner
-    uses this both to query compatibility predicates
-    (`owns_thermostat`, `supports_constraints`) and to drive
-    `validate_params` against the parsed config before any GPU
-    work runs.
-  - `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
-    — looks up the builder whose `kind_name()` equals `slot.kind`
-    and delegates `build(gpu, particle_count, n_constraints, &slot.params)` to it.
-    Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
-    no builder matches.
+  Construction dispatch is subsystem-specific (the build inputs are
+  integrator-side):
+  - `Registry<dyn IntegratorBuilder>::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
+    — looks up the builder whose `kind_name()` equals `slot.kind` and
+    delegates `build(gpu, particle_count, n_constraints, &slot.params)`
+    to it. Returns `IntegratorError::UnknownKind(slot.kind.clone())`
+    when no builder matches. The runner also uses `lookup` directly to
+    query compatibility predicates (`owns_thermostat`,
+    `supports_constraints`) and to drive `validate_params`.
   - The thermostat and barostat registries expose
     `build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`
     (and the corresponding barostat variant): if `slot` is `None`,

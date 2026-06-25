@@ -10,6 +10,7 @@ use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::integrator::{Constraint, ConstraintError};
 use crate::io::config::{ConfigError, SlotConfig};
+use crate::registry::{Builtins, KindedBuilder, Registry};
 use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
@@ -133,9 +134,9 @@ pub trait Minimizer: std::fmt::Debug + Send {
 }
 
 // rq-dddb8e7a
-pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait MinimizerBuilder:
+    KindedBuilder + MinimizerBuilderClone + std::fmt::Debug + Send + Sync
+{
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
 
     /// `true` iff this minimizer can drive a constraint slot's
@@ -152,51 +153,21 @@ pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Minimizer>, MinimizerError>;
-
-    fn box_clone(&self) -> Box<dyn MinimizerBuilder>;
 }
 
 // rq-d5b07d2a
-#[derive(Debug)]
-pub struct MinimizerRegistry {
-    pub builders: Vec<Box<dyn MinimizerBuilder>>,
-}
+pub type MinimizerRegistry = Registry<dyn MinimizerBuilder>;
 
-impl Clone for MinimizerRegistry {
-    fn clone(&self) -> Self {
-        MinimizerRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+// rq-237b5543
+impl Builtins for dyn MinimizerBuilder {
+    fn builtins() -> Vec<Box<dyn MinimizerBuilder>> {
+        vec![Box::new(SteepestDescentBuilder)]
     }
 }
 
-impl MinimizerRegistry {
-    pub fn new() -> Self {
-        MinimizerRegistry {
-            builders: Vec::new(),
-        }
-    }
+crate::registry_builder_clone!(pub MinimizerBuilderClone for MinimizerBuilder);
 
-    // rq-237b5543
-    pub fn with_builtins() -> Self {
-        MinimizerRegistry {
-            builders: vec![Box::new(SteepestDescentBuilder)],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn MinimizerBuilder>) {
-        self.builders.push(builder);
-    }
-
-    pub fn lookup(&self, kind: &str) -> Option<&dyn MinimizerBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn MinimizerBuilder> {
     pub fn build(
         &self,
         slot: &SlotConfig,
@@ -208,12 +179,6 @@ impl MinimizerRegistry {
             .lookup(&slot.kind)
             .ok_or_else(|| MinimizerError::UnknownKind(slot.kind.clone()))?;
         b.build(gpu, particle_count, n_constraints, &slot.params)
-    }
-}
-
-impl Default for MinimizerRegistry {
-    fn default() -> Self {
-        MinimizerRegistry::with_builtins()
     }
 }
 

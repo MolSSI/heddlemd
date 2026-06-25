@@ -18,6 +18,7 @@ use crate::io::{
     TrajectoryFrame, TrajectoryFrameHeader, TrajectoryReader, TrajectoryReaderError,
 };
 use crate::pbc::SimulationBox;
+use crate::registry::{Builtins, KindedBuilder, Registry};
 
 pub use rdf::RdfBuilder;
 
@@ -143,9 +144,9 @@ pub struct AnalyzeSummary {
 // =====================================================================
 
 // rq-86f01d20
-pub trait AnalysisBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait AnalysisBuilder:
+    KindedBuilder + AnalysisBuilderClone + std::fmt::Debug + Send + Sync
+{
     fn validate_params(&self, params: &toml::Value) -> Result<(), AnalyzeError>;
 
     fn build(
@@ -154,8 +155,6 @@ pub trait AnalysisBuilder: std::fmt::Debug + Send + Sync {
         header: &TrajectoryFrameHeader,
         sim_config: &Config,
     ) -> Result<Box<dyn Analysis>, AnalysisRuntimeError>;
-
-    fn box_clone(&self) -> Box<dyn AnalysisBuilder>;
 }
 
 // rq-8464775b
@@ -174,47 +173,15 @@ pub trait Analysis: Send {
 }
 
 // rq-e3ba8c3b
-#[derive(Debug)]
-pub struct AnalysisRegistry {
-    pub builders: Vec<Box<dyn AnalysisBuilder>>,
-}
+pub type AnalysisRegistry = Registry<dyn AnalysisBuilder>;
 
-impl Clone for AnalysisRegistry {
-    fn clone(&self) -> Self {
-        AnalysisRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn AnalysisBuilder {
+    fn builtins() -> Vec<Box<dyn AnalysisBuilder>> {
+        vec![Box::new(RdfBuilder)]
     }
 }
 
-impl AnalysisRegistry {
-    pub fn new() -> Self {
-        AnalysisRegistry { builders: Vec::new() }
-    }
-
-    pub fn with_builtins() -> Self {
-        AnalysisRegistry {
-            builders: vec![Box::new(RdfBuilder)],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn AnalysisBuilder>) {
-        self.builders.push(builder);
-    }
-
-    pub fn lookup(&self, kind: &str) -> Option<&dyn AnalysisBuilder> {
-        self.builders
-            .iter()
-            .find(|b| b.kind_name() == kind)
-            .map(|b| b.as_ref())
-    }
-}
-
-impl Default for AnalysisRegistry {
-    fn default() -> Self {
-        AnalysisRegistry::with_builtins()
-    }
-}
+crate::registry_builder_clone!(pub AnalysisBuilderClone for AnalysisBuilder);
 
 // =====================================================================
 // Raw deserialisation types.

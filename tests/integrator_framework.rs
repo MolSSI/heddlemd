@@ -1,4 +1,5 @@
 use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::registry::KindedBuilder;
 use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::integrator::{
@@ -136,13 +137,15 @@ struct StubBuilder;
 #[derive(Debug)]
 struct StubIntegrator;
 
-impl IntegratorBuilder for StubBuilder {
+    impl heddle_md::registry::KindedBuilder for StubBuilder {
     fn kind_name(&self) -> &'static str {
         // Use "velocity-verlet" so a real IntegratorKind can route to us; the
         // built-in builder is added later and therefore shadowed by the stub
         // when the stub is first in the builders Vec.
         "velocity-verlet"
-    }
+    }    }
+
+impl IntegratorBuilder for StubBuilder {
     fn validate_params(&self, _params: &toml::Value) -> Result<(), heddle_md::io::ConfigError> {
         Ok(())
     }
@@ -154,9 +157,6 @@ impl IntegratorBuilder for StubBuilder {
         _params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         Ok(Box::new(StubIntegrator))
-    }
-    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
-        Box::new(self.clone())
     }
 }
 
@@ -517,7 +517,7 @@ fn barostat_with_builtins_contains_berendsen() {
     let registry = BarostatRegistry::with_builtins();
     assert!(
         registry
-            .builders
+            .builders()
             .iter()
             .any(|b| b.kind_name() == "berendsen")
     );
