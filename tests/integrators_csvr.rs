@@ -237,6 +237,8 @@ fn csvr_apply_post_launches_expected_kernels() {
             .unwrap_or(0)
     };
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
+    // The stochastic sample + factor kernel is now instrumented. rq-5f59fa80
+    assert_eq!(count_for(KernelStage::CSVR_SAMPLE_AND_FACTOR), 1);
     // The per-particle velocity rescale is dispatched by the
     // JIT-composed post-force per-particle kernel; the standalone
     // `CSVR_RESCALE_VELOCITIES` stage is not recorded.

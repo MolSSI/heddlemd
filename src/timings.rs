@@ -70,6 +70,18 @@ impl KernelStage {
         KernelStage::new("andersen_resample");
     pub const BERENDSEN_RESCALE_VELOCITIES: KernelStage =
         KernelStage::new("berendsen_rescale_velocities");
+    // Thermostat/barostat scalar-prep stages. These wrap the device
+    // scalar kernels that each slot's `apply_*` launches (the per-particle
+    // rescale is folded into the JIT-composed post-force kernel and timed
+    // separately). rq-5f59fa80
+    pub const CSVR_SAMPLE_AND_FACTOR: KernelStage =
+        KernelStage::new("csvr_sample_and_factor");
+    pub const BERENDSEN_COMPUTE_FACTOR: KernelStage =
+        KernelStage::new("berendsen_compute_factor");
+    pub const C_RESCALE_COMPUTE_MU: KernelStage =
+        KernelStage::new("c_rescale_compute_mu_and_rescale_lattice");
+    pub const BERENDSEN_BAROSTAT_COMPUTE_MU: KernelStage =
+        KernelStage::new("berendsen_compute_mu_and_rescale_lattice");
     // rq-0d8c8688
     pub const VIRIAL_SUM_REDUCE: KernelStage =
         KernelStage::new("virial_sum_reduce");
@@ -140,6 +152,10 @@ impl KernelStage {
         Self::CSVR_RESCALE_VELOCITIES,
         Self::ANDERSEN_RESAMPLE,
         Self::BERENDSEN_RESCALE_VELOCITIES,
+        Self::CSVR_SAMPLE_AND_FACTOR,
+        Self::BERENDSEN_COMPUTE_FACTOR,
+        Self::C_RESCALE_COMPUTE_MU,
+        Self::BERENDSEN_BAROSTAT_COMPUTE_MU,
         Self::VIRIAL_SUM_REDUCE,
         Self::POTENTIAL_ENERGY_REDUCE,
         Self::BERENDSEN_BAROSTAT_RESCALE_POSITIONS,

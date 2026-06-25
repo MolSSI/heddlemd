@@ -10625,6 +10625,22 @@
         "kind": "code"
       },
       {
+        "file": "src/timings.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/barostats_berendsen.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/barostats_c_rescale.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/integrators_berendsen.rs",
+        "kind": "code"
+      },
+      {
         "file": "tests/integrators_csvr.rs",
         "kind": "code"
       }

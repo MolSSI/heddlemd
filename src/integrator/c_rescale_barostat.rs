@@ -198,6 +198,7 @@ impl Barostat for CRescaleBarostat {
         //    captured by a CUDA graph.
         let kt = self.temperature;
         let dt_f64 = dt as f64;
+        timings.kernel_start(KernelStage::C_RESCALE_COMPUTE_MU)?;
         c_rescale_compute_mu(
             buffers,
             &self.ke_scratch,
@@ -214,6 +215,7 @@ impl Barostat for CRescaleBarostat {
             dt_f64,
             MU_MIN * MU_MIN * MU_MIN,
         )?;
+        timings.kernel_stop(KernelStage::C_RESCALE_COMPUTE_MU)?;
         self.draw_counter += 1;
 
         // The per-particle position rescale `x ← μ · x` is dispatched

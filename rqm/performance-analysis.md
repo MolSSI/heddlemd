@@ -77,6 +77,23 @@ see `integration/langevin-baoab.md`):
 - `langevin_drift_half` — the A step (`lan_drift_half` kernel).
 - `langevin_ou_step` — the O step (`lan_ou_step` kernel).
 
+Thermostat / barostat scalar-prep stages (the device scalar kernels each
+active slot's `apply_*` launches; the per-particle rescale itself is
+folded into the JIT-composed post-force kernel and timed under
+`jit_composed_post_force` — see `cuda-graphs.md`):
+
+- `kinetic_energy_reduce` — kinetic-energy reduction (CSVR, Berendsen,
+  Nosé-Hoover-chain thermostats; both barostats).
+- `csvr_sample_and_factor` — CSVR stochastic sample (`Σ ξ_i²`) and
+  rescale factor; see `integration/csvr.md`. The dominant cost at large
+  `N_f`, so omitting it materially undercounts the per-step GPU total.
+- `berendsen_compute_factor` — Berendsen thermostat rescale factor.
+- `virial_sum_reduce` — scalar-virial reduction (both barostats).
+- `c_rescale_compute_mu_and_rescale_lattice` — C-rescale barostat µ and
+  in-place lattice rescale; see `integration/c-rescale-barostat.md`.
+- `berendsen_compute_mu_and_rescale_lattice` — Berendsen barostat µ and
+  in-place lattice rescale; see `integration/berendsen-barostat.md`.
+
 Only the stages corresponding to the chosen integrator have nonzero
 counts; the others are absent from the output file. The velocity-Verlet
 slot also leaves exactly one of `vv_kick_drift` / `vv_kick_drift_lossless`

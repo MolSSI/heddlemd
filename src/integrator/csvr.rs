@@ -186,6 +186,7 @@ impl Thermostat for CsvrThermostat {
         let nf = self.g_dof as f64;
         let k_target = (nf / 2.0) * self.kt_target;
         let k_target_over_nf = k_target / nf;
+        timings.kernel_start(KernelStage::CSVR_SAMPLE_AND_FACTOR)?;
         csvr_sample_and_factor(
             buffers,
             &self.ke_scratch,
@@ -199,6 +200,7 @@ impl Thermostat for CsvrThermostat {
             one_minus_c,
             k_target_over_nf,
         )?;
+        timings.kernel_stop(KernelStage::CSVR_SAMPLE_AND_FACTOR)?;
 
         // The per-particle rescale `v ← α · v` is dispatched by the
         // JIT-composed post-force per-particle kernel via this slot's

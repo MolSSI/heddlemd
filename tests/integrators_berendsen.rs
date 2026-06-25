@@ -189,6 +189,8 @@ fn berendsen_apply_post_launches_expected_kernels() {
             .unwrap_or(0)
     };
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
+    // The compute-factor scalar kernel is instrumented. rq-5f59fa80
+    assert_eq!(count_for(KernelStage::BERENDSEN_COMPUTE_FACTOR), 1);
     // The per-particle velocity rescale is dispatched by the
     // JIT-composed post-force per-particle kernel; the standalone
     // `BERENDSEN_RESCALE_VELOCITIES` stage is not recorded.

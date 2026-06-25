@@ -126,6 +126,7 @@ impl Thermostat for BerendsenThermostat {
         let nf = self.g_dof as f64;
         let k_target = (nf / 2.0) * self.kt_target;
         let dt_over_tau = (dt as f64) / self.tau;
+        timings.kernel_start(KernelStage::BERENDSEN_COMPUTE_FACTOR)?;
         berendsen_compute_factor(
             buffers,
             &self.ke_scratch,
@@ -134,6 +135,7 @@ impl Thermostat for BerendsenThermostat {
             k_target,
             dt_over_tau,
         )?;
+        timings.kernel_stop(KernelStage::BERENDSEN_COMPUTE_FACTOR)?;
         // The composed post-force per-particle kernel applies the
         // rescale via this slot's source fragment.
         Ok(())

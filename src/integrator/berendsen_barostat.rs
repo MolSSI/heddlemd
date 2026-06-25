@@ -143,6 +143,7 @@ impl Barostat for BerendsenBarostat {
         // per-step dtoh; lattice mutated in place via
         // `sim_box.lattice_device_mut()`.
         let dt_f64 = dt as f64;
+        timings.kernel_start(KernelStage::BERENDSEN_BAROSTAT_COMPUTE_MU)?;
         berendsen_compute_mu(
             buffers,
             &self.ke_scratch,
@@ -156,6 +157,7 @@ impl Barostat for BerendsenBarostat {
             dt_f64,
             MU_MIN * MU_MIN * MU_MIN,
         )?;
+        timings.kernel_stop(KernelStage::BERENDSEN_BAROSTAT_COMPUTE_MU)?;
         // The per-particle position rescale `x ← μ · x` is dispatched
         // by the JIT-composed post-force per-particle kernel via this
         // slot's source fragment.

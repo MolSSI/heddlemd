@@ -224,6 +224,8 @@ fn apply_launches_expected_kernel_set() {
     };
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
     assert_eq!(count_for(KernelStage::VIRIAL_SUM_REDUCE), 1);
+    // The compute-mu + lattice-rescale scalar kernel is instrumented. rq-5f59fa80
+    assert_eq!(count_for(KernelStage::C_RESCALE_COMPUTE_MU), 1);
     // The per-particle position rescale is dispatched by the
     // JIT-composed post-force per-particle kernel via c-rescale's
     // source fragment, not by `apply`. The standalone
