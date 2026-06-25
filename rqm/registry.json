@@ -435,10 +435,10 @@
     "type": "scenario"
   },
   "rq-033fc52a": {
-    "decl": "Scenario: A slow-class slot (frequency_class == Slow) is not consulted for a fragment",
+    "decl": "Scenario: A slow-class slot is not a JIT participant",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "A slow-class slot (frequency_class == Slow) is not consulted for a fragment",
+    "title": "A slow-class slot is not a JIT participant",
     "type": "scenario"
   },
   "rq-03423870": {
@@ -536,13 +536,6 @@
     "file": "forces/jit-composed-pair-force",
     "refs": [],
     "title": "KernelArgSchema",
-    "type": "api-item"
-  },
-  "rq-042872ac": {
-    "decl": "- `Thermostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline -->",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Thermostat",
     "type": "api-item"
   },
   "rq-043796fa": {
@@ -1332,11 +1325,11 @@
     "type": "section"
   },
   "rq-0b1918e0": {
-    "decl": "### Trait methods",
+    "decl": "### Capability traits",
     "file": "forces/jit-composed-intramolecular",
     "level": 3,
     "refs": [],
-    "title": "Trait methods",
+    "title": "Capability traits",
     "type": "section"
   },
   "rq-0b4600e2": {
@@ -3006,10 +2999,10 @@
     "type": "scenario"
   },
   "rq-182549b3": {
-    "decl": "Scenario: A builder that returns Some(_) from both pair_force_fragment and bonded_force_fragment is rejected",
+    "decl": "Scenario: A slot returns a single shape from jit_participant",
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
-    "title": "A builder that returns Some(_) from both pair_force_fragment and bonded_force_fragment is rejected",
+    "title": "A slot returns a single shape from jit_participant",
     "type": "scenario"
   },
   "rq-182dd348": {
@@ -5706,7 +5699,7 @@
     "type": "section"
   },
   "rq-2e33e1b8": {
-    "decl": "- `Integrator::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline -->",
+    "decl": "- `Integrator::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline -->",
     "file": "integration/framework",
     "refs": [],
     "title": "Integrator",
@@ -5982,13 +5975,6 @@
       }
     ],
     "title": "ConfigError",
-    "type": "api-item"
-  },
-  "rq-311c9f01": {
-    "decl": "- `SlotMultipleShapes { label: &'static str }` — a builder whose",
-    "file": "forces/jit-composed-intramolecular",
-    "refs": [],
-    "title": "SlotMultipleShapes",
     "type": "api-item"
   },
   "rq-312906a6": {
@@ -7394,10 +7380,10 @@
     "type": "scenario"
   },
   "rq-3e69b82c": {
-    "decl": "Scenario: A bonded builder that returns None from bonded_force_fragment is rejected",
+    "decl": "Scenario: A Fast slot whose jit_participant returns None dispatches via compute",
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
-    "title": "A bonded builder that returns None from bonded_force_fragment is rejected",
+    "title": "A Fast slot whose jit_participant returns None dispatches via compute",
     "type": "scenario"
   },
   "rq-3e744fed": {
@@ -7722,10 +7708,10 @@
     "type": "scenario"
   },
   "rq-4187d20f": {
-    "decl": "- `Integrator::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline -->",
+    "decl": "- `PostForcePerParticle` — capability trait carrying both an <!-- inline -->",
     "file": "integration/framework",
     "refs": [],
-    "title": "Integrator",
+    "title": "PostForcePerParticle",
     "type": "api-item"
   },
   "rq-41ba5dca": {
@@ -8753,13 +8739,6 @@
     "title": "Feature: Radial Distribution Function Analysis (`rdf`)",
     "type": "file"
   },
-  "rq-4d1fa71c": {
-    "decl": "- `MissingPairForceFragment { label: &'static str }` — a slot whose",
-    "file": "forces/jit-composed-pair-force",
-    "refs": [],
-    "title": "MissingPairForceFragment",
-    "type": "api-item"
-  },
   "rq-4d226dff": {
     "decl": "Scenario: Re-upload after host-side mutation",
     "file": "particle-state",
@@ -9405,7 +9384,7 @@
     "type": "section"
   },
   "rq-538707ad": {
-    "decl": "- `ForceLaunchContext<'a>` — shape-specific per-launch context",
+    "decl": "- `ForceLaunchContext<'a>` — per-launch context passed to",
     "file": "forces/framework",
     "refs": [],
     "title": "ForceLaunchContext",
@@ -14925,6 +14904,13 @@
     "title": "At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "type": "scenario"
   },
+  "rq-8571bd3e": {
+    "decl": "- `JitParticipant<'a>` — single-shape tag a slot returns from",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "JitParticipant",
+    "type": "api-item"
+  },
   "rq-857ccf63": {
     "decl": "- `SimulationBox::device(&self) -> &Arc<CudaDevice>`",
     "file": "simulation-box",
@@ -17257,10 +17243,10 @@
     "type": "scenario"
   },
   "rq-9bd9ccd4": {
-    "decl": "- `bind_angle_force_args(&self, ctx, builder)` — angle analogue.",
+    "decl": "- `AnglePotential::bind_angle_force_args(&self, ctx, builder)` — angle",
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
-    "title": "bind_angle_force_args",
+    "title": "AnglePotential",
     "type": "api-item"
   },
   "rq-9be2f56a": {
@@ -17524,13 +17510,6 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
-  },
-  "rq-9d827201": {
-    "decl": "- `Barostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline -->",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Barostat",
-    "type": "api-item"
   },
   "rq-9d8d96f1": {
     "decl": "## Perpendicular Widths",
@@ -19157,10 +19136,10 @@
     "type": "api-item"
   },
   "rq-ac1403d3": {
-    "decl": "- `bonded_force_fragment(&self, cx: &PotentialBuildContext<'_>)",
+    "decl": "- `BondedPotential::bonded_force_fragment(&self) -> BondedForceFragment`",
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
-    "title": "bonded_force_fragment",
+    "title": "BondedPotential",
     "type": "api-item"
   },
   "rq-ac1c8916": {
@@ -19547,10 +19526,10 @@
     "type": "section"
   },
   "rq-af254840": {
-    "decl": "Scenario: A bonded slot (max_cutoff == None) is not consulted for a fragment",
+    "decl": "Scenario: A bonded slot is not treated as a pair-force participant",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "A bonded slot (max_cutoff == None) is not consulted for a fragment",
+    "title": "A bonded slot is not treated as a pair-force participant",
     "type": "scenario"
   },
   "rq-af2d1628": {
@@ -19676,10 +19655,10 @@
     "type": "scenario"
   },
   "rq-b08937a3": {
-    "decl": "- `bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>,",
+    "decl": "- `BondedPotential::bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>,",
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
-    "title": "bind_bonded_force_args",
+    "title": "BondedPotential",
     "type": "api-item"
   },
   "rq-b09032cb": {
@@ -19776,7 +19755,7 @@
     "type": "scenario"
   },
   "rq-b14ac769": {
-    "decl": "- `Thermostat::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline -->",
+    "decl": "- `Thermostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline -->",
     "file": "integration/framework",
     "refs": [],
     "title": "Thermostat",
@@ -20244,7 +20223,7 @@
     "type": "api-item"
   },
   "rq-b5c52011": {
-    "decl": "- `pair_force_fragment(&self, cx: &PotentialBuildContext<'_>) ->",
+    "decl": "- `pair_force_fragment(&self) -> PairForceFragment`",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
     "title": "pair_force_fragment",
@@ -21944,13 +21923,6 @@
     "title": "λ > 1 when K_old < K_target (system needs heating)",
     "type": "scenario"
   },
-  "rq-c6e8020e": {
-    "decl": "- `MissingAngleFragment { label: &'static str }` — the angle",
-    "file": "forces/jit-composed-intramolecular",
-    "refs": [],
-    "title": "MissingAngleFragment",
-    "type": "api-item"
-  },
   "rq-c6f6a13c": {
     "decl": "- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>`",
     "file": "forces/spme",
@@ -22236,10 +22208,10 @@
     "type": "api-item"
   },
   "rq-c9ac8000": {
-    "decl": "- `angle_force_fragment(&self, cx: &PotentialBuildContext<'_>)",
+    "decl": "- `BondedPotential::bonded_scratch(&self) -> BondedScratchView<'_>`",
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
-    "title": "angle_force_fragment",
+    "title": "BondedPotential",
     "type": "api-item"
   },
   "rq-c9b26a08": {
@@ -22436,7 +22408,7 @@
     "type": "section"
   },
   "rq-cb31286f": {
-    "decl": "- `Barostat::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline -->",
+    "decl": "- `Barostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline -->",
     "file": "integration/framework",
     "refs": [],
     "title": "Barostat",
@@ -23733,6 +23705,13 @@
     "title": "Feature: Pair-Force Kernel Conventions",
     "type": "file"
   },
+  "rq-d7ddc1ac": {
+    "decl": "- `BondedPotential` — capability trait a bonded slot implements,",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "BondedPotential",
+    "type": "api-item"
+  },
   "rq-d801f67c": {
     "decl": "Scenario: compute_total_virial is deterministic",
     "file": "integration/berendsen-barostat",
@@ -23961,6 +23940,13 @@
     "refs": [],
     "title": "Feature: Harmonic Angle Bonded Potential",
     "type": "file"
+  },
+  "rq-da327920": {
+    "decl": "- `AnglePotential` — capability trait an angle slot implements,",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "AnglePotential",
+    "type": "api-item"
   },
   "rq-da36d746": {
     "decl": "- `andersen_resample(buffers: &mut ParticleBuffers, seed: u64, draw_counter: u64, p_collision: f32, kt: f32) -> Result<(), GpuError>`",
@@ -24337,10 +24323,10 @@
     "type": "scenario"
   },
   "rq-dcd0d421": {
-    "decl": "Scenario: Construction is rejected when a built-in slot exposes no fragment",
+    "decl": "Scenario: Construction is rejected when a built-in slot does not participate",
     "file": "integration/jit-composed-post-force",
     "refs": [],
-    "title": "Construction is rejected when a built-in slot exposes no fragment",
+    "title": "Construction is rejected when a built-in slot does not participate",
     "type": "scenario"
   },
   "rq-dcfdb7c9": {
@@ -24509,10 +24495,10 @@
     "type": "scenario"
   },
   "rq-de8aef8c": {
-    "decl": "Scenario: A fast-class pair-force builder that returns None from pair_force_fragment is rejected",
+    "decl": "Scenario: A fast-class slot whose jit_participant returns None dispatches via compute",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "A fast-class pair-force builder that returns None from pair_force_fragment is rejected",
+    "title": "A fast-class slot whose jit_participant returns None dispatches via compute",
     "type": "scenario"
   },
   "rq-de8b9cd5": {
@@ -24694,13 +24680,6 @@
     ],
     "title": "Reject NaN dt",
     "type": "scenario"
-  },
-  "rq-e045f2ef": {
-    "decl": "- `MissingBondedFragment { label: &'static str }` — a slot whose",
-    "file": "forces/jit-composed-intramolecular",
-    "refs": [],
-    "title": "MissingBondedFragment",
-    "type": "api-item"
   },
   "rq-e06bcfb0": {
     "decl": "### `Properties`",
@@ -25258,6 +25237,13 @@
     "refs": [],
     "title": "A binding whose push kind disagrees with the schema panics",
     "type": "scenario"
+  },
+  "rq-e533174d": {
+    "decl": "- `PairForcePotential` — capability trait a pair-force slot implements",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "PairForcePotential",
+    "type": "api-item"
   },
   "rq-e538c545": {
     "decl": "- `Constraint::apply_before_drift`, `Constraint::apply_after_drift`,",

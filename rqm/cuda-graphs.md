@@ -33,7 +33,7 @@ hold:
   optional barostat, optional constraint) reports
   `graph_compatible(&params) == true`.
 - Every active integrator / thermostat / barostat slot returns
-  `Some(_)` from `post_force_per_particle_fragment()`. The
+  `Some(_)` from `post_force_per_particle()`. The
   JIT-composed post-force per-particle kernel is part of the
   captured sequence and the per-step loop alike; a slot that does
   not expose a fragment cannot participate. Every in-tree slot
@@ -237,7 +237,7 @@ sequence:
    `JitComposedPostForcePerParticle::compile_and_load`, and binds
    the resulting `CudaFunction` handle to phase-local state. A
    built-in slot returning `None` from
-   `post_force_per_particle_fragment()` raises
+   `post_force_per_particle()` raises
    `StepError::MissingPostForcePerParticleFragment` and fails
    phase setup; this is a programmer error rather than a runtime
    fallback.
@@ -895,7 +895,7 @@ Feature: CUDA graph capture and replay
   @rq-3d84a5b8
   Scenario: Built-in slot returning None is rejected at phase setup
     Given an MD phase configured with a user-registered integrator
-      whose post_force_per_particle_fragment returns None
+      whose post_force_per_particle returns None
     When the runner enters the phase
     Then phase setup returns Err(StepError::MissingPostForcePerParticleFragment
       { kind: "integrator", label: <slot's label> })

@@ -53,43 +53,27 @@ determinism guarantees the composed modules preserve.
 
 ## Slot Participation <!-- rq-10313445 -->
 
-A *fast-class bonded slot* is any slot whose `frequency_class()`
-returns `ForceClass::Fast`, whose `max_cutoff()` returns `None`,
-and whose builder exposes a `bonded_force_fragment(cx)` returning
-`Some(_)`. A *fast-class angle slot* is the analogous slot whose
-builder exposes `angle_force_fragment(cx)` returning `Some(_)`.
+A *fast-class bonded slot* is a slot whose `Potential::jit_participant`
+returns `Some(JitParticipant::Bonded(self))`; the slot is then a
+`BondedPotential`. A *fast-class angle slot* is the analogous slot
+whose `jit_participant()` returns `Some(JitParticipant::Angle(self))`,
+making it an `AnglePotential`. Both report `max_cutoff() == None`.
 
-The framework calls `bonded_force_fragment(cx)` and
-`angle_force_fragment(cx)` on every registered builder during
-`ForceField::new`, after `build(cx)` has returned `Ok(Some(slot))`
-and the displacement-resolution pass has determined the slot
-survives. Slots whose builders return `Ok(Some(slot))` from
-`build(cx)` but `Ok(None)` from both `bonded_force_fragment(cx)`
-and `angle_force_fragment(cx)` are dispatched via their own
-`Potential::compute` kernel call at step time (the bonded /
-angle JIT path does not see them).
+The framework reads each built slot's `jit_participant()` during
+`ForceField::new`, after `build(cx)` has returned `Ok(Some(slot))` and
+the displacement-resolution pass has determined the slot survives. It
+collects `BondedPotential::bonded_force_fragment()` from each bonded
+participant into the bonded composed module and
+`AnglePotential::angle_force_fragment()` from each angle participant
+into the angle composed module, both in canonical slot order. A slot
+whose `jit_participant()` returns `None` dispatches via its own
+`Potential::compute` kernel call at step time (the bonded / angle JIT
+path does not see it).
 
-A slot whose builder returns `Some(_)` from
-`bonded_force_fragment(cx)` and reports `frequency_class() == Fast`
-participates in the bonded composed module. A slot whose builder
-returns `Some(_)` from `angle_force_fragment(cx)` and reports
-`frequency_class() == Fast` participates in the angle composed
-module. A single builder may participate in at most one shape's
-composer; a builder that returns `Some(_)` from more than one
-fragment method causes `ForceField::new` to return
-`ForceFieldError::SlotMultipleShapes { label }`.
-
-A builder that names itself a bonded slot via the canonical
-`MorseBondedBuilder` / future bonded builders contract but whose
-`bonded_force_fragment(cx)` returns `None` is rejected at
-construction with `ForceFieldError::MissingBondedFragment { label }`.
-The analogous rejection for angle slots is
-`ForceFieldError::MissingAngleFragment { label }`. The framework
-recognises the canonical bonded / angle slot list at compile time
-through the canonical builders the registry exposes; slots from
-custom builders are not auto-classified as bonded / angle —
-participation is determined exclusively by which fragment method
-returns `Some(_)`.
+Because `jit_participant()` returns a single `JitParticipant` variant,
+a slot belongs to at most one shape by construction, and a bonded /
+angle participant always carries both its fragment and its argument
+binding (both live on the capability trait) — neither can be absent.
 
 ## Source-Fragment Contract — Bonded Shape <!-- rq-892e8856 -->
 
@@ -290,9 +274,10 @@ composed-module launches for that shape.
 shape independently, after the slot list has been determined and
 displacement resolution has run:
 
-1. Collect every active fast-class slot's fragment for that
-   shape via `bonded_force_fragment(cx)` /
-   `angle_force_fragment(cx)`, in canonical slot order.
+1. Collect every participant's fragment for that shape by matching
+   each slot's `jit_participant()` against `JitParticipant::Bonded(b)`
+   / `JitParticipant::Angle(a)` and calling `b.bonded_force_fragment()`
+   / `a.angle_force_fragment()`, in canonical slot order.
 2. Build the composed-module source by concatenating, in order:
    the shape's preamble, each fragment's `functor_source`, and
    the generated `extern "C"` entry points (one per slot per
@@ -388,7 +373,7 @@ reproducibility invariant individually.
 
 - `BondedForceFragment` — self-contained CUDA C++ source fragment <!-- rq-7773e9e8 -->
   plus identifying metadata for a bonded slot, returned by
-  `PotentialBuilder::bonded_force_fragment(cx)`. Same field set as
+  `BondedPotential::bonded_force_fragment()`. Same field set as
   `PairForceFragment` (see `framework.md`):
 
   ```rust
@@ -406,7 +391,7 @@ reproducibility invariant individually.
   `KernelArgSchema::intramolecular`; see *Argument Schema*.
 
 - `AngleForceFragment` — same shape as `BondedForceFragment`, <!-- rq-565ffbcc -->
-  returned by `PotentialBuilder::angle_force_fragment(cx)`. Its
+  returned by `AnglePotential::angle_force_fragment()`. Its
   `entry_point_args` and `functor_init_source` are likewise generated
   from the slot's `KernelArgSchema`.
 
@@ -435,52 +420,43 @@ reproducibility invariant individually.
 
 ### Error variants <!-- rq-0f8a60e2 -->
 
-`ForceFieldError` carries the following variants for the bonded /
-angle JIT mechanism, alongside the pair-force composer's existing
-variants (see `framework.md`):
+`FragmentCompileFailed` and `FragmentLoadFailed` (see `framework.md`)
+are reused for bonded / angle module compile / load errors; the
+error's `Display` impl additionally names every contributing
+fragment's slot label so the caller can identify which slot's
+fragment is the likely culprit. There are no missing-fragment or
+multiple-shape error variants: a bonded or angle participant carries
+its fragment and binding together on its capability trait, and a slot
+declares at most one shape through `Potential::jit_participant`, so
+both inconsistencies are impossible by construction.
 
-- `MissingBondedFragment { label: &'static str }` — a slot whose <!-- rq-e045f2ef -->
-  builder names itself bonded but whose `bonded_force_fragment(cx)`
-  returned `None`. Reported from `ForceField::new` before the
-  bonded composed source is built.
-- `MissingAngleFragment { label: &'static str }` — the angle <!-- rq-c6e8020e -->
-  analogue.
-- `SlotMultipleShapes { label: &'static str }` — a builder whose <!-- rq-311c9f01 -->
-  `pair_force_fragment(cx)`, `bonded_force_fragment(cx)`, and
-  `angle_force_fragment(cx)` together return `Some(_)` from more
-  than one method. A slot participates in at most one shape's
-  composer.
+### Capability traits <!-- rq-0b1918e0 -->
 
-`FragmentCompileFailed` and `FragmentLoadFailed` are reused for
-bonded / angle module compile / load errors; the error's
-`Display` impl additionally names every contributing fragment's
-slot label so the caller can identify which slot's fragment is
-the likely culprit.
+A bonded slot is a `BondedPotential` and an angle slot is an
+`AnglePotential` (both defined in `framework.md`'s *Feature API*),
+reached through `Potential::jit_participant` returning
+`JitParticipant::Bonded(self)` / `JitParticipant::Angle(self)`. Each
+capability trait carries the slot's fragment, its scratch view, and
+its argument binding, none with a default:
 
-### Trait methods <!-- rq-0b1918e0 -->
-
-The `PotentialBuilder` trait (see `framework.md`'s *Feature API*)
-exposes the following methods for participation:
-
-- `bonded_force_fragment(&self, cx: &PotentialBuildContext<'_>) <!-- rq-ac1403d3 -->
-  -> Result<Option<BondedForceFragment>, ForceFieldError>` —
-  default `Ok(None)`. Built-in bonded builders override.
-- `angle_force_fragment(&self, cx: &PotentialBuildContext<'_>) <!-- rq-c9ac8000 -->
-  -> Result<Option<AngleForceFragment>, ForceFieldError>` —
-  default `Ok(None)`. Built-in angle builders override.
-
-The `Potential` trait exposes parallel binding methods to the
-existing `bind_pair_force_args`:
-
-- `bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>, <!-- rq-b08937a3 -->
+- `BondedPotential::bonded_force_fragment(&self) -> BondedForceFragment` <!-- rq-ac1403d3 -->
+  / `AnglePotential::angle_force_fragment(&self) -> AngleForceFragment`
+  — return the slot's CUDA source fragment, collected once per
+  participant at `ForceField::new`. The slot computes its fragment
+  from the build inputs at construction; the method takes no context.
+- `BondedPotential::bonded_scratch(&self) -> BondedScratchView<'_>` <!-- rq-c9ac8000 -->
+  / `AnglePotential::angle_scratch(&self) -> AngleScratchView<'_>` —
+  expose the slot's per-bond / per-angle contribution buffers so the
+  framework can wire the composed launch.
+- `BondedPotential::bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>, <!-- rq-b08937a3 -->
   builder: &mut ForceLaunchBuilder)` — supplies the slot's parameter
   buffers through a `KernelArgBinder` over the slot's `KernelArgSchema`
   and `builder`, pushing one value per declared argument by name and
   calling `finish()`. The binder validates every push against the
   schema; a name, kind, element-type, or count mismatch panics, naming
-  the slot and the offending argument. Default panics so an
-  unimplemented override surfaces a programmer error.
-- `bind_angle_force_args(&self, ctx, builder)` — angle analogue. <!-- rq-9bd9ccd4 -->
+  the slot and the offending argument.
+- `AnglePotential::bind_angle_force_args(&self, ctx, builder)` — angle <!-- rq-9bd9ccd4 -->
+  analogue.
 
 ### Composed-module name and entry points <!-- rq-529b2c5f -->
 
@@ -588,19 +564,18 @@ Feature: JIT-composed intramolecular kernels
     And no nvrtc compile is invoked for the bonded shape
 
   @rq-3e69b82c
-  Scenario: A bonded builder that returns None from bonded_force_fragment is rejected
-    Given a custom builder whose build(cx) returns Ok(Some(slot)) with frequency_class() == Fast and max_cutoff() == None
-    And whose bonded_force_fragment(cx) returns Ok(None)
-    And which the framework classifies as a bonded slot via the canonical builders contract
-    When ForceField::new(...) is called
-    Then it returns Err(ForceFieldError::MissingBondedFragment { label: <slot's label> })
+  Scenario: A Fast slot whose jit_participant returns None dispatches via compute
+    Given a custom slot with frequency_class() == Fast and max_cutoff() == None whose jit_participant() returns None
+    When ForceField::new(...) is called and a step is run
+    Then no bonded fragment is collected for that slot
+    And the slot's Potential::compute is invoked at step time
 
   @rq-182549b3
-  Scenario: A builder that returns Some(_) from both pair_force_fragment and bonded_force_fragment is rejected
-    Given a custom builder whose pair_force_fragment(cx) returns Ok(Some(_))
-    And whose bonded_force_fragment(cx) also returns Ok(Some(_))
-    When ForceField::new(...) is called
-    Then it returns Err(ForceFieldError::SlotMultipleShapes { label: <slot's label> })
+  Scenario: A slot returns a single shape from jit_participant
+    Given a bonded slot active in the ForceField
+    When the slot's jit_participant() is queried
+    Then it returns Some(JitParticipant::Bonded(_))
+    And the JitParticipant type makes returning a second shape from the same call impossible
 
   # --- Angle composition: construction ---
 

@@ -14,9 +14,10 @@ use crate::timings::{KernelStage, Timings};
 
 use super::topology::AngleList;
 use super::{
-    AggregateLevel, AngleForceFragment, AngleScratchView, ForceFieldError, ForceLaunchBuilder,
-    ForceLaunchContext, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType, Potential,
-    PotentialBuildContext, PotentialBuilder, SlotOutputView,
+    AggregateLevel, AngleForceFragment, AnglePotential, AngleScratchView, ForceFieldError,
+    ForceLaunchBuilder, ForceLaunchContext, JitParticipant, KernelArg, KernelArgBinder,
+    KernelArgSchema, KernelArgType, Potential, PotentialBuildContext, PotentialBuilder,
+    SlotOutputView,
 };
 use crate::precision::Real;
 
@@ -155,6 +156,28 @@ impl Potential for HarmonicAngleState {
         Ok(())
     }
 
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::Angle(self))
+    }
+}
+
+impl AnglePotential for HarmonicAngleState {
+    fn angle_force_fragment(&self) -> AngleForceFragment {
+        harmonic_angle_force_fragment()
+    }
+
+    fn angle_scratch(&self) -> AngleScratchView<'_> {
+        AngleScratchView {
+            angles: &self.angles,
+            angle_triple_x: &self.angle_triple_x,
+            angle_triple_y: &self.angle_triple_y,
+            angle_triple_z: &self.angle_triple_z,
+            angle_triple_energy: &self.angle_triple_energy,
+            angle_triple_virial: &self.angle_triple_virial,
+            angle_count: self.angle_count,
+        }
+    }
+
     fn bind_angle_force_args(
         &self,
         _ctx: &ForceLaunchContext<'_>,
@@ -169,18 +192,6 @@ impl Potential for HarmonicAngleState {
         b.buffer("harmonic_angle_k_theta", &self.angle_k_theta);
         b.buffer("harmonic_angle_theta_0", &self.angle_theta_0);
         b.finish();
-    }
-
-    fn angle_scratch(&self) -> Option<AngleScratchView<'_>> {
-        Some(AngleScratchView {
-            angles: &self.angles,
-            angle_triple_x: &self.angle_triple_x,
-            angle_triple_y: &self.angle_triple_y,
-            angle_triple_z: &self.angle_triple_z,
-            angle_triple_energy: &self.angle_triple_energy,
-            angle_triple_virial: &self.angle_triple_virial,
-            angle_count: self.angle_count,
-        })
     }
 }
 
@@ -244,16 +255,6 @@ impl PotentialBuilder for HarmonicAngleBuilder {
 
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
-    }
-
-    fn angle_force_fragment(
-        &self,
-        cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<AngleForceFragment>, ForceFieldError> {
-        if cx.angle_list.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(harmonic_angle_force_fragment()))
     }
 }
 

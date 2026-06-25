@@ -35,24 +35,24 @@ determinism guarantees the composed kernel preserves.
 
 ## Slot Participation <!-- rq-ed6e49c5 -->
 
-Every fast-class pair-force slot exposes a CUDA source fragment via
-its builder's `pair_force_fragment(cx)` method (see
-`framework.md`'s *Feature API*). The framework collects every
-`Some(_)` return in canonical slot order during `ForceField::new`'s
-construction pass and feeds the collected fragments to the composer.
+A pair-force slot declares its participation by returning
+`Some(JitParticipant::PairForce(self))` from `Potential::jit_participant`
+(see `framework.md`'s *Feature API*); the slot is then a
+`PairForcePotential` and exposes its CUDA source fragment via
+`PairForcePotential::pair_force_fragment()`. The framework collects every
+pair-force participant's fragment in canonical slot order during
+`ForceField::new`'s construction pass and feeds them to the composer. A
+pair-force participant also reports `max_cutoff() == Some(_)`, since it
+consumes the shared neighbour list.
 
-A slot whose `frequency_class()` is `Fast` and whose `max_cutoff()`
-is `Some(_)` but whose `pair_force_fragment(cx)` returns `None` is
-rejected at construction with
-`ForceFieldError::MissingPairForceFragment { label }`. A slot that
-reports `max_cutoff() == None` (a bonded slot, an angle slot, an
-intramolecular slot, any slot that does not consume the neighbour
-list) does not participate in the composition and is not consulted
-for a fragment.
-
-The slow-class `SpmeReciprocal` slot does not participate. Its
-compute path is the SPME reciprocal pipeline (`spme.md`), which is
-unaffected by the JIT-composition mechanism.
+A slot whose `jit_participant()` returns `None` — the slow-class
+`SpmeReciprocal` slot (whose compute path is the SPME reciprocal
+pipeline, `spme.md`), and any slot that does not JIT-compose — is not
+consulted for a fragment and dispatches via its own `Potential::compute`
+call. Because `jit_participant()` returns a single `JitParticipant`
+variant, the slot's fragment and its argument binding always come as a
+pair (both live on `PairForcePotential`), so neither can be present
+without the other.
 
 ## Source-Fragment Contract <!-- rq-18382cc2 -->
 
@@ -458,13 +458,10 @@ constituent fragments before composition.
 `ForceField::new` performs the following at construction, after the
 slot list has been determined and displacement resolution has run:
 
-1. Collect every active fast-class pair-force slot's fragment, in
-   canonical slot order, by calling its builder's
-   `pair_force_fragment(cx)`. Slots whose `frequency_class()` is
-   `Fast` and whose `max_cutoff()` is `Some(_)` MUST return
-   `Some(_)`; a `None` return is the
-   `ForceFieldError::MissingPairForceFragment { label }` rejection
-   path.
+1. Collect every pair-force participant's fragment, in canonical slot
+   order, by matching each slot's `jit_participant()` against
+   `JitParticipant::PairForce(p)` and calling
+   `p.pair_force_fragment()`.
 
 2. Build the composed-kernel source by concatenating, in order:
    1. The framework preamble. The preamble includes the project's
@@ -598,8 +595,8 @@ standalone case.
 ### Types <!-- rq-d603cae5 -->
 
 - `PairForceFragment` — self-contained CUDA C++ source fragment plus <!-- rq-1ff4c7cb -->
-  identifying metadata. Constructed by a slot's builder via
-  `pair_force_fragment(cx)`.
+  identifying metadata. Returned by the slot via
+  `PairForcePotential::pair_force_fragment()`.
 
   ```rust
   pub struct PairForceFragment {
@@ -843,12 +840,6 @@ standalone case.
 JIT-composition mechanism (added alongside the existing variants in
 `framework.md`):
 
-- `MissingPairForceFragment { label: &'static str }` — a slot whose <!-- rq-4d1fa71c -->
-  `frequency_class()` is `Fast` and whose `max_cutoff()` is
-  `Some(_)` was registered with a builder whose
-  `pair_force_fragment(cx)` returned `None`. Rejection is at
-  `ForceField::new` time before the composed source is built.
-
 - `FragmentCompileFailed { log: String }` — nvrtc rejected the <!-- rq-4289075c -->
   composed source. `log` carries the full nvrtc compile log. The
   framework includes the labels of every contributing fragment in
@@ -860,51 +851,32 @@ JIT-composition mechanism (added alongside the existing variants in
 
 ### Trait methods <!-- rq-139a8a17 -->
 
-The `PotentialBuilder` trait (see `framework.md`'s *Feature API*)
-exposes the following methods to participate in JIT composition:
+A pair-force slot is a `PairForcePotential` (see `framework.md`'s
+*Feature API*), reached through `Potential::jit_participant` returning
+`JitParticipant::PairForce(self)`. The trait carries both methods, with
+no defaults:
 
-- `pair_force_fragment(&self, cx: &PotentialBuildContext<'_>) -> <!-- rq-b5c52011 -->
-  Result<Option<PairForceFragment>, ForceFieldError>` — the
-  framework calls this on every registered builder during
-  `ForceField::new`, after the builder's `build(cx)` has returned
-  `Ok(Some(slot))` and the displacement-resolution pass has
-  determined the slot survives. Return values:
-
-  - `Ok(Some(fragment))` — the builder produces a pair-force slot,
-    and the fragment is to be composed into the composed kernel.
-    Required for every slot whose `frequency_class()` is `Fast`
-    AND whose `max_cutoff()` is `Some(_)`.
-  - `Ok(None)` — the builder does not participate in JIT
-    composition. Permitted for slots whose `frequency_class()` is
-    `Slow`, or whose `max_cutoff()` is `None`, or both. A `None`
-    return for a fast-class pair-force slot is the
-    `MissingPairForceFragment` rejection.
-  - `Err(_)` — fragment construction failed. The error surfaces
-    from `ForceField::new` unchanged.
-
-  The default implementation returns `Ok(None)`. Built-in pair-force
-  builders override.
-
-The `Potential` trait exposes the following method to bind
-per-launch arguments to the composed kernel:
+- `pair_force_fragment(&self) -> PairForceFragment` <!-- rq-b5c52011 -->
+  — returns the slot's CUDA source fragment. The framework calls it
+  once per pair-force participant during `ForceField::new`, after the
+  displacement-resolution pass has determined the slot survives, and
+  feeds the fragment to the composer. The slot computes its fragment
+  from the build inputs at construction; the method takes no context.
 
 - `bind_pair_force_args(&self, ctx: &PairForceBindContext<'_>, <!-- rq-a8da1cf0 -->
-  builder: &mut ForceLaunchBuilder)` — supplies the slot's
-  parameter buffers and scalars through a `KernelArgBinder` over
-  the slot's `KernelArgSchema` and `builder`, pushing one value per
-  declared argument by name and calling `finish()`. The framework
-  calls this on every active fast-class pair-force slot, in canonical
-  slot order, once per composed-kernel launch. The binder validates
-  every push against the schema; a name, kind, element-type, or count
-  mismatch panics, naming the slot and the offending argument.
+  builder: &mut ForceLaunchBuilder)` — supplies the slot's parameter
+  buffers and scalars through a `KernelArgBinder` over the slot's
+  `KernelArgSchema` and `builder`, pushing one value per declared
+  argument by name and calling `finish()`. The framework calls this on
+  every pair-force participant, in canonical slot order, once per
+  composed-kernel launch. The binder validates every push against the
+  schema; a name, kind, element-type, or count mismatch panics, naming
+  the slot and the offending argument.
 
-  The default implementation panics. Built-in pair-force slots
-  override.
-
-  Slots whose `frequency_class()` is not `Fast`, or whose
-  `max_cutoff()` is `None`, are never asked to bind; the default
-  panic surfaces a programmer error rather than silently producing
-  bad launches.
+Because both methods live on `PairForcePotential` with no defaults, a
+slot that declares pair-force participation supplies both the fragment
+and the binding — neither can be absent, and a non-participating slot
+implements neither.
 
 ### Composed-kernel module name and entry points <!-- rq-52b69f09 -->
 
@@ -987,12 +959,6 @@ runs where the composed kernel covers their contribution.
   at `ForceField::new`; the composed kernel is loaded once and
   never recompiled or replaced.
 
-- Mixed-mode dispatch where some fast-class pair-force slots are
-  composed and others run via their own `Potential::compute`. Every
-  fast-class pair-force slot in the slot list participates in the
-  composed kernel; a slot that cannot provide a fragment is
-  rejected at construction.
-
 - Cross-`ForceField` sharing of the composed-kernel module. Each
   `ForceField` owns its own composed module; modules are not
   globally cached.
@@ -1053,28 +1019,28 @@ Feature: JIT-composed pair-force kernel
     Then the two byte slices are equal
 
   @rq-de8aef8c
-  Scenario: A fast-class pair-force builder that returns None from pair_force_fragment is rejected
-    Given a custom PotentialBuilder whose build(cx) returns Ok(Some(slot)) with frequency_class() == Fast and max_cutoff() == Some(1.0)
-    And whose pair_force_fragment(cx) returns Ok(None)
-    When ForceField::new(...) is called
-    Then it returns Err(ForceFieldError::MissingPairForceFragment { label: <slot's label> })
+  Scenario: A fast-class slot whose jit_participant returns None dispatches via compute
+    Given a custom slot with frequency_class() == Fast and max_cutoff() == Some(1.0) whose jit_participant() returns None
+    When ForceField::new(...) is called and a step is run
+    Then no pair-force fragment is collected for that slot
+    And the slot's Potential::compute is invoked at step time
 
   @rq-af254840
-  Scenario: A bonded slot (max_cutoff == None) is not consulted for a fragment
+  Scenario: A bonded slot is not treated as a pair-force participant
     Given a config with no [[pair_interactions]] entries and a non-empty bond list activating the Morse bonded slot
     When ForceField::new(...) is called
-    Then the framework does not invoke pair_force_fragment on MorseBondedBuilder
-    And no composed-kernel module is loaded
+    Then the Morse slot's jit_participant() returns Some(JitParticipant::Bonded(_)), not PairForce
+    And no composed pair-force kernel module is loaded
 
   @rq-033fc52a
-  Scenario: A slow-class slot (frequency_class == Slow) is not consulted for a fragment
+  Scenario: A slow-class slot is not a JIT participant
     Given a config that activates SpmeReciprocal
     When ForceField::new(...) is called
-    Then the framework does not invoke pair_force_fragment on SpmeReciprocalBuilder
+    Then the SpmeReciprocal slot's jit_participant() returns None
 
   @rq-fa17b283
   Scenario: A malformed fragment surfaces FragmentCompileFailed with the nvrtc log
-    Given a custom builder whose pair_force_fragment returns a fragment whose source contains a deliberate syntax error
+    Given a custom pair-force slot whose pair_force_fragment() returns a fragment whose source contains a deliberate syntax error
     When ForceField::new(...) is called
     Then it returns Err(ForceFieldError::FragmentCompileFailed { log })
     And log contains the substring "error" (verbatim from nvrtc)
@@ -1254,20 +1220,20 @@ Feature: JIT-composed pair-force kernel
   @rq-118a47d5
   Scenario: LJ with a uniform type_cutoff table reports CutoffHandling::Uniform
     Given a config whose [[pair_interactions]] entries all have the same cutoff
-    When LennardJonesBuilder::pair_force_fragment(cx) is called
-    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(c)` where c is the common cutoff
+    When the LennardJones slot's pair_force_fragment() is called
+    Then it returns a fragment with `fragment.cutoff == CutoffHandling::Uniform(c)` where c is the common cutoff
 
   @rq-059aff56
   Scenario: LJ with mixed cutoffs across pair types reports CutoffHandling::PerPair
     Given a config whose [[pair_interactions]] entries have at least two distinct cutoff values
-    When LennardJonesBuilder::pair_force_fragment(cx) is called
-    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::PerPair`
+    When the LennardJones slot's pair_force_fragment() is called
+    Then it returns a fragment with `fragment.cutoff == CutoffHandling::PerPair`
 
   @rq-b7ed60ff
   Scenario: SPME-real always reports CutoffHandling::Uniform
     Given any [spme] configuration with r_cut_real = c
-    When SpmeRealBuilder::pair_force_fragment(cx) is called
-    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(c)`
+    When the SpmeReal slot's pair_force_fragment() is called
+    Then it returns a fragment with `fragment.cutoff == CutoffHandling::Uniform(c)`
 
   # --- Three-pass structure ---
 

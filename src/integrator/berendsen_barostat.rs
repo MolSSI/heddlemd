@@ -118,6 +118,35 @@ impl BerendsenBarostat {
 // (β · dt/τ · (P_target − P) > 1).
 const MU_MIN: f64 = 1.0e-6;
 
+impl crate::integrator::PostForcePerParticle for BerendsenBarostat {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "berendsen_barostat",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *berendsen_baro_mu_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real berendsen_baro_mu = berendsen_baro_mu_device[0];\n\
+                 \x20       Real4 pq = posq[i];\n\
+                 \x20       pq.x *= berendsen_baro_mu;\n\
+                 \x20       pq.y *= berendsen_baro_mu;\n\
+                 \x20       pq.z *= berendsen_baro_mu;\n\
+                 \x20       posq[i] = pq;",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.mu_device);
+    }}
+
 impl Barostat for BerendsenBarostat {
     // rq-1179e42f rq-29dda250
     fn apply(
@@ -172,33 +201,10 @@ impl Barostat for BerendsenBarostat {
         BerendsenBarostat::flush_pending_injection(self, device).map_err(BarostatError::from)
     }
 
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
-        Some(crate::forces::PerParticleFragment {
-            label: "berendsen_barostat",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *berendsen_baro_mu_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real berendsen_baro_mu = berendsen_baro_mu_device[0];\n\
-                 \x20       Real4 pq = posq[i];\n\
-                 \x20       pq.x *= berendsen_baro_mu;\n\
-                 \x20       pq.y *= berendsen_baro_mu;\n\
-                 \x20       pq.z *= berendsen_baro_mu;\n\
-                 \x20       posq[i] = pq;",
-            ),
-        })
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
     }
 
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.mu_device);
-    }
 
     // rq-62b44dc9 rq-b6728f3c
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {

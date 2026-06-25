@@ -270,6 +270,46 @@ impl MtkNptIntegrator {
     }
 }
 
+impl crate::integrator::PostForcePerParticle for MtkNptIntegrator {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "mtk_npt",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    Real mtk_exp_minus_alpha,\n\
+                 \x20   Real mtk_phi_v_dt_half,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real inv_m_mtk = R(1.0) / masses[i];\n\
+                 \x20       velocities_x[i] = mtk_exp_minus_alpha * velocities_x[i]\n\
+                 \x20                       + mtk_phi_v_dt_half * (forces_x[i] * inv_m_mtk);\n\
+                 \x20       velocities_y[i] = mtk_exp_minus_alpha * velocities_y[i]\n\
+                 \x20                       + mtk_phi_v_dt_half * (forces_y[i] * inv_m_mtk);\n\
+                 \x20       velocities_z[i] = mtk_exp_minus_alpha * velocities_z[i]\n\
+                 \x20                       + mtk_phi_v_dt_half * (forces_z[i] * inv_m_mtk);",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        let dt_f64 = ctx.dt as f64;
+        let nf = self.g_dof as f64;
+        let alpha_v = (1.0 + 3.0 / nf) * (self.p_eps / self.w_cell);
+        let exp_ma_half = (-alpha_v * dt_f64 / 2.0).exp();
+        let phi_v_dt_half = 0.5
+            * dt_f64
+            * sinh_over_x(alpha_v * dt_f64 / 4.0)
+            * (-alpha_v * dt_f64 / 4.0).exp();
+        builder.push_scalar::<Real>(exp_ma_half as Real);
+        builder.push_scalar::<Real>(phi_v_dt_half as Real);
+    }}
+
 impl Integrator for MtkNptIntegrator {
     // rq-aa68f468 rq-8cda2c89
     fn plan(&self, dt: Real) -> StepPlan {
@@ -456,44 +496,10 @@ impl Integrator for MtkNptIntegrator {
     // continue to run as separate kernel launches via `execute(...)`;
     // only the per-thread `KickHalf` body is folded into the
     // composed kernel.
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
-        Some(crate::forces::PerParticleFragment {
-            label: "mtk_npt",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    Real mtk_exp_minus_alpha,\n\
-                 \x20   Real mtk_phi_v_dt_half,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real inv_m_mtk = R(1.0) / masses[i];\n\
-                 \x20       velocities_x[i] = mtk_exp_minus_alpha * velocities_x[i]\n\
-                 \x20                       + mtk_phi_v_dt_half * (forces_x[i] * inv_m_mtk);\n\
-                 \x20       velocities_y[i] = mtk_exp_minus_alpha * velocities_y[i]\n\
-                 \x20                       + mtk_phi_v_dt_half * (forces_y[i] * inv_m_mtk);\n\
-                 \x20       velocities_z[i] = mtk_exp_minus_alpha * velocities_z[i]\n\
-                 \x20                       + mtk_phi_v_dt_half * (forces_z[i] * inv_m_mtk);",
-            ),
-        })
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
     }
 
-    fn bind_post_force_per_particle_args(
-        &self,
-        ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        let dt_f64 = ctx.dt as f64;
-        let nf = self.g_dof as f64;
-        let alpha_v = (1.0 + 3.0 / nf) * (self.p_eps / self.w_cell);
-        let exp_ma_half = (-alpha_v * dt_f64 / 2.0).exp();
-        let phi_v_dt_half = 0.5
-            * dt_f64
-            * sinh_over_x(alpha_v * dt_f64 / 4.0)
-            * (-alpha_v * dt_f64 / 4.0).exp();
-        builder.push_scalar::<Real>(exp_ma_half as Real);
-        builder.push_scalar::<Real>(phi_v_dt_half as Real);
-    }
 
     // rq-3b6d5001 rq-14a7685e
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {

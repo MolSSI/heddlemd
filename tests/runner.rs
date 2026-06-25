@@ -894,7 +894,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
     use std::sync::Arc;
     use heddle_md::gpu::{GpuContext, ParticleBuffers};
     use heddle_md::integrator::{
-        Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep,
+        Integrator, IntegratorBuilder, IntegratorError, PostForcePerParticle, StepPlan, SubStep,
     };
     use heddle_md::pbc::SimulationBox;
     use heddle_md::timings::Timings;
@@ -917,29 +917,31 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
         ) -> Result<(), IntegratorError> {
             Ok(())
         }
-        // K's strict policy requires every active integrator to expose
-        // a post-force per-particle fragment. The stub returns a
-        // no-op fragment so the runner accepts it. With an empty
-        // StepPlan the composed kernel still launches once per step
-        // but its per-thread body is empty.
-        fn post_force_per_particle_fragment(
-            &self,
-        ) -> Option<heddle_md::forces::PerParticleFragment> {
-            Some(heddle_md::forces::PerParticleFragment {
+        // K's strict policy requires every active integrator to
+        // participate in the post-force per-particle kernel. The stub
+        // participates with a no-op fragment so the runner accepts it.
+        fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
+            Some(self)
+        }
+        fn post_force_substep_index(&self, _dt: Real) -> Option<usize> {
+            None
+        }
+    }
+
+    impl PostForcePerParticle for CountingStubIntegrator {
+        fn post_force_per_particle_fragment(&self) -> heddle_md::forces::PerParticleFragment {
+            heddle_md::forces::PerParticleFragment {
                 label: "custom_stub",
                 helper_source: String::new(),
                 entry_point_args: String::new(),
                 per_thread_body: String::from("        (void)i;"),
-            })
+            }
         }
         fn bind_post_force_per_particle_args(
             &self,
             _ctx: &heddle_md::forces::PostForceBindContext<'_>,
             _builder: &mut heddle_md::forces::ForceLaunchBuilder,
         ) {
-        }
-        fn post_force_substep_index(&self, _dt: Real) -> Option<usize> {
-            None
         }
     }
     #[derive(Debug, Clone)]

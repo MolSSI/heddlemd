@@ -86,6 +86,35 @@ impl LangevinBaoabState {
     }
 }
 
+impl crate::integrator::PostForcePerParticle for LangevinBaoabState {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "langevin_baoab",
+            helper_source: String::new(),
+            entry_point_args: String::from("    Real langevin_dt,\n"),
+            per_thread_body: String::from(
+                "        Real m_l = masses[i];\n\
+                 \x20       Real ax_l = forces_x[i] / m_l;\n\
+                 \x20       Real ay_l = forces_y[i] / m_l;\n\
+                 \x20       Real az_l = forces_z[i] / m_l;\n\
+                 \x20       Real half_dt_l = langevin_dt * R(0.5);\n\
+                 \x20       velocities_x[i] += ax_l * half_dt_l;\n\
+                 \x20       velocities_y[i] += ay_l * half_dt_l;\n\
+                 \x20       velocities_z[i] += az_l * half_dt_l;",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_scalar::<Real>(ctx.dt);
+    }}
+
 impl Integrator for LangevinBaoabState {
     // rq-aa68f468
     fn plan(&self, dt: Real) -> StepPlan {
@@ -149,33 +178,10 @@ impl Integrator for LangevinBaoabState {
     // rq-9c5226e5 — Langevin-BAOAB's post-force phase is the trailing
     // `B` half-kick (`vv_kick`-equivalent). Mid-plan `O` / `A` work
     // remains as separate kernel launches via `execute(...)`.
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
-        Some(crate::forces::PerParticleFragment {
-            label: "langevin_baoab",
-            helper_source: String::new(),
-            entry_point_args: String::from("    Real langevin_dt,\n"),
-            per_thread_body: String::from(
-                "        Real m_l = masses[i];\n\
-                 \x20       Real ax_l = forces_x[i] / m_l;\n\
-                 \x20       Real ay_l = forces_y[i] / m_l;\n\
-                 \x20       Real az_l = forces_z[i] / m_l;\n\
-                 \x20       Real half_dt_l = langevin_dt * R(0.5);\n\
-                 \x20       velocities_x[i] += ax_l * half_dt_l;\n\
-                 \x20       velocities_y[i] += ay_l * half_dt_l;\n\
-                 \x20       velocities_z[i] += az_l * half_dt_l;",
-            ),
-        })
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
     }
 
-    fn bind_post_force_per_particle_args(
-        &self,
-        ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_scalar::<Real>(ctx.dt);
-    }
 }
 
 #[derive(Debug, Clone)]

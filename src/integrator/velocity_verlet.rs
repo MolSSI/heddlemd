@@ -78,30 +78,10 @@ impl VelocityVerletState {
     }
 }
 
-impl Integrator for VelocityVerletState {
-    // rq-aa68f468
-    fn plan(&self, dt: Real) -> StepPlan {
-        StepPlan {
-            steps: vec![
-                SubStep::KickDrift { dt, label: "vv_kick_drift" },
-                SubStep::ForceEval {
-                    class: None,
-                    level: Some(crate::forces::AggregateLevel::ForcesOnly),
-                },
-                SubStep::KickHalf { dt, label: "vv_kick" },
-            ],
-        }
-    }
-
-    // rq-9c5226e5 — VV half-kick fragment for the composed post-force
-    // per-particle kernel. The fragment writes velocities (and the
-    // matching `_lo` compensation buffers when lossless mode is
-    // active). The standalone `vv_kick` / `vv_kick_lossless`
-    // entry points are not launched on the JIT path; the runner's
-    // composed-kernel dispatch handles the trailing half-kick.
+impl crate::integrator::PostForcePerParticle for VelocityVerletState {
     fn post_force_per_particle_fragment(
         &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
+    ) -> crate::forces::PerParticleFragment {
         let lossless = self.is_lossless();
         let (entry_point_args, per_thread_body) = if lossless {
             (
@@ -149,12 +129,12 @@ impl Integrator for VelocityVerletState {
                 ),
             )
         };
-        Some(crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
             label: "velocity_verlet",
             helper_source: String::new(),
             entry_point_args,
             per_thread_body,
-        })
+        }
     }
 
     fn bind_post_force_per_particle_args(
@@ -169,7 +149,33 @@ impl Integrator for VelocityVerletState {
             builder.push_device_buffer(&ll.velocities_z_lo);
         }
         builder.push_scalar::<Real>(ctx.dt);
+    }}
+
+impl Integrator for VelocityVerletState {
+    // rq-aa68f468
+    fn plan(&self, dt: Real) -> StepPlan {
+        StepPlan {
+            steps: vec![
+                SubStep::KickDrift { dt, label: "vv_kick_drift" },
+                SubStep::ForceEval {
+                    class: None,
+                    level: Some(crate::forces::AggregateLevel::ForcesOnly),
+                },
+                SubStep::KickHalf { dt, label: "vv_kick" },
+            ],
+        }
     }
+
+    // rq-9c5226e5 — VV half-kick fragment for the composed post-force
+    // per-particle kernel. The fragment writes velocities (and the
+    // matching `_lo` compensation buffers when lossless mode is
+    // active). The standalone `vv_kick` / `vv_kick_lossless`
+    // entry points are not launched on the JIT path; the runner's
+    // composed-kernel dispatch handles the trailing half-kick.
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
+    }
+
 
     // rq-83e752cd
     fn execute(

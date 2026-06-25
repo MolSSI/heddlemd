@@ -774,9 +774,8 @@ successfully.
   `jit-composed-post-force.md`):
   - `MissingPostForcePerParticleFragment { label: &'static str }`
     — a slot in the runner's active configuration returned `None`
-    from `post_force_per_particle_fragment()` when its
-    corresponding configuration is present. Reported from runner
-    construction.
+    from `post_force_per_particle()` when its corresponding
+    configuration is present. Reported from runner construction.
   - `PostForceFragmentCompileFailed { log: String }` — nvrtc
     rejected the composed post-force-per-particle kernel source.
   - `PostForceFragmentLoadFailed(GpuError)` — `load_ptx` rejected
@@ -874,19 +873,37 @@ successfully.
     correct when called on its other SubSteps regardless of
     whether the composed-kernel path is active.
 
-- `Integrator::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline --> <!-- rq-2e33e1b8 -->
-  - Returns the integrator's post-force per-particle source
-    fragment (see `jit-composed-post-force.md`). Default returns
-    `None` (the integrator does not participate). Every built-in
-    integrator overrides to return `Some(_)`; a built-in returning
-    `None` is the `StepError::MissingPostForcePerParticleFragment`
-    rejection at runner construction.
+- `Integrator::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-2e33e1b8 -->
+  - Declares whether the integrator contributes a per-thread update
+    to the JIT-composed post-force per-particle kernel (see
+    `jit-composed-post-force.md`). Returns `Some(self)` from an
+    integrator that implements `PostForcePerParticle`, `None` (the
+    default) otherwise. Every built-in integrator participates; a
+    built-in returning `None` is the
+    `StepError::MissingPostForcePerParticleFragment` rejection at
+    runner construction.
 
-- `Integrator::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline --> <!-- rq-4187d20f -->
-  - Pushes the integrator's per-fragment kernel arguments onto
-    `builder` in the order its fragment's `entry_point_args`
-    declares them. Default panics; integrators that expose a
-    fragment must override.
+- `PostForcePerParticle` — capability trait carrying both an <!-- inline --> <!-- rq-4187d20f -->
+  integrator / thermostat / barostat slot's post-force fragment and
+  its launch-time argument binding, so a slot cannot provide one
+  without the other.
+
+  ```rust
+  pub trait PostForcePerParticle {
+      fn post_force_per_particle_fragment(&self) -> PerParticleFragment;
+      fn bind_post_force_per_particle_args(
+          &self,
+          ctx: &PostForceBindContext<'_>,
+          builder: &mut ForceLaunchBuilder,
+      );
+  }
+  ```
+
+  Neither method has a default. `post_force_per_particle_fragment`
+  returns the per-thread source the composer concatenates at runner
+  construction; `bind_post_force_per_particle_args` pushes the slot's
+  parameters in the order its fragment's `entry_point_args` declares
+  them. See `jit-composed-post-force.md`.
 
 - `Thermostat::apply_pre(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>` <!-- rq-2fe47a86 -->
   - Default implementation returns `Ok(())` without launching any
@@ -910,14 +927,12 @@ successfully.
     per-particle Maxwell-Boltzmann draw + assignment runs from
     the composed kernel.
 
-- `Thermostat::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline --> <!-- rq-b14ac769 -->
-  - Returns the thermostat's post-force per-particle rescale /
-    resample fragment. Default returns `None`; built-in
-    thermostats override.
-
-- `Thermostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline --> <!-- rq-042872ac -->
-  - Pushes the thermostat's per-fragment kernel arguments.
-    Default panics.
+- `Thermostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-b14ac769 -->
+  - Declares the thermostat's per-thread rescale / resample
+    contribution to the composed post-force kernel. Returns
+    `Some(self)` from a thermostat implementing
+    `PostForcePerParticle`, `None` (the default) otherwise. Built-in
+    thermostats participate.
 
 - `Barostat::apply(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, dt: f32, timings: &mut Timings) -> Result<(), BarostatError>` <!-- rq-1179e42f -->
   - Every concrete `Barostat` must implement this method.
@@ -934,13 +949,11 @@ successfully.
     but the per-particle position rescale runs from the composed
     kernel.
 
-- `Barostat::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline --> <!-- rq-cb31286f -->
-  - Returns the barostat's post-force per-particle rescale
-    fragment. Default returns `None`; built-in barostats override.
-
-- `Barostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline --> <!-- rq-9d827201 -->
-  - Pushes the barostat's per-fragment kernel arguments. Default
-    panics.
+- `Barostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-cb31286f -->
+  - Declares the barostat's per-thread rescale contribution to the
+    composed post-force kernel. Returns `Some(self)` from a barostat
+    implementing `PostForcePerParticle`, `None` (the default)
+    otherwise. Built-in barostats participate.
 
 ## Determinism Guarantees <!-- rq-a93a8dc4 -->
 

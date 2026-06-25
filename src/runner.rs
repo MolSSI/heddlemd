@@ -1229,15 +1229,19 @@ pub(crate) fn run_md_phase_inner(
         None;
     let mut post_force_substep_index: Option<usize> = None;
     {
-        let int_frag = integrator.post_force_per_particle_fragment();
+        let int_frag = integrator
+            .post_force_per_particle()
+            .map(|p| p.post_force_per_particle_fragment());
         let therm_active = thermostat.is_some();
         let baro_active = barostat.is_some();
         let therm_frag = thermostat
             .as_ref()
-            .and_then(|t| t.post_force_per_particle_fragment());
+            .and_then(|t| t.post_force_per_particle())
+            .map(|p| p.post_force_per_particle_fragment());
         let baro_frag = barostat
             .as_ref()
-            .and_then(|b| b.post_force_per_particle_fragment());
+            .and_then(|b| b.post_force_per_particle())
+            .map(|p| p.post_force_per_particle_fragment());
         if int_frag.is_none() {
             return Err((
                 RunnerError::MissingPostForcePerParticleFragment {
@@ -2076,11 +2080,14 @@ fn launch_composed_post_force(
         sim_box,
         dt,
     };
-    integrator.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
-    if let Some(t) = thermostat.as_ref() {
+    integrator
+        .post_force_per_particle()
+        .expect("composed post-force kernel implies the integrator participates")
+        .bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+    if let Some(t) = thermostat.as_ref().and_then(|t| t.post_force_per_particle()) {
         t.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
     }
-    if let Some(b) = barostat.as_ref() {
+    if let Some(b) = barostat.as_ref().and_then(|b| b.post_force_per_particle()) {
         b.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
     }
     let n_particles = buffers.particle_count() as u32;

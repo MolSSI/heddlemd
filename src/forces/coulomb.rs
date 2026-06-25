@@ -16,10 +16,10 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
 use super::{
-    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, KernelArgType,
-    KernelArg, KernelArgBinder, KernelArgSchema, PairForceBindContext,
-    PairForceFragment, ForceLaunchBuilder, Potential, PotentialBuildContext,
-    PotentialBuilder, SlotOutputView,
+    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
+    JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
+    PairForceBindContext, PairForceFragment, PairForcePotential, Potential,
+    PotentialBuildContext, PotentialBuilder, SlotOutputView,
 };
 use crate::gpu::K_COULOMB_F32;
 use crate::precision::Real;
@@ -121,6 +121,16 @@ impl Potential for CoulombState {
         Ok(())
     }
 
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::PairForce(self))
+    }
+}
+
+impl PairForcePotential for CoulombState {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        coulomb_pair_force_fragment(self.params.cutoff)
+    }
+
     fn bind_pair_force_args(
         &self,
         _ctx: &PairForceBindContext<'_>,
@@ -190,17 +200,6 @@ impl PotentialBuilder for CoulombBuilder {
 
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
-    }
-
-    fn pair_force_fragment(
-        &self,
-        cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<PairForceFragment>, ForceFieldError> {
-        let Some(coul_cfg) = cx.coulomb_config else {
-            return Ok(None);
-        };
-        let cutoff = coul_cfg.cutoff as Real;
-        Ok(Some(coulomb_pair_force_fragment(cutoff)))
     }
 }
 

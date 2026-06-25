@@ -114,6 +114,40 @@ impl AndersenThermostat {
     }
 }
 
+impl crate::integrator::PostForcePerParticle for AndersenThermostat {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "andersen",
+            helper_source: String::from(ANDERSEN_PHILOX_HELPER_SOURCE),
+            entry_point_args: String::from(
+                "    const unsigned int *andersen_particle_ids,\n\
+                 \x20   unsigned long long *andersen_draw_counter_device,\n\
+                 \x20   unsigned int andersen_seed_lo,\n\
+                 \x20   unsigned int andersen_seed_hi,\n\
+                 \x20   Real andersen_p_collision,\n\
+                 \x20   Real andersen_kt,\n",
+            ),
+            per_thread_body: String::from(ANDERSEN_PER_THREAD_BODY),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&ctx.buffers.particle_ids);
+        builder.push_device_buffer(&self.draw_counter_device);
+        let seed_lo = self.seed as u32;
+        let seed_hi = (self.seed >> 32) as u32;
+        builder.push_scalar::<u32>(seed_lo);
+        builder.push_scalar::<u32>(seed_hi);
+        builder.push_scalar::<Real>(self.cached_p_collision);
+        builder.push_scalar::<Real>(self.kt as Real);
+    }}
+
 impl Thermostat for AndersenThermostat {
     // rq-7a124d43 — Andersen does no scalar-prep work; the per-particle
     // Bernoulli + Maxwell-Boltzmann resample is performed entirely
@@ -169,38 +203,10 @@ impl Thermostat for AndersenThermostat {
     // of the first block increments the device draw counter at the
     // end of the per-thread body so subsequent kernel launches draw
     // a fresh Philox sequence.
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
-        Some(crate::forces::PerParticleFragment {
-            label: "andersen",
-            helper_source: String::from(ANDERSEN_PHILOX_HELPER_SOURCE),
-            entry_point_args: String::from(
-                "    const unsigned int *andersen_particle_ids,\n\
-                 \x20   unsigned long long *andersen_draw_counter_device,\n\
-                 \x20   unsigned int andersen_seed_lo,\n\
-                 \x20   unsigned int andersen_seed_hi,\n\
-                 \x20   Real andersen_p_collision,\n\
-                 \x20   Real andersen_kt,\n",
-            ),
-            per_thread_body: String::from(ANDERSEN_PER_THREAD_BODY),
-        })
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
     }
 
-    fn bind_post_force_per_particle_args(
-        &self,
-        ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&ctx.buffers.particle_ids);
-        builder.push_device_buffer(&self.draw_counter_device);
-        let seed_lo = self.seed as u32;
-        let seed_hi = (self.seed >> 32) as u32;
-        builder.push_scalar::<u32>(seed_lo);
-        builder.push_scalar::<u32>(seed_hi);
-        builder.push_scalar::<Real>(self.cached_p_collision);
-        builder.push_scalar::<Real>(self.kt as Real);
-    }
 }
 
 const ANDERSEN_PHILOX_HELPER_SOURCE: &str = r#"

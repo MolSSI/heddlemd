@@ -10,9 +10,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use cudarc::driver::DeviceSlice;
 use heddle_md::forces::{
-    AggregateLevel, AngleList, Bond, BondList, ExclusionList, ForceClass, ForceField,
-    ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
-    PotentialRegistry, SlotOutputView,
+    AggregateLevel, AngleList, Bond, BondList, CutoffHandling, ExclusionList, ForceClass,
+    ForceField, ForceFieldContext, ForceFieldError, ForceLaunchBuilder, JitParticipant,
+    PairForceBindContext, PairForceFragment, PairForcePotential, Potential, PotentialBuildContext,
+    PotentialBuilder, PotentialRegistry, SlotOutputView,
 };
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{
@@ -267,6 +268,53 @@ impl Potential for StubPotential {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
+
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        if self.class == ForceClass::Fast && self.cutoff.is_some() {
+            Some(JitParticipant::PairForce(self))
+        } else {
+            None
+        }
+    }
+}
+
+impl PairForcePotential for StubPotential {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        // No-op fragment so the stub can stand in as a pair-force slot.
+        // The functor name is `Box::leak`-ed to satisfy the fragment's
+        // 'static lifetime.
+        let functor_struct_name: &'static str =
+            Box::leak(format!("StubFunctor_{}", self.label).into_boxed_str());
+        let functor_source = format!(
+            r#"
+struct {n} {{
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const {{ return R(0.0); }}
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int,
+                                     Real &factor, Real &energy, Real &virial) const {{
+        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+    }}
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
+}};
+"#,
+            n = functor_struct_name
+        );
+        PairForceFragment {
+            label: self.label,
+            functor_struct_name,
+            functor_source,
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+            cutoff: CutoffHandling::PerPair,
+        }
+    }
+
+    fn bind_pair_force_args(
+        &self,
+        _ctx: &PairForceBindContext<'_>,
+        _builder: &mut ForceLaunchBuilder,
+    ) {
+        // No-op functor takes no parameters.
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -326,42 +374,6 @@ impl PotentialBuilder for StubBuilder {
 
     fn displaces(&self) -> &'static [&'static str] {
         self.displaces
-    }
-
-    fn pair_force_fragment(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<heddle_md::forces::PairForceFragment>, ForceFieldError> {
-        // A fast-class slot with a cutoff must expose a fragment under
-        // J1's strict rejection rule; supply a no-op fragment so the
-        // stub can stand in as a pair-force slot in tests. The label
-        // is `Box::leak`-ed to satisfy the fragment's 'static lifetime.
-        if self.class != ForceClass::Fast || self.cutoff.is_none() {
-            return Ok(None);
-        }
-        let functor_struct_name: &'static str =
-            Box::leak(format!("StubFunctor_{}", self.label).into_boxed_str());
-        let functor_source = format!(
-            r#"
-struct {n} {{
-    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const {{ return R(0.0); }}
-    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int,
-                                     Real &factor, Real &energy, Real &virial) const {{
-        factor = R(0.0); energy = R(0.0); virial = R(0.0);
-    }}
-    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
-}};
-"#,
-            n = functor_struct_name
-        );
-        Ok(Some(heddle_md::forces::PairForceFragment {
-            label: self.label,
-            functor_struct_name,
-            functor_source,
-            entry_point_args: String::new(),
-            functor_init_source: String::new(),
-            cutoff: heddle_md::forces::CutoffHandling::PerPair,
-        }))
     }
 }
 
@@ -1257,10 +1269,40 @@ impl Potential for CutoffInspectingPotential {
         Ok(())
     }
 
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::PairForce(self))
+    }
+}
+
+impl PairForcePotential for CutoffInspectingPotential {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        // A minimal no-op fragment that contributes zero force / energy /
+        // virial, letting the test observe the framework's neighbor-list
+        // and JIT-composed-kernel state.
+        PairForceFragment {
+            label: "cutoff_inspector",
+            functor_struct_name: "CutoffInspectorFunctor",
+            functor_source: r#"
+struct CutoffInspectorFunctor {
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const { return R(0.0); }
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int,
+                                     Real &factor, Real &energy, Real &virial) const {
+        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+    }
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const { return R(1.0); }
+};
+"#
+            .to_string(),
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+            cutoff: CutoffHandling::PerPair,
+        }
+    }
+
     fn bind_pair_force_args(
         &self,
-        _ctx: &heddle_md::forces::PairForceBindContext<'_>,
-        _builder: &mut heddle_md::forces::ForceLaunchBuilder,
+        _ctx: &PairForceBindContext<'_>,
+        _builder: &mut ForceLaunchBuilder,
     ) {
         // No-op functor takes no parameters.
     }
@@ -1278,33 +1320,6 @@ impl PotentialBuilder for CutoffInspectingBuilder {
     }
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
-    }
-    fn pair_force_fragment(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<heddle_md::forces::PairForceFragment>, ForceFieldError> {
-        // A minimal no-op fragment that contributes zero force / energy /
-        // virial. Exposed so the slot satisfies J1's strict requirement
-        // that every fast-class pair-force slot expose a fragment, while
-        // still letting the test observe the framework's neighbor-list
-        // and JIT-composed-kernel state.
-        Ok(Some(heddle_md::forces::PairForceFragment {
-            label: "cutoff_inspector",
-            functor_struct_name: "CutoffInspectorFunctor",
-            functor_source: r#"
-struct CutoffInspectorFunctor {
-    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const { return R(0.0); }
-    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int,
-                                     Real &factor, Real &energy, Real &virial) const {
-        factor = R(0.0); energy = R(0.0); virial = R(0.0);
-    }
-    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const { return R(1.0); }
-};
-"#.to_string(),
-            entry_point_args: String::new(),
-            functor_init_source: String::new(),
-            cutoff: heddle_md::forces::CutoffHandling::PerPair,
-        }))
     }
 }
 

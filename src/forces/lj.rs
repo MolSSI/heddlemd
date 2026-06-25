@@ -15,10 +15,10 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
 use super::{
-    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, KernelArgType,
-    KernelArg, KernelArgBinder, KernelArgSchema, PairForceBindContext,
-    PairForceFragment, ForceLaunchBuilder, Potential, PotentialBuildContext,
-    PotentialBuilder, SlotOutputView,
+    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
+    JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
+    PairForceBindContext, PairForceFragment, PairForcePotential, Potential,
+    PotentialBuildContext, PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
 
@@ -32,9 +32,18 @@ pub struct LennardJonesState {
     pub(crate) particle_count: usize,
     pub(crate) max_cutoff: Real,
     pub(crate) max_neighbors: u32,
+    /// `true` when every configured pair-interaction has
+    /// `r_switch == cutoff`, making the switch polynomial unreachable.
+    /// Drives the fragment's evaluate body.
+    pub(crate) switch_degenerate: bool,
+    /// `Some(c)` when every pair-interaction shares cutoff `c`
+    /// (fragment reports `CutoffHandling::Uniform(c)`); `None` for a
+    /// mixed-cutoff table (`CutoffHandling::PerPair`).
+    pub(crate) uniform_cutoff: Option<Real>,
 }
 
 impl LennardJonesState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         gpu: &GpuContext,
         particle_count: usize,
@@ -42,6 +51,8 @@ impl LennardJonesState {
         max_cutoff: Real,
         max_neighbors: u32,
         exclusion_list: &ExclusionList,
+        switch_degenerate: bool,
+        uniform_cutoff: Option<Real>,
     ) -> Result<Self, NeighborListError> {
         let device = gpu.device.clone();
         let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
@@ -52,6 +63,8 @@ impl LennardJonesState {
             particle_count,
             max_cutoff,
             max_neighbors,
+            switch_degenerate,
+            uniform_cutoff,
         })
     }
 
@@ -100,6 +113,16 @@ impl Potential for LennardJonesState {
         )?;
         timings.kernel_stop(KernelStage::LJ_PAIR_FORCE)?;
         Ok(())
+    }
+
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::PairForce(self))
+    }
+}
+
+impl PairForcePotential for LennardJonesState {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        lj_pair_force_fragment(self.switch_degenerate, self.uniform_cutoff)
     }
 
     fn bind_pair_force_args(
@@ -177,28 +200,6 @@ impl PotentialBuilder for LennardJonesBuilder {
             .map(|p| p.cutoff as Real)
             .fold(0.0, Real::max);
         let max_neighbors = super::max_neighbors_from(cx.neighbor_list_config, cx.particle_count);
-        let state = LennardJonesState::new(
-            cx.gpu,
-            cx.particle_count,
-            params,
-            max_cutoff,
-            max_neighbors,
-            cx.exclusion_list,
-        )?;
-        Ok(Some(Box::new(state)))
-    }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
-
-    fn pair_force_fragment(
-        &self,
-        cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<PairForceFragment>, ForceFieldError> {
-        if cx.pair_interactions.is_empty() {
-            return Ok(None);
-        }
         // Inspect the configured pair interactions to decide the
         // fragment's cutoff structure and whether the LJ switching
         // function is degenerate (every entry has r_switch == cutoff).
@@ -216,7 +217,21 @@ impl PotentialBuilder for LennardJonesBuilder {
         } else {
             None
         };
-        Ok(Some(lj_pair_force_fragment(switch_degenerate, uniform_cutoff)))
+        let state = LennardJonesState::new(
+            cx.gpu,
+            cx.particle_count,
+            params,
+            max_cutoff,
+            max_neighbors,
+            cx.exclusion_list,
+            switch_degenerate,
+            uniform_cutoff,
+        )?;
+        Ok(Some(Box::new(state)))
+    }
+
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 

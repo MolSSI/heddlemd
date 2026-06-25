@@ -204,11 +204,12 @@ uses to assemble integrator + thermostat + barostat slots)
 performs the following at construction:
 
 1. Collect the active integrator's, thermostat's (if any), and
-   barostat's (if any) post-force per-particle fragments by
-   calling each slot's `post_force_per_particle_fragment()`
-   method. Reject construction with
-   `StepError::MissingPostForcePerParticleFragment { label }` if
-   any built-in slot returns `None`.
+   barostat's (if any) post-force per-particle fragments by calling
+   each slot's `post_force_per_particle()` accessor and, for each
+   `Some(p)`, reading `p.post_force_per_particle_fragment()`. Reject
+   construction with
+   `StepError::MissingPostForcePerParticleFragment { label }` if any
+   built-in slot returns `None`.
 
 2. Build the composed-kernel source by concatenating:
    1. The integration-shape preamble — the precision shims, PBC
@@ -414,8 +415,8 @@ skipped entirely; the runner's loop reverts to its non-JIT shape.
 
 - `MissingPostForcePerParticleFragment { label: &'static str }` — <!-- rq-88b188d3 -->
   a built-in slot in the runner's active configuration returned
-  `None` from `post_force_per_particle_fragment()`. Reported from
-  runner construction.
+  `None` from `post_force_per_particle()`. Reported from runner
+  construction.
 
 - `PostForceFragmentCompileFailed { log: String }` — nvrtc <!-- rq-9ebdaea4 -->
   rejected the composed source.
@@ -425,31 +426,38 @@ skipped entirely; the runner's loop reverts to its non-JIT shape.
 
 ### Trait methods <!-- rq-ba5e545b -->
 
-`Integrator`, `Thermostat`, and `Barostat` each gain two methods:
+`Integrator`, `Thermostat`, and `Barostat` each carry one accessor
+that declares post-force participation:
 
 ```rust
-fn post_force_per_particle_fragment(&self)
-    -> Option<PerParticleFragment> {
+fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
     None
 }
+```
 
-fn bind_post_force_per_particle_args(
-    &self,
-    ctx: &PostForceBindContext<'_>,
-    builder: &mut ForceLaunchBuilder,
-) {
-    panic!(
-        "post-force fragment is exposed but bind method is not overridden \
-         for slot `<label>`"
+The default returns `None` (the slot does not participate). A slot
+that participates implements the `PostForcePerParticle` capability
+trait (defined in `integration/framework.md`'s *Feature API*) and
+returns `Some(self)`:
+
+```rust
+pub trait PostForcePerParticle {
+    fn post_force_per_particle_fragment(&self) -> PerParticleFragment;
+    fn bind_post_force_per_particle_args(
+        &self,
+        ctx: &PostForceBindContext<'_>,
+        builder: &mut ForceLaunchBuilder,
     );
 }
 ```
 
-Default `post_force_per_particle_fragment` returns `None` (the
-slot does not participate). Default `bind_post_force_per_particle_args`
-panics so a slot that exposes a fragment but omits the bind method
-override surfaces a programmer error rather than producing bad
-launches.
+Neither capability method has a default. Because the fragment and the
+binding live on one trait, a slot that participates supplies both —
+it cannot expose a fragment without a binding, and a non-participating
+slot implements neither. The framework reads `post_force_per_particle()`
+once at runner construction to collect each participant's
+`post_force_per_particle_fragment()`, and calls
+`bind_post_force_per_particle_args` at each launch.
 
 ### Composed-module name and entry point <!-- rq-dd480027 -->
 
@@ -540,9 +548,9 @@ Feature: JIT-composed post-force per-particle kernel
     And the composed kernel is loaded successfully
 
   @rq-dcd0d421
-  Scenario: Construction is rejected when a built-in slot exposes no fragment
+  Scenario: Construction is rejected when a built-in slot does not participate
     Given a SimulationSetup with a custom integrator whose
-      post_force_per_particle_fragment() returns Ok(None)
+      post_force_per_particle() returns None
     When the runner is constructed
     Then it returns Err(StepError::MissingPostForcePerParticleFragment
       { label: <slot's label> })

@@ -282,6 +282,33 @@ impl NoseHooverChainThermostat {
     }
 }
 
+impl crate::integrator::PostForcePerParticle for NoseHooverChainThermostat {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "nose_hoover_chain",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *nhc_factor_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real nhc_factor = nhc_factor_device[0];\n\
+                 \x20       velocities_x[i] *= nhc_factor;\n\
+                 \x20       velocities_y[i] *= nhc_factor;\n\
+                 \x20       velocities_z[i] *= nhc_factor;",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.factor_device);
+    }}
+
 impl Thermostat for NoseHooverChainThermostat {
     // rq-2fe47a86 rq-a9c46f51
     fn apply_pre(
@@ -327,31 +354,10 @@ impl Thermostat for NoseHooverChainThermostat {
         Ok(())
     }
 
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
-        Some(crate::forces::PerParticleFragment {
-            label: "nose_hoover_chain",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *nhc_factor_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real nhc_factor = nhc_factor_device[0];\n\
-                 \x20       velocities_x[i] *= nhc_factor;\n\
-                 \x20       velocities_y[i] *= nhc_factor;\n\
-                 \x20       velocities_z[i] *= nhc_factor;",
-            ),
-        })
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
     }
 
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.factor_device);
-    }
 
     // rq-8a571737
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {

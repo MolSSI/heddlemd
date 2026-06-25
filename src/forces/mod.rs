@@ -107,75 +107,77 @@ pub trait Potential: std::fmt::Debug + Send {
         level: AggregateLevel,
     ) -> Result<(), ForceFieldError>;
 
-    /// Push the slot's parameter buffers and scalars onto the
-    /// JIT-composed pair-force kernel's launch-argument builder, in
-    /// the order the slot's source fragment expects them. The
-    /// framework calls this method on every active fast-class
-    /// pair-force slot in canonical slot order once per composed-kernel
-    /// launch. Default implementation panics so a fast-class pair-force
-    /// slot that omits an override surfaces a programmer error rather
-    /// than silently producing bad launches. See
-    /// `rqm/forces/jit-composed-pair-force.md`.
+    /// Declare whether this slot contributes to a JIT-composed kernel
+    /// and, if so, in which shape. Returns `None` (the default) from a
+    /// slot that runs only through `compute` (the slow-class SPME
+    /// reciprocal slot, and any slot not JIT-composed). A participating
+    /// slot returns `Some(JitParticipant::PairForce(self))`,
+    /// `Some(JitParticipant::Bonded(self))`, or
+    /// `Some(JitParticipant::Angle(self))`, implementing the matching
+    /// capability trait. Because the return is a single enum, a slot
+    /// participates in at most one shape by construction. See
+    /// `rqm/forces/jit-composed-pair-force.md` and
+    /// `rqm/forces/jit-composed-intramolecular.md`.
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        None
+    }
+}
+
+// rq-8571bd3e
+/// Single-shape tag a slot returns from [`Potential::jit_participant`]
+/// to declare its JIT-composed contribution. Each variant borrows the
+/// slot itself as the matching capability trait object.
+pub enum JitParticipant<'a> {
+    PairForce(&'a dyn PairForcePotential),
+    Bonded(&'a dyn BondedPotential),
+    Angle(&'a dyn AnglePotential),
+}
+
+// rq-e533174d
+/// Capability trait a pair-force slot implements to contribute to the
+/// JIT-composed pair-force kernel. Carries both the slot's source
+/// fragment and its launch-time argument binding, so a slot cannot
+/// provide one without the other.
+pub trait PairForcePotential {
+    /// The slot's CUDA source fragment, computed from the build inputs
+    /// at construction. Collected once per participant at
+    /// `ForceField::new`.
+    fn pair_force_fragment(&self) -> PairForceFragment;
+
+    /// Push the slot's parameter buffers and scalars onto `builder`
+    /// through a `KernelArgBinder` over the slot's schema, in the order
+    /// the fragment's `entry_point_args` declares them.
     fn bind_pair_force_args(
         &self,
-        _ctx: &PairForceBindContext<'_>,
-        _builder: &mut ForceLaunchBuilder,
-    ) {
-        panic!(
-            "Potential::bind_pair_force_args must be overridden for fast-class \
-             pair-force slot `{}`",
-            self.label()
-        );
-    }
+        ctx: &PairForceBindContext<'_>,
+        builder: &mut ForceLaunchBuilder,
+    );
+}
 
-    /// Push the slot's parameter buffers and scalars onto the
-    /// JIT-composed bonded module's launch-argument builder, in the
-    /// order the slot's bonded fragment expects them. Default panics;
-    /// fast-class bonded slots must override. See
-    /// `rqm/forces/jit-composed-intramolecular.md`.
+// rq-d7ddc1ac
+/// Capability trait a bonded slot implements, carrying the slot's
+/// fragment, its per-bond scratch view, and its argument binding.
+pub trait BondedPotential {
+    fn bonded_force_fragment(&self) -> BondedForceFragment;
+    fn bonded_scratch(&self) -> BondedScratchView<'_>;
     fn bind_bonded_force_args(
         &self,
-        _ctx: &ForceLaunchContext<'_>,
-        _builder: &mut ForceLaunchBuilder,
-    ) {
-        panic!(
-            "Potential::bind_bonded_force_args must be overridden for fast-class \
-             bonded slot `{}`",
-            self.label()
-        );
-    }
+        ctx: &ForceLaunchContext<'_>,
+        builder: &mut ForceLaunchBuilder,
+    );
+}
 
-    /// Return a read-only view of the slot's bonded scratch buffers
-    /// (bond list, per-bond contribution buffers, bond count) so the
-    /// framework can wire them into the composed-bonded-kernel launch.
-    /// Default returns `None`; fast-class bonded slots override.
-    fn bonded_scratch(&self) -> Option<BondedScratchView<'_>> {
-        None
-    }
-
-    /// Return a read-only view of the slot's angle scratch buffers
-    /// for the composed-angle-kernel launch. Default returns `None`;
-    /// fast-class angle slots override.
-    fn angle_scratch(&self) -> Option<AngleScratchView<'_>> {
-        None
-    }
-
-    /// Push the slot's parameter buffers and scalars onto the
-    /// JIT-composed angle module's launch-argument builder, in the
-    /// order the slot's angle fragment expects them. Default panics;
-    /// fast-class angle slots must override. See
-    /// `rqm/forces/jit-composed-intramolecular.md`.
+// rq-da327920
+/// Capability trait an angle slot implements, carrying the slot's
+/// fragment, its per-angle scratch view, and its argument binding.
+pub trait AnglePotential {
+    fn angle_force_fragment(&self) -> AngleForceFragment;
+    fn angle_scratch(&self) -> AngleScratchView<'_>;
     fn bind_angle_force_args(
         &self,
-        _ctx: &ForceLaunchContext<'_>,
-        _builder: &mut ForceLaunchBuilder,
-    ) {
-        panic!(
-            "Potential::bind_angle_force_args must be overridden for fast-class \
-             angle slot `{}`",
-            self.label()
-        );
-    }
+        ctx: &ForceLaunchContext<'_>,
+        builder: &mut ForceLaunchBuilder,
+    );
 }
 
 // rq-304b191b
@@ -210,26 +212,6 @@ pub enum ForceFieldError {
         label: &'static str,
         by: Vec<&'static str>,
     },
-    #[error(
-        "fast-class pair-force slot `{label}` did not expose a CUDA source fragment \
-         via PotentialBuilder::pair_force_fragment"
-    )]
-    MissingPairForceFragment { label: &'static str },
-    #[error(
-        "fast-class bonded slot `{label}` did not expose a CUDA source fragment \
-         via PotentialBuilder::bonded_force_fragment"
-    )]
-    MissingBondedFragment { label: &'static str },
-    #[error(
-        "fast-class angle slot `{label}` did not expose a CUDA source fragment \
-         via PotentialBuilder::angle_force_fragment"
-    )]
-    MissingAngleFragment { label: &'static str },
-    #[error(
-        "slot `{label}` returned Some(_) from more than one of \
-         PotentialBuilder::pair_force_fragment, bonded_force_fragment, angle_force_fragment"
-    )]
-    SlotMultipleShapes { label: &'static str },
     #[error("JIT-composed kernel failed to compile: {log}")]
     FragmentCompileFailed { log: String },
     #[error("JIT-composed kernel failed to load: {0}")]
@@ -265,42 +247,6 @@ pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
 
     fn displaces(&self) -> &'static [&'static str] {
         &[]
-    }
-
-    /// Return the slot's CUDA source fragment for the JIT-composed
-    /// pair-force kernel. The framework calls this on every registered
-    /// builder during `ForceField::new` after `build` has returned
-    /// `Ok(Some(slot))` and displacement resolution has determined the
-    /// slot survives. Default returns `Ok(None)`, meaning the builder
-    /// does not participate. Every builder whose `build` returns a
-    /// slot with `frequency_class() == Fast` and `max_cutoff() ==
-    /// Some(_)` must override this to return `Ok(Some(fragment))`. See
-    /// `rqm/forces/jit-composed-pair-force.md`.
-    fn pair_force_fragment(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<PairForceFragment>, ForceFieldError> {
-        Ok(None)
-    }
-
-    /// Return the slot's CUDA source fragment for the JIT-composed
-    /// bonded module. Default returns `Ok(None)`; built-in bonded
-    /// builders override. See `rqm/forces/jit-composed-intramolecular.md`.
-    fn bonded_force_fragment(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<BondedForceFragment>, ForceFieldError> {
-        Ok(None)
-    }
-
-    /// Return the slot's CUDA source fragment for the JIT-composed
-    /// angle module. Default returns `Ok(None)`; built-in angle
-    /// builders override. See `rqm/forces/jit-composed-intramolecular.md`.
-    fn angle_force_fragment(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<AngleForceFragment>, ForceFieldError> {
-        Ok(None)
     }
 }
 
@@ -475,43 +421,15 @@ impl ForceField {
             neighbor_list_config,
         };
 
-        // For each surviving builder, collect: (slot, displaces,
-        // pair fragment, bonded fragment, angle fragment). A
-        // single builder may return Some(_) from at most one of the
-        // three fragment methods.
-        type BuilderEntry = (
-            Box<dyn Potential>,
-            &'static [&'static str],
-            Option<PairForceFragment>,
-            Option<BondedForceFragment>,
-            Option<AngleForceFragment>,
-        );
+        // For each surviving builder, collect: (slot, displaces). Each
+        // slot declares its own JIT participation and carries its own
+        // fragment via `Potential::jit_participant`; the builder no
+        // longer produces fragments.
+        type BuilderEntry = (Box<dyn Potential>, &'static [&'static str]);
         let mut built: Vec<BuilderEntry> = Vec::new();
         for builder in &registry.builders {
             if let Some(slot) = builder.build(&cx)? {
-                let pair_fragment = builder.pair_force_fragment(&cx)?;
-                let bonded_fragment = builder.bonded_force_fragment(&cx)?;
-                let angle_fragment = builder.angle_force_fragment(&cx)?;
-                let count = [
-                    pair_fragment.is_some(),
-                    bonded_fragment.is_some(),
-                    angle_fragment.is_some(),
-                ]
-                .iter()
-                .filter(|x| **x)
-                .count();
-                if count > 1 {
-                    return Err(ForceFieldError::SlotMultipleShapes {
-                        label: slot.label(),
-                    });
-                }
-                built.push((
-                    slot,
-                    builder.displaces(),
-                    pair_fragment,
-                    bonded_fragment,
-                    angle_fragment,
-                ));
+                built.push((slot, builder.displaces()));
             }
         }
 
@@ -527,10 +445,10 @@ impl ForceField {
         // some other built slot carries, error on multi-claim conflicts,
         // and drop displaced constituents.
         let built_labels: Vec<&'static str> =
-            built.iter().map(|(slot, _, _, _, _)| slot.label()).collect();
+            built.iter().map(|(slot, _)| slot.label()).collect();
         let mut claimers_per_label: std::collections::HashMap<&'static str, Vec<&'static str>> =
             std::collections::HashMap::new();
-        for (slot, displaces, _, _, _) in &built {
+        for (slot, displaces) in &built {
             for &target in *displaces {
                 if built_labels.contains(&target) {
                     claimers_per_label
@@ -551,19 +469,12 @@ impl ForceField {
         let displaced: std::collections::HashSet<&'static str> =
             claimers_per_label.keys().copied().collect();
         let mut slots: Vec<Box<dyn Potential>> = Vec::new();
-        let mut pair_frags_in_slot_order: Vec<Option<PairForceFragment>> = Vec::new();
-        let mut bonded_frags_in_slot_order: Vec<Option<BondedForceFragment>> = Vec::new();
-        let mut angle_frags_in_slot_order: Vec<Option<AngleForceFragment>> = Vec::new();
-        for (slot, _, pair_f, bonded_f, angle_f) in built.into_iter() {
+        for (slot, _) in built.into_iter() {
             if displaced.contains(slot.label()) {
                 continue;
             }
             slots.push(slot);
-            pair_frags_in_slot_order.push(pair_f);
-            bonded_frags_in_slot_order.push(bonded_f);
-            angle_frags_in_slot_order.push(angle_f);
         }
-        let fragments_in_slot_order = pair_frags_in_slot_order;
 
         // Count slots per class; each class's accumulators are sized
         // particle_count regardless of slot count.
@@ -625,28 +536,33 @@ impl ForceField {
             None
         };
 
-        // JIT compose the fast-class pair-force kernel from the
-        // surviving fragments. Every fast-class slot with a cutoff
-        // must have supplied a fragment; reject construction
-        // otherwise. See `rqm/forces/jit-composed-pair-force.md`.
+        // Collect each shape's participants from `jit_participant`. A
+        // slot's single `JitParticipant` variant determines its shape
+        // and carries its fragment + binding; a slot that returns `None`
+        // is not JIT-composed and runs via `compute`. See
+        // `rqm/forces/jit-composed-pair-force.md` and
+        // `rqm/forces/jit-composed-intramolecular.md`.
         let mut jit_fragments: Vec<PairForceFragment> = Vec::new();
         let mut jit_slot_indices: Vec<usize> = Vec::new();
+        let mut jit_bonded_fragments: Vec<BondedForceFragment> = Vec::new();
+        let mut jit_bonded_slot_indices: Vec<usize> = Vec::new();
+        let mut jit_angle_fragments: Vec<AngleForceFragment> = Vec::new();
+        let mut jit_angle_slot_indices: Vec<usize> = Vec::new();
         for (idx, slot) in slots.iter().enumerate() {
-            let is_pair_force = slot.frequency_class() == ForceClass::Fast
-                && slot.max_cutoff().is_some();
-            if !is_pair_force {
-                continue;
-            }
-            match &fragments_in_slot_order[idx] {
-                Some(fragment) => {
-                    jit_fragments.push(fragment.clone());
+            match slot.jit_participant() {
+                Some(JitParticipant::PairForce(p)) => {
+                    jit_fragments.push(p.pair_force_fragment());
                     jit_slot_indices.push(idx);
                 }
-                None => {
-                    return Err(ForceFieldError::MissingPairForceFragment {
-                        label: slot.label(),
-                    });
+                Some(JitParticipant::Bonded(b)) => {
+                    jit_bonded_fragments.push(b.bonded_force_fragment());
+                    jit_bonded_slot_indices.push(idx);
                 }
+                Some(JitParticipant::Angle(a)) => {
+                    jit_angle_fragments.push(a.angle_force_fragment());
+                    jit_angle_slot_indices.push(idx);
+                }
+                None => {}
             }
         }
         let jit_composed = if jit_fragments.is_empty() {
@@ -674,17 +590,6 @@ impl ForceField {
 
         // JIT compose the fast-class bonded module.
         // See `rqm/forces/jit-composed-intramolecular.md`.
-        let mut jit_bonded_fragments: Vec<BondedForceFragment> = Vec::new();
-        let mut jit_bonded_slot_indices: Vec<usize> = Vec::new();
-        for (idx, fragment_opt) in bonded_frags_in_slot_order.iter().enumerate() {
-            if slots[idx].frequency_class() != ForceClass::Fast {
-                continue;
-            }
-            if let Some(fragment) = fragment_opt {
-                jit_bonded_fragments.push(fragment.clone());
-                jit_bonded_slot_indices.push(idx);
-            }
-        }
         let jit_composed_bonded = if jit_bonded_fragments.is_empty() {
             None
         } else {
@@ -695,17 +600,6 @@ impl ForceField {
         };
 
         // JIT compose the fast-class angle module.
-        let mut jit_angle_fragments: Vec<AngleForceFragment> = Vec::new();
-        let mut jit_angle_slot_indices: Vec<usize> = Vec::new();
-        for (idx, fragment_opt) in angle_frags_in_slot_order.iter().enumerate() {
-            if slots[idx].frequency_class() != ForceClass::Fast {
-                continue;
-            }
-            if let Some(fragment) = fragment_opt {
-                jit_angle_fragments.push(fragment.clone());
-                jit_angle_slot_indices.push(idx);
-            }
-        }
         let jit_composed_angle = if jit_angle_fragments.is_empty() {
             None
         } else {
@@ -773,6 +667,34 @@ impl ForceField {
         })
     }
 
+    /// The pair-force capability of the slot at `idx`. The index comes
+    /// from `jit_slot_indices`, which `ForceField::new` populates only
+    /// with pair-force participants, so the match is exhaustive in
+    /// practice.
+    fn pair_force_participant(&self, idx: usize) -> &dyn PairForcePotential {
+        match self.slots[idx].jit_participant() {
+            Some(JitParticipant::PairForce(p)) => p,
+            _ => unreachable!("jit_slot_indices holds only pair-force participants"),
+        }
+    }
+
+    /// The bonded capability of the slot at `idx` (from
+    /// `jit_bonded_slot_indices`).
+    fn bonded_participant(&self, idx: usize) -> &dyn BondedPotential {
+        match self.slots[idx].jit_participant() {
+            Some(JitParticipant::Bonded(b)) => b,
+            _ => unreachable!("jit_bonded_slot_indices holds only bonded participants"),
+        }
+    }
+
+    /// The angle capability of the slot at `idx` (from
+    /// `jit_angle_slot_indices`).
+    fn angle_participant(&self, idx: usize) -> &dyn AnglePotential {
+        match self.slots[idx].jit_participant() {
+            Some(JitParticipant::Angle(a)) => a,
+            _ => unreachable!("jit_angle_slot_indices holds only angle participants"),
+        }
+    }
 
     // rq-3579df3b
     pub fn step(
@@ -1043,7 +965,8 @@ impl ForceField {
             launch_builder.push_device_buffer(&self.fast_total_virials_fp);
             // Per-fragment args in canonical slot order.
             for &slot_idx in &self.jit_slot_indices {
-                self.slots[slot_idx].bind_pair_force_args(&bind_ctx, &mut launch_builder);
+                self.pair_force_participant(slot_idx)
+                    .bind_pair_force_args(&bind_ctx, &mut launch_builder);
             }
             // Trailing `n` arg.
             launch_builder.push_scalar(n as u32);
@@ -1087,7 +1010,7 @@ impl ForceField {
                         .push_device_buffer(&self.fast_total_potential_energies_fp);
                     single_pair_builder.push_device_buffer(&self.fast_total_virials_fp);
                     for &slot_idx in &self.jit_slot_indices {
-                        self.slots[slot_idx]
+                        self.pair_force_participant(slot_idx)
                             .bind_pair_force_args(&bind_ctx, &mut single_pair_builder);
                     }
                     single_pair_builder.push_scalar(n as u32);
@@ -1119,7 +1042,7 @@ impl ForceField {
                 correction_builder.push_device_buffer(&self.fast_total_virials_fp);
                 // Per-fragment args in canonical slot order.
                 for &slot_idx in &self.jit_slot_indices {
-                    self.slots[slot_idx]
+                    self.pair_force_participant(slot_idx)
                         .bind_pair_force_args(&bind_ctx, &mut correction_builder);
                 }
                 correction_builder.push_scalar(n as u32);
@@ -1183,9 +1106,7 @@ impl ForceField {
                 sim_box,
             };
             for (entry_idx, &slot_idx) in self.jit_bonded_slot_indices.iter().enumerate() {
-                let scratch = self.slots[slot_idx]
-                    .bonded_scratch()
-                    .expect("bonded slot exposes bonded_scratch");
+                let scratch = self.bonded_participant(slot_idx).bonded_scratch();
                 if scratch.bond_count == 0 {
                     continue;
                 }
@@ -1200,7 +1121,8 @@ impl ForceField {
                     launch_builder.push_device_buffer(scratch.bond_pair_energy);
                     launch_builder.push_device_buffer(scratch.bond_pair_virial);
                 }
-                self.slots[slot_idx].bind_bonded_force_args(&bind_ctx, &mut launch_builder);
+                self.bonded_participant(slot_idx)
+                    .bind_bonded_force_args(&bind_ctx, &mut launch_builder);
                 launch_builder.push_scalar(scratch.bond_count as u32);
                 unsafe {
                     bonded_jit.launch_slot(
@@ -1230,9 +1152,7 @@ impl ForceField {
                 sim_box,
             };
             for (entry_idx, &slot_idx) in self.jit_angle_slot_indices.iter().enumerate() {
-                let scratch = self.slots[slot_idx]
-                    .angle_scratch()
-                    .expect("angle slot exposes angle_scratch");
+                let scratch = self.angle_participant(slot_idx).angle_scratch();
                 if scratch.angle_count == 0 {
                     continue;
                 }
@@ -1247,7 +1167,8 @@ impl ForceField {
                     launch_builder.push_device_buffer(scratch.angle_triple_energy);
                     launch_builder.push_device_buffer(scratch.angle_triple_virial);
                 }
-                self.slots[slot_idx].bind_angle_force_args(&bind_ctx, &mut launch_builder);
+                self.angle_participant(slot_idx)
+                    .bind_angle_force_args(&bind_ctx, &mut launch_builder);
                 launch_builder.push_scalar(scratch.angle_count as u32);
                 unsafe {
                     angle_jit.launch_slot(

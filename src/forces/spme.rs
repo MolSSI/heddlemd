@@ -27,10 +27,10 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::{alloc_scan_block_totals, NeighborListError};
 use super::{
-    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, KernelArgType,
-    KernelArg, KernelArgBinder, KernelArgSchema, PairForceBindContext,
-    PairForceFragment, ForceLaunchBuilder, Potential, PotentialBuildContext,
-    PotentialBuilder, SlotOutputView,
+    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
+    JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
+    PairForceBindContext, PairForceFragment, PairForcePotential, Potential,
+    PotentialBuildContext, PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
 
@@ -668,6 +668,16 @@ impl Potential for SpmeRealSpaceState {
         Ok(())
     }
 
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::PairForce(self))
+    }
+}
+
+impl PairForcePotential for SpmeRealSpaceState {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        spme_real_pair_force_fragment(self.r_cut_real)
+    }
+
     fn bind_pair_force_args(
         &self,
         _ctx: &PairForceBindContext<'_>,
@@ -970,17 +980,6 @@ impl PotentialBuilder for SpmeRealBuilder {
 
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
-    }
-
-    fn pair_force_fragment(
-        &self,
-        cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<PairForceFragment>, ForceFieldError> {
-        let Some(spme_cfg) = cx.spme_config else {
-            return Ok(None);
-        };
-        let r_cut_real = spme_cfg.r_cut_real as Real;
-        Ok(Some(spme_real_pair_force_fragment(r_cut_real)))
     }
 }
 

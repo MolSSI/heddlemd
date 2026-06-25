@@ -107,6 +107,33 @@ impl BerendsenThermostat {
     }
 }
 
+impl crate::integrator::PostForcePerParticle for BerendsenThermostat {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "berendsen",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *berendsen_factor_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real berendsen_factor = berendsen_factor_device[0];\n\
+                 \x20       velocities_x[i] *= berendsen_factor;\n\
+                 \x20       velocities_y[i] *= berendsen_factor;\n\
+                 \x20       velocities_z[i] *= berendsen_factor;",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.factor_device);
+    }}
+
 impl Thermostat for BerendsenThermostat {
     // rq-7a124d43
     fn apply_post(
@@ -149,31 +176,10 @@ impl Thermostat for BerendsenThermostat {
             .map_err(ThermostatError::from)
     }
 
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
-        Some(crate::forces::PerParticleFragment {
-            label: "berendsen",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *berendsen_factor_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real berendsen_factor = berendsen_factor_device[0];\n\
-                 \x20       velocities_x[i] *= berendsen_factor;\n\
-                 \x20       velocities_y[i] *= berendsen_factor;\n\
-                 \x20       velocities_z[i] *= berendsen_factor;",
-            ),
-        })
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
     }
 
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.factor_device);
-    }
 
     // rq-c908bbf1
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {

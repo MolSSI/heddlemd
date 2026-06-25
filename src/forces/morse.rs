@@ -14,9 +14,10 @@ use crate::timings::{KernelStage, Timings};
 
 use super::topology::BondList;
 use super::{
-    AggregateLevel, BondedForceFragment, BondedScratchView, ForceFieldError, ForceLaunchBuilder,
-    ForceLaunchContext, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType, Potential,
-    PotentialBuildContext, PotentialBuilder, SlotOutputView,
+    AggregateLevel, BondedForceFragment, BondedPotential, BondedScratchView, ForceFieldError,
+    ForceLaunchBuilder, ForceLaunchContext, JitParticipant, KernelArg, KernelArgBinder,
+    KernelArgSchema, KernelArgType, Potential, PotentialBuildContext, PotentialBuilder,
+    SlotOutputView,
 };
 use crate::precision::Real;
 
@@ -158,6 +159,28 @@ impl Potential for MorseBondedState {
         Ok(())
     }
 
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::Bonded(self))
+    }
+}
+
+impl BondedPotential for MorseBondedState {
+    fn bonded_force_fragment(&self) -> BondedForceFragment {
+        morse_bonded_force_fragment()
+    }
+
+    fn bonded_scratch(&self) -> BondedScratchView<'_> {
+        BondedScratchView {
+            bonds: &self.bonds,
+            bond_pair_x: &self.bond_pair_x,
+            bond_pair_y: &self.bond_pair_y,
+            bond_pair_z: &self.bond_pair_z,
+            bond_pair_energy: &self.bond_pair_energy,
+            bond_pair_virial: &self.bond_pair_virial,
+            bond_count: self.bond_count,
+        }
+    }
+
     fn bind_bonded_force_args(
         &self,
         _ctx: &ForceLaunchContext<'_>,
@@ -172,18 +195,6 @@ impl Potential for MorseBondedState {
         b.buffer("morse_bond_a", &self.bond_a);
         b.buffer("morse_bond_re", &self.bond_re);
         b.finish();
-    }
-
-    fn bonded_scratch(&self) -> Option<BondedScratchView<'_>> {
-        Some(BondedScratchView {
-            bonds: &self.bonds,
-            bond_pair_x: &self.bond_pair_x,
-            bond_pair_y: &self.bond_pair_y,
-            bond_pair_z: &self.bond_pair_z,
-            bond_pair_energy: &self.bond_pair_energy,
-            bond_pair_virial: &self.bond_pair_virial,
-            bond_count: self.bond_count,
-        })
     }
 }
 
@@ -247,16 +258,6 @@ impl PotentialBuilder for MorseBondedBuilder {
 
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
-    }
-
-    fn bonded_force_fragment(
-        &self,
-        cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<BondedForceFragment>, ForceFieldError> {
-        if cx.bond_list.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(morse_bonded_force_fragment()))
     }
 }
 

@@ -167,6 +167,35 @@ impl CRescaleBarostat {
     }
 }
 
+impl crate::integrator::PostForcePerParticle for CRescaleBarostat {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "c_rescale_barostat",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *c_rescale_mu_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real c_rescale_mu = c_rescale_mu_device[0];\n\
+                 \x20       Real4 pq = posq[i];\n\
+                 \x20       pq.x *= c_rescale_mu;\n\
+                 \x20       pq.y *= c_rescale_mu;\n\
+                 \x20       pq.z *= c_rescale_mu;\n\
+                 \x20       posq[i] = pq;",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.mu_device);
+    }}
+
 impl Barostat for CRescaleBarostat {
     // rq-1179e42f rq-2b405d23
     fn apply(
@@ -230,33 +259,10 @@ impl Barostat for CRescaleBarostat {
     // for the JIT-composed post-force kernel. `apply` still computes
     // µ via `c_rescale_compute_mu`; the composed kernel reads
     // `mu_device` and applies the rescale to positions.
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
-        Some(crate::forces::PerParticleFragment {
-            label: "c_rescale_barostat",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *c_rescale_mu_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real c_rescale_mu = c_rescale_mu_device[0];\n\
-                 \x20       Real4 pq = posq[i];\n\
-                 \x20       pq.x *= c_rescale_mu;\n\
-                 \x20       pq.y *= c_rescale_mu;\n\
-                 \x20       pq.z *= c_rescale_mu;\n\
-                 \x20       posq[i] = pq;",
-            ),
-        })
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
     }
 
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.mu_device);
-    }
 
     fn flush_pending_injection(
         &mut self,

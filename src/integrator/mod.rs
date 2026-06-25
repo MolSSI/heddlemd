@@ -200,6 +200,23 @@ impl StepPlan {
     }
 }
 
+// rq-4187d20f
+/// Capability trait carrying both an integrator / thermostat / barostat
+/// slot's post-force per-particle fragment and its launch-time argument
+/// binding, so a slot cannot provide one without the other. A slot that
+/// participates returns `Some(self)` from its trait's
+/// `post_force_per_particle` accessor. See
+/// `rqm/integration/jit-composed-post-force.md`.
+pub trait PostForcePerParticle {
+    fn post_force_per_particle_fragment(&self) -> crate::forces::PerParticleFragment;
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    );
+}
+
 // rq-78f484d9
 pub trait Integrator: std::fmt::Debug + Send {
     /// Return the ordered sequence of sub-steps that constitute one
@@ -232,31 +249,16 @@ pub trait Integrator: std::fmt::Debug + Send {
         Vec::new()
     }
 
-    /// Return the integrator's post-force per-particle source fragment
-    /// for the JIT-composed post-force per-particle kernel (see
-    /// `rqm/integration/jit-composed-post-force.md`). Every built-in
-    /// integrator overrides; a built-in returning `None` is the
-    /// `StepError::MissingPostForcePerParticleFragment` rejection at
-    /// runner construction.
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
+    /// Declare whether this integrator contributes a per-thread update
+    /// to the JIT-composed post-force per-particle kernel. Returns
+    /// `Some(self)` from an integrator that implements
+    /// `PostForcePerParticle`, `None` (the default) otherwise. Every
+    /// built-in integrator participates; a built-in returning `None` is
+    /// the `StepError::MissingPostForcePerParticleFragment` rejection at
+    /// runner construction. See
+    /// `rqm/integration/jit-composed-post-force.md`.
+    fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
         None
-    }
-
-    /// Push the integrator's per-fragment kernel arguments onto
-    /// `builder` in the order its fragment's `entry_point_args`
-    /// declares them. Default panics; integrators that expose a
-    /// fragment must override.
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        _builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        panic!(
-            "Integrator::bind_post_force_per_particle_args must be overridden \
-             when post_force_per_particle_fragment returns Some(_)"
-        );
     }
 
     /// Returns the SubStep index in `plan(dt)` whose work is dispatched
@@ -864,28 +866,14 @@ pub trait Thermostat: std::fmt::Debug + Send {
         Vec::new()
     }
 
-    /// Return the thermostat's post-force per-particle source fragment
-    /// for the JIT-composed post-force per-particle kernel (see
-    /// `rqm/integration/jit-composed-post-force.md`). Built-in
-    /// thermostats override.
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
+    /// Declare whether this thermostat contributes a per-thread rescale
+    /// / resample to the JIT-composed post-force per-particle kernel.
+    /// Returns `Some(self)` from a thermostat that implements
+    /// `PostForcePerParticle`, `None` (the default) otherwise. Built-in
+    /// thermostats participate. See
+    /// `rqm/integration/jit-composed-post-force.md`.
+    fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
         None
-    }
-
-    /// Push the thermostat's per-fragment kernel arguments onto
-    /// `builder`. Default panics; thermostats that expose a fragment
-    /// must override.
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        _builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        panic!(
-            "Thermostat::bind_post_force_per_particle_args must be overridden \
-             when post_force_per_particle_fragment returns Some(_)"
-        );
     }
 
 }
@@ -1023,28 +1011,14 @@ pub trait Barostat: std::fmt::Debug + Send {
         Vec::new()
     }
 
-    /// Return the barostat's post-force per-particle source fragment
-    /// for the JIT-composed post-force per-particle kernel (see
-    /// `rqm/integration/jit-composed-post-force.md`). Built-in
-    /// barostats override.
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
+    /// Declare whether this barostat contributes a per-thread rescale
+    /// to the JIT-composed post-force per-particle kernel. Returns
+    /// `Some(self)` from a barostat that implements
+    /// `PostForcePerParticle`, `None` (the default) otherwise. Built-in
+    /// barostats participate. See
+    /// `rqm/integration/jit-composed-post-force.md`.
+    fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
         None
-    }
-
-    /// Push the barostat's per-fragment kernel arguments onto
-    /// `builder`. Default panics; barostats that expose a fragment
-    /// must override.
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        _builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        panic!(
-            "Barostat::bind_post_force_per_particle_args must be overridden \
-             when post_force_per_particle_fragment returns Some(_)"
-        );
     }
 
 }

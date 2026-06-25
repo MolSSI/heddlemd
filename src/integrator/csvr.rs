@@ -156,6 +156,33 @@ impl CsvrThermostat {
     }
 }
 
+impl crate::integrator::PostForcePerParticle for CsvrThermostat {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "csvr",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *csvr_factor_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real csvr_factor = csvr_factor_device[0];\n\
+                 \x20       velocities_x[i] *= csvr_factor;\n\
+                 \x20       velocities_y[i] *= csvr_factor;\n\
+                 \x20       velocities_z[i] *= csvr_factor;",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.factor_device);
+    }}
+
 impl Thermostat for CsvrThermostat {
     // rq-7a124d43
     fn apply_post(
@@ -216,31 +243,10 @@ impl Thermostat for CsvrThermostat {
     // (`csvr_sample_and_factor`) still runs as part of `apply_post`
     // and produces `factor_device`; the composed kernel reads that
     // device-resident scalar in this fragment's per-thread body.
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> Option<crate::forces::PerParticleFragment> {
-        Some(crate::forces::PerParticleFragment {
-            label: "csvr",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *csvr_factor_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real csvr_factor = csvr_factor_device[0];\n\
-                 \x20       velocities_x[i] *= csvr_factor;\n\
-                 \x20       velocities_y[i] *= csvr_factor;\n\
-                 \x20       velocities_z[i] *= csvr_factor;",
-            ),
-        })
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
     }
 
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.factor_device);
-    }
 
     fn flush_pending_injection(
         &mut self,
