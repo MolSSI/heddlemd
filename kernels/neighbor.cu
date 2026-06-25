@@ -801,9 +801,12 @@ extern "C" __global__ void histogram_entries_by_iblock(
 // range via `atomicAdd(&iblock_cursor[b], 1) + iblock_offset[b]`, then
 // copies the 32 packed j-atom IDs into sorted_interacting_atoms.
 // One warp per entry: lane k copies interacting_atoms[e*32+k] into
-// the destination row. The sort is unstable; force-kernel
-// determinism is preserved by exact integer fixed-point summation,
-// which is associative regardless of the within-i-block ordering.
+// the destination row. The within-i-block entry order is unstable
+// (atomic-claimed slots below). Force-kernel determinism does not
+// depend on it: the pair kernel folds each i-atom's per-entry
+// contributions into a warp-resident i64 fixed-point accumulator,
+// and integer addition is associative regardless of entry order.
+// See rqm/forces/jit-composed-pair-force.md (rq-693544f8).
 extern "C" __global__ void scatter_entries_by_iblock(
     const unsigned int *interacting_tiles,      // length = entry_count
     const unsigned int *interacting_atoms,      // length = entry_count * 32

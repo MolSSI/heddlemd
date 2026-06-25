@@ -11642,7 +11642,12 @@
     "decl": "## Composed-Kernel Structure",
     "file": "forces/jit-composed-pair-force",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Composed-Kernel Structure",
     "type": "section"
   },

@@ -258,22 +258,40 @@ The lane:
    equality (multiplying any finite value by `0.0f` yields `+0.0f`
    in IEEE-754, and subsequent adds with `+0.0f` are identity).
 7. The lane forms `(fx, fy, fz) = factor * (dx, dy, dz)` and adds
-   to per-lane `i_*` accumulators; it also subtracts `(fx, fy, fz)`
-   from per-lane `j_*` accumulators (Newton's 3rd, both directions
-   computed inside the same iteration). The `_fev` variant
-   additionally adds `energy` and `virial` to per-scalar
-   accumulators on both sides.
+   them to per-lane, per-entry `i_*` accumulators; it also subtracts
+   `(fx, fy, fz)` from per-lane, per-entry `j_*` accumulators
+   (Newton's 3rd, both directions computed inside the same
+   iteration). The `_fev` variant additionally adds `energy` and
+   `virial` to per-scalar accumulators on both sides.
 
-After the 32-iteration diagonal-shuffle inner loop, the per-lane
-`i_*` and `j_*` accumulators are atomicAdded — in fixed-point — to
-the per-class fixed-point buffers
+The per-entry accumulators are floating-point and are summed over
+the entry's fixed 32-iteration diagonal-shuffle order, which is
+deterministic. They reach the per-class fixed-point buffers
 (`fast_total_forces_fp_x/y/z` and, for `_fev`,
-`fast_total_potential_energies_fp` and
-`fast_total_virials_fp`). Integer addition is associative, so the
-per-atom sum is bit-exact across runs regardless of which warps
-contributed in what order. The conversion to `Real` happens once
-per step in a separate finalisation kernel; see
-`packed-neighbour-pair-force.md`.
+`fast_total_potential_energies_fp` and `fast_total_virials_fp`) by
+two routes:
+
+- **j-side.** At the end of each entry the per-lane `j_*` float sum
+  is converted to fixed-point and atomicAdded to the j-atom's slot —
+  one atomic per (entry, lane). The j-atoms differ every entry, so
+  the j-side cannot be staged.
+- **i-side.** Each entry's per-lane `i_*` float sum is converted to
+  fixed-point and added into a **warp-resident i64 accumulator that
+  persists across every entry the warp processes**; that accumulator
+  is reduced through a block shared-memory i64 accumulator and
+  atomicAdded to the i-atom's slot once per (i-block, i-atom). A
+  warp's tile entries arrive in a non-deterministic, atomic-built
+  order (see `packed-neighbour-pair-force.md`); because the
+  cross-entry accumulation is i64 integer addition, which is
+  associative, the per-atom sum is **bit-exact across runs
+  regardless of entry order**. A floating-point i-side accumulator
+  across entries would make the result depend on that order and
+  break run-to-run reproducibility.
+
+Integer addition is also associative across warps, so cross-warp
+contributions combine bit-exactly regardless of order. The
+conversion to `Real` happens once per step in a separate
+finalisation kernel; see `packed-neighbour-pair-force.md`.
 
 When zero fast-class pair-force slots are active, the framework does
 not compose or load a composed kernel and does not launch one at

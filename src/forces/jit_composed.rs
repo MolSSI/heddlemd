@@ -1311,9 +1311,13 @@ __device__ static inline void heddle_jit_outer_loop(
   // Per-warp register accumulator persists across every entry this
   // warp processes — this is the register-staging optimization that
   // collapses one i-side global atomic per (entry, lane) down to one
-  // per (warp, lane).
-  Real warp_i_fx = R(0.0), warp_i_fy = R(0.0), warp_i_fz = R(0.0);
-  Real warp_i_e  = R(0.0), warp_i_w  = R(0.0);
+  // per (warp, lane). The accumulators are i64 fixed-point: a warp's
+  // tile entries arrive in a non-deterministic (atomic-built) order, and
+  // integer addition is associative, so the per-i-atom total is bit-exact
+  // across runs. Float accumulation here would make the sum depend on
+  // entry order and break run-to-run reproducibility. rq-693544f8
+  unsigned long long warp_i_fx = 0u, warp_i_fy = 0u, warp_i_fz = 0u;
+  unsigned long long warp_i_e  = 0u, warp_i_w  = 0u;
 
   __syncthreads();
 
@@ -1353,6 +1357,12 @@ __device__ static inline void heddle_jit_outer_loop(
     // j-atoms each time).
     Real j_fx = R(0.0), j_fy = R(0.0), j_fz = R(0.0);
     Real j_e  = R(0.0), j_w  = R(0.0);
+    // Per-entry i-side accumulator (float). Summed over this entry's
+    // fixed 32-rotation order — deterministic — then converted to
+    // fixed-point once per entry and folded into the i64 warp
+    // accumulator. One conversion per entry (not per pair). rq-693544f8
+    Real ei_fx = R(0.0), ei_fy = R(0.0), ei_fz = R(0.0);
+    Real ei_e  = R(0.0), ei_w  = R(0.0);
 
     for (unsigned int t = 0u; t < 32u; ++t) {
       if (i_valid && j_valid && i_atom_id != j_atom_id) {
@@ -1391,18 +1401,20 @@ __device__ static inline void heddle_jit_outer_loop(
         Real fx = factor * dx;
         Real fy = factor * dy;
         Real fz = factor * dz;
-        warp_i_fx += fx;  warp_i_fy += fy;  warp_i_fz += fz;
+        // Both sides accumulate in float within the entry (fixed
+        // 32-rotation order, deterministic). The i-side per-entry sum is
+        // converted to fixed-point once after the loop; the j-side is
+        // flushed per entry.
+        ei_fx += fx;  ei_fy += fy;  ei_fz += fz;
         if (!self_block) {
           j_fx -= fx;  j_fy -= fy;  j_fz -= fz;
         }
         if (WriteEv) {
           Real he = energy * R(0.5);
           Real hw = virial * R(0.5);
-          if (self_block) {
-            warp_i_e += he;  warp_i_w += hw;
-          } else {
-            warp_i_e += he;  j_e += he;
-            warp_i_w += hw;  j_w += hw;
+          ei_e += he;  ei_w += hw;
+          if (!self_block) {
+            j_e += he;  j_w += hw;
           }
         }
       }
@@ -1420,6 +1432,19 @@ __device__ static inline void heddle_jit_outer_loop(
       if (WriteEv) {
         j_e = __shfl_sync(0xFFFFFFFFu, j_e, src_lane);
         j_w = __shfl_sync(0xFFFFFFFFu, j_w, src_lane);
+      }
+    }
+
+    // Fold this entry's float i-side sum into the i64 warp accumulator —
+    // one fixed-point conversion per entry. The cross-entry sum is i64
+    // (associative), so it is bit-exact regardless of entry order.
+    if (i_valid) {
+      warp_i_fx += (unsigned long long) heddle_jit_real_to_fixed(ei_fx);
+      warp_i_fy += (unsigned long long) heddle_jit_real_to_fixed(ei_fy);
+      warp_i_fz += (unsigned long long) heddle_jit_real_to_fixed(ei_fz);
+      if (WriteEv) {
+        warp_i_e += (unsigned long long) heddle_jit_real_to_fixed(ei_e);
+        warp_i_w += (unsigned long long) heddle_jit_real_to_fixed(ei_w);
       }
     }
 
@@ -1442,22 +1467,13 @@ __device__ static inline void heddle_jit_outer_loop(
   // and integer addition is associative — ordering across warps is
   // irrelevant to the final value.
   if (i_valid) {
-    unsigned long long delta_fx =
-        (unsigned long long) heddle_jit_real_to_fixed(warp_i_fx);
-    unsigned long long delta_fy =
-        (unsigned long long) heddle_jit_real_to_fixed(warp_i_fy);
-    unsigned long long delta_fz =
-        (unsigned long long) heddle_jit_real_to_fixed(warp_i_fz);
-    atomicAdd(&shared_fx[lane], delta_fx);
-    atomicAdd(&shared_fy[lane], delta_fy);
-    atomicAdd(&shared_fz[lane], delta_fz);
+    // warp_i_* are already i64 fixed-point — add them straight in.
+    atomicAdd(&shared_fx[lane], warp_i_fx);
+    atomicAdd(&shared_fy[lane], warp_i_fy);
+    atomicAdd(&shared_fz[lane], warp_i_fz);
     if (WriteEv) {
-      unsigned long long delta_e =
-          (unsigned long long) heddle_jit_real_to_fixed(warp_i_e);
-      unsigned long long delta_w =
-          (unsigned long long) heddle_jit_real_to_fixed(warp_i_w);
-      atomicAdd(&shared_e[lane], delta_e);
-      atomicAdd(&shared_w[lane], delta_w);
+      atomicAdd(&shared_e[lane], warp_i_e);
+      atomicAdd(&shared_w[lane], warp_i_w);
     }
   }
   __syncthreads();
