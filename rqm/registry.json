@@ -10611,7 +10611,24 @@
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/csvr",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/csvr.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/integrators_csvr.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },

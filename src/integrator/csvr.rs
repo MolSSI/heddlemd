@@ -79,6 +79,11 @@ pub struct CsvrThermostat {
     /// observes the post-increment counter from the previous replay
     /// and draws a distinct Philox sequence.
     draw_counter_device: CudaSlice<u64>,
+    /// Per-block partial sums of `Σ xi_i²` for the multi-block CSVR
+    /// sample (length `CSVR_PARTIAL_BLOCKS`). Written by
+    /// `csvr_sample_partials` and reduced by `csvr_finish_from_partials`
+    /// when `g_dof` exceeds the single-block threshold. rq-5f59fa80
+    csvr_partials: CudaSlice<f64>,
 }
 
 impl CsvrThermostat {
@@ -101,6 +106,10 @@ impl CsvrThermostat {
             gpu.device.alloc_zeros::<f64>(1).map_err(GpuError::from)?;
         let draw_counter_device =
             gpu.device.alloc_zeros::<u64>(1).map_err(GpuError::from)?;
+        let csvr_partials = gpu
+            .device
+            .alloc_zeros::<f64>(crate::gpu::CSVR_PARTIAL_BLOCKS as usize)
+            .map_err(GpuError::from)?;
         Ok(CsvrThermostat {
             temperature,
             tau,
@@ -113,6 +122,7 @@ impl CsvrThermostat {
             factor_device,
             cumulative_injection_delta,
             draw_counter_device,
+            csvr_partials,
         })
     }
 
@@ -182,6 +192,7 @@ impl Thermostat for CsvrThermostat {
             &mut self.factor_device,
             &mut self.cumulative_injection_delta,
             &mut self.draw_counter_device,
+            &mut self.csvr_partials,
             self.seed,
             self.g_dof,
             c,

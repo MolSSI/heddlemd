@@ -245,6 +245,53 @@ fn csvr_apply_post_launches_expected_kernels() {
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
 }
 
+// rq-5f59fa80
+// Multi-block CSVR path (g_dof > SINGLE_BLOCK_CSVR_MAX = 8192): the
+// parallel draw + deterministic two-pass reduction must produce a
+// byte-identical rescale factor across two independent runs with
+// identical inputs.
+#[test]
+fn csvr_multi_block_sample_is_deterministic() {
+    let gpu = init_device().unwrap();
+    let n = 4000usize; // g_dof = 3n - 3 = 11997 > 8192 -> multi-block
+    let mass = 1.0 as Real;
+    // Non-zero velocities so k_old > 0 and the factor depends on the
+    // sampled s = Σ xi².
+    let vx: Vec<Real> = (0..n).map(|i| 0.001 + (i as Real) * 1.0e-7).collect();
+    let make_state = || {
+        ParticleState::new(
+            vec![0.0; n],
+            vec![0.0; n],
+            vec![0.0; n],
+            vx.clone(),
+            vec![0.002 as Real; n],
+            vec![0.003 as Real; n],
+            vec![mass; n],
+            vec![0.0; n],
+            vec![0u32; n],
+            None,
+            None,
+        )
+        .unwrap()
+    };
+    let dt = (1.0e-15 / TIME_F) as Real;
+    let run = || -> u32 {
+        let state = make_state();
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut timings = Timings::new(&gpu).unwrap();
+        let mut therm = unbox_csvr(build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 7)));
+        therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
+        let f = gpu.device.dtoh_sync_copy(&therm.factor_device).unwrap();
+        f[0].to_bits()
+    };
+    let a = run();
+    let b = run();
+    assert_eq!(
+        a, b,
+        "multi-block CSVR factor must be byte-identical across runs"
+    );
+}
+
 // rq-a2454a72
 #[test]
 fn csvr_apply_post_empty_state_is_noop() {

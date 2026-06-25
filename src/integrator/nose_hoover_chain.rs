@@ -458,6 +458,9 @@ pub struct NoseHooverKernels {
     pub rescale_velocities: CudaFunction,
     pub rescale_velocities_device_factor: CudaFunction,
     pub csvr_sample_and_factor: CudaFunction,
+    // rq-5f59fa80
+    pub csvr_sample_partials: CudaFunction,
+    pub csvr_finish_from_partials: CudaFunction,
     pub berendsen_compute_factor: CudaFunction,
     pub increment_u64: CudaFunction,
 }
@@ -473,6 +476,8 @@ impl NoseHooverKernels {
                 "rescale_velocities",
                 "rescale_velocities_device_factor",
                 "csvr_sample_and_factor",
+                "csvr_sample_partials",
+                "csvr_finish_from_partials",
                 "berendsen_compute_factor",
                 "increment_u64",
             ],
@@ -491,6 +496,12 @@ impl NoseHooverKernels {
                 "rescale_velocities_device_factor",
             )?,
             csvr_sample_and_factor: get_func(device, "nose_hoover", "csvr_sample_and_factor")?,
+            csvr_sample_partials: get_func(device, "nose_hoover", "csvr_sample_partials")?,
+            csvr_finish_from_partials: get_func(
+                device,
+                "nose_hoover",
+                "csvr_finish_from_partials",
+            )?,
             berendsen_compute_factor: get_func(
                 device,
                 "nose_hoover",

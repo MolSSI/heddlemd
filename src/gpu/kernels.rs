@@ -1280,12 +1280,25 @@ pub fn berendsen_compute_factor(
 /// `(k_new - k_old)` into `cumulative_injection_delta[0]`. Single
 /// 256-thread block; no host sync required.
 #[allow(clippy::too_many_arguments)]
+// rq-5f59fa80
+// Number of blocks (and the `csvr_partials` buffer length) for the
+// multi-block CSVR sample. Fixed so the launch dims are graph-capturable
+// and the deterministic block→chunk mapping is stable run-to-run.
+pub const CSVR_PARTIAL_BLOCKS: u32 = 1024;
+// At or below this `g_dof` the single-block `csvr_sample_and_factor`
+// kernel is used (preserving exact values for small-system fixtures);
+// above it, the deterministic two-pass multi-block path parallelises the
+// `g_dof - 1` Gaussian draws across the whole device.
+const SINGLE_BLOCK_CSVR_MAX: u32 = 8192;
+
+// rq-5f59fa80
 pub fn csvr_sample_and_factor(
     particle_buffers: &ParticleBuffers,
     k_old: &CudaSlice<Real>,
     factor_out: &mut CudaSlice<Real>,
     cumulative_injection_delta: &mut CudaSlice<f64>,
     draw_counter_device: &mut CudaSlice<u64>,
+    csvr_partials: &mut CudaSlice<f64>,
     seed: u64,
     g_dof: u32,
     c: f64,
@@ -1299,35 +1312,81 @@ pub fn csvr_sample_and_factor(
     debug_assert_eq!(factor_out.len(), 1);
     debug_assert_eq!(cumulative_injection_delta.len(), 1);
     debug_assert_eq!(draw_counter_device.len(), 1);
-    let func = particle_buffers
-        .kernels
-        .nose_hoover
-        .csvr_sample_and_factor
-        .clone();
-    let cfg = LaunchConfig {
+    let kernels = &particle_buffers.kernels.nose_hoover;
+    let seed_lo = seed as u32;
+    let seed_hi = (seed >> 32) as u32;
+
+    if g_dof <= SINGLE_BLOCK_CSVR_MAX {
+        let func = kernels.csvr_sample_and_factor.clone();
+        let cfg = LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            func.launch(
+                cfg,
+                (
+                    k_old,
+                    &mut *factor_out,
+                    &mut *cumulative_injection_delta,
+                    &mut *draw_counter_device,
+                    seed_lo,
+                    seed_hi,
+                    g_dof,
+                    c,
+                    one_minus_c,
+                    k_target_over_nf,
+                ),
+            )
+            .map_err(GpuError::from)?;
+        }
+        return Ok(());
+    }
+
+    // Multi-block: pass 1 draws + sums the partials, pass 2 reduces them
+    // and performs the scalar finish.
+    debug_assert_eq!(csvr_partials.len(), CSVR_PARTIAL_BLOCKS as usize);
+    let part_func = kernels.csvr_sample_partials.clone();
+    let cfg1 = LaunchConfig {
+        grid_dim: (CSVR_PARTIAL_BLOCKS, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        part_func
+            .launch(
+                cfg1,
+                (&*draw_counter_device, &mut *csvr_partials, seed_lo, seed_hi, g_dof),
+            )
+            .map_err(GpuError::from)?;
+    }
+
+    let finish_func = kernels.csvr_finish_from_partials.clone();
+    let cfg2 = LaunchConfig {
         grid_dim: (1, 1, 1),
         block_dim: (256, 1, 1),
         shared_mem_bytes: 0,
     };
-    let seed_lo = seed as u32;
-    let seed_hi = (seed >> 32) as u32;
     unsafe {
-        func.launch(
-            cfg,
-            (
-                k_old,
-                &mut *factor_out,
-                &mut *cumulative_injection_delta,
-                &mut *draw_counter_device,
-                seed_lo,
-                seed_hi,
-                g_dof,
-                c,
-                one_minus_c,
-                k_target_over_nf,
-            ),
-        )
-        .map_err(GpuError::from)?;
+        finish_func
+            .launch(
+                cfg2,
+                (
+                    k_old,
+                    &mut *factor_out,
+                    &mut *cumulative_injection_delta,
+                    &mut *draw_counter_device,
+                    &*csvr_partials,
+                    CSVR_PARTIAL_BLOCKS,
+                    seed_lo,
+                    seed_hi,
+                    c,
+                    one_minus_c,
+                    k_target_over_nf,
+                ),
+            )
+            .map_err(GpuError::from)?;
     }
     Ok(())
 }

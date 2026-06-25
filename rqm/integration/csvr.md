@@ -97,7 +97,7 @@ kernel (see `jit-composed-post-force.md`).
 | Order | Step               | Kernel / call                                    | Operation                                       | Stage label                  |
 | ----- | ------------------ | ------------------------------------------------ | ----------------------------------------------- | ---------------------------- |
 | 1     | KE reduce          | `kinetic_energy_reduce`                          | one f32 scalar of `K`                           | `KineticEnergyReduce`        |
-| 2     | Sample + factor    | `csvr_sample_and_factor`                         | device-side Philox draws + `α` to `factor_device` | `CsvrSampleAndFactor`        |
+| 2     | Sample + factor    | `csvr_sample_and_factor` (small `N_f`) or `csvr_sample_partials` + `csvr_finish_from_partials` (large `N_f`) | device Philox draws + chi-squared sum + `α` to `factor_device` | `CsvrSampleAndFactor`        |
 | 3     | Velocity rescale   | composed post-force per-particle kernel          | `v ← α · v` per particle                        | `JitComposedPostForce`       |
 
 The first two kernels run inside `apply_post`; the third runs from
@@ -108,12 +108,34 @@ participation through its source fragment. The standalone
 particle rescale body lives in CSVR's source fragment described
 below.
 
-The host-side work each invocation is `N_f` Philox-4×32-10
-invocations + a chi-squared sum + the `α` calculation; for `N_f` of
-order 10³ this is < 10 µs on a modern CPU. The integrator's own
-kernels (`vv_kick_drift`, `vv_kick`, the force pipeline) are launched
-separately by `integrator.step()` and are not part of this slot's
-per-step sequence.
+The integrator's own kernels (`vv_kick_drift`, `vv_kick`, the force
+pipeline) are launched separately by `integrator.step()` and are not part
+of this slot's per-step sequence.
+
+**Computing the chi-squared sum `S`.** The `N_f − 1` Gaussian draws and
+their squared sum `S` are the dominant per-step cost at production sizes
+(`N_f` of order 10⁵–10⁶). The sample is dispatched on `N_f`:
+
+- `N_f ≤ 8192`: a single 256-thread block (`csvr_sample_and_factor`)
+  draws every `ξ_i`, reduces `S`, and performs the scalar finish (draw
+  `R`, form `K_new`, write `α`, advance the draw counter).
+- `N_f > 8192`: a **deterministic two-pass** decomposition that
+  parallelises the draw across the whole device. `csvr_sample_partials`
+  launches a fixed 1024 blocks, each owning a contiguous chunk of the
+  `N_f − 1` draw indices and writing its partial `Σ ξ_i²` to one slot of
+  a length-1024 buffer; `csvr_finish_from_partials` (single block)
+  reduces those partials to `S` and performs the scalar finish.
+
+Determinism holds for the multi-block path: `ξ_i = philox(seed, counter,
+i, 0)` depends only on the index `i`, the block→chunk mapping is fixed by
+`(N_f, 1024)`, and both reductions are fixed-shape, so two runs on the
+same GPU produce a byte-identical `S` and `α`. The multi-block summation
+order differs from the single-block kernel, so the `8192` threshold sits
+above every test fixture, leaving their values unchanged. Both kernels
+have constant launch dimensions and are CUDA-graph-capturable; the draw
+counter is read in the partials pass and read-then-incremented once in
+the finish pass, so graph replays advance the Philox sequence exactly as
+the single-block kernel does.
 
 ## Parameters <!-- rq-a8da85cf -->
 

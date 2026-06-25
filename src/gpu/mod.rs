@@ -16,7 +16,7 @@ pub use graph::{
     end_stream_capture,
 };
 pub use kernels::{
-    K_COULOMB_F32, LennardJonesParameterTable, SPATIAL_HASH_SCAN_BLOCK_SIZE,
+    CSVR_PARTIAL_BLOCKS, K_COULOMB_F32, LennardJonesParameterTable, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     andersen_resample, berendsen_compute_factor, berendsen_compute_mu,
     c_rescale_compute_mu, combine_class_totals,
     compute_block_bbox,
