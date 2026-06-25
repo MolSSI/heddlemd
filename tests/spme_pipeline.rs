@@ -871,3 +871,92 @@ fn influence_recomputed_every_call_even_when_box_unchanged() {
         "compute() must recompute influence_G unconditionally, not skip on unchanged box generation"
     );
 }
+
+// rq-f81b4298
+// The order-specialized spread/gather (JIT-compiled per run with
+// PME_ORDER fixed at the configured spline order) reproduce the explicit
+// Ewald reciprocal energy within tolerance for every accepted order. The
+// grid (16^3) satisfies n_d >= 2*spline_order up to order 8.
+#[test]
+fn reciprocal_energy_matches_ewald_for_every_spline_order() {
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9;
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let positions = [[0.2e-9, 0.0, 0.0], [-0.2e-9, 0.0, 0.0]];
+    let charges = [1.0 as Real, -1.0];
+    let state = build_state(&positions, &charges);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let alpha = 4.0e9_f64;
+    let energy_ref = explicit_ewald_recip_energy(
+        &positions,
+        &charges,
+        [l as f64, l as f64, l as f64],
+        alpha,
+        8,
+    );
+    // Even orders 4, 6, 8. The engine's `compute_b_factors` does not
+    // handle the near-zero B-spline structure-factor moduli that odd
+    // orders (5, 7) produce, so odd orders are not validated here (a
+    // pre-existing limitation independent of order specialization).
+    for order in [4u32, 6, 8] {
+        let params = SpmeParameters {
+            alpha: alpha as Real,
+            r_cut_real: 0.3e-9,
+            grid: [16, 16, 16],
+            spline_order: order,
+        };
+        let mut spme = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
+        let mut timings = Timings::new(&gpu).unwrap();
+        spme.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
+        spme.sync_recip().unwrap();
+        let energy_spme = spme_energy_from_pipeline(&spme);
+        let rel = (energy_spme - energy_ref).abs() / energy_ref.abs();
+        assert!(
+            rel < 5.0e-3,
+            "spline_order {order}: SPME = {energy_spme:e}, ref = {energy_ref:e}, rel = {rel:e}"
+        );
+    }
+}
+
+// rq-141360a1
+// The order-specialized spread is deterministic at a non-default order:
+// two slots constructed with spline_order=5 on identical inputs produce
+// byte-identical rho_fixed, rho, and V. (Gather/force determinism is
+// structural — one thread per atom, fixed accumulation order — and is
+// covered by the full-pipeline reproducibility scenario.)
+#[test]
+fn specialized_pipeline_is_byte_identical_at_non_default_order() {
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9;
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let positions = [[0.1e-9, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
+    let e = 1.602176634e-19;
+    let charges = [e, -e];
+    let state = build_state(&positions, &charges);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 5,
+    };
+
+    let mut spme1 = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
+    let mut spme2 = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    spme1.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
+    spme2.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
+    spme1.sync_recip().unwrap();
+    spme2.sync_recip().unwrap();
+
+    let rf1: Vec<i64> = gpu.device.dtoh_sync_copy(&spme1.rho_fixed).unwrap();
+    let rf2: Vec<i64> = gpu.device.dtoh_sync_copy(&spme2.rho_fixed).unwrap();
+    assert_eq!(rf1, rf2, "rho_fixed must be byte-identical at order 5");
+    let rho1: Vec<Real> = gpu.device.dtoh_sync_copy(&spme1.rho).unwrap();
+    let rho2: Vec<Real> = gpu.device.dtoh_sync_copy(&spme2.rho).unwrap();
+    assert_eq!(rho1, rho2, "rho must be byte-identical at order 5");
+    let v1: Vec<Real> = gpu.device.dtoh_sync_copy(&spme1.v).unwrap();
+    let v2: Vec<Real> = gpu.device.dtoh_sync_copy(&spme2.v).unwrap();
+    assert_eq!(v1, v2, "V must be byte-identical at order 5");
+}

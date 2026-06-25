@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, DevicePtrMut, DeviceSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::nvrtc::{CompileOptions, Ptx, compile_ptx_with_opts};
 
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::device::get_func;
@@ -68,6 +68,9 @@ pub enum SpmeError {
     },
     #[error("{0}")]
     Gpu(#[from] GpuError),
+    // rq-ebfa6e1f
+    #[error("SPME order-specialized kernel compilation failed:\n{0}")]
+    KernelCompilation(String),
 }
 
 /// PR 1 scope: owns the FFT grid buffers, cuFFT plans, precomputed
@@ -146,6 +149,85 @@ pub struct SpmeReciprocalGrid {
     /// sort. The slot re-runs the sort pipeline when the framework
     /// reports a generation strictly greater than this value.
     pub cached_neighbor_list_generation: u64,
+    /// Order-specialized charge-spread kernel, NVRTC-compiled at
+    /// construction with `PME_ORDER` fixed at the configured spline
+    /// order (see *Compile-time spline-order specialization*).
+    pub jit_spread: CudaFunction,
+    /// Order-specialized force-gather kernel, NVRTC-compiled alongside
+    /// `jit_spread`.
+    pub jit_gather: CudaFunction,
+}
+
+// rq-94bfcb7e
+//
+// NVRTC-compile the charge-spread and force-gather kernels specialized
+// to `spline_order` (supplied as the compile-time constant `PME_ORDER`).
+// The translation unit is self-contained: the project `precision.cuh`
+// and `pbc.cuh` preambles are concatenated with their `#include` lines
+// stripped (so NVRTC needs no filesystem), followed by the
+// order-specialized kernel source. Returns the two device functions.
+// Assemble the self-contained NVRTC translation unit for the
+// order-specialized spread/gather: PME_ORDER define, then the project
+// `precision.cuh` and `pbc.cuh` preambles with their `#include` lines
+// stripped (NVRTC has no filesystem), then the kernel source.
+pub(crate) fn assemble_spme_jit_source(spline_order: u32) -> String {
+    let precision =
+        include_str!("../../kernels/precision.cuh").replace("#include <math_constants.h>", "");
+    let pbc = include_str!("../../kernels/pbc.cuh").replace("#include \"precision.cuh\"", "");
+    let kernels_src = include_str!("../../kernels/spme_spread_gather.cuh");
+    format!("#define PME_ORDER {spline_order}\n{precision}\n{pbc}\n{kernels_src}")
+}
+
+// NVRTC-compile an assembled SPME source to PTX, with the device's
+// compute architecture and the build's precision define. A compile
+// failure is surfaced as `SpmeError::KernelCompilation` carrying the log.
+pub(crate) fn compile_spme_ptx(
+    device: &Arc<CudaDevice>,
+    source: &str,
+) -> Result<Ptx, SpmeError> {
+    let mut options = vec!["--std=c++17".to_string()];
+    if let Some(a) = crate::forces::jit_composed::detect_arch_option(device) {
+        options.push(a);
+    }
+    #[cfg(feature = "f64")]
+    options.push("--define-macro=REAL_F64".to_string());
+    let opts = CompileOptions {
+        options,
+        ..Default::default()
+    };
+    compile_ptx_with_opts(source, opts).map_err(|e| {
+        let log = match e {
+            cudarc::nvrtc::CompileError::CompileError { ref log, .. } => log
+                .to_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| format!("{e:?}")),
+            _ => format!("{e:?}"),
+        };
+        SpmeError::KernelCompilation(log)
+    })
+}
+
+fn compile_order_specialized_kernels(
+    device: &Arc<CudaDevice>,
+    spline_order: u32,
+) -> Result<(CudaFunction, CudaFunction), SpmeError> {
+    let ptx = compile_spme_ptx(device, &assemble_spme_jit_source(spline_order))?;
+
+    // Unique module name per compile so independent slots never collide
+    // in the device's module registry.
+    static MODULE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = MODULE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let module = format!("spme_jit_{id}");
+    device
+        .load_ptx(
+            ptx,
+            &module,
+            &["spme_spread_fixed_point", "spme_force_gather"],
+        )
+        .map_err(GpuError::from)?;
+    let spread = get_func(device, &module, "spme_spread_fixed_point")?;
+    let gather = get_func(device, &module, "spme_force_gather")?;
+    Ok((spread, gather))
 }
 
 impl SpmeReciprocalGrid {
@@ -275,6 +357,12 @@ impl SpmeReciprocalGrid {
             m_complex as u32,
         )?;
 
+        // Order-specialized charge-spread and force-gather kernels,
+        // NVRTC-compiled once with PME_ORDER fixed at the configured
+        // spline order. rq-94bfcb7e
+        let (jit_spread, jit_gather) =
+            compile_order_specialized_kernels(&device, params.spline_order)?;
+
         Ok(SpmeReciprocalGrid {
             device,
             params,
@@ -301,6 +389,8 @@ impl SpmeReciprocalGrid {
             sorted_atom_index,
             sort_scan_block_totals,
             cached_neighbor_list_generation: 0,
+            jit_spread,
+            jit_gather,
         })
     }
 
@@ -381,6 +471,7 @@ impl SpmeReciprocalGrid {
             .map_err(GpuError::from)?;
         if self.particle_count > 0 {
             crate::gpu::spme_spread_fixed_point(
+                &self.jit_spread,
                 particle_buffers,
                 &self.sorted_atom_index,
                 sim_box,
@@ -779,6 +870,7 @@ impl Potential for SpmeReciprocalState {
 
         timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
         spme_force_gather(
+            &self.grid.jit_gather,
             buffers,
             &self.grid.sorted_atom_index,
             sim_box,
@@ -813,6 +905,9 @@ fn map_spme_err(e: SpmeError) -> ForceFieldError {
         SpmeError::InvalidGrid { axis, n, required } => panic!(
             "SPME step encountered invalid grid (axis {axis}, n {n}, required {required})"
         ),
+        SpmeError::KernelCompilation(log) => {
+            panic!("SPME step encountered kernel-compilation error: {log}")
+        }
     }
 }
 
@@ -912,13 +1007,14 @@ impl SpmeRealKernels {
 pub struct SpmeRecipKernels {
     pub spme_recip_compute_influence: CudaFunction,
     pub spme_compute_bin_key: CudaFunction,
-    pub spme_spread_fixed_point: CudaFunction,
     pub spme_spread_finish: CudaFunction,
     pub spme_recip_apply_influence: CudaFunction,
     pub spme_recip_reduce_partials: CudaFunction,
-    pub spme_force_gather: CudaFunction,
 }
 
+// The charge-spread and force-gather kernels are not loaded here: they
+// are NVRTC-compiled per run, specialized to the configured spline
+// order (see *Compile-time spline-order specialization*). rq-94bfcb7e
 impl SpmeRecipKernels {
     pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
         device.load_ptx(
@@ -927,11 +1023,9 @@ impl SpmeRecipKernels {
             &[
                 "spme_recip_compute_influence",
                 "spme_compute_bin_key",
-                "spme_spread_fixed_point",
                 "spme_spread_finish",
                 "spme_recip_apply_influence",
                 "spme_recip_reduce_partials",
-                "spme_force_gather",
             ],
         )?;
         Ok(SpmeRecipKernels {
@@ -941,7 +1035,6 @@ impl SpmeRecipKernels {
                 "spme_recip_compute_influence",
             )?,
             spme_compute_bin_key: get_func(device, "spme_recip", "spme_compute_bin_key")?,
-            spme_spread_fixed_point: get_func(device, "spme_recip", "spme_spread_fixed_point")?,
             spme_spread_finish: get_func(device, "spme_recip", "spme_spread_finish")?,
             spme_recip_apply_influence: get_func(
                 device,
@@ -953,7 +1046,44 @@ impl SpmeRecipKernels {
                 "spme_recip",
                 "spme_recip_reduce_partials",
             )?,
-            spme_force_gather: get_func(device, "spme_recip", "spme_force_gather")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod order_specialization_tests {
+    use super::{assemble_spme_jit_source, compile_spme_ptx, SpmeError};
+
+    // rq-3cfebff3
+    // The order-specialized kernels must be register-resident: with
+    // PME_ORDER a compile-time constant the support loops unroll and the
+    // per-axis B-spline arrays are not spilled to local memory. NVRTC
+    // emits a `__local_depot` only when a function carries a local-memory
+    // stack frame, so its absence in the compiled PTX is the assertion.
+    #[test]
+    fn order_specialized_kernels_use_no_local_memory() {
+        let gpu = crate::gpu::init_device().unwrap();
+        let ptx = compile_spme_ptx(&gpu.device, &assemble_spme_jit_source(4))
+            .expect("order-4 SPME module compiles");
+        let src = ptx.to_src();
+        assert!(
+            !src.contains("__local_depot"),
+            "specialized spread/gather must have no local-memory stack frame"
+        );
+    }
+
+    // rq-7fb4b760
+    // An NVRTC compilation failure surfaces as SpmeError::KernelCompilation
+    // carrying a non-empty log.
+    #[test]
+    fn nvrtc_failure_surfaces_as_kernel_compilation() {
+        let gpu = crate::gpu::init_device().unwrap();
+        let bad = "extern \"C\" __global__ void k() { this is not valid cuda ; }";
+        match compile_spme_ptx(&gpu.device, bad) {
+            Err(SpmeError::KernelCompilation(log)) => {
+                assert!(!log.is_empty(), "compilation log must be non-empty")
+            }
+            other => panic!("expected KernelCompilation, got {other:?}"),
+        }
     }
 }

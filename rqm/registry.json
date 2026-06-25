@@ -2515,6 +2515,18 @@
     "title": "NeighborListState",
     "type": "api-item"
   },
+  "rq-141360a1": {
+    "decl": "Scenario: Specialized pipeline is byte-identical across two runs at a non-default order",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Specialized pipeline is byte-identical across two runs at a non-default order",
+    "type": "scenario"
+  },
   "rq-142f60e8": {
     "decl": "## Feature API",
     "file": "integration/berendsen-barostat",
@@ -7162,6 +7174,18 @@
     "file": "precision",
     "refs": [],
     "title": "Cross-build outputs are not bit-exact (informational)",
+    "type": "scenario"
+  },
+  "rq-3cfebff3": {
+    "decl": "Scenario: The order-specialized force-gather kernel uses no local memory",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The order-specialized force-gather kernel uses no local memory",
     "type": "scenario"
   },
   "rq-3d3679d0": {
@@ -14203,6 +14227,18 @@
     "title": "Angle list",
     "type": "section"
   },
+  "rq-7fb4b760": {
+    "decl": "Scenario: An NVRTC compile failure surfaces as SpmeError::KernelCompilation",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An NVRTC compile failure surfaces as SpmeError::KernelCompilation",
+    "type": "scenario"
+  },
   "rq-7fcd6e99": {
     "decl": "Scenario: sorted_blocks is sorted by volume bin ascending",
     "file": "forces/packed-neighbour-pair-force",
@@ -16301,6 +16337,23 @@
     ],
     "title": "plan(dt) returns the same StepPlan shape across repeated calls",
     "type": "scenario"
+  },
+  "rq-94bfcb7e": {
+    "decl": "### Compile-time spline-order specialization",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Compile-time spline-order specialization",
+    "type": "section"
   },
   "rq-94cb21a5": {
     "decl": "# atom_count per row is determined by the constraint_type's `kind`.",
@@ -27232,6 +27285,18 @@
     ],
     "title": "ExclusionList",
     "type": "api-item"
+  },
+  "rq-f81b4298": {
+    "decl": "Scenario: Reciprocal energy matches explicit Ewald for each even spline order",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reciprocal energy matches explicit Ewald for each even spline order",
+    "type": "scenario"
   },
   "rq-f84229ac": {
     "decl": "- `IntegratorBuilder::graph_compatible(&self, params: &toml::Value)",

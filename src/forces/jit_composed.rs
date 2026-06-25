@@ -660,7 +660,7 @@ impl JitComposedPairForce {
     }
 }
 
-fn detect_arch_option(device: &Arc<CudaDevice>) -> Option<String> {
+pub(crate) fn detect_arch_option(device: &Arc<CudaDevice>) -> Option<String> {
     use cudarc::driver::sys;
     let mut major: i32 = 0;
     let mut minor: i32 = 0;

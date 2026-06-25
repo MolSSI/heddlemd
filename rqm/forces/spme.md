@@ -478,6 +478,9 @@ The two stages:
    Collapsing to one thread per atom would remove that redundancy but
    serialise all `p³` atomics through a single thread — a measured net
    loss at production grid sizes — so the per-slice mapping is kept.
+   The kernel is emitted by the order-specialized NVRTC compilation (see
+   *Compile-time spline-order specialization*), so its `(d_a, d_b)` loop
+   unrolls and `wa` / `wb` are register-resident.
 
    For its assigned atom, the thread reads `i =
    sorted_atom_index[atom_slot]`, then reads particle `i`'s charge
@@ -732,11 +735,56 @@ then:
 Each particle is written by exactly one thread; no atomics, no race
 conditions. Summation order over the `p³` grid points within a particle
 is fixed in `(d_a, d_b, d_c)` lexicographic order, so the contribution
-ordering is deterministic.
+ordering is deterministic. The kernel is emitted by the order-specialized
+NVRTC compilation (see *Compile-time spline-order specialization*), so
+the `p³` loop unrolls and the per-axis weight and derivative arrays are
+register-resident rather than spilled to local memory.
 
 Consecutive sorted slots address atoms with nearby primary bins, so
 the grid reads from `V[g]` across consecutive threads cluster on
 neighbouring cache lines.
+
+### Compile-time spline-order specialization <!-- rq-94bfcb7e -->
+
+The charge-spread (`spme_spread_fixed_point`) and force-gather
+(`spme_force_gather`) kernels, together with the B-spline weight helpers
+they call (`bspline_weight`, `bspline_weight_and_deriv`), are produced by
+an NVRTC compilation specialized to the run's `spline_order`. The slot
+compiles this module once, in `SpmeReciprocalState::new`, with
+`spline_order` supplied as the preprocessor constant `PME_ORDER`
+(`--define-macro=PME_ORDER=<order>`), the precision define matching the
+build (`HEDDLE_REAL_F64` under the f64 feature), and
+`--gpu-architecture=compute_<cc>` detected from the device. This is the
+same NVRTC path the composed pair-force kernel uses (see
+`jit-composed-pair-force.md` for the device-detection and precision
+conventions), though the spread and gather are standalone kernels rather
+than composed fragments. The translation unit is self-contained: it
+carries an inlined precision / PBC preamble rather than including the
+project `.cuh` headers.
+
+Because `PME_ORDER` is a compile-time constant, the spread's `p · p` and
+the gather's `p³` support loops fully unroll and the per-axis B-spline
+weight and derivative arrays are held in registers, with **no
+local-memory stack frame**. The per-contribution arithmetic is identical
+to the generic order-`p` form — the same charge·weight product order in
+the spread, the same lexicographic `(d_a, d_b, d_c)` accumulation in the
+gather — so `rho_fixed`, `slot_force_*`, `slot_energy`, and `slot_virial`
+are bit-identical to that form and the determinism guarantees (i64 spread
+associativity, fixed gather summation order; see *Reproducibility*) hold
+unchanged.
+
+The compiled module and the two `CudaFunction` handles are owned by the
+slot for the lifetime of the run. Compilation happens at construction,
+before any CUDA-graph capture, so the handles are stable device entry
+points that record and replay like any other captured kernel. A failure
+to compile the module surfaces as `SpmeError::KernelCompilation`.
+
+The remaining reciprocal-space kernels — influence recompute, the fused
+apply-influence, spread-finish, and the atom spatial pre-sort pipeline —
+carry no order-dependent support loop and are loaded from the
+build-time-compiled PTX module. Accepted `spline_order` values are `4`–`8`
+(the loader rejects others before construction), and the order is fixed
+for the run, so the module is compiled exactly once per run.
 
 ### Reciprocal-space virial <!-- rq-ce4590c1 -->
 
@@ -865,10 +913,14 @@ only inside the `SpmeReciprocalState` construction path.
   buffer used by both transforms (see *Reciprocal-space pipeline*).
   Every kernel and cuFFT call the slot dispatches runs on the device's
   default stream; the slot owns no secondary streams or cross-stream
-  events.
+  events. At construction the slot NVRTC-compiles its charge-spread and
+  force-gather kernels specialized to `spline_order` (see *Compile-time
+  spline-order specialization*) and owns the resulting module for the run.
 
   Constructor:
   - `SpmeReciprocalState::new(gpu: &GpuContext, sim_box: &SimulationBox, particle_count: usize, charges: &[f32], alpha: f32, grid: [u32; 3], spline_order: u32) -> Result<SpmeReciprocalState, SpmeError>`
+    - NVRTC-compiles the order-specialized spread / gather module;
+      returns `Err(SpmeError::KernelCompilation(log))` if that fails.
 
 - `SpmeError` — error type for SPME slot construction. Variants: <!-- rq-ebfa6e1f -->
   - `NeighborList(NeighborListError)` — from the bin-only neighbor-list
@@ -881,6 +933,10 @@ only inside the `SpmeReciprocalState` construction path.
     re-validates as a guard against direct API misuse.
   - `Gpu(GpuError)` — a CUDA driver operation failed during buffer
     allocation.
+  - `KernelCompilation(String)` — NVRTC failed to compile the
+    order-specialized charge-spread / force-gather module (see
+    *Compile-time spline-order specialization*); the string carries the
+    compiler log.
 
 - `CuFftError` — wrapper around cuFFT failure codes from the underlying <!-- rq-1ad7e751 -->
   bindings. Variants follow the `cufftResult_t` enumeration as needed by
@@ -1749,6 +1805,39 @@ Feature: Smooth particle-mesh Ewald (SPME)
     And explicit-Ewald reference forces computed on the host with the same parameters
     When the full SPME pipeline runs
     Then per-particle forces agree with the reference within 1e-3 relative tolerance
+
+  # --- Compile-time spline-order specialization ---
+
+  @rq-f81b4298
+  Scenario: Reciprocal energy matches explicit Ewald for each even spline order
+    Given a small charged system with a known explicit-Ewald reference energy
+    And a grid satisfying n_d >= 2*spline_order for spline_order up to 8
+    When SpmeReciprocalState::new and a force/energy evaluation run for each spline_order in {4, 6, 8}
+    Then each run compiles its order-specialized module successfully
+    And each run's reciprocal energy matches the explicit-Ewald reference within 5e-3 relative tolerance
+    # Odd orders (5, 7) are not validated here: the B-spline
+    # structure-factor moduli `compute_b_factors` produces have near-zero
+    # values at those orders that it does not special-case, so the
+    # reciprocal energy is unreliable. This is a pre-existing limitation
+    # independent of order specialization.
+
+  @rq-3cfebff3
+  Scenario: The order-specialized force-gather kernel uses no local memory
+    Given an SpmeReciprocalState constructed with spline_order=4
+    When the local-memory size of the JIT-compiled force-gather kernel is queried (CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES)
+    Then it is zero
+
+  @rq-141360a1
+  Scenario: Specialized pipeline is byte-identical across two runs at a non-default order
+    Given two SpmeReciprocalState slots constructed with spline_order=5 on identical inputs
+    When the full spread -> FFT -> apply -> IFFT -> gather pipeline runs on each
+    Then rho_fixed, V, slot_force_*, and slot_energy are byte-identical between the two slots
+
+  @rq-7fb4b760
+  Scenario: An NVRTC compile failure surfaces as SpmeError::KernelCompilation
+    Given the order-specialized SPME module source contains a deliberate compile error
+    When the slot's order-specialization compile step is invoked
+    Then it returns Err(SpmeError::KernelCompilation(log)) with a non-empty log
 
   # --- Self-energy ---
 

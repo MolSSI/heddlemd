@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use cudarc::driver::{
-    CudaDevice, CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig,
+    CudaDevice, CudaFunction, CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig,
 };
 
 #[cfg(not(feature = "f64"))]
@@ -468,7 +468,11 @@ pub fn spme_real_pair_force(
 // `ceil(p^3 / 32)` `atomicAdd<i64>` operations into `rho_fixed`. The
 // caller is responsible for zeroing `rho_fixed` before this kernel
 // runs (via `memset_zeros` on the device).
+// rq-94bfcb7e
+// `func` is the order-specialized `spme_spread_fixed_point` kernel
+// NVRTC-compiled by the SPME slot (PME_ORDER fixed at `spline_order`).
 pub fn spme_spread_fixed_point(
+    func: &CudaFunction,
     particle_buffers: &ParticleBuffers,
     sorted_atom_index: &CudaSlice<u32>,
     sim_box: &SimulationBox,
@@ -500,7 +504,7 @@ pub fn spme_spread_fixed_point(
         shared_mem_bytes: 0,
     };
     let lattice = sim_box.lattice_device();
-    let func = particle_buffers.kernels.spme_recip.spme_spread_fixed_point.clone();
+    let func = func.clone();
     let args = (
         &particle_buffers.posq,
         sorted_atom_index,
@@ -672,9 +676,12 @@ pub fn spme_recip_reduce_partials(
     Ok(())
 }
 
-// rq-9ca00d25 rq-35b76155 rq-c6f6a13c rq-df8766ae
+// rq-9ca00d25 rq-35b76155 rq-c6f6a13c rq-df8766ae rq-94bfcb7e
+// `func` is the order-specialized `spme_force_gather` kernel NVRTC-compiled
+// by the SPME slot (PME_ORDER fixed at `spline_order`).
 #[allow(clippy::too_many_arguments)]
 pub fn spme_force_gather(
+    func: &CudaFunction,
     particle_buffers: &ParticleBuffers,
     sorted_atom_index: &CudaSlice<u32>,
     sim_box: &SimulationBox,
@@ -706,7 +713,7 @@ pub fn spme_force_gather(
     debug_assert_eq!(slot_virial.len(), n);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.spme_recip.spme_force_gather.clone();
+    let func = func.clone();
     let cfg = launch_config(n_u32);
     let lattice = sim_box.lattice_device();
     unsafe {
