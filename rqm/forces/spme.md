@@ -581,14 +581,22 @@ and the `b_factors_*` are the SPME B-spline correction terms:
 b_factors_d[k] = |Σ_{j=0..p-1} M_p(j + 1) · exp(2π i · k · j / n_d)|⁻²
 ```
 
+For odd spline orders the modulus `|Σ …|²` is (near-)zero at certain grid
+indices, where its reciprocal would diverge. Each such modulus (below a
+`1e-7` threshold) is replaced by the average of its two periodic
+neighbours before inversion (Essmann et al. 1995); even orders have no
+near-zero moduli, so the pass leaves them unchanged. This makes every
+accepted order `4`–`8` produce a finite, well-conditioned `b_factors_*`.
+
 The `k = (0, 0, 0)` slot is set to zero in both `influence_G` and
 `virial_factor`, implementing tinfoil boundary conditions and removing
 the (unphysical) infinite background-charge contribution.
 
 `b_factors_*` are independent of the box and depend only on the grid
 dimensions and spline order; they are computed once on the host at slot
-construction via the Cox-de Boor B-spline recursion, uploaded to the
-slot's device buffers, and never rebuilt.
+construction via the Cox-de Boor B-spline recursion, the neighbour-average
+fix above, and inversion, uploaded to the slot's device buffers, and
+never rebuilt.
 
 `influence_G` and `virial_factor` are populated on device by a
 `spme_recip_compute_influence` kernel that runs on `recip_stream`. The
@@ -1698,6 +1706,14 @@ Feature: Smooth particle-mesh Ewald (SPME)
 
   # --- Reciprocal-space pipeline: influence function recompute ---
 
+  @rq-b3f2381a
+  Scenario: B-spline correction factors are finite for odd spline orders
+    When compute_b_factors(16, p) is evaluated for p = 5 and p = 7
+    Then every returned value is finite (no inf / NaN)
+    And every returned value is below 1e3
+    # The near-zero B-spline structure-factor moduli odd orders produce are
+    # neighbour-averaged before inversion, so the reciprocal stays bounded.
+
   @rq-9cee9bfd
   Scenario: Influence buffers are populated at slot construction
     Given an SpmeReciprocalState constructed with a sim_box B0 and parameters (alpha, grid, p)
@@ -1809,17 +1825,12 @@ Feature: Smooth particle-mesh Ewald (SPME)
   # --- Compile-time spline-order specialization ---
 
   @rq-f81b4298
-  Scenario: Reciprocal energy matches explicit Ewald for each even spline order
+  Scenario: Reciprocal energy matches explicit Ewald for every accepted spline order
     Given a small charged system with a known explicit-Ewald reference energy
     And a grid satisfying n_d >= 2*spline_order for spline_order up to 8
-    When SpmeReciprocalState::new and a force/energy evaluation run for each spline_order in {4, 6, 8}
+    When SpmeReciprocalState::new and a force/energy evaluation run for each spline_order in {4, 5, 6, 7, 8}
     Then each run compiles its order-specialized module successfully
     And each run's reciprocal energy matches the explicit-Ewald reference within 5e-3 relative tolerance
-    # Odd orders (5, 7) are not validated here: the B-spline
-    # structure-factor moduli `compute_b_factors` produces have near-zero
-    # values at those orders that it does not special-case, so the
-    # reciprocal energy is unreliable. This is a pre-existing limitation
-    # independent of order specialization.
 
   @rq-3cfebff3
   Scenario: The order-specialized force-gather kernel uses no local memory

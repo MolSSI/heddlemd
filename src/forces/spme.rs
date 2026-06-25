@@ -159,17 +159,10 @@ pub struct SpmeReciprocalGrid {
 }
 
 // rq-94bfcb7e
-//
-// NVRTC-compile the charge-spread and force-gather kernels specialized
-// to `spline_order` (supplied as the compile-time constant `PME_ORDER`).
-// The translation unit is self-contained: the project `precision.cuh`
-// and `pbc.cuh` preambles are concatenated with their `#include` lines
-// stripped (so NVRTC needs no filesystem), followed by the
-// order-specialized kernel source. Returns the two device functions.
 // Assemble the self-contained NVRTC translation unit for the
-// order-specialized spread/gather: PME_ORDER define, then the project
+// order-specialized spread/gather: a PME_ORDER define, then the project
 // `precision.cuh` and `pbc.cuh` preambles with their `#include` lines
-// stripped (NVRTC has no filesystem), then the kernel source.
+// stripped (so NVRTC needs no filesystem), then the kernel source.
 pub(crate) fn assemble_spme_jit_source(spline_order: u32) -> String {
     let precision =
         include_str!("../../kernels/precision.cuh").replace("#include <math_constants.h>", "");
@@ -526,12 +519,16 @@ impl SpmeReciprocalGrid {
 // and B-spline order p, `b_factors[k] = |b(k)|²` where
 //   b(k) = exp(2π i (p-1) k / N) / Σ_{j=0..p-2} M_p(j+1) · exp(2π i j k / N)
 // and |b(k)|² = 1 / |denominator|².
+// rq-e7b74f7a
 pub fn compute_b_factors(n: u32, p: u32) -> Vec<Real> {
     let n = n as usize;
     let p = p as usize;
-    let mut out = vec![0.0; n];
     let two_pi = 2.0 * std::f64::consts::PI;
     let m_p_samples: Vec<f64> = (1..p).map(|j| cardinal_bspline(p, j as f64)).collect();
+
+    // |Σ_j M_p(j+1) · exp(2π i k j / n)|² — the B-spline structure-factor
+    // modulus squared per grid index. `b_factors_d[k]` is its reciprocal.
+    let mut moduli = vec![0.0_f64; n];
     for k in 0..n {
         let theta = two_pi * (k as f64) / (n as f64);
         let mut sum_re = 0.0_f64;
@@ -541,14 +538,26 @@ pub fn compute_b_factors(n: u32, p: u32) -> Vec<Real> {
             sum_re += m_val * angle.cos();
             sum_im += m_val * angle.sin();
         }
-        let denom2 = sum_re * sum_re + sum_im * sum_im;
-        out[k] = if denom2 > 0.0 {
-            (1.0 / denom2) as Real
-        } else {
-            0.0
-        };
+        moduli[k] = sum_re * sum_re + sum_im * sum_im;
     }
-    out
+
+    // Odd spline orders produce (near-)zero moduli at certain grid
+    // indices, where the reciprocal `1 / |·|²` would blow up. Replace each
+    // near-zero modulus with the average of its two periodic neighbours
+    // (Essmann et al. 1995).
+    // Even orders have no near-zero moduli, so the pass is a no-op there.
+    for k in 0..n {
+        if moduli[k] < 1.0e-7 {
+            let prev = moduli[(k + n - 1) % n];
+            let next = moduli[(k + 1) % n];
+            moduli[k] = 0.5 * (prev + next);
+        }
+    }
+
+    moduli
+        .iter()
+        .map(|&d| if d > 0.0 { (1.0 / d) as Real } else { 0.0 })
+        .collect()
 }
 
 // Cardinal B-spline M_p(x) via the Cox-de Boor recursion, host-side.
@@ -1052,7 +1061,27 @@ impl SpmeRecipKernels {
 
 #[cfg(test)]
 mod order_specialization_tests {
-    use super::{assemble_spme_jit_source, compile_spme_ptx, SpmeError};
+    use super::{assemble_spme_jit_source, compute_b_factors, compile_spme_ptx, SpmeError};
+
+    // rq-b3f2381a
+    // The B-spline correction factors must be finite and bounded for odd
+    // spline orders: the near-zero structure-factor moduli odd orders
+    // produce are neighbour-averaged before inversion, so `1 / |·|²` does
+    // not diverge. Pure host computation — no device needed.
+    #[test]
+    fn b_factors_are_finite_for_odd_orders() {
+        for p in [5u32, 7] {
+            let b = compute_b_factors(16, p);
+            assert_eq!(b.len(), 16);
+            for (k, &v) in b.iter().enumerate() {
+                assert!(v.is_finite(), "b_factors[{k}] order {p} not finite: {v}");
+                assert!(
+                    (v as f64) < 1.0e3,
+                    "b_factors[{k}] order {p} exceeds bound: {v}"
+                );
+            }
+        }
+    }
 
     // rq-3cfebff3
     // The order-specialized kernels must be register-resident: with

@@ -894,11 +894,10 @@ fn reciprocal_energy_matches_ewald_for_every_spline_order() {
         alpha,
         8,
     );
-    // Even orders 4, 6, 8. The engine's `compute_b_factors` does not
-    // handle the near-zero B-spline structure-factor moduli that odd
-    // orders (5, 7) produce, so odd orders are not validated here (a
-    // pre-existing limitation independent of order specialization).
-    for order in [4u32, 6, 8] {
+    // Every accepted spline order 4..=8. `compute_b_factors` averages the
+    // near-zero B-spline structure-factor moduli that odd orders produce,
+    // so odd orders (5, 7) are correct too.
+    for order in 4u32..=8 {
         let params = SpmeParameters {
             alpha: alpha as Real,
             r_cut_real: 0.3e-9,

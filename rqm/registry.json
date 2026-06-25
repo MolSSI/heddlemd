@@ -19872,6 +19872,18 @@
     "title": "Composed kernel is compiled when an integrator is active",
     "type": "scenario"
   },
+  "rq-b3f2381a": {
+    "decl": "Scenario: B-spline correction factors are finite for odd spline orders",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "B-spline correction factors are finite for odd spline orders",
+    "type": "scenario"
+  },
   "rq-b41d8d36": {
     "decl": "### Types",
     "file": "integration/langevin-baoab",
@@ -27287,7 +27299,7 @@
     "type": "api-item"
   },
   "rq-f81b4298": {
-    "decl": "Scenario: Reciprocal energy matches explicit Ewald for each even spline order",
+    "decl": "Scenario: Reciprocal energy matches explicit Ewald for every accepted spline order",
     "file": "forces/spme",
     "refs": [
       {
@@ -27295,7 +27307,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reciprocal energy matches explicit Ewald for each even spline order",
+    "title": "Reciprocal energy matches explicit Ewald for every accepted spline order",
     "type": "scenario"
   },
   "rq-f84229ac": {

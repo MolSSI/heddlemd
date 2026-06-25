@@ -554,11 +554,10 @@ __device__ static inline Real packed_block_bbox_dist_sq(
 
 // rq-bce26a14
 // Compile-time threshold for sparse-tile single-pair extraction.
-// Matches OpenMM's MAX_BITS_FOR_PAIRS on compute capability 8.0+
-// (CudaNonbondedUtilities.cpp:523). When a candidate (i-block,
-// j-block) pair produces <= MAX_BITS_FOR_PAIRS j-atom hits, every
-// (i_atom, j_atom) hit is written individually to single_pair_atoms
-// instead of being merged into the packed-neighbour buffer.
+// When a candidate (i-block, j-block) pair produces
+// <= MAX_BITS_FOR_PAIRS j-atom hits, every (i_atom, j_atom) hit
+// is written individually to single_pair_atoms instead of being
+// merged into the packed-neighbour buffer.
 #ifndef MAX_BITS_FOR_PAIRS
 #define MAX_BITS_FOR_PAIRS 3
 #endif
