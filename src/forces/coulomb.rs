@@ -16,8 +16,9 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
 use super::{
-    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, PairForceBindContext,
-    PairForceFragment, PairForceLaunchBuilder, Potential, PotentialBuildContext,
+    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, KernelArgType,
+    KernelArg, KernelArgBinder, KernelArgSchema, PairForceBindContext,
+    PairForceFragment, ForceLaunchBuilder, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
 use crate::gpu::K_COULOMB_F32;
@@ -79,7 +80,7 @@ impl CoulombState {
 
 impl Potential for CoulombState {
     fn label(&self) -> &'static str {
-        "coulomb"
+        LABEL
     }
 
     fn max_cutoff(&self) -> Option<Real> {
@@ -123,15 +124,44 @@ impl Potential for CoulombState {
     fn bind_pair_force_args(
         &self,
         _ctx: &PairForceBindContext<'_>,
-        builder: &mut PairForceLaunchBuilder,
+        builder: &mut ForceLaunchBuilder,
     ) {
-        builder.push_scalar(K_COULOMB_F32);
-        builder.push_scalar(self.params.cutoff);
-        builder.push_scalar(self.params.r_switch);
-        builder.push_device_buffer(&self.exclusions.atom_excl_offsets);
-        builder.push_device_buffer(&self.exclusions.atom_excl_partners);
-        builder.push_device_buffer(&self.exclusions.atom_excl_coul_scales);
+        // Validated against `coulomb_arg_schema()` — the same schema that
+        // generates the fragment's entry-point args and functor-init
+        // source — so the binding cannot drift from the kernel signature.
+        let schema = coulomb_arg_schema();
+        let mut b = KernelArgBinder::new(&schema, LABEL, builder);
+        b.scalar_real("coul_k_coulomb", K_COULOMB_F32);
+        b.scalar_real("coul_cutoff", self.params.cutoff);
+        b.scalar_real("coul_r_switch", self.params.r_switch);
+        b.buffer("coul_excl_offsets", &self.exclusions.atom_excl_offsets);
+        b.buffer("coul_excl_partners", &self.exclusions.atom_excl_partners);
+        b.buffer("coul_excl_scales", &self.exclusions.atom_excl_coul_scales);
+        b.finish();
     }
+}
+
+/// The slot's stable label, shared by `Potential::label`, the fragment,
+/// and the argument schema.
+const LABEL: &str = "coulomb";
+
+/// Single source of truth for the truncated-Coulomb pair-force kernel
+/// arguments. The fragment's `entry_point_args` and `functor_init_source`
+/// are generated from this list, and `bind_pair_force_args` is validated
+/// against it, so the three pieces cannot drift apart.
+fn coulomb_arg_schema() -> KernelArgSchema {
+    use KernelArgType::{ConstPtrReal, ConstPtrU32, ScalarReal};
+    KernelArgSchema::pair_force(
+        LABEL,
+        vec![
+            KernelArg::new("coul_k_coulomb", ScalarReal, "k_coulomb"),
+            KernelArg::new("coul_cutoff", ScalarReal, "cutoff"),
+            KernelArg::new("coul_r_switch", ScalarReal, "r_switch"),
+            KernelArg::new("coul_excl_offsets", ConstPtrU32, "excl_offsets"),
+            KernelArg::new("coul_excl_partners", ConstPtrU32, "excl_partners"),
+            KernelArg::new("coul_excl_scales", ConstPtrReal, "excl_scales"),
+        ],
+    )
 }
 
 // rq-e8550f96
@@ -220,26 +250,17 @@ struct CoulombPairFunctor {
     }
 };
 "#;
-    let entry_point_args = r#"    Real coul_k_coulomb,
-    Real coul_cutoff,
-    Real coul_r_switch,
-    const unsigned int *coul_excl_offsets,
-    const unsigned int *coul_excl_partners,
-    const Real *coul_excl_scales,
-"#;
-    let functor_init_source = r#"    composite.functor_coulomb.k_coulomb = coul_k_coulomb;
-    composite.functor_coulomb.cutoff = coul_cutoff;
-    composite.functor_coulomb.r_switch = coul_r_switch;
-    composite.functor_coulomb.excl_offsets = coul_excl_offsets;
-    composite.functor_coulomb.excl_partners = coul_excl_partners;
-    composite.functor_coulomb.excl_scales = coul_excl_scales;
-"#;
+    // `entry_point_args` and `functor_init_source` are generated from
+    // `coulomb_arg_schema()`, the same schema `bind_pair_force_args` is
+    // validated against; the functor field names in `functor_source`
+    // above must match the schema's `functor_field` entries.
+    let schema = coulomb_arg_schema();
     PairForceFragment {
-        label: "coulomb",
+        label: LABEL,
         functor_struct_name: "CoulombPairFunctor",
         functor_source: functor_source.to_string(),
-        entry_point_args: entry_point_args.to_string(),
-        functor_init_source: functor_init_source.to_string(),
+        entry_point_args: schema.entry_point_args(),
+        functor_init_source: schema.functor_init_source(),
         cutoff: CutoffHandling::Uniform(cutoff),
     }
 }
@@ -262,5 +283,44 @@ impl CoulombKernels {
             coulomb_pair_force_f: get_func(device, "coulomb", "coulomb_pair_force_f")?,
             coulomb_pair_force_fev: get_func(device, "coulomb", "coulomb_pair_force_fev")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The exact CUDA argument declarations and functor-init assignments
+    // the composer expects for the Coulomb slot. The schema-generated
+    // output MUST equal these byte-for-byte so the composed JIT kernel
+    // source — and therefore the bit-wise reproducible result — is
+    // unchanged.
+    const EXPECTED_ENTRY_POINT_ARGS: &str = r#"    Real coul_k_coulomb,
+    Real coul_cutoff,
+    Real coul_r_switch,
+    const unsigned int *coul_excl_offsets,
+    const unsigned int *coul_excl_partners,
+    const Real *coul_excl_scales,
+"#;
+
+    const EXPECTED_FUNCTOR_INIT_SOURCE: &str = r#"    composite.functor_coulomb.k_coulomb = coul_k_coulomb;
+    composite.functor_coulomb.cutoff = coul_cutoff;
+    composite.functor_coulomb.r_switch = coul_r_switch;
+    composite.functor_coulomb.excl_offsets = coul_excl_offsets;
+    composite.functor_coulomb.excl_partners = coul_excl_partners;
+    composite.functor_coulomb.excl_scales = coul_excl_scales;
+"#;
+
+    #[test]
+    fn generated_entry_point_args_match_expected() {
+        assert_eq!(coulomb_arg_schema().entry_point_args(), EXPECTED_ENTRY_POINT_ARGS);
+    }
+
+    #[test]
+    fn generated_functor_init_source_matches_expected() {
+        assert_eq!(
+            coulomb_arg_schema().functor_init_source(),
+            EXPECTED_FUNCTOR_INIT_SOURCE
+        );
     }
 }

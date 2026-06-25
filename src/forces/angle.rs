@@ -15,7 +15,8 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::AngleList;
 use super::{
     AggregateLevel, AngleForceFragment, AngleScratchView, ForceFieldError, ForceLaunchBuilder,
-    ForceLaunchContext, Potential, PotentialBuildContext, PotentialBuilder, SlotOutputView,
+    ForceLaunchContext, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType, Potential,
+    PotentialBuildContext, PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
 
@@ -105,7 +106,7 @@ impl HarmonicAngleState {
 
 impl Potential for HarmonicAngleState {
     fn label(&self) -> &'static str {
-        "harmonic_angle"
+        LABEL
     }
 
     fn max_cutoff(&self) -> Option<Real> {
@@ -159,8 +160,15 @@ impl Potential for HarmonicAngleState {
         _ctx: &ForceLaunchContext<'_>,
         builder: &mut ForceLaunchBuilder,
     ) {
-        builder.push_device_buffer(&self.angle_k_theta);
-        builder.push_device_buffer(&self.angle_theta_0);
+        // Validated against `harmonic_angle_arg_schema()` — the same
+        // schema that generates the fragment's entry-point args and
+        // functor-init source — so the binding cannot drift from the
+        // kernel signature.
+        let schema = harmonic_angle_arg_schema();
+        let mut b = KernelArgBinder::new(&schema, LABEL, builder);
+        b.buffer("harmonic_angle_k_theta", &self.angle_k_theta);
+        b.buffer("harmonic_angle_theta_0", &self.angle_theta_0);
+        b.finish();
     }
 
     fn angle_scratch(&self) -> Option<AngleScratchView<'_>> {
@@ -174,6 +182,26 @@ impl Potential for HarmonicAngleState {
             angle_count: self.angle_count,
         })
     }
+}
+
+/// The slot's stable label, shared by `Potential::label`, the fragment,
+/// and the argument schema.
+const LABEL: &str = "harmonic_angle";
+
+/// Single source of truth for the harmonic-angle per-angle kernel
+/// arguments. The fragment's `entry_point_args` and `functor_init_source`
+/// are generated from this list (local-functor init), and
+/// `bind_angle_force_args` is validated against it, so the three pieces
+/// cannot drift apart.
+fn harmonic_angle_arg_schema() -> KernelArgSchema {
+    use KernelArgType::ConstPtrReal;
+    KernelArgSchema::intramolecular(
+        LABEL,
+        vec![
+            KernelArg::new("harmonic_angle_k_theta", ConstPtrReal, "angle_k_theta"),
+            KernelArg::new("harmonic_angle_theta_0", ConstPtrReal, "angle_theta_0"),
+        ],
+    )
 }
 
 fn htod_or_empty_u32(
@@ -290,18 +318,18 @@ struct HarmonicAngleFunctor {
     }
 };
 "#;
-    let entry_point_args = r#"    const Real *harmonic_angle_k_theta,
-    const Real *harmonic_angle_theta_0,
-"#;
-    let functor_init_source = r#"    functor.angle_k_theta = harmonic_angle_k_theta;
-    functor.angle_theta_0 = harmonic_angle_theta_0;
-"#;
+    // `entry_point_args` and `functor_init_source` are generated from
+    // `harmonic_angle_arg_schema()`, the same schema
+    // `bind_angle_force_args` is validated against; the functor field
+    // names in `functor_source` above must match the schema's
+    // `functor_field` entries.
+    let schema = harmonic_angle_arg_schema();
     AngleForceFragment {
-        label: "harmonic_angle",
+        label: LABEL,
         functor_struct_name: "HarmonicAngleFunctor",
         functor_source: functor_source.to_string(),
-        entry_point_args: entry_point_args.to_string(),
-        functor_init_source: functor_init_source.to_string(),
+        entry_point_args: schema.entry_point_args(),
+        functor_init_source: schema.functor_init_source(),
     }
 }
 
@@ -321,5 +349,35 @@ impl AngleKernels {
         Ok(AngleKernels {
             reduce_angle_forces: get_func(device, "angle", "reduce_angle_forces")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The CUDA argument declarations and local-functor initialisation
+    // the angle composer expects for the HarmonicAngle slot.
+    const EXPECTED_ENTRY_POINT_ARGS: &str = r#"    const Real *harmonic_angle_k_theta,
+    const Real *harmonic_angle_theta_0,
+"#;
+
+    const EXPECTED_FUNCTOR_INIT_SOURCE: &str = r#"    functor.angle_k_theta = harmonic_angle_k_theta;
+    functor.angle_theta_0 = harmonic_angle_theta_0;
+"#;
+
+    #[test]
+    fn generated_entry_point_args_match_expected() {
+        assert_eq!(
+            harmonic_angle_arg_schema().entry_point_args(),
+            EXPECTED_ENTRY_POINT_ARGS
+        );
+    }
+
+    #[test]
+    fn generated_functor_init_source_is_local_functor() {
+        let init = harmonic_angle_arg_schema().functor_init_source();
+        assert_eq!(init, EXPECTED_FUNCTOR_INIT_SOURCE);
+        assert!(!init.contains("composite."));
     }
 }

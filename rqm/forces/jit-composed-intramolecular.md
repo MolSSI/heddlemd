@@ -142,13 +142,13 @@ functor plus identifying metadata. The snippet:
    `(r2, r, bond_type_index, dx, dy, dz, parameters)` to
    `(fmag, u_k, w_k)`.
 
-The fragment also carries:
-- `entry_point_args` — CUDA source declaring its slot-specific
-  kernel parameters (per-bond-type parameter table pointers,
-  scalars). Concatenated into the composed entry point's signature.
-- `functor_init_source` — CUDA source assigning the entry-point
-  args to the functor's members. The composer emits this at the
-  start of the entry-point body.
+The fragment also carries `entry_point_args` and `functor_init_source`,
+both generated from the slot's `KernelArgSchema` (see *Argument
+Schema*). `entry_point_args` declares the slot's kernel parameters
+(per-bond-type parameter table pointers, scalars), concatenated into the
+composed entry point's signature; `functor_init_source` assigns those
+parameters to the entry point's local `functor`, emitted at the start of
+the entry-point body.
 
 ## Source-Fragment Contract — Angle Shape <!-- rq-c8fb9600 -->
 
@@ -188,8 +188,68 @@ for `i`, `j`, `k`) along with `u_m / 3` / `w_m / 3` (one-third
 shares; see `harmonic-angle.md`'s *Force Accumulation*) into the
 slot's scratch buffer.
 
-The fragment's `entry_point_args` and `functor_init_source` follow
-the same convention as the bonded shape.
+The fragment's `entry_point_args` and `functor_init_source` are
+generated from the slot's `KernelArgSchema` exactly as in the bonded
+shape (see *Argument Schema*).
+
+## Argument Schema <!-- rq-13d8e659 -->
+
+A bonded or angle slot's kernel parameters are declared once as a
+`KernelArgSchema` — an ordered list of typed `KernelArg` entries that is
+the single source of truth for the slot's contribution to the composed
+module. The schema type and its companions (`KernelArg`,
+`KernelArgType`, `KernelArgBinder`, `ElemTy`, `ArgKind`, `KernelElem`)
+are shape-neutral and shared with the pair-force composer, where they
+are canonically defined (`jit-composed-pair-force.md`'s *Feature API*).
+A bonded or angle slot constructs its schema with
+`KernelArgSchema::intramolecular(label, args)`.
+
+From this one list the framework derives the three artefacts that must
+stay in agreement:
+
+- The fragment's `entry_point_args` — the slot's CUDA `extern "C"`
+  parameter declarations, concatenated into the per-slot entry point's
+  signature — is produced by `KernelArgSchema::entry_point_args()`.
+- The fragment's `functor_init_source` — the assignments that copy each
+  kernel parameter into the entry point's local functor — is produced by
+  `KernelArgSchema::functor_init_source()`. For an `intramolecular`
+  schema each line reads `functor.<functor_field> = <name>;`, targeting
+  the `functor` local the per-slot entry-point body declares (one functor
+  per entry point, not a shared composite functor as in the pair-force
+  shape).
+- The slot's `Potential::bind_bonded_force_args` /
+  `bind_angle_force_args` pushes one launch argument per schema entry
+  through a `KernelArgBinder`, which validates each push against the
+  same schema.
+
+Because all three derive from one ordered list, the parameter order in
+the entry-point signature, the field-initialisation order, and the
+launch-time binding order are identical by construction. A bonded or
+angle slot does not hand-write `entry_point_args` or
+`functor_init_source`, and its bind method does not push arguments
+directly onto the `ForceLaunchBuilder`.
+
+Each `KernelArg` carries `name` (the CUDA parameter name), `ty` (a
+`KernelArgType` fixing the declaration and the accepted push kind), and
+`functor_field` (the functor struct field it initialises). The functor
+struct declared in the fragment's `functor_source` must declare a field
+of each `functor_field` name and a compatible type; a mismatch is an
+nvrtc compile error (`FragmentCompileFailed`), not a silent fault.
+
+### Schema-Checked Binding <!-- rq-30d233fd -->
+
+`bind_bonded_force_args` / `bind_angle_force_args` constructs a
+`KernelArgBinder` over the slot's schema and the framework's
+`ForceLaunchBuilder`, then pushes one value per declared argument by
+name. The binder validates every push, in declaration order, on every
+launch: the pushed name must equal the next schema entry's `name`; the
+push kind (buffer vs scalar) and, for buffers, the `CudaSlice<T>`
+element type must match the schema entry's `KernelArgType`; and the
+total number of pushes must equal the schema's length. A name, kind,
+element-type, or count mismatch panics with a message naming the slot
+and the offending argument, instead of silently corrupting the entry
+point's argument list. The validation runs on every bind call (once per
+composed-entry-point launch per step); it is not gated to debug builds.
 
 ## Composed-Module Structure <!-- rq-d90f3107 -->
 
@@ -259,9 +319,11 @@ Each fast-class bonded slot's `Potential` implementation exposes a
 `bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>, builder:
 &mut ForceLaunchBuilder)` method, and each fast-class angle slot
 exposes `bind_angle_force_args(&self, ctx, builder)` with the same
-signature. The methods push the slot's parameter buffers and
-scalars onto a launch-argument builder in the same order the
-slot's fragment's `entry_point_args` declares them.
+signature. The methods supply the slot's parameter buffers and scalars
+through a `KernelArgBinder` validated against the slot's
+`KernelArgSchema` (see *Argument Schema*), in the order the schema
+declares them — the same order the slot's fragment's `entry_point_args`
+were generated in.
 
 The `ForceLaunchBuilder` is the same type used by the pair-force
 composer (see `framework.md`'s *Feature API* and
@@ -339,8 +401,22 @@ reproducibility invariant individually.
   }
   ```
 
+  The `entry_point_args` and `functor_init_source` fields are generated
+  from the slot's `KernelArgSchema`, constructed via
+  `KernelArgSchema::intramolecular`; see *Argument Schema*.
+
 - `AngleForceFragment` — same shape as `BondedForceFragment`, <!-- rq-565ffbcc -->
-  returned by `PotentialBuilder::angle_force_fragment(cx)`.
+  returned by `PotentialBuilder::angle_force_fragment(cx)`. Its
+  `entry_point_args` and `functor_init_source` are likewise generated
+  from the slot's `KernelArgSchema`.
+
+- `KernelArgSchema`, `KernelArg`, `KernelArgType`, `KernelArgBinder`, <!-- rq-402b55fc -->
+  `ElemTy`, `ArgKind`, `KernelElem` — the shape-neutral kernel-argument
+  schema types, defined canonically in `jit-composed-pair-force.md`'s
+  *Feature API*. A bonded or angle slot builds its schema with
+  `KernelArgSchema::intramolecular(label, args)` (local-functor
+  `functor_init_source`) and validates its launch-time binding with
+  `KernelArgBinder` over a `ForceLaunchBuilder`.
 
 - `ForceLaunchBuilder` — opaque argument-builder threaded through <!-- rq-61a784a9 -->
   every active fast-class slot's bind method (`bind_pair_force_args`,
@@ -397,9 +473,12 @@ The `Potential` trait exposes parallel binding methods to the
 existing `bind_pair_force_args`:
 
 - `bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>, <!-- rq-b08937a3 -->
-  builder: &mut ForceLaunchBuilder)` — pushes the slot's
-  parameter buffers onto `builder` in the order the slot's
-  `entry_point_args` declares them. Default panics so an
+  builder: &mut ForceLaunchBuilder)` — supplies the slot's parameter
+  buffers through a `KernelArgBinder` over the slot's `KernelArgSchema`
+  and `builder`, pushing one value per declared argument by name and
+  calling `finish()`. The binder validates every push against the
+  schema; a name, kind, element-type, or count mismatch panics, naming
+  the slot and the offending argument. Default panics so an
   unimplemented override surfaces a programmer error.
 - `bind_angle_force_args(&self, ctx, builder)` — angle analogue. <!-- rq-9bd9ccd4 -->
 
@@ -614,6 +693,50 @@ Feature: JIT-composed intramolecular kernels
     When ForceField::new(...) is called
     Then the returned Err's Display contains every active bonded slot's label
     And the underlying FragmentCompileFailed::log carries the nvrtc compile log verbatim
+
+  # --- Argument schema ---
+
+  @rq-790edb52
+  Scenario: A bonded slot's entry_point_args are generated from its argument schema
+    Given a bonded slot whose KernelArgSchema, built with KernelArgSchema::intramolecular, declares ("morse_bond_de", ConstPtrReal), ("morse_bond_a", ConstPtrReal), and ("morse_bond_re", ConstPtrReal) in order
+    When the slot's BondedForceFragment is constructed
+    Then fragment.entry_point_args equals "    const Real *morse_bond_de,\n    const Real *morse_bond_a,\n    const Real *morse_bond_re,\n"
+
+  @rq-c4f93cfa
+  Scenario: A bonded slot's functor_init_source uses local-functor initialisation
+    Given a bonded slot whose intramolecular schema includes ("morse_bond_de", ConstPtrReal, functor_field "bond_de")
+    When the slot's BondedForceFragment is constructed
+    Then fragment.functor_init_source contains the line "    functor.bond_de = morse_bond_de;"
+    And no line in fragment.functor_init_source contains "composite."
+    And it contains exactly one assignment line per schema entry, in schema order
+
+  @rq-075663ff
+  Scenario: An angle slot's functor_init_source uses local-functor initialisation
+    Given an angle slot whose intramolecular schema includes ("harmonic_angle_k_theta", ConstPtrReal, functor_field "angle_k_theta")
+    When the slot's AngleForceFragment is constructed
+    Then fragment.functor_init_source contains the line "    functor.angle_k_theta = harmonic_angle_k_theta;"
+    And no line in fragment.functor_init_source contains "composite."
+
+  @rq-7763d1ce
+  Scenario: A bonded binding that pushes arguments out of order panics
+    Given a bonded slot's KernelArgSchema declaring "morse_bond_de" then "morse_bond_a"
+    And a KernelArgBinder over that schema and a fresh ForceLaunchBuilder
+    When bind_bonded_force_args pushes "morse_bond_a" before "morse_bond_de"
+    Then the binder panics with a message naming the slot and the expected argument "morse_bond_de"
+
+  @rq-f7cc0a56
+  Scenario: A bonded binding whose buffer element type disagrees with the schema panics
+    Given a bonded slot's KernelArgSchema whose first argument is "morse_bond_de" (ConstPtrReal)
+    And a KernelArgBinder over that schema
+    When the binding pushes a CudaSlice<u32> for "morse_bond_de"
+    Then the binder panics naming the slot and the argument
+
+  @rq-4710429f
+  Scenario: The schema-generated bonded signature compiles and binds consistently
+    Given a fast-class bonded slot with a populated KernelArgSchema active in a ForceField
+    When ForceField::new(...) is called
+    Then nvrtc compiles the bonded composed module without error
+    And at step time the slot's bind_bonded_force_args, validated against the same schema, supplies exactly one launch argument per generated parameter
 
   # --- Standalone-kernel retirement ---
 

@@ -15,7 +15,8 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::BondList;
 use super::{
     AggregateLevel, BondedForceFragment, BondedScratchView, ForceFieldError, ForceLaunchBuilder,
-    ForceLaunchContext, Potential, PotentialBuildContext, PotentialBuilder, SlotOutputView,
+    ForceLaunchContext, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType, Potential,
+    PotentialBuildContext, PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
 
@@ -108,7 +109,7 @@ impl MorseBondedState {
 
 impl Potential for MorseBondedState {
     fn label(&self) -> &'static str {
-        "morse_bonded"
+        LABEL
     }
 
     fn max_cutoff(&self) -> Option<Real> {
@@ -162,10 +163,15 @@ impl Potential for MorseBondedState {
         _ctx: &ForceLaunchContext<'_>,
         builder: &mut ForceLaunchBuilder,
     ) {
-        // Order MUST match the Morse fragment's entry_point_args.
-        builder.push_device_buffer(&self.bond_de);
-        builder.push_device_buffer(&self.bond_a);
-        builder.push_device_buffer(&self.bond_re);
+        // Validated against `morse_arg_schema()` — the same schema that
+        // generates the fragment's entry-point args and functor-init
+        // source — so the binding cannot drift from the kernel signature.
+        let schema = morse_arg_schema();
+        let mut b = KernelArgBinder::new(&schema, LABEL, builder);
+        b.buffer("morse_bond_de", &self.bond_de);
+        b.buffer("morse_bond_a", &self.bond_a);
+        b.buffer("morse_bond_re", &self.bond_re);
+        b.finish();
     }
 
     fn bonded_scratch(&self) -> Option<BondedScratchView<'_>> {
@@ -179,6 +185,26 @@ impl Potential for MorseBondedState {
             bond_count: self.bond_count,
         })
     }
+}
+
+/// The slot's stable label, shared by `Potential::label`, the fragment,
+/// and the argument schema.
+const LABEL: &str = "morse_bonded";
+
+/// Single source of truth for the Morse per-bond kernel arguments. The
+/// fragment's `entry_point_args` and `functor_init_source` are generated
+/// from this list (local-functor init), and `bind_bonded_force_args` is
+/// validated against it, so the three pieces cannot drift apart.
+fn morse_arg_schema() -> KernelArgSchema {
+    use KernelArgType::ConstPtrReal;
+    KernelArgSchema::intramolecular(
+        LABEL,
+        vec![
+            KernelArg::new("morse_bond_de", ConstPtrReal, "bond_de"),
+            KernelArg::new("morse_bond_a", ConstPtrReal, "bond_a"),
+            KernelArg::new("morse_bond_re", ConstPtrReal, "bond_re"),
+        ],
+    )
 }
 
 fn htod_or_empty_u32(
@@ -269,20 +295,17 @@ struct MorsePairFunctor {
     }
 };
 "#;
-    let entry_point_args = r#"    const Real *morse_bond_de,
-    const Real *morse_bond_a,
-    const Real *morse_bond_re,
-"#;
-    let functor_init_source = r#"    functor.bond_de = morse_bond_de;
-    functor.bond_a  = morse_bond_a;
-    functor.bond_re = morse_bond_re;
-"#;
+    // `entry_point_args` and `functor_init_source` are generated from
+    // `morse_arg_schema()`, the same schema `bind_bonded_force_args` is
+    // validated against; the functor field names in `functor_source`
+    // above must match the schema's `functor_field` entries.
+    let schema = morse_arg_schema();
     BondedForceFragment {
-        label: "morse_bonded",
+        label: LABEL,
         functor_struct_name: "MorsePairFunctor",
         functor_source: functor_source.to_string(),
-        entry_point_args: entry_point_args.to_string(),
-        functor_init_source: functor_init_source.to_string(),
+        entry_point_args: schema.entry_point_args(),
+        functor_init_source: schema.functor_init_source(),
     }
 }
 
@@ -302,5 +325,38 @@ impl MorseKernels {
         Ok(MorseKernels {
             reduce_bond_forces: get_func(device, "morse", "reduce_bond_forces")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The CUDA argument declarations and local-functor initialisation
+    // the bonded composer expects for the Morse slot. The
+    // schema-generated output must equal these so the composed bonded
+    // module compiles to the same per-bond kernel.
+    const EXPECTED_ENTRY_POINT_ARGS: &str = r#"    const Real *morse_bond_de,
+    const Real *morse_bond_a,
+    const Real *morse_bond_re,
+"#;
+
+    const EXPECTED_FUNCTOR_INIT_SOURCE: &str = r#"    functor.bond_de = morse_bond_de;
+    functor.bond_a = morse_bond_a;
+    functor.bond_re = morse_bond_re;
+"#;
+
+    #[test]
+    fn generated_entry_point_args_match_expected() {
+        assert_eq!(morse_arg_schema().entry_point_args(), EXPECTED_ENTRY_POINT_ARGS);
+    }
+
+    #[test]
+    fn generated_functor_init_source_is_local_functor() {
+        let init = morse_arg_schema().functor_init_source();
+        assert_eq!(init, EXPECTED_FUNCTOR_INIT_SOURCE);
+        // Intramolecular slots use a local `functor`, never the
+        // pair-force composite member.
+        assert!(!init.contains("composite."));
     }
 }

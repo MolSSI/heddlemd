@@ -27,8 +27,9 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::{alloc_scan_block_totals, NeighborListError};
 use super::{
-    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, PairForceBindContext,
-    PairForceFragment, PairForceLaunchBuilder, Potential, PotentialBuildContext,
+    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, KernelArgType,
+    KernelArg, KernelArgBinder, KernelArgSchema, PairForceBindContext,
+    PairForceFragment, ForceLaunchBuilder, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
@@ -626,7 +627,7 @@ impl SpmeRealSpaceState {
 
 impl Potential for SpmeRealSpaceState {
     fn label(&self) -> &'static str {
-        "spme_real"
+        SPME_REAL_LABEL
     }
 
     fn max_cutoff(&self) -> Option<Real> {
@@ -670,15 +671,45 @@ impl Potential for SpmeRealSpaceState {
     fn bind_pair_force_args(
         &self,
         _ctx: &PairForceBindContext<'_>,
-        builder: &mut PairForceLaunchBuilder,
+        builder: &mut ForceLaunchBuilder,
     ) {
-        builder.push_scalar(K_COULOMB_F32);
-        builder.push_scalar(self.alpha);
-        builder.push_scalar(self.r_cut_real);
-        builder.push_device_buffer(&self.exclusions.atom_excl_offsets);
-        builder.push_device_buffer(&self.exclusions.atom_excl_partners);
-        builder.push_device_buffer(&self.exclusions.atom_excl_coul_scales);
+        // Validated against `spme_real_arg_schema()` — the same schema
+        // that generates the fragment's entry-point args and
+        // functor-init source — so the binding cannot drift from the
+        // kernel signature.
+        let schema = spme_real_arg_schema();
+        let mut b = KernelArgBinder::new(&schema, SPME_REAL_LABEL, builder);
+        b.scalar_real("spme_real_k_coulomb", K_COULOMB_F32);
+        b.scalar_real("spme_real_alpha", self.alpha);
+        b.scalar_real("spme_real_r_cut", self.r_cut_real);
+        b.buffer("spme_real_excl_offsets", &self.exclusions.atom_excl_offsets);
+        b.buffer("spme_real_excl_partners", &self.exclusions.atom_excl_partners);
+        b.buffer("spme_real_excl_scales", &self.exclusions.atom_excl_coul_scales);
+        b.finish();
     }
+}
+
+/// The real-space slot's stable label, shared by `Potential::label`,
+/// the fragment, and the argument schema.
+const SPME_REAL_LABEL: &str = "spme_real";
+
+/// Single source of truth for the SPME real-space pair-force kernel
+/// arguments. The fragment's `entry_point_args` and `functor_init_source`
+/// are generated from this list, and `bind_pair_force_args` is validated
+/// against it, so the three pieces cannot drift apart.
+fn spme_real_arg_schema() -> KernelArgSchema {
+    use KernelArgType::{ConstPtrReal, ConstPtrU32, ScalarReal};
+    KernelArgSchema::pair_force(
+        SPME_REAL_LABEL,
+        vec![
+            KernelArg::new("spme_real_k_coulomb", ScalarReal, "k_coulomb"),
+            KernelArg::new("spme_real_alpha", ScalarReal, "alpha"),
+            KernelArg::new("spme_real_r_cut", ScalarReal, "r_cut_real"),
+            KernelArg::new("spme_real_excl_offsets", ConstPtrU32, "excl_offsets"),
+            KernelArg::new("spme_real_excl_partners", ConstPtrU32, "excl_partners"),
+            KernelArg::new("spme_real_excl_scales", ConstPtrReal, "excl_scales"),
+        ],
+    )
 }
 
 /// SPME real-space `erfc`-screened pair force fragment for the
@@ -739,26 +770,17 @@ struct SpmeRealPairFunctor {
     }
 };
 "#;
-    let entry_point_args = r#"    Real spme_real_k_coulomb,
-    Real spme_real_alpha,
-    Real spme_real_r_cut,
-    const unsigned int *spme_real_excl_offsets,
-    const unsigned int *spme_real_excl_partners,
-    const Real *spme_real_excl_scales,
-"#;
-    let functor_init_source = r#"    composite.functor_spme_real.k_coulomb = spme_real_k_coulomb;
-    composite.functor_spme_real.alpha = spme_real_alpha;
-    composite.functor_spme_real.r_cut_real = spme_real_r_cut;
-    composite.functor_spme_real.excl_offsets = spme_real_excl_offsets;
-    composite.functor_spme_real.excl_partners = spme_real_excl_partners;
-    composite.functor_spme_real.excl_scales = spme_real_excl_scales;
-"#;
+    // `entry_point_args` and `functor_init_source` are generated from
+    // `spme_real_arg_schema()`, the same schema `bind_pair_force_args`
+    // is validated against; the functor field names in `functor_source`
+    // above must match the schema's `functor_field` entries.
+    let schema = spme_real_arg_schema();
     PairForceFragment {
-        label: "spme_real",
+        label: SPME_REAL_LABEL,
         functor_struct_name: "SpmeRealPairFunctor",
         functor_source: functor_source.to_string(),
-        entry_point_args: entry_point_args.to_string(),
-        functor_init_source: functor_init_source.to_string(),
+        entry_point_args: schema.entry_point_args(),
+        functor_init_source: schema.functor_init_source(),
         cutoff: CutoffHandling::Uniform(r_cut_real),
     }
 }
@@ -1115,5 +1137,47 @@ mod order_specialization_tests {
             }
             other => panic!("expected KernelCompilation, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::spme_real_arg_schema;
+
+    // The exact CUDA argument declarations and functor-init assignments
+    // the composer expects for the SPME real-space slot. The
+    // schema-generated output MUST equal these byte-for-byte so the
+    // composed JIT kernel source — and therefore the bit-wise
+    // reproducible result — is unchanged.
+    const EXPECTED_ENTRY_POINT_ARGS: &str = r#"    Real spme_real_k_coulomb,
+    Real spme_real_alpha,
+    Real spme_real_r_cut,
+    const unsigned int *spme_real_excl_offsets,
+    const unsigned int *spme_real_excl_partners,
+    const Real *spme_real_excl_scales,
+"#;
+
+    const EXPECTED_FUNCTOR_INIT_SOURCE: &str = r#"    composite.functor_spme_real.k_coulomb = spme_real_k_coulomb;
+    composite.functor_spme_real.alpha = spme_real_alpha;
+    composite.functor_spme_real.r_cut_real = spme_real_r_cut;
+    composite.functor_spme_real.excl_offsets = spme_real_excl_offsets;
+    composite.functor_spme_real.excl_partners = spme_real_excl_partners;
+    composite.functor_spme_real.excl_scales = spme_real_excl_scales;
+"#;
+
+    #[test]
+    fn generated_entry_point_args_match_expected() {
+        assert_eq!(
+            spme_real_arg_schema().entry_point_args(),
+            EXPECTED_ENTRY_POINT_ARGS
+        );
+    }
+
+    #[test]
+    fn generated_functor_init_source_matches_expected() {
+        assert_eq!(
+            spme_real_arg_schema().functor_init_source(),
+            EXPECTED_FUNCTOR_INIT_SOURCE
+        );
     }
 }

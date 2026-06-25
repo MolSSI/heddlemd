@@ -1260,7 +1260,7 @@ impl Potential for CutoffInspectingPotential {
     fn bind_pair_force_args(
         &self,
         _ctx: &heddle_md::forces::PairForceBindContext<'_>,
-        _builder: &mut heddle_md::forces::PairForceLaunchBuilder,
+        _builder: &mut heddle_md::forces::ForceLaunchBuilder,
     ) {
         // No-op functor takes no parameters.
     }

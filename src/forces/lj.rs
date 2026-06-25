@@ -15,8 +15,9 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
 use super::{
-    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, PairForceBindContext,
-    PairForceFragment, PairForceLaunchBuilder, Potential, PotentialBuildContext,
+    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, KernelArgType,
+    KernelArg, KernelArgBinder, KernelArgSchema, PairForceBindContext,
+    PairForceFragment, ForceLaunchBuilder, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
@@ -61,7 +62,7 @@ impl LennardJonesState {
 
 impl Potential for LennardJonesState {
     fn label(&self) -> &'static str {
-        "lennard_jones"
+        LABEL
     }
 
     fn max_cutoff(&self) -> Option<Real> {
@@ -104,20 +105,53 @@ impl Potential for LennardJonesState {
     fn bind_pair_force_args(
         &self,
         ctx: &PairForceBindContext<'_>,
-        builder: &mut PairForceLaunchBuilder,
+        builder: &mut ForceLaunchBuilder,
     ) {
-        // Order MUST match `lj_pair_force_fragment`'s entry-point args
-        // below.
-        builder.push_device_buffer(&ctx.buffers.type_indices);
-        builder.push_scalar(self.params.n_types as u32);
-        builder.push_device_buffer(&self.params.sigma);
-        builder.push_device_buffer(&self.params.epsilon);
-        builder.push_device_buffer(&self.params.cutoff);
-        builder.push_device_buffer(&self.params.switch);
-        builder.push_device_buffer(&self.exclusions.atom_excl_offsets);
-        builder.push_device_buffer(&self.exclusions.atom_excl_partners);
-        builder.push_device_buffer(&self.exclusions.atom_excl_lj_scales);
+        // Each push is validated against `lj_arg_schema()` — the same
+        // schema that GENERATES the fragment's entry-point args and
+        // functor-init source — so the binding cannot drift in order,
+        // name, kind, or element type from the kernel signature.
+        let schema = lj_arg_schema();
+        let mut b = KernelArgBinder::new(&schema, LABEL, builder);
+        b.buffer("lj_type_indices", &ctx.buffers.type_indices);
+        b.scalar_u32("lj_n_types", self.params.n_types as u32);
+        b.buffer("lj_type_sigma", &self.params.sigma);
+        b.buffer("lj_type_epsilon", &self.params.epsilon);
+        b.buffer("lj_type_cutoff", &self.params.cutoff);
+        b.buffer("lj_type_switch", &self.params.switch);
+        b.buffer("lj_excl_offsets", &self.exclusions.atom_excl_offsets);
+        b.buffer("lj_excl_partners", &self.exclusions.atom_excl_partners);
+        b.buffer("lj_excl_scales", &self.exclusions.atom_excl_lj_scales);
+        b.finish();
     }
+}
+
+/// The slot's stable label, shared by `Potential::label`, the fragment,
+/// and the argument schema.
+const LABEL: &str = "lennard_jones";
+
+/// Single source of truth for the LJ pair-force kernel arguments. The
+/// fragment's `entry_point_args` and `functor_init_source` are generated
+/// from this list, and `bind_pair_force_args` is validated against it,
+/// so the three pieces cannot drift apart. The order here defines the
+/// kernel's parameter order; each entry pairs a CUDA parameter name and
+/// type with the `LjPairFunctor` field it initialises.
+fn lj_arg_schema() -> KernelArgSchema {
+    use KernelArgType::{ConstPtrReal, ConstPtrU32, ScalarU32};
+    KernelArgSchema::pair_force(
+        LABEL,
+        vec![
+            KernelArg::new("lj_type_indices", ConstPtrU32, "type_indices"),
+            KernelArg::new("lj_n_types", ScalarU32, "n_types"),
+            KernelArg::new("lj_type_sigma", ConstPtrReal, "type_sigma"),
+            KernelArg::new("lj_type_epsilon", ConstPtrReal, "type_epsilon"),
+            KernelArg::new("lj_type_cutoff", ConstPtrReal, "type_cutoff"),
+            KernelArg::new("lj_type_switch", ConstPtrReal, "type_switch"),
+            KernelArg::new("lj_excl_offsets", ConstPtrU32, "excl_offsets"),
+            KernelArg::new("lj_excl_partners", ConstPtrU32, "excl_partners"),
+            KernelArg::new("lj_excl_scales", ConstPtrReal, "excl_scales"),
+        ],
+    )
 }
 
 // rq-e8550f96
@@ -292,36 +326,24 @@ struct LjPairFunctor {{
 "#,
         eval_body = evaluate_body,
     );
-    let entry_point_args = r#"    const unsigned int *lj_type_indices,
-    unsigned int lj_n_types,
-    const Real *lj_type_sigma,
-    const Real *lj_type_epsilon,
-    const Real *lj_type_cutoff,
-    const Real *lj_type_switch,
-    const unsigned int *lj_excl_offsets,
-    const unsigned int *lj_excl_partners,
-    const Real *lj_excl_scales,
-"#;
-    let functor_init_source = r#"    composite.functor_lennard_jones.type_indices = lj_type_indices;
-    composite.functor_lennard_jones.n_types = lj_n_types;
-    composite.functor_lennard_jones.type_sigma = lj_type_sigma;
-    composite.functor_lennard_jones.type_epsilon = lj_type_epsilon;
-    composite.functor_lennard_jones.type_cutoff = lj_type_cutoff;
-    composite.functor_lennard_jones.type_switch = lj_type_switch;
-    composite.functor_lennard_jones.excl_offsets = lj_excl_offsets;
-    composite.functor_lennard_jones.excl_partners = lj_excl_partners;
-    composite.functor_lennard_jones.excl_scales = lj_excl_scales;
-"#;
+    // The entry-point argument declarations and the functor-field
+    // initialisation are GENERATED from `lj_arg_schema()`, the same
+    // schema `bind_pair_force_args` is validated against. The functor
+    // struct field names in `functor_source` above must match the
+    // schema's `functor_field` entries (the CUDA compiler catches any
+    // mismatch there); the kernel parameter order and binding order are
+    // now guaranteed identical by construction.
+    let schema = lj_arg_schema();
     let cutoff = match uniform_cutoff {
         Some(c) => CutoffHandling::Uniform(c),
         None => CutoffHandling::PerPair,
     };
     PairForceFragment {
-        label: "lennard_jones",
+        label: LABEL,
         functor_struct_name: "LjPairFunctor",
         functor_source,
-        entry_point_args: entry_point_args.to_string(),
-        functor_init_source: functor_init_source.to_string(),
+        entry_point_args: schema.entry_point_args(),
+        functor_init_source: schema.functor_init_source(),
         cutoff,
     }
 }
@@ -344,6 +366,108 @@ impl LjKernels {
             pair_force_f: get_func(device, "pair_force", "lj_pair_force_f")?,
             pair_force_fev: get_func(device, "pair_force", "lj_pair_force_fev")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::forces::{KernelArgType, KernelArg, KernelArgBinder, KernelArgSchema,
+        ForceLaunchBuilder};
+
+    // The exact CUDA strings the slot hand-maintained before the schema
+    // refactor. The generated output MUST equal these byte-for-byte so
+    // the composed JIT kernel source — and therefore the bit-wise
+    // reproducible result — is unchanged.
+    const LEGACY_ENTRY_POINT_ARGS: &str = r#"    const unsigned int *lj_type_indices,
+    unsigned int lj_n_types,
+    const Real *lj_type_sigma,
+    const Real *lj_type_epsilon,
+    const Real *lj_type_cutoff,
+    const Real *lj_type_switch,
+    const unsigned int *lj_excl_offsets,
+    const unsigned int *lj_excl_partners,
+    const Real *lj_excl_scales,
+"#;
+
+    const LEGACY_FUNCTOR_INIT_SOURCE: &str = r#"    composite.functor_lennard_jones.type_indices = lj_type_indices;
+    composite.functor_lennard_jones.n_types = lj_n_types;
+    composite.functor_lennard_jones.type_sigma = lj_type_sigma;
+    composite.functor_lennard_jones.type_epsilon = lj_type_epsilon;
+    composite.functor_lennard_jones.type_cutoff = lj_type_cutoff;
+    composite.functor_lennard_jones.type_switch = lj_type_switch;
+    composite.functor_lennard_jones.excl_offsets = lj_excl_offsets;
+    composite.functor_lennard_jones.excl_partners = lj_excl_partners;
+    composite.functor_lennard_jones.excl_scales = lj_excl_scales;
+"#;
+
+    #[test]
+    fn generated_entry_point_args_match_legacy() {
+        assert_eq!(lj_arg_schema().entry_point_args(), LEGACY_ENTRY_POINT_ARGS);
+    }
+
+    #[test]
+    fn generated_functor_init_source_matches_legacy() {
+        assert_eq!(
+            lj_arg_schema().functor_init_source(),
+            LEGACY_FUNCTOR_INIT_SOURCE
+        );
+    }
+
+    // A two-scalar schema lets us exercise the binder's validation
+    // without a CUDA device (scalar pushes need no buffer).
+    fn two_scalar_schema() -> KernelArgSchema {
+        KernelArgSchema::pair_force(
+            "test",
+            vec![
+                KernelArg::new("a", KernelArgType::ScalarU32, "a"),
+                KernelArg::new("b", KernelArgType::ScalarU32, "b"),
+            ],
+        )
+    }
+
+    #[test]
+    fn binder_accepts_matching_schema() {
+        let schema = two_scalar_schema();
+        let mut builder = ForceLaunchBuilder::new();
+        let mut b = KernelArgBinder::new(&schema, "test", &mut builder);
+        b.scalar_u32("a", 1);
+        b.scalar_u32("b", 2);
+        b.finish();
+    }
+
+    #[test]
+    #[should_panic(expected = "order/name drift")]
+    fn binder_rejects_name_drift() {
+        let schema = two_scalar_schema();
+        let mut builder = ForceLaunchBuilder::new();
+        let mut b = KernelArgBinder::new(&schema, "test", &mut builder);
+        // Pushing "b" first is exactly the silent argument-swap bug the
+        // schema is meant to catch; now it is a located panic.
+        b.scalar_u32("b", 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Buffer parameter but binding pushed")]
+    fn binder_rejects_kind_mismatch() {
+        let schema = KernelArgSchema::pair_force(
+            "test",
+            vec![KernelArg::new("a", KernelArgType::ConstPtrReal, "a")],
+        );
+        let mut builder = ForceLaunchBuilder::new();
+        let mut b = KernelArgBinder::new(&schema, "test", &mut builder);
+        // Schema declares a pointer; pushing a scalar must be rejected.
+        b.scalar_u32("a", 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "pushed 1 arguments but the schema declares 2")]
+    fn binder_rejects_undercount() {
+        let schema = two_scalar_schema();
+        let mut builder = ForceLaunchBuilder::new();
+        let mut b = KernelArgBinder::new(&schema, "test", &mut builder);
+        b.scalar_u32("a", 1);
+        b.finish();
     }
 }
 

@@ -143,6 +143,87 @@ arithmetic, the per-pair self-skip, the warp-tree butterfly
 reduction, and the per-particle write — so the fragment only
 specifies the per-pair physics for one potential.
 
+## Argument Schema <!-- rq-2856405a -->
+
+A pair-force slot's kernel parameters are declared once as a
+`KernelArgSchema` — an ordered list of typed `KernelArg` entries that is
+the single source of truth for the slot's contribution to the composed
+kernel's argument list. `KernelArgSchema` and its companion types
+(`KernelArg`, `KernelArgType`, `KernelArgBinder`, `ElemTy`, `ArgKind`,
+`KernelElem`) are shape-neutral: the same types declare and bind the
+arguments of bonded and angle slots (see
+`jit-composed-intramolecular.md`). A pair-force slot constructs its
+schema with `KernelArgSchema::pair_force(label, args)`. From this one
+list the framework derives the three artefacts that must stay in
+agreement:
+
+- The fragment's `entry_point_args` — the CUDA `extern "C"` parameter
+  declarations the composer concatenates into each entry point — is
+  produced by `KernelArgSchema::entry_point_args()`.
+- The fragment's `functor_init_source` — the assignments that copy each
+  kernel parameter into the slot's member of the composite functor — is
+  produced by `KernelArgSchema::functor_init_source()`.
+- The slot's `Potential::bind_pair_force_args` pushes one launch
+  argument per schema entry through a `KernelArgBinder`, which
+  validates each push against the same schema.
+
+Because all three derive from one ordered list, the parameter order in
+the kernel signature, the field-initialisation order, and the
+launch-time binding order are identical by construction. A pair-force
+slot does not hand-write `entry_point_args` or `functor_init_source`,
+and its `bind_pair_force_args` does not push arguments directly onto the
+`ForceLaunchBuilder`.
+
+Each `KernelArg` carries:
+
+- `name` — the CUDA kernel parameter name (e.g. `lj_type_sigma`). The
+  generated declaration is `<cuda-type> name`.
+- `ty` — a `KernelArgType` that fixes the CUDA declaration (pointer
+  const-ness and element type, or scalar type) and the kind of launch
+  push (buffer vs scalar) the binder accepts.
+- `functor_field` — the functor struct field the parameter initialises.
+  The functor struct (declared in the fragment's `functor_source`) must
+  declare a field of this name and a compatible type; a mismatch is an
+  nvrtc compile error (`FragmentCompileFailed`), not a silent fault.
+
+A schema built with `KernelArgSchema::pair_force(label, …)` generates
+composite-member initialisation: each `functor_init_source` line reads
+`composite.<slot-functor>.<functor_field> = <name>;`, where
+`<slot-functor>` is `functor_<sanitised-label>` — the composite-functor
+member the composer emits for the slot. (The intramolecular composers
+construct their schemas with `KernelArgSchema::intramolecular(label, …)`,
+which generates local-functor initialisation instead; see
+`jit-composed-intramolecular.md`.) The argument order declared in the
+schema is the kernel parameter order for all three passes
+(packed-neighbour, single-pair, exclusion-correction); each pass
+concatenates the same per-slot `entry_point_args` block.
+
+### Schema-Checked Binding <!-- rq-a45a30ce -->
+
+`bind_pair_force_args` constructs a `KernelArgBinder` over the slot's
+schema and the framework's `ForceLaunchBuilder`, then pushes one value
+per declared argument by name. The binder validates every push, in
+declaration order, on every launch:
+
+- The pushed name must equal the next schema entry's `name`. A mismatch
+  panics — this is the argument-order drift that would otherwise corrupt
+  the kernel's argument list with no compile-time or load-time signal.
+- The push kind (buffer vs scalar) must match the schema entry's
+  `KernelArgType::kind()`.
+- A buffer push of `CudaSlice<T>` must have `T`'s element type
+  (`KernelElem::ELEM`) equal to the schema entry's pointer element type.
+- A scalar push must match the schema entry's scalar type.
+- The total number of pushes must equal the schema's length; a binding
+  that ends early or pushes an extra argument panics — the short case at
+  the binder's `finish()`, the long case at the offending push.
+
+The validation runs on every `bind_pair_force_args` call (once per
+composed-kernel launch, per pass, per step). Its cost is a fixed number
+of name and tag comparisons per argument, negligible beside the kernel
+launch it guards; it is not gated to debug builds. A drift therefore
+surfaces as a located panic naming the slot and the offending argument,
+rather than as wrong forces observed at runtime.
+
 ## Composed-Kernel Structure <!-- rq-693544f8 -->
 
 The composed kernel ships three JIT-compiled passes that all write
@@ -437,11 +518,14 @@ state and never launches a composed-kernel call.
 ## Parameter Binding and Launch <!-- rq-92fec152 -->
 
 Each pair-force slot's `Potential` implementation exposes a
-`bind_pair_force_args(&self, builder: &mut PairForceLaunchBuilder)`
-method (see `framework.md`'s *Feature API*) that pushes the slot's
-parameter buffers and scalars onto a launch-argument builder in the
-same order the slot's fragment expects them. The framework owns the
-builder, initialises it with the common arguments documented in
+`bind_pair_force_args(&self, ctx: &PairForceBindContext<'_>, builder:
+&mut ForceLaunchBuilder)` method (see `framework.md`'s *Feature
+API*) that supplies the slot's parameter buffers and scalars through a
+`KernelArgBinder` validated against the slot's `KernelArgSchema`
+(see *Argument Schema*), in the order the schema declares them — the
+same order the slot's fragment's `entry_point_args` were generated in.
+The framework owns the builder, initialises it with the common
+arguments documented in
 `packed-neighbour-pair-force.md` *JIT Composer Integration*
 (`positions_*`, `tile_sorted_positions_*`, `sorted_particle_ids`,
 exclusion-tile arrays, `interacting_tiles`, `interacting_atoms`,
@@ -521,18 +605,28 @@ standalone case.
   pub struct PairForceFragment {
       pub label: &'static str,
       pub functor_struct_name: &'static str,
-      pub source: &'static str,
+      pub functor_source: String,
+      pub entry_point_args: String,
+      pub functor_init_source: String,
       pub cutoff: CutoffHandling,
   }
   ```
 
   - `label` matches the constructed slot's `Potential::label()` and
-    is used to namespace the fragment's emitted helper symbols.
+    is used to namespace the fragment's emitted helper symbols and to
+    name the slot's member of the composite functor.
   - `functor_struct_name` is the name of the `__device__` functor
     type the fragment defines (e.g. `"LjPairFunctor"`).
-  - `source` is the CUDA C++ text of the fragment: zero or more
-    helper `__device__` functions plus exactly one `struct
-    <functor_struct_name>` definition.
+  - `functor_source` is the CUDA C++ text of the fragment: zero or
+    more helper `__device__` functions plus exactly one `struct
+    <functor_struct_name>` definition whose plain-old-data fields are
+    named by the slot's `KernelArgSchema` `functor_field` entries.
+  - `entry_point_args` is the slot's contribution to each entry
+    point's CUDA parameter declarations, produced by
+    `KernelArgSchema::entry_point_args()` (see *Argument Schema*).
+  - `functor_init_source` is the assignment block that copies each
+    kernel parameter into the slot's composite-functor member,
+    produced by `KernelArgSchema::functor_init_source()`.
   - `cutoff` declares the fragment's per-pair cutoff structure for
     the composer's cutoff-collapse optimisation; see
     `CutoffHandling` below.
@@ -573,14 +667,15 @@ standalone case.
   `PerPair`. The decision is made once at fragment construction
   time.
 
-- `PairForceLaunchBuilder` — opaque argument-builder threaded <!-- rq-86691f43 -->
-  through every active slot's `bind_pair_force_args(...)` call. The
-  framework constructs it once per launch, common arguments
-  pre-populated. Implementations interact with it through pushing
-  methods:
+- `ForceLaunchBuilder` — opaque argument-builder threaded through <!-- rq-86691f43 -->
+  every active slot's bind method. The framework constructs it once
+  per launch, common arguments pre-populated. Shape-neutral: the same
+  type backs the pair-force, bonded, and angle composers (also
+  referenced from `jit-composed-intramolecular.md`). Implementations
+  interact with it through pushing methods:
 
   ```rust
-  impl PairForceLaunchBuilder {
+  impl ForceLaunchBuilder {
       pub fn push_device_buffer<T>(&mut self, buf: &CudaSlice<T>);
       pub fn push_scalar<T: Copy>(&mut self, value: T);
   }
@@ -589,7 +684,158 @@ standalone case.
   Each method appends the named argument to the builder's growing
   list, in the slot's required order. The framework calls the
   compiled kernel via cudarc's raw-argument launch path once every
-  slot has bound its arguments.
+  slot has bound its arguments. A slot reaches these pushing methods
+  only through a `KernelArgBinder`; it does not call them directly.
+
+- `KernelArgSchema` — the single source of truth for one JIT slot's <!-- rq-04043614 -->
+  kernel arguments. Shape-neutral: pair-force, bonded, and angle slots
+  all declare their arguments through it. Constructed from the slot's
+  label and an ordered list of `KernelArg`. Generates the fragment's
+  CUDA argument declarations and functor-initialisation source, and is
+  consulted by `KernelArgBinder` to validate the slot's launch-time
+  binding.
+
+  ```rust
+  impl KernelArgSchema {
+      pub fn pair_force(label: &str, args: Vec<KernelArg>) -> Self;
+      pub fn intramolecular(label: &str, args: Vec<KernelArg>) -> Self;
+      pub fn entry_point_args(&self) -> String;
+      pub fn functor_init_source(&self) -> String;
+  }
+  ```
+
+  - `pair_force(label, args)` records the ordered argument list and
+    selects composite-member functor-init: `functor_init_source()`
+    emits `composite.<slot-functor>.<functor_field> = <name>;` per
+    argument, where `<slot-functor>` is `functor_<sanitised-label>`
+    (`label` lowercased with non-alphanumeric characters mapped to
+    `_`). Used by pair-force slots, whose fragments compose into one
+    summed composite functor.
+  - `intramolecular(label, args)` records the same list but selects
+    local-functor functor-init: `functor_init_source()` emits
+    `functor.<functor_field> = <name>;` per argument, targeting the
+    `functor` local each per-slot bonded / angle entry point declares.
+    Used by bonded and angle slots; see
+    `jit-composed-intramolecular.md`.
+  - `entry_point_args()` returns one CUDA parameter declaration per
+    argument, indented four spaces and comma-terminated, in schema
+    order — the value assigned to the fragment's `entry_point_args`.
+    Identical for both constructors.
+  - `functor_init_source()` returns one assignment per argument, in
+    schema order, in the form selected by the constructor — the value
+    assigned to the fragment's `functor_init_source`.
+
+- `KernelArg` — one entry in a `KernelArgSchema`: a CUDA kernel <!-- rq-754b41ea -->
+  parameter name, its type, and the functor field it initialises.
+
+  ```rust
+  pub struct KernelArg {
+      pub name: &'static str,
+      pub ty: KernelArgType,
+      pub functor_field: &'static str,
+  }
+
+  impl KernelArg {
+      pub const fn new(
+          name: &'static str,
+          ty: KernelArgType,
+          functor_field: &'static str,
+      ) -> Self;
+  }
+  ```
+
+- `KernelArgType` — the CUDA type of one kernel parameter. Fixes the <!-- rq-cd4827b8 -->
+  declaration text, the push kind the binder accepts, and (for
+  pointers) the element type.
+
+  ```rust
+  pub enum KernelArgType {
+      ConstPtrU32,
+      ConstPtrI32,
+      ConstPtrReal,
+      MutPtrReal,
+      ScalarU32,
+      ScalarReal,
+  }
+
+  impl KernelArgType {
+      pub fn cuda_decl(self, name: &str) -> String;
+      pub fn kind(self) -> ArgKind;
+      pub fn elem(self) -> Option<ElemTy>;
+  }
+  ```
+
+  - `cuda_decl(name)` returns the parameter declaration, e.g.
+    `ConstPtrReal.cuda_decl("lj_type_sigma") == "const Real *lj_type_sigma"`.
+  - `kind()` returns `ArgKind::Scalar` for `ScalarU32` / `ScalarReal`
+    and `ArgKind::Buffer` otherwise.
+  - `elem()` returns the pointer element type (`Some(ElemTy::…)`) for
+    pointer parameters and `None` for scalars.
+
+- `ArgKind` — whether a parameter is bound from a buffer or pushed as <!-- rq-93ff6690 -->
+  a by-value scalar.
+
+  ```rust
+  pub enum ArgKind {
+      Buffer,
+      Scalar,
+  }
+  ```
+
+- `ElemTy` — element type of a pointer parameter or scalar parameter, <!-- rq-4cb82e94 -->
+  used to validate that a bound `CudaSlice<T>` or scalar matches the
+  declared schema entry.
+
+  ```rust
+  pub enum ElemTy {
+      U32,
+      I32,
+      Real,
+  }
+  ```
+
+- `KernelElem` — compile-time mapping from a Rust buffer/scalar <!-- rq-91c651f2 -->
+  element type to its `ElemTy`, implemented for `u32`, `i32`, and
+  `Real`. The binder reads `T::ELEM` to check a `CudaSlice<T>` push
+  against the schema's declared pointer element type.
+
+  ```rust
+  pub trait KernelElem {
+      const ELEM: ElemTy;
+  }
+  ```
+
+- `KernelArgBinder` — schema-checked wrapper over a <!-- rq-b5eba87b -->
+  `ForceLaunchBuilder`. A slot's bind method (`bind_pair_force_args`,
+  `bind_bonded_force_args`, or `bind_angle_force_args`) constructs one
+  over its schema and the framework's builder, pushes one value per
+  argument by name, and calls `finish()`. Every push is validated
+  against the schema in declaration order; a name, kind, element-type,
+  or count mismatch panics with a message naming the slot and the
+  offending argument. Shape-neutral: used by pair-force, bonded, and
+  angle slots alike.
+
+  ```rust
+  impl<'a> KernelArgBinder<'a> {
+      pub fn new(
+          schema: &'a KernelArgSchema,
+          slot_label: &'static str,
+          builder: &'a mut ForceLaunchBuilder,
+      ) -> Self;
+      pub fn buffer<T: KernelElem>(&mut self, name: &'static str, buf: &CudaSlice<T>);
+      pub fn scalar_u32(&mut self, name: &'static str, value: u32);
+      pub fn scalar_real(&mut self, name: &'static str, value: Real);
+      pub fn finish(self);
+  }
+  ```
+
+  - `buffer(name, buf)` validates the next schema entry expects a
+    pointer of `T`'s element type named `name`, then pushes `buf`'s
+    device pointer.
+  - `scalar_u32(name, value)` / `scalar_real(name, value)` validate
+    the next schema entry is the matching scalar type named `name`,
+    then push `value`.
+  - `finish()` asserts every declared argument was bound exactly once.
 
 ### Error variants <!-- rq-c011e5e2 -->
 
@@ -642,11 +888,15 @@ exposes the following methods to participate in JIT composition:
 The `Potential` trait exposes the following method to bind
 per-launch arguments to the composed kernel:
 
-- `bind_pair_force_args(&self, builder: &mut PairForceLaunchBuilder)` <!-- rq-a8da1cf0 -->
-  — pushes the slot's parameter buffers and scalars onto `builder`
-  in the order the slot's fragment expects them. The framework
-  calls this on every active fast-class pair-force slot, in
-  canonical slot order, once per composed-kernel launch.
+- `bind_pair_force_args(&self, ctx: &PairForceBindContext<'_>, <!-- rq-a8da1cf0 -->
+  builder: &mut ForceLaunchBuilder)` — supplies the slot's
+  parameter buffers and scalars through a `KernelArgBinder` over
+  the slot's `KernelArgSchema` and `builder`, pushing one value per
+  declared argument by name and calling `finish()`. The framework
+  calls this on every active fast-class pair-force slot, in canonical
+  slot order, once per composed-kernel launch. The binder validates
+  every push against the schema; a name, kind, element-type, or count
+  mismatch panics, naming the slot and the offending argument.
 
   The default implementation panics. Built-in pair-force slots
   override.
@@ -690,7 +940,7 @@ range as follows:
    canonical order.
 2. When the iteration reaches the first fast-class pair-force slot
    (a slot whose builder produced a fragment), the framework
-   constructs a `PairForceLaunchBuilder`, calls
+   constructs a `ForceLaunchBuilder`, calls
    `bind_pair_force_args` on every such slot in canonical order,
    and dispatches one composed-kernel launch.
 3. The framework skips each of those slots' `Potential::compute`
@@ -1099,6 +1349,70 @@ Feature: JIT-composed pair-force kernel
     When ForceField::new(...) is called
     Then the returned Err's Display contains the substrings "alpha" and "beta"
     And the underlying FragmentCompileFailed::log carries the nvrtc compile log verbatim
+
+  # --- Argument schema ---
+
+  @rq-27b28332
+  Scenario: entry_point_args are generated from the slot's argument schema
+    Given a pair-force slot whose argument schema declares, in order, ("lj_type_indices", ConstPtrU32), ("lj_n_types", ScalarU32), and ("lj_type_sigma", ConstPtrReal)
+    When the slot's PairForceFragment is constructed
+    Then fragment.entry_point_args equals "    const unsigned int *lj_type_indices,\n    unsigned int lj_n_types,\n    const Real *lj_type_sigma,\n"
+
+  @rq-7a79f565
+  Scenario: functor_init_source is generated from the slot's argument schema
+    Given a pair-force slot with label "lennard_jones" whose schema includes ("lj_type_sigma", ConstPtrReal, functor_field "type_sigma")
+    When the slot's PairForceFragment is constructed
+    Then fragment.functor_init_source contains the line "    composite.functor_lennard_jones.type_sigma = lj_type_sigma;"
+    And it contains exactly one assignment line per schema entry, in schema order
+
+  @rq-475e403e
+  Scenario: A binding that pushes every argument in schema order is accepted
+    Given a KernelArgSchema with arguments "a" (ScalarU32) and "b" (ScalarU32)
+    And a KernelArgBinder over that schema and a fresh ForceLaunchBuilder
+    When the binding pushes "a" then "b" and calls finish()
+    Then no panic occurs
+
+  @rq-60be5a5c
+  Scenario: A binding that pushes arguments out of order panics
+    Given a KernelArgSchema with arguments "a" then "b"
+    And a KernelArgBinder over that schema
+    When the binding pushes "b" before "a"
+    Then the binder panics with a message naming the slot, the expected argument "a", and the pushed argument "b"
+
+  @rq-e53297d2
+  Scenario: A binding whose push kind disagrees with the schema panics
+    Given a KernelArgSchema whose first argument is a pointer (ConstPtrReal)
+    And a KernelArgBinder over that schema
+    When the binding pushes a scalar for that argument
+    Then the binder panics naming the slot and the argument
+
+  @rq-823a4014
+  Scenario: A binding whose buffer element type disagrees with the schema panics
+    Given a KernelArgSchema whose first argument is "x" (ConstPtrReal)
+    And a KernelArgBinder over that schema
+    When the binding pushes a CudaSlice<u32> for "x"
+    Then the binder panics naming the slot and the argument
+
+  @rq-e9937e20
+  Scenario: A binding that pushes fewer arguments than declared panics at finish
+    Given a KernelArgSchema with two arguments
+    And a KernelArgBinder over that schema
+    When the binding pushes only the first argument and calls finish()
+    Then the binder panics reporting the pushed count and the declared count
+
+  @rq-bb78f1de
+  Scenario: A binding that pushes more arguments than declared panics
+    Given a KernelArgSchema with one argument
+    And a KernelArgBinder over that schema
+    When the binding pushes a second argument
+    Then the binder panics reporting an argument beyond the schema length
+
+  @rq-dd755083
+  Scenario: The schema-generated signature compiles and binds consistently
+    Given a fast-class pair-force slot with a populated argument schema active in a ForceField
+    When ForceField::new(...) is called
+    Then nvrtc compiles the composed source without error
+    And at step time the slot's bind_pair_force_args, validated against the same schema, supplies exactly one launch argument per generated parameter
 
   # --- Mod B retirement ---
 

@@ -302,7 +302,7 @@ impl JitComposedPostForcePerParticle {
     pub unsafe fn launch(
         &self,
         n: u32,
-        mut builder: PairForceLaunchBuilder,
+        mut builder: ForceLaunchBuilder,
     ) -> Result<(), GpuError> {
         let cfg = LaunchConfig {
             grid_dim: (n.div_ceil(256), 1, 1),
@@ -400,17 +400,14 @@ fn format_post_force_compile_failure(
     s
 }
 
-/// Shape-agnostic alias for `PairForceLaunchBuilder` — the binding
-/// mechanism is the same across the pair-force, bonded, and angle
-/// composers, so the launch builder is one type with multiple names.
-pub type ForceLaunchBuilder = PairForceLaunchBuilder;
-
-/// Argument-builder threaded through every active fast-class pair-force
-/// slot's `Potential::bind_pair_force_args(...)` call. Pre-populated by
-/// the framework with the composed kernel's common arguments; each slot
-/// then pushes its parameter buffers and scalars in the order its
-/// fragment expects them.
-pub struct PairForceLaunchBuilder {
+/// Argument-builder threaded through every active fast-class slot's
+/// bind method (`bind_pair_force_args`, `bind_bonded_force_args`,
+/// `bind_angle_force_args`). Pre-populated by the framework with the
+/// composed kernel's common arguments; each slot then pushes its
+/// parameter buffers and scalars in the order its fragment expects them.
+/// Shape-neutral: the binding mechanism is the same across the
+/// pair-force, bonded, and angle composers.
+pub struct ForceLaunchBuilder {
     /// Owned storage for each argument's bytes. Pointers in
     /// `kernel_params` point into the `Box<[u8]>` heap allocations.
     /// Box ensures the allocation address is stable across pushes onto
@@ -419,18 +416,18 @@ pub struct PairForceLaunchBuilder {
     kernel_params: Vec<*mut c_void>,
 }
 
-impl Default for PairForceLaunchBuilder {
+impl Default for ForceLaunchBuilder {
     fn default() -> Self {
-        PairForceLaunchBuilder {
+        ForceLaunchBuilder {
             storage: Vec::new(),
             kernel_params: Vec::new(),
         }
     }
 }
 
-impl PairForceLaunchBuilder {
+impl ForceLaunchBuilder {
     pub fn new() -> Self {
-        PairForceLaunchBuilder::default()
+        ForceLaunchBuilder::default()
     }
 
     /// Push a CUDA device buffer's device pointer as a kernel
@@ -455,6 +452,334 @@ impl PairForceLaunchBuilder {
         let ptr = bytes.as_mut_ptr() as *mut c_void;
         self.storage.push(bytes);
         self.kernel_params.push(ptr);
+    }
+}
+
+// ---------------------------------------------------------------------
+// Typed pair-force argument schema (prototype — see `cleanup.md` Tier 1).
+//
+// A fast-class pair-force slot historically hand-maintained THREE
+// positionally-coupled pieces that the compiler could not cross-check:
+//
+//   1. `PairForceFragment::entry_point_args`   — the CUDA `extern "C"`
+//      parameter declarations.
+//   2. `PairForceFragment::functor_init_source` — the assignments that
+//      copy each kernel parameter into the composite functor's field.
+//   3. `Potential::bind_pair_force_args`        — the positional pushes
+//      of the matching device buffers / scalars at launch time.
+//
+// A drift in order, count, or type between (1) and (3) is silent: the
+// kernel reads the wrong bytes for an argument and produces wrong forces
+// (or crashes) only at runtime. The single guard was a `// Order MUST
+// match` comment.
+//
+// `KernelArgSchema` makes one ordered, typed list the single source
+// of truth. (1) and (2) are GENERATED from it, so they cannot diverge.
+// (3) is routed through `KernelArgBinder`, which VALIDATES every push
+// against the schema by name and kind — turning a silent argument-order
+// corruption into a located panic at the bind call site.
+// ---------------------------------------------------------------------
+
+/// Element type of a kernel pointer parameter / scalar parameter, used
+/// to validate that a bound buffer or scalar matches the declared
+/// schema entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElemTy {
+    U32,
+    I32,
+    Real,
+}
+
+/// Compile-time mapping from a Rust buffer/scalar element type to its
+/// CUDA `ElemTy`, so `KernelArgBinder::buffer` can check a
+/// `CudaSlice<T>` against the schema's declared pointer element type.
+pub trait KernelElem {
+    const ELEM: ElemTy;
+}
+impl KernelElem for u32 {
+    const ELEM: ElemTy = ElemTy::U32;
+}
+impl KernelElem for i32 {
+    const ELEM: ElemTy = ElemTy::I32;
+}
+impl KernelElem for Real {
+    const ELEM: ElemTy = ElemTy::Real;
+}
+
+/// Whether a kernel parameter is a pointer (bound from a `CudaSlice`) or
+/// a by-value scalar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgKind {
+    Buffer,
+    Scalar,
+}
+
+/// The CUDA type of one JIT kernel parameter. Knows how to emit its
+/// declaration and which binder push is valid for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KernelArgType {
+    ConstPtrU32,
+    ConstPtrI32,
+    ConstPtrReal,
+    MutPtrReal,
+    ScalarU32,
+    ScalarReal,
+}
+
+impl KernelArgType {
+    /// The CUDA `extern "C"` declaration for a parameter of this type
+    /// with the given name (e.g. `const Real *lj_type_sigma`).
+    pub fn cuda_decl(self, name: &str) -> String {
+        let prefix = match self {
+            KernelArgType::ConstPtrU32 => "const unsigned int *",
+            KernelArgType::ConstPtrI32 => "const int *",
+            KernelArgType::ConstPtrReal => "const Real *",
+            KernelArgType::MutPtrReal => "Real *",
+            KernelArgType::ScalarU32 => "unsigned int ",
+            KernelArgType::ScalarReal => "Real ",
+        };
+        format!("{prefix}{name}")
+    }
+
+    pub fn kind(self) -> ArgKind {
+        match self {
+            KernelArgType::ScalarU32 | KernelArgType::ScalarReal => ArgKind::Scalar,
+            _ => ArgKind::Buffer,
+        }
+    }
+
+    /// Element type for a pointer parameter; `None` for scalars.
+    pub fn elem(self) -> Option<ElemTy> {
+        match self {
+            KernelArgType::ConstPtrU32 => Some(ElemTy::U32),
+            KernelArgType::ConstPtrI32 => Some(ElemTy::I32),
+            KernelArgType::ConstPtrReal | KernelArgType::MutPtrReal => Some(ElemTy::Real),
+            KernelArgType::ScalarU32 | KernelArgType::ScalarReal => None,
+        }
+    }
+}
+
+/// One entry in a slot's pair-force argument schema: the CUDA parameter
+/// name, its type, and the composite-functor field it initialises.
+#[derive(Debug, Clone)]
+pub struct KernelArg {
+    /// CUDA kernel parameter name, e.g. `"lj_type_sigma"`.
+    pub name: &'static str,
+    pub ty: KernelArgType,
+    /// Functor struct field this parameter is copied into, e.g.
+    /// `"type_sigma"` (assigned as
+    /// `composite.<slot-functor>.type_sigma = lj_type_sigma;`).
+    pub functor_field: &'static str,
+}
+
+impl KernelArg {
+    pub const fn new(
+        name: &'static str,
+        ty: KernelArgType,
+        functor_field: &'static str,
+    ) -> Self {
+        KernelArg { name, ty, functor_field }
+    }
+}
+
+/// Selects the form `KernelArgSchema::functor_init_source` generates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FunctorInit {
+    /// Pair-force: each slot is a member of a shared composite functor.
+    /// Init lines read `composite.<composite_member>.<field> = <name>;`.
+    CompositeMember,
+    /// Bonded/angle: each per-slot entry point declares one local
+    /// functor named `functor`. Init lines read
+    /// `functor.<field> = <name>;`.
+    LocalFunctor,
+}
+
+/// The single source of truth for one JIT slot's kernel arguments.
+/// Shape-neutral: pair-force, bonded, and angle slots all declare their
+/// arguments through it. Generates the fragment's `entry_point_args` and
+/// `functor_init_source`, and validates the slot's launch-time binding.
+#[derive(Debug, Clone)]
+pub struct KernelArgSchema {
+    /// Composite-functor member for the owning slot, derived from its
+    /// label (e.g. `"functor_lennard_jones"`). Read only by the
+    /// `CompositeMember` init style.
+    composite_member: String,
+    init: FunctorInit,
+    args: Vec<KernelArg>,
+}
+
+impl KernelArgSchema {
+    /// Build a schema for a pair-force slot. `functor_init_source`
+    /// generates composite-member assignments
+    /// (`composite.functor_<label>.<field> = <name>;`); `label` must
+    /// equal the slot's `Potential::label()` so the generated member
+    /// name matches the one the composer emits.
+    pub fn pair_force(label: &str, args: Vec<KernelArg>) -> Self {
+        KernelArgSchema {
+            composite_member: functor_field_name(label),
+            init: FunctorInit::CompositeMember,
+            args,
+        }
+    }
+
+    /// Build a schema for a bonded or angle slot. `functor_init_source`
+    /// generates local-functor assignments (`functor.<field> = <name>;`)
+    /// targeting the `functor` local each per-slot entry point declares.
+    pub fn intramolecular(label: &str, args: Vec<KernelArg>) -> Self {
+        KernelArgSchema {
+            composite_member: functor_field_name(label),
+            init: FunctorInit::LocalFunctor,
+            args,
+        }
+    }
+
+    /// CUDA parameter declarations for the fragment's `entry_point_args`,
+    /// one per line, indented and comma-terminated to match the composer's
+    /// concatenation contract. Identical for both constructors.
+    pub fn entry_point_args(&self) -> String {
+        let mut s = String::new();
+        for a in &self.args {
+            s.push_str("    ");
+            s.push_str(&a.ty.cuda_decl(a.name));
+            s.push_str(",\n");
+        }
+        s
+    }
+
+    /// Functor-field initialisation for the fragment's
+    /// `functor_init_source`, in the form selected by the constructor.
+    pub fn functor_init_source(&self) -> String {
+        let mut s = String::new();
+        for a in &self.args {
+            match self.init {
+                FunctorInit::CompositeMember => {
+                    s.push_str("    composite.");
+                    s.push_str(&self.composite_member);
+                    s.push('.');
+                }
+                FunctorInit::LocalFunctor => {
+                    s.push_str("    functor.");
+                }
+            }
+            s.push_str(a.functor_field);
+            s.push_str(" = ");
+            s.push_str(a.name);
+            s.push_str(";\n");
+        }
+        s
+    }
+}
+
+/// Schema-checked wrapper over `ForceLaunchBuilder`. Each named push
+/// is validated against the slot's `KernelArgSchema` in declaration
+/// order: a wrong name, wrong push-kind (buffer vs scalar), wrong
+/// element type, or wrong count panics with a located message at bind
+/// time, instead of silently corrupting the kernel's argument list.
+pub struct KernelArgBinder<'a> {
+    schema: &'a KernelArgSchema,
+    builder: &'a mut ForceLaunchBuilder,
+    slot_label: &'static str,
+    cursor: usize,
+}
+
+impl<'a> KernelArgBinder<'a> {
+    pub fn new(
+        schema: &'a KernelArgSchema,
+        slot_label: &'static str,
+        builder: &'a mut ForceLaunchBuilder,
+    ) -> Self {
+        KernelArgBinder {
+            schema,
+            builder,
+            slot_label,
+            cursor: 0,
+        }
+    }
+
+    /// Validate the next expected argument against `(name, kind, elem)`
+    /// and return its declared type (Copy, so no borrow of `self`
+    /// outlives the call).
+    fn expect(&self, name: &str, kind: ArgKind, elem: Option<ElemTy>) -> KernelArgType {
+        let a = self.schema.args.get(self.cursor).unwrap_or_else(|| {
+            panic!(
+                "slot `{}`: binding pushed more arguments than the schema declares \
+                 ({} declared); extra argument `{}`",
+                self.slot_label,
+                self.schema.args.len(),
+                name,
+            )
+        });
+        if a.name != name {
+            panic!(
+                "slot `{}` argument #{}: schema declares `{}` but binding pushed `{}` \
+                 — order/name drift between the fragment signature and the binding",
+                self.slot_label, self.cursor, a.name, name,
+            );
+        }
+        if a.ty.kind() != kind {
+            panic!(
+                "slot `{}` argument `{}`: schema declares a {:?} parameter but binding \
+                 pushed a {:?}",
+                self.slot_label, name, a.ty.kind(), kind,
+            );
+        }
+        if kind == ArgKind::Buffer && a.ty.elem() != elem {
+            panic!(
+                "slot `{}` argument `{}`: schema declares `{}` (element {:?}) but binding \
+                 pushed a buffer of element {:?}",
+                self.slot_label,
+                name,
+                a.ty.cuda_decl(name),
+                a.ty.elem(),
+                elem,
+            );
+        }
+        a.ty
+    }
+
+    /// Push a device buffer for the named pointer parameter.
+    pub fn buffer<T: KernelElem>(&mut self, name: &'static str, buf: &CudaSlice<T>) {
+        self.expect(name, ArgKind::Buffer, Some(T::ELEM));
+        self.builder.push_device_buffer(buf);
+        self.cursor += 1;
+    }
+
+    /// Push a `u32` scalar for the named `unsigned int` parameter.
+    pub fn scalar_u32(&mut self, name: &'static str, value: u32) {
+        let ty = self.expect(name, ArgKind::Scalar, None);
+        assert_eq!(
+            ty,
+            KernelArgType::ScalarU32,
+            "slot `{}` argument `{}`: scalar_u32 push does not match declared {:?}",
+            self.slot_label, name, ty,
+        );
+        self.builder.push_scalar(value);
+        self.cursor += 1;
+    }
+
+    /// Push a `Real` scalar for the named `Real` parameter.
+    pub fn scalar_real(&mut self, name: &'static str, value: Real) {
+        let ty = self.expect(name, ArgKind::Scalar, None);
+        assert_eq!(
+            ty,
+            KernelArgType::ScalarReal,
+            "slot `{}` argument `{}`: scalar_real push does not match declared {:?}",
+            self.slot_label, name, ty,
+        );
+        self.builder.push_scalar(value);
+        self.cursor += 1;
+    }
+
+    /// Assert every declared argument was bound exactly once.
+    pub fn finish(self) {
+        if self.cursor != self.schema.args.len() {
+            panic!(
+                "slot `{}`: binding pushed {} arguments but the schema declares {}",
+                self.slot_label,
+                self.cursor,
+                self.schema.args.len(),
+            );
+        }
     }
 }
 
@@ -580,7 +905,7 @@ impl JitComposedPairForce {
         &self,
         n_iblocks: u32,
         use_fev: bool,
-        mut builder: PairForceLaunchBuilder,
+        mut builder: ForceLaunchBuilder,
     ) -> Result<(), GpuError> {
         if n_iblocks == 0 {
             drop(builder.storage);
@@ -622,7 +947,7 @@ impl JitComposedPairForce {
         &self,
         excluded_pair_count: u32,
         use_fev: bool,
-        mut builder: PairForceLaunchBuilder,
+        mut builder: ForceLaunchBuilder,
     ) -> Result<(), GpuError> {
         if excluded_pair_count == 0 {
             drop(builder.storage);
@@ -664,7 +989,7 @@ impl JitComposedPairForce {
         &self,
         single_pairs_capacity: u32,
         use_fev: bool,
-        mut builder: PairForceLaunchBuilder,
+        mut builder: ForceLaunchBuilder,
     ) -> Result<(), GpuError> {
         if single_pairs_capacity == 0 {
             drop(builder.storage);

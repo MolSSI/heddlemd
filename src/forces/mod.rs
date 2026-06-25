@@ -28,10 +28,11 @@ use crate::precision::Real;
 pub use angle::{HarmonicAngleBuilder, HarmonicAngleState};
 pub use coulomb::{CoulombBuilder, CoulombParameters, CoulombState};
 pub use jit_composed::{
-    AngleForceFragment, AngleScratchView, BondedForceFragment, BondedScratchView, CutoffHandling,
-    ForceLaunchBuilder, ForceLaunchContext, JitComposedAngleForce, JitComposedBondedForce,
-    JitComposedPairForce, JitComposedPostForcePerParticle, PairForceBindContext,
-    PairForceFragment, PairForceLaunchBuilder, PerParticleFragment, PostForceBindContext,
+    AngleForceFragment, AngleScratchView, ArgKind, BondedForceFragment, BondedScratchView,
+    CutoffHandling, ElemTy, ForceLaunchBuilder, ForceLaunchContext, JitComposedAngleForce,
+    JitComposedBondedForce, JitComposedPairForce, JitComposedPostForcePerParticle, KernelArg,
+    KernelArgBinder, KernelArgSchema, KernelArgType, KernelElem, PairForceBindContext,
+    PairForceFragment, PerParticleFragment, PostForceBindContext,
     set_jit_fast_math,
 };
 pub use spme::{
@@ -118,7 +119,7 @@ pub trait Potential: std::fmt::Debug + Send {
     fn bind_pair_force_args(
         &self,
         _ctx: &PairForceBindContext<'_>,
-        _builder: &mut PairForceLaunchBuilder,
+        _builder: &mut ForceLaunchBuilder,
     ) {
         panic!(
             "Potential::bind_pair_force_args must be overridden for fast-class \
@@ -1017,7 +1018,7 @@ impl ForceField {
                 sim_box,
                 neighbor_list: nl,
             };
-            let mut launch_builder = PairForceLaunchBuilder::new();
+            let mut launch_builder = ForceLaunchBuilder::new();
             // Common args, in the order the composer declares them.
             // `block_centre` and `block_bbox` are consumed by the
             // per-block single-periodic-copy fast-path check at the
@@ -1074,7 +1075,7 @@ impl ForceField {
                 .and_then(|nl| nl.packed.as_ref());
             if let Some(packed) = packed_opt {
                 if packed.single_pairs_capacity > 0 {
-                    let mut single_pair_builder = PairForceLaunchBuilder::new();
+                    let mut single_pair_builder = ForceLaunchBuilder::new();
                     single_pair_builder.push_device_buffer(&buffers.posq);
                     single_pair_builder.push_device_buffer(&packed.single_pair_atoms);
                     single_pair_builder.push_device_buffer(&packed.interaction_count);
@@ -1104,7 +1105,7 @@ impl ForceField {
             // the fixed-point accumulators. When there are no
             // exclusions, this launch is skipped entirely.
             if self.excluded_pair_count > 0 {
-                let mut correction_builder = PairForceLaunchBuilder::new();
+                let mut correction_builder = ForceLaunchBuilder::new();
                 // Common args for the correction entry point (order
                 // must match emit_correction_entry_point).
                 correction_builder.push_device_buffer(&buffers.posq);

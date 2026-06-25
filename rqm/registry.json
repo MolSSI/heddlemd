@@ -531,6 +531,13 @@
     "title": "Drop best-effort flushes",
     "type": "scenario"
   },
+  "rq-04043614": {
+    "decl": "- `KernelArgSchema` — the single source of truth for one JIT slot's",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "KernelArgSchema",
+    "type": "api-item"
+  },
   "rq-042872ac": {
     "decl": "- `Thermostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline -->",
     "file": "integration/framework",
@@ -914,6 +921,13 @@
       }
     ],
     "title": "Plan walk on empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-075663ff": {
+    "decl": "Scenario: An angle slot's functor_init_source uses local-functor initialisation",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "An angle slot's functor_init_source uses local-functor initialisation",
     "type": "scenario"
   },
   "rq-076617ab": {
@@ -2466,6 +2480,14 @@
     ],
     "title": "[neighbor_list] rejects unknown fields for the chosen mode",
     "type": "scenario"
+  },
+  "rq-13d8e659": {
+    "decl": "## Argument Schema",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Argument Schema",
+    "type": "section"
   },
   "rq-13e15b90": {
     "decl": "Scenario: Bond row with atom index out of range",
@@ -4889,6 +4911,13 @@
     "title": "JIT fragment behaviour",
     "type": "section"
   },
+  "rq-27b28332": {
+    "decl": "Scenario: entry_point_args are generated from the slot's argument schema",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "entry_point_args are generated from the slot's argument schema",
+    "type": "scenario"
+  },
   "rq-27c19b67": {
     "decl": "Scenario: ForcesOnly call preserves the energy and virial accumulator entries from the previous ForcesAndScalars call",
     "file": "forces/framework",
@@ -4957,6 +4986,14 @@
     "refs": [],
     "title": "Bit-exact equality after a 100-step run",
     "type": "scenario"
+  },
+  "rq-2856405a": {
+    "decl": "## Argument Schema",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Argument Schema",
+    "type": "section"
   },
   "rq-28611487": {
     "decl": "### Types",
@@ -5907,6 +5944,14 @@
     ],
     "title": "LintOverall",
     "type": "api-item"
+  },
+  "rq-30d233fd": {
+    "decl": "### Schema-Checked Binding",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 3,
+    "refs": [],
+    "title": "Schema-Checked Binding",
+    "type": "section"
   },
   "rq-30d3f1fa": {
     "decl": "Scenario: Reject step_decrease >= 1.0",
@@ -7498,6 +7543,13 @@
     "title": "NamedSlotConfig",
     "type": "api-item"
   },
+  "rq-402b55fc": {
+    "decl": "- `KernelArgSchema`, `KernelArg`, `KernelArgType`, `KernelArgBinder`,",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "KernelArgSchema",
+    "type": "api-item"
+  },
   "rq-402cea33": {
     "decl": "## Constraint-Type Validation",
     "file": "integration/constraint-framework",
@@ -8104,11 +8156,25 @@
     "title": "Construct with particle_count = 1 (N_f = 1)",
     "type": "scenario"
   },
+  "rq-4710429f": {
+    "decl": "Scenario: The schema-generated bonded signature compiles and binds consistently",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "The schema-generated bonded signature compiles and binds consistently",
+    "type": "scenario"
+  },
   "rq-47540d14": {
     "decl": "Scenario: A bonded-only ForceField step launches no neighbor-list kernels",
     "file": "forces/framework",
     "refs": [],
     "title": "A bonded-only ForceField step launches no neighbor-list kernels",
+    "type": "scenario"
+  },
+  "rq-475e403e": {
+    "decl": "Scenario: A binding that pushes every argument in schema order is accepted",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A binding that pushes every argument in schema order is accepted",
     "type": "scenario"
   },
   "rq-47697f4a": {
@@ -8643,6 +8709,13 @@
     ],
     "title": "Wrap Algorithm",
     "type": "section"
+  },
+  "rq-4cb82e94": {
+    "decl": "- `ElemTy` — element type of a pointer parameter or scalar parameter,",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "ElemTy",
+    "type": "api-item"
   },
   "rq-4cd2ec5b": {
     "decl": "Scenario: IntegratorBuilder::owns_thermostat agrees with the validation rule",
@@ -10804,6 +10877,13 @@
       }
     ],
     "title": "Two phases of different kinds may share a numerical seed",
+    "type": "scenario"
+  },
+  "rq-60be5a5c": {
+    "decl": "Scenario: A binding that pushes arguments out of order panics",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A binding that pushes arguments out of order panics",
     "type": "scenario"
   },
   "rq-60c1e792": {
@@ -12974,6 +13054,13 @@
     "title": "from_config builds a symmetric parameter table from an unordered pair_interactions",
     "type": "scenario"
   },
+  "rq-754b41ea": {
+    "decl": "- `KernelArg` — one entry in a `KernelArgSchema`: a CUDA kernel",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "KernelArg",
+    "type": "api-item"
+  },
   "rq-7564b1e7": {
     "decl": "Scenario: log_column_names returns [\"pressure\", \"box_volume\"]",
     "file": "integration/berendsen-barostat",
@@ -13218,6 +13305,13 @@
       }
     ],
     "title": "Reject non-positive tau_p",
+    "type": "scenario"
+  },
+  "rq-7763d1ce": {
+    "decl": "Scenario: A bonded binding that pushes arguments out of order panics",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "A bonded binding that pushes arguments out of order panics",
     "type": "scenario"
   },
   "rq-7773e9e8": {
@@ -13516,6 +13610,13 @@
     "title": "Reject when type_indices has the wrong length",
     "type": "scenario"
   },
+  "rq-790edb52": {
+    "decl": "Scenario: A bonded slot's entry_point_args are generated from its argument schema",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "A bonded slot's entry_point_args are generated from its argument schema",
+    "type": "scenario"
+  },
   "rq-7921e537": {
     "decl": "Scenario: Construct a constraint slot for a non-empty constraint list",
     "file": "integration/constraint-framework",
@@ -13735,6 +13836,13 @@
       }
     ],
     "title": "Reject positions at the +L/2 boundary (orthorhombic)",
+    "type": "scenario"
+  },
+  "rq-7a79f565": {
+    "decl": "Scenario: functor_init_source is generated from the slot's argument schema",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "functor_init_source is generated from the slot's argument schema",
     "type": "scenario"
   },
   "rq-7ab80063": {
@@ -14491,6 +14599,13 @@
     "title": "SI-mode steepest-descent minimizer params are converted",
     "type": "scenario"
   },
+  "rq-823a4014": {
+    "decl": "Scenario: A binding whose buffer element type disagrees with the schema panics",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A binding whose buffer element type disagrees with the schema panics",
+    "type": "scenario"
+  },
   "rq-8253d3c4": {
     "decl": "Scenario: interaction_count is reset at the start of every rebuild",
     "file": "forces/packed-neighbour-pair-force",
@@ -14869,10 +14984,10 @@
     "type": "scenario"
   },
   "rq-86691f43": {
-    "decl": "- `PairForceLaunchBuilder` — opaque argument-builder threaded",
+    "decl": "- `ForceLaunchBuilder` — opaque argument-builder threaded through",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "PairForceLaunchBuilder",
+    "title": "ForceLaunchBuilder",
     "type": "api-item"
   },
   "rq-866dcea2": {
@@ -16083,6 +16198,13 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-91c651f2": {
+    "decl": "- `KernelElem` — compile-time mapping from a Rust buffer/scalar",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "KernelElem",
+    "type": "api-item"
+  },
   "rq-91cec484": {
     "decl": "### CUDA events",
     "file": "performance-analysis",
@@ -16324,6 +16446,13 @@
     ],
     "title": "Unknown attributes in the comment line are ignored",
     "type": "scenario"
+  },
+  "rq-93ff6690": {
+    "decl": "- `ArgKind` — whether a parameter is bound from a buffer or pushed as",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "ArgKind",
+    "type": "api-item"
   },
   "rq-941c4000": {
     "decl": "Scenario: wrap_position is idempotent",
@@ -18188,6 +18317,14 @@
     "title": "Open creates a new trajectory file",
     "type": "scenario"
   },
+  "rq-a45a30ce": {
+    "decl": "### Schema-Checked Binding",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Schema-Checked Binding",
+    "type": "section"
+  },
   "rq-a479680a": {
     "decl": "Scenario: Lint reports a box-too-small failure under the box/cutoff stage",
     "file": "simulation-runner",
@@ -18602,7 +18739,7 @@
     "type": "scenario"
   },
   "rq-a8da1cf0": {
-    "decl": "- `bind_pair_force_args(&self, builder: &mut PairForceLaunchBuilder)`",
+    "decl": "- `bind_pair_force_args(&self, ctx: &PairForceBindContext<'_>,",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
     "title": "bind_pair_force_args",
@@ -20125,6 +20262,13 @@
     "title": "run_simulation defers to run_simulation_with_registries with built-ins",
     "type": "scenario"
   },
+  "rq-b5eba87b": {
+    "decl": "- `KernelArgBinder` — schema-checked wrapper over a",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "KernelArgBinder",
+    "type": "api-item"
+  },
   "rq-b6324878": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/berendsen-barostat",
@@ -20629,6 +20773,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Trivial-mode pre_step does no work",
+    "type": "scenario"
+  },
+  "rq-bb78f1de": {
+    "decl": "Scenario: A binding that pushes more arguments than declared panics",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A binding that pushes more arguments than declared panics",
     "type": "scenario"
   },
   "rq-bb807252": {
@@ -21582,6 +21733,13 @@
     "title": "Pair with Coulomb exclusion scale 0.0 contributes nothing",
     "type": "scenario"
   },
+  "rq-c4f93cfa": {
+    "decl": "Scenario: A bonded slot's functor_init_source uses local-functor initialisation",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "A bonded slot's functor_init_source uses local-functor initialisation",
+    "type": "scenario"
+  },
   "rq-c505f34b": {
     "decl": "Scenario: Same-type RDF on a one-particle frame yields zero counts",
     "file": "analysis/rdf",
@@ -22443,6 +22601,13 @@
     "refs": [],
     "title": "Toggling the f64 feature forces a kernel recompile",
     "type": "scenario"
+  },
+  "rq-cd4827b8": {
+    "decl": "- `KernelArgType` — the CUDA type of one kernel parameter. Fixes the",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "KernelArgType",
+    "type": "api-item"
   },
   "rq-cd50d861": {
     "decl": "Scenario: cell_offsets contains the prefix sum of cell occupancies",
@@ -24225,6 +24390,13 @@
     "title": "Reject n_resp = 0",
     "type": "scenario"
   },
+  "rq-dd755083": {
+    "decl": "Scenario: The schema-generated signature compiles and binds consistently",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "The schema-generated signature compiles and binds consistently",
+    "type": "scenario"
+  },
   "rq-dd829afb": {
     "decl": "Scenario: Bin-only cell list rebuilds every step regardless of particle displacement",
     "file": "forces/spme",
@@ -25080,6 +25252,13 @@
     "title": "nhc_chain_sub_step handles M = 1 without panicking",
     "type": "scenario"
   },
+  "rq-e53297d2": {
+    "decl": "Scenario: A binding whose push kind disagrees with the schema panics",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A binding whose push kind disagrees with the schema panics",
+    "type": "scenario"
+  },
   "rq-e538c545": {
     "decl": "- `Constraint::apply_before_drift`, `Constraint::apply_after_drift`,",
     "file": "integration/constraint-framework",
@@ -25617,6 +25796,13 @@
       }
     ],
     "title": "step_with_constraint short-circuits on a constraint-rejecting state",
+    "type": "scenario"
+  },
+  "rq-e9937e20": {
+    "decl": "Scenario: A binding that pushes fewer arguments than declared panics at finish",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A binding that pushes fewer arguments than declared panics at finish",
     "type": "scenario"
   },
   "rq-e9994f86": {
@@ -27325,6 +27511,13 @@
     "refs": [],
     "title": "Reversible symmetric Trotter splitting",
     "type": "section"
+  },
+  "rq-f7cc0a56": {
+    "decl": "Scenario: A bonded binding whose buffer element type disagrees with the schema panics",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "A bonded binding whose buffer element type disagrees with the schema panics",
+    "type": "scenario"
   },
   "rq-f7e279ee": {
     "decl": "- `main(args: Vec<String>) -> ExitCode` (in `src/main.rs`)",
