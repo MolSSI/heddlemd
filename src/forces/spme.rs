@@ -112,9 +112,6 @@ pub struct SpmeReciprocalGrid {
     pub b_factors_a: CudaSlice<Real>,
     pub b_factors_b: CudaSlice<Real>,
     pub b_factors_c: CudaSlice<Real>,
-    /// Box generation the influence function was computed against.
-    /// Refreshed when the sim_box generation changes.
-    pub cached_box_generation: u64,
     pub forward_plan: Plan3dR2C,
     pub inverse_plan: Plan3dC2R,
     /// Device-resident work area shared by the R2C and C2R cuFFT plans.
@@ -294,7 +291,6 @@ impl SpmeReciprocalGrid {
             b_factors_a,
             b_factors_b,
             b_factors_c,
-            cached_box_generation: sim_box.generation(),
             forward_plan,
             inverse_plan,
             workspace,
@@ -327,26 +323,32 @@ impl SpmeReciprocalGrid {
         neighbor_list_generation: u64,
         timings: &mut Timings,
     ) -> Result<(), SpmeError> {
-        // Refresh influence function (and the virial factor that
-        // tracks it) on device when the box has changed. All recip
-        // launches share the default stream, so downstream consumers
-        // see the refreshed buffers without additional synchronisation.
-        if sim_box.generation() != self.cached_box_generation {
-            crate::gpu::spme_recip_compute_influence(
-                &particle_buffers.kernels,
-                &self.b_factors_a,
-                &self.b_factors_b,
-                &self.b_factors_c,
-                &mut self.influence_g,
-                &mut self.virial_factor,
-                sim_box,
-                self.params.grid,
-                K_COULOMB_F32,
-                self.params.alpha,
-                self.m_complex as u32,
-            )?;
-            self.cached_box_generation = sim_box.generation();
-        }
+        // Recompute the influence function (and the virial factor that
+        // tracks it) every step from the live device lattice. Barostats
+        // mutate `sim_box.lattice_device()` in place via a captured
+        // kernel, so launching this unconditionally records it into the
+        // per-step CUDA graph; it then replays every step and tracks the
+        // box. A host-side box-generation guard cannot serve here: graph
+        // capture evaluates the host branch once, before the step's
+        // barostat advances the box, so a gated launch would be skipped
+        // and the captured batch would run on a stale influence. The f32
+        // kernel is memory-bound and cheap enough to run every step (NVT
+        // simply recomputes identical buffers). All recip launches share
+        // the default stream, so downstream consumers see the refreshed
+        // buffers without additional synchronisation. rq-e7b74f7a
+        crate::gpu::spme_recip_compute_influence(
+            &particle_buffers.kernels,
+            &self.b_factors_a,
+            &self.b_factors_b,
+            &self.b_factors_c,
+            &mut self.influence_g,
+            &mut self.virial_factor,
+            sim_box,
+            self.params.grid,
+            K_COULOMB_F32,
+            self.params.alpha,
+            self.m_complex as u32,
+        )?;
 
         // Atom spatial pre-sort. Triggered when the framework's
         // neighbour-list rebuild generation advances past the slot's

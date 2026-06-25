@@ -296,6 +296,22 @@ sequence:
 The captured iteration counts as physical step 1; the timestep loop
 replays from step 2 onward.
 
+Force kernels whose result depends on the simulation box must read the
+box from the persistent device lattice buffer (`sim_box.lattice_device()`)
+and must launch **unconditionally** during the force evaluation, never
+gated on a host-side state check. The barostat mutates that device buffer
+in place (step 4 above), so a box-dependent kernel that is recorded into
+the graph automatically tracks the per-replay box: on each replay it
+reads the lattice the previous step's captured barostat kernel wrote. The
+SPME reciprocal influence-function recompute (`spme_recip_compute_influence`,
+see `forces/spme.md`) is the load-bearing case — it runs every force
+evaluation and is captured into the graph. A box-dependent kernel that
+instead gates its launch on a host-side counter (for example a box
+generation) would be skipped at capture time, because the force
+evaluation precedes the step's barostat update, so the host counter has
+not yet advanced; the kernel would never be recorded and the captured
+batch would run on a stale, box-independent result.
+
 If any of begin-capture / end-capture / instantiate returns a CUDA
 driver error, the runner logs a single line to stderr of the form
 `warning: cuda graph capture failed for phase `<name>`: <reason>;

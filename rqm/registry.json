@@ -25221,7 +25221,15 @@
     "level": 3,
     "refs": [
       {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/spme_pipeline.rs",
         "kind": "code"
       }
     ],

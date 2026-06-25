@@ -579,8 +579,11 @@ slot's device buffers, and never rebuilt.
 
 `influence_G` and `virial_factor` are populated on device by a
 `spme_recip_compute_influence` kernel that runs on `recip_stream`. The
-kernel takes the current box lattice as scalar kernel arguments
-(`lx, ly, lz, xy, xz, yz`), the precomputed device-resident
+kernel takes the box lattice as a **device pointer**
+(`sim_box.lattice_device()`, length 6: `lx, ly, lz, xy, xz, yz`) — not
+as scalar launch arguments — so that a captured launch reads whatever
+the buffer holds at replay time rather than the values frozen into the
+graph at capture. It also takes the precomputed device-resident
 `b_factors_*` buffers, the grid dimensions, and `α`. One thread per
 complex grid cell evaluates the formulae above; threads do not
 communicate. All inner arithmetic uses `Real` — the same f32 width as
@@ -601,23 +604,38 @@ produce byte-identical buffers.
 
 1. **At slot construction**, after the `b_factors_*` buffers have been
    uploaded, to populate `influence_G` and `virial_factor` for the
-   initial box. The slot's `cached_box_generation` is set to
-   `sim_box.generation()` at this point.
-2. **At the start of every `SpmeReciprocalState::compute()` call where
-   `sim_box.generation() != self.cached_box_generation`**, before
-   the bin-list pre-step and before the recip-stream's wait for the
-   default stream. The launch updates `cached_box_generation`. When
-   the generations match, the call is skipped and the prior
-   `influence_G` / `virial_factor` are reused.
+   initial box.
+2. **At the start of every `SpmeReciprocalState::compute()` call**,
+   unconditionally, before the bin-list pre-step and before the
+   recip-stream's wait for the default stream. The launch reads the box
+   lattice from the persistent device buffer `sim_box.lattice_device()`
+   — a buffer allocated once and mutated in place by barostats — so the
+   recompute always reflects the box as it stands on device when the
+   recip pipeline runs.
 
-The cadence of recompute therefore tracks the C-rescale and other
-barostats' box updates: NVT runs recompute exactly once (at
-construction); NPT runs recompute every step the barostat fires.
+Recomputing on every call (rather than gating the launch on a host-side
+box-generation counter) is what makes the influence correct under CUDA
+graphs. The launch is an ordinary kernel reading a device pointer, so it
+is recorded into the captured per-step graph and **replays every step**,
+reading the live device lattice that the barostat's captured box-update
+kernel writes earlier in the same step. A host-side generation check
+could not serve this role: graph capture evaluates the host branch once,
+at capture time, before that step's barostat has advanced the box, so a
+gated launch would be skipped and never recorded into the graph — leaving
+the reciprocal forces on a stale influence function for the whole
+replayed batch. The per-cell arithmetic is f32 and memory-bound, so the
+unconditional recompute is affordable even in NVT, where it reproduces
+byte-identical buffers every step.
 
-When the kernel runs, the strict default-stream ordering (the
-influence recompute is dispatched before any later reciprocal kernel
-on the same stream; see *Launch configuration*) ensures that
-downstream consumers see the updated buffers before reading them.
+The cadence is therefore uniform: the influence function tracks the box
+on every step, on both the per-step launch path and the captured
+graph-replay path. Under NPT it follows the barostat's per-step box
+updates; under NVT it recomputes identical buffers each step.
+
+The strict default-stream ordering (the influence recompute is dispatched
+before any later reciprocal kernel on the same stream; see *Launch
+configuration*) ensures that downstream consumers see the updated buffers
+before reading them.
 
 ### Influence-function multiply, virial partial reduction, and inverse FFT <!-- rq-95385a9d -->
 

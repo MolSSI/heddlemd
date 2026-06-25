@@ -788,3 +788,86 @@ fn end_to_end_w_per_particle_virial_equals_half_over_n_times_sum_of_partials() {
     let total: f64 = virials.iter().map(|&x| x as f64).sum();
     assert!(total.is_finite(), "non-finite total virial");
 }
+
+// rq-e7b74f7a
+#[test]
+fn influence_tracks_box_change_across_compute_calls() {
+    // Under NPT the box changes every step; the influence function must
+    // follow it. After a box change (what a barostat does in place to
+    // the device lattice), the next compute() must produce a different
+    // influence_G.
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9;
+    let mut sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let positions = [[0.2e-9, 0.0, 0.0], [-0.2e-9, 0.0, 0.0]];
+    let charges = [1.0 as Real, -1.0];
+    let state = build_state(&positions, &charges);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 4,
+    };
+    let mut spme = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    spme.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
+    spme.sync_recip().unwrap();
+    let g_a: Vec<Real> = gpu.device.dtoh_sync_copy(&spme.influence_g).unwrap();
+
+    // Isotropic box expansion, applied to the device lattice in place.
+    let l2 = 1.05e-9;
+    sim_box.set_lattice(l2, l2, l2, 0.0, 0.0, 0.0).unwrap();
+    spme.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
+    spme.sync_recip().unwrap();
+    let g_b: Vec<Real> = gpu.device.dtoh_sync_copy(&spme.influence_g).unwrap();
+
+    let changed = g_a.iter().zip(&g_b).any(|(a, b)| (a - b).abs() > 0.0);
+    assert!(changed, "influence_G must change after a box rescale");
+}
+
+// rq-e7b74f7a
+#[test]
+fn influence_recomputed_every_call_even_when_box_unchanged() {
+    // The recompute is unconditional (not gated on a host-side box
+    // generation counter), so it records into the captured CUDA graph
+    // and replays every step. Overwriting influence_G on device and
+    // calling compute() again with the SAME box must restore the correct
+    // values — a generation-gated launch would skip the recompute and
+    // leave the corrupted buffer in place.
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9;
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let positions = [[0.2e-9, 0.0, 0.0], [-0.2e-9, 0.0, 0.0]];
+    let charges = [1.0 as Real, -1.0];
+    let state = build_state(&positions, &charges);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 4,
+    };
+    let mut spme = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    spme.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
+    spme.sync_recip().unwrap();
+    let g_ref: Vec<Real> = gpu.device.dtoh_sync_copy(&spme.influence_g).unwrap();
+
+    // Corrupt influence_G on device; box (and its generation) unchanged.
+    let garbage = vec![7.0 as Real; g_ref.len()];
+    gpu.device
+        .htod_sync_copy_into(&garbage, &mut spme.influence_g)
+        .unwrap();
+
+    spme.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
+    spme.sync_recip().unwrap();
+    let g_after: Vec<Real> = gpu.device.dtoh_sync_copy(&spme.influence_g).unwrap();
+
+    assert_eq!(
+        g_after, g_ref,
+        "compute() must recompute influence_G unconditionally, not skip on unchanged box generation"
+    );
+}
