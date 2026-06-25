@@ -454,8 +454,11 @@ mediated by `sim_box.lattice_device_mut()`.
 
 Per-step launch counts (per `apply` invocation):
 
-- `kinetic_energy_reduce`: 1 launch (single block of 256 threads).
-- `virial_sum_reduce`: 1 launch (single block of 256 threads).
+- kinetic-energy and virial reductions: 1 launch each (single block) for
+  `n <= SINGLE_BLOCK_REDUCE_MAX`, else 2 launches each (a
+  `*_partials` pass over `REDUCE_PARTIAL_BLOCKS` blocks followed by a
+  single-block `virial_sum_reduce` of the partials). The reductions are
+  deterministic on both paths; see `nose-hoover-chain.md`.
 - `rescale_positions`: 1 launch (block 256, grid `ceil(n/256)`).
 
 All launches go through the default stream of

@@ -150,9 +150,9 @@ fn registry_builds_nhc_with_particle_count_zero() {
 fn kinetic_energy_reduce_zero_velocity_returns_zero() {
     let gpu = init_device().unwrap();
     let state = small_state(4, 1.0);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
+    let ke = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap();
     assert_eq!(ke, 0.0);
 }
 
@@ -179,9 +179,9 @@ fn kinetic_energy_reduce_matches_host_formula() {
         None,
     )
     .unwrap();
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
+    let ke = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap();
     let mut expected = 0.0;
     for i in 0..n {
         expected += 0.5 * masses[i] * (vx[i] * vx[i] + vy[i] * vy[i] + vz[i] * vz[i]);
@@ -213,12 +213,12 @@ fn kinetic_energy_reduce_is_deterministic() {
         None,
     )
     .unwrap();
-    let buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
-    let buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch_a = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let mut scratch_b = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let ke_a = compute_kinetic_energy(&buffers_a, &mut scratch_a).unwrap();
-    let ke_b = compute_kinetic_energy(&buffers_b, &mut scratch_b).unwrap();
+    let ke_a = compute_kinetic_energy(&mut buffers_a, &mut scratch_a).unwrap();
+    let ke_b = compute_kinetic_energy(&mut buffers_b, &mut scratch_b).unwrap();
     assert_eq!(ke_a.to_bits(), ke_b.to_bits());
 }
 
@@ -227,9 +227,9 @@ fn kinetic_energy_reduce_is_deterministic() {
 fn kinetic_energy_reduce_empty_state_returns_zero() {
     let gpu = init_device().unwrap();
     let state = small_state(0, 1.0);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
+    let ke = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap();
     assert_eq!(ke, 0.0);
 }
 

@@ -288,9 +288,9 @@ fn berendsen_lambda_squared_matches_analytical_when_cooling() {
     let tau = 1.0e-13_f64;
     let mut therm = unbox_berendsen(build_berendsen(&gpu, n, &berendsen_kind(temperature, tau)));
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let k_before = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     berendsen_apply_post_with_rescale(&mut therm, &mut buffers, dt, &mut timings).unwrap();
-    let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let k_after = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     // dt is in atomic time; tau supplied as SI seconds → convert.
     let expected_lambda_sq =
         1.0 + ((dt as f64) / (tau / TIME_F)) * (k_target / k_before - 1.0);
@@ -388,11 +388,11 @@ fn berendsen_cumulative_injection_matches_kinetic_change() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = unbox_berendsen(build_berendsen(&gpu, n, &berendsen_kind(300.0, 1.0e-13)));
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let k_before = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
-    let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let k_after = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     let expected = k_after - k_before;
     let rel = (therm.cumulative_injection - expected).abs() / expected.abs().max(1.0e-30);
     assert!(
@@ -499,7 +499,7 @@ fn berendsen_temperature_relaxes_toward_target() {
         berendsen_apply_post_with_rescale(&mut therm, &mut buffers, dt, &mut timings).unwrap();
     }
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let k_final = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let k_final = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     let rel = (k_final - k_target).abs() / k_target;
     assert!(
         rel < 0.05,

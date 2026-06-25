@@ -17,6 +17,7 @@ use crate::kernels;
 #[derive(Debug, Clone)]
 pub struct BarostatKernels {
     pub virial_sum_reduce: CudaFunction,
+    pub virial_sum_reduce_partials: CudaFunction,
     pub rescale_positions: CudaFunction,
     pub rescale_positions_device_factor: CudaFunction,
     pub multiply_lattice_isotropic: CudaFunction,
@@ -32,6 +33,7 @@ impl BarostatKernels {
             "barostat",
             &[
                 "virial_sum_reduce",
+                "virial_sum_reduce_partials",
                 "rescale_positions",
                 "rescale_positions_device_factor",
                 "multiply_lattice_isotropic",
@@ -41,6 +43,11 @@ impl BarostatKernels {
         )?;
         Ok(BarostatKernels {
             virial_sum_reduce: get_func(device, "barostat", "virial_sum_reduce")?,
+            virial_sum_reduce_partials: get_func(
+                device,
+                "barostat",
+                "virial_sum_reduce_partials",
+            )?,
             rescale_positions: get_func(device, "barostat", "rescale_positions")?,
             rescale_positions_device_factor: get_func(
                 device,

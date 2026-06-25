@@ -383,9 +383,34 @@ The strided per-thread accumulation order (thread `t` sees particles
 `t, t + 256, t + 512, …`) is fixed by `n` and `blockDim.x`, and the
 shared-memory reduction tree is fully symmetric, so the kernel returns
 byte-identical `f32` results for identical inputs on the same GPU.
-Single-block execution underutilises the GPU for very large `n` but
-keeps the determinism analysis trivial; the cost is negligible
-relative to the force-pipeline launches.
+
+Single-block execution underutilises the GPU: it runs the whole
+reduction on one SM. For `n <= SINGLE_BLOCK_REDUCE_MAX` (8192) the cost
+is negligible and this single-block kernel is used directly, with the
+summation order above. For larger `n` the scalar reductions (kinetic
+energy, virial, and potential energy) switch to a **deterministic
+two-pass multi-block** reduction so the whole GPU is used:
+
+1. **Pass 1** (`kinetic_energy_reduce_partials` for KE,
+   `virial_sum_reduce_partials` for the array sums) launches a fixed
+   `REDUCE_PARTIAL_BLOCKS` (1024) blocks. Block `b` reduces the fixed
+   contiguous chunk `[b·chunk, (b+1)·chunk)` of the input
+   (`chunk = ceil(n / REDUCE_PARTIAL_BLOCKS)`) with the same strided
+   per-thread accumulation and symmetric in-block tree as above, and
+   writes its single partial sum to `reduction_partials[b]`
+   (`ParticleBuffers::reduction_partials`, a fixed-length device buffer).
+2. **Pass 2** reduces `reduction_partials[0..REDUCE_PARTIAL_BLOCKS]` with
+   the single-block `virial_sum_reduce`.
+
+Each block writes only its own partial slot (no atomics, no cross-block
+communication), the block→chunk mapping and both reduction trees are
+fixed by `n`, and the partials are summed in fixed slot order, so the
+result is byte-identical across runs on the same GPU. The launch
+dimensions are constant (1024 blocks, then one block), so the path is
+CUDA-graph-capturable. The two paths produce *different* (each
+deterministic) f32 values because their summation orders differ;
+`SINGLE_BLOCK_REDUCE_MAX` is set above every test fixture so per-kernel
+reduction tests observe the unchanged single-block order.
 
 The output is a length-1 `CudaSlice<f32>` (held on
 `NoseHooverChainThermostat.ke_scratch` for this slot, or on the

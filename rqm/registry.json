@@ -2815,7 +2815,20 @@
     "decl": "#### `kinetic_energy_reduce`",
     "file": "integration/nose-hoover-chain",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/buffers.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/reductions_multiblock.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`kinetic_energy_reduce`",
     "type": "section"
   },

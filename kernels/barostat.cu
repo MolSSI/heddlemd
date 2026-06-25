@@ -35,6 +35,48 @@ extern "C" __global__ void virial_sum_reduce(
   }
 }
 
+// Pass 1 of the deterministic multi-block array-sum reduction (the
+// large-N path for the virial and potential-energy reductions; see
+// `rqm/integration/nose-hoover-chain.md`). Block b reduces the fixed
+// contiguous chunk `[b*chunk, (b+1)*chunk)` (chunk = ceil(n/gridDim.x))
+// and writes its partial sum to `partials_out[b]`. Pass 2 reduces
+// `partials_out[0..gridDim.x)` with the single-block `virial_sum_reduce`.
+// The block→chunk mapping and the in-block tree are fixed, so the result
+// is bit-reproducible across runs. rq-1727d6bd
+extern "C" __global__ void virial_sum_reduce_partials(
+    const Real *values,
+    Real *partials_out,   // length >= gridDim.x; block b writes slot b
+    unsigned int n)
+{
+  __shared__ Real partial[256];
+
+  unsigned int chunk = (n + gridDim.x - 1u) / gridDim.x;
+  unsigned int start = blockIdx.x * chunk;
+  unsigned int end = start + chunk;
+  if (end > n) {
+    end = n;
+  }
+
+  unsigned int tid = threadIdx.x;
+  Real sum = R(0.0);
+  for (unsigned int i = start + tid; i < end; i += blockDim.x) {
+    sum += values[i];
+  }
+  partial[tid] = sum;
+  __syncthreads();
+
+  for (unsigned int stride = 1; stride < blockDim.x; stride *= 2) {
+    if ((tid % (2u * stride)) == 0u && (tid + stride) < blockDim.x) {
+      partial[tid] += partial[tid + stride];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0u) {
+    partials_out[blockIdx.x] = partial[0];
+  }
+}
+
 // Uniform per-particle position rescale: x_i ← factor · x_i for every
 // component of every particle. One thread per particle, no inter-thread
 // interaction. Does NOT touch velocities, forces, image flags, or any

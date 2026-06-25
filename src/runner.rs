@@ -1011,7 +1011,7 @@ fn simulation_setup_finish_gpu(
                 .device
                 .alloc_zeros::<Real>(1)
                 .map_err(|e| RunnerError::Gpu(crate::gpu::GpuError::from(e)))?;
-            let ke_after = crate::gpu::compute_kinetic_energy(&buffers, &mut ke_scratch)
+            let ke_after = crate::gpu::compute_kinetic_energy(&mut buffers, &mut ke_scratch)
                 .map_err(RunnerError::Gpu)? as f64;
             let n_thermal_dof_f64 = n_thermal_dof as f64;
             // k_B = 1 in atomic units; simulation.temperature is k_B · T in Hartrees.
@@ -1397,7 +1397,7 @@ pub(crate) fn run_md_phase_inner(
             timings
                 .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
                 .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-            let pe = compute_total_potential_energy(&setup.buffers, scratch)
+            let pe = compute_total_potential_energy(&mut setup.buffers, scratch)
                 .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Setup))?;
             timings
                 .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
@@ -2402,7 +2402,7 @@ fn run_per_step_range(
                 timings
                     .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
                     .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-                let pe = compute_total_potential_energy(&setup.buffers, scratch)
+                let pe = compute_total_potential_energy(&mut setup.buffers, scratch)
                     .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
                 timings
                     .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
@@ -2664,7 +2664,7 @@ fn handle_step_output(
             timings
                 .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
                 .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-            let pe = compute_total_potential_energy(&setup.buffers, scratch)
+            let pe = compute_total_potential_energy(&mut setup.buffers, scratch)
                 .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
             timings
                 .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)

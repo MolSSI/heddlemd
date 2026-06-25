@@ -419,11 +419,11 @@ fn andersen_cumulative_injection_tracks_ke_change() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = unbox_andersen(build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e16, 1)));
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let k_before = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
-    let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let k_after = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     let expected = k_after - k_before;
     let rel = (therm.cumulative_injection - expected).abs() / expected.abs().max(1.0e-30);
     assert!(rel < 1.0e-4);
@@ -620,7 +620,7 @@ fn andersen_time_averaged_ke_tracks_target() {
             &mut timings,
         )
         .unwrap();
-        sum += compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+        sum += compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     }
     let k_avg = sum / n_samples as f64;
     let rel = (k_avg - k_target).abs() / k_target;

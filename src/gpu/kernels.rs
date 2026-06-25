@@ -975,13 +975,156 @@ pub fn reduce_angle_forces(
     Ok(())
 }
 
-// Launch helper for the NHC kinetic-energy reduction. Single-block,
-// 256 threads. Output goes to a length-1 device buffer the caller owns
-// (typically reused across calls to avoid per-step allocation). The
-// helper synchronously downloads the value and returns it as Real.
-// rq-f606ff6f
+// rq-1727d6bd
+// Largest particle count handled by the single-block scalar reductions.
+// Above this the deterministic two-pass multi-block path is used (the
+// whole GPU instead of one SM). The single-block path's summation order
+// is bit-identical to the historical reduction, so values for systems at
+// or below this size are unchanged. See `rqm/pipeline-reproducibility.md`.
+const SINGLE_BLOCK_REDUCE_MAX: u32 = 8192;
+
+fn single_block_reduce_cfg() -> LaunchConfig {
+    LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0, // shared array is __shared__ static, not dynamic
+    }
+}
+
+// rq-1727d6bd
+// Pass 2 of the multi-block reduction: deterministically sum
+// `reduction_partials[0..REDUCE_PARTIAL_BLOCKS]` into `scratch[0]` with
+// the single-block `virial_sum_reduce`.
+fn reduce_partials_into(
+    buffers: &ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let func = buffers.kernels.barostat.virial_sum_reduce.clone();
+    unsafe {
+        func.launch(
+            single_block_reduce_cfg(),
+            (
+                &buffers.reduction_partials,
+                &mut *scratch,
+                crate::gpu::buffers::REDUCE_PARTIAL_BLOCKS,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-1727d6bd
+// Deterministic kinetic-energy reduction into `scratch[0]`. Single-block
+// for `n <= SINGLE_BLOCK_REDUCE_MAX`, two-pass multi-block otherwise.
+fn reduce_kinetic_energy_into(
+    buffers: &mut ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n_u32 = buffers.particle_count() as u32;
+    if n_u32 <= SINGLE_BLOCK_REDUCE_MAX {
+        let func = buffers.kernels.nose_hoover.kinetic_energy_reduce.clone();
+        unsafe {
+            func.launch(
+                single_block_reduce_cfg(),
+                (
+                    &buffers.velocities_x,
+                    &buffers.velocities_y,
+                    &buffers.velocities_z,
+                    &buffers.masses,
+                    &mut *scratch,
+                    n_u32,
+                ),
+            )
+            .map_err(GpuError::from)?;
+        }
+    } else {
+        let func = buffers
+            .kernels
+            .nose_hoover
+            .kinetic_energy_reduce_partials
+            .clone();
+        let cfg = LaunchConfig {
+            grid_dim: (crate::gpu::buffers::REDUCE_PARTIAL_BLOCKS, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            func.launch(
+                cfg,
+                (
+                    &buffers.velocities_x,
+                    &buffers.velocities_y,
+                    &buffers.velocities_z,
+                    &buffers.masses,
+                    &mut buffers.reduction_partials,
+                    n_u32,
+                ),
+            )
+            .map_err(GpuError::from)?;
+        }
+        reduce_partials_into(buffers, scratch)?;
+    }
+    Ok(())
+}
+
+// rq-1727d6bd
+// Deterministic sum of a per-particle `Real` array (`buffers.virials` or
+// `buffers.potential_energies`) into `scratch[0]`. `is_pe` selects the
+// input field; both follow the same single-block / multi-block split.
+fn reduce_particle_array_into(
+    buffers: &mut ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+    is_pe: bool,
+) -> Result<(), GpuError> {
+    let n_u32 = buffers.particle_count() as u32;
+    if n_u32 <= SINGLE_BLOCK_REDUCE_MAX {
+        let func = buffers.kernels.barostat.virial_sum_reduce.clone();
+        let cfg = single_block_reduce_cfg();
+        unsafe {
+            if is_pe {
+                func.launch(cfg, (&buffers.potential_energies, &mut *scratch, n_u32))
+                    .map_err(GpuError::from)?;
+            } else {
+                func.launch(cfg, (&buffers.virials, &mut *scratch, n_u32))
+                    .map_err(GpuError::from)?;
+            }
+        }
+    } else {
+        let func = buffers
+            .kernels
+            .barostat
+            .virial_sum_reduce_partials
+            .clone();
+        let cfg = LaunchConfig {
+            grid_dim: (crate::gpu::buffers::REDUCE_PARTIAL_BLOCKS, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            if is_pe {
+                func.launch(
+                    cfg,
+                    (&buffers.potential_energies, &mut buffers.reduction_partials, n_u32),
+                )
+                .map_err(GpuError::from)?;
+            } else {
+                func.launch(cfg, (&buffers.virials, &mut buffers.reduction_partials, n_u32))
+                    .map_err(GpuError::from)?;
+            }
+        }
+        reduce_partials_into(buffers, scratch)?;
+    }
+    Ok(())
+}
+
+// Launch helper for the kinetic-energy reduction. Deterministic
+// (single-block for small N, two-pass multi-block for large N). Output
+// goes to a length-1 device buffer the caller owns; the helper
+// synchronously downloads the value and returns it as Real.
+// rq-f606ff6f rq-1727d6bd
 pub fn compute_kinetic_energy(
-    particle_buffers: &ParticleBuffers,
+    particle_buffers: &mut ParticleBuffers,
     scratch: &mut CudaSlice<Real>,
 ) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
@@ -989,27 +1132,7 @@ pub fn compute_kinetic_energy(
         return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.nose_hoover.kinetic_energy_reduce.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (256, 1, 1),
-        shared_mem_bytes: 0, // shared array is __shared__ static, not dynamic
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.velocities_x,
-                &particle_buffers.velocities_y,
-                &particle_buffers.velocities_z,
-                &particle_buffers.masses,
-                &mut *scratch,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
+    reduce_kinetic_energy_into(particle_buffers, scratch)?;
     let mut out = [0.0; 1];
     particle_buffers
         .device
@@ -1055,7 +1178,7 @@ pub fn rescale_velocities(
 /// device-side kernel (e.g. `csvr_sample_and_factor`) or via a later
 /// host dtoh when one is unavoidable.
 pub fn compute_kinetic_energy_on_device(
-    particle_buffers: &ParticleBuffers,
+    particle_buffers: &mut ParticleBuffers,
     scratch: &mut CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
@@ -1063,28 +1186,7 @@ pub fn compute_kinetic_energy_on_device(
         return Ok(());
     }
     debug_assert_eq!(scratch.len(), 1);
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.nose_hoover.kinetic_energy_reduce.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (256, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.velocities_x,
-                &particle_buffers.velocities_y,
-                &particle_buffers.velocities_z,
-                &particle_buffers.masses,
-                &mut *scratch,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
+    reduce_kinetic_energy_into(particle_buffers, scratch)
 }
 
 /// Launches `rescale_velocities_device_factor`: applies a velocity
@@ -1300,7 +1402,7 @@ pub fn increment_u64_device(
 // value and returns it as Real.
 // rq-0d8c8688 rq-0f50dade
 pub fn compute_total_virial(
-    particle_buffers: &ParticleBuffers,
+    particle_buffers: &mut ParticleBuffers,
     scratch: &mut CudaSlice<Real>,
 ) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
@@ -1308,24 +1410,7 @@ pub fn compute_total_virial(
         return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.barostat.virial_sum_reduce.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (256, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.virials,
-                &mut *scratch,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
+    reduce_particle_array_into(particle_buffers, scratch, false)?;
     let mut out = [0.0; 1];
     particle_buffers
         .device
@@ -1338,7 +1423,7 @@ pub fn compute_total_virial(
 /// on device — no host download. Used by the c-rescale barostat's
 /// device-resident pipeline.
 pub fn compute_total_virial_on_device(
-    particle_buffers: &ParticleBuffers,
+    particle_buffers: &mut ParticleBuffers,
     scratch: &mut CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
@@ -1346,25 +1431,7 @@ pub fn compute_total_virial_on_device(
         return Ok(());
     }
     debug_assert_eq!(scratch.len(), 1);
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.barostat.virial_sum_reduce.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (256, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.virials,
-                &mut *scratch,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
+    reduce_particle_array_into(particle_buffers, scratch, false)
 }
 
 /// Launches `c_rescale_compute_mu`: reads `k`, `w`, and the device
@@ -1521,15 +1588,15 @@ pub fn rescale_positions_device_factor(
     Ok(())
 }
 
-// rq-fc6859df
+// rq-fc6859df rq-1727d6bd
 //
-// Reuses `virial_sum_reduce` (the generic single-block deterministic
-// f32 sum-reduction kernel) against `particle_buffers.potential_energies`.
+// Deterministically sums `particle_buffers.potential_energies`
+// (single-block for small N, two-pass multi-block for large N).
 // Runner-side helper for assembling integrator/thermostat log columns
 // that need the total potential energy without downloading the
 // per-particle buffer.
 pub fn compute_total_potential_energy(
-    particle_buffers: &ParticleBuffers,
+    particle_buffers: &mut ParticleBuffers,
     scratch: &mut CudaSlice<Real>,
 ) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
@@ -1537,24 +1604,7 @@ pub fn compute_total_potential_energy(
         return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.barostat.virial_sum_reduce.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (256, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.potential_energies,
-                &mut *scratch,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
+    reduce_particle_array_into(particle_buffers, scratch, true)?;
     let mut out = [0.0; 1];
     particle_buffers
         .device

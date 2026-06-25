@@ -454,6 +454,7 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
 #[derive(Debug, Clone)]
 pub struct NoseHooverKernels {
     pub kinetic_energy_reduce: CudaFunction,
+    pub kinetic_energy_reduce_partials: CudaFunction,
     pub rescale_velocities: CudaFunction,
     pub rescale_velocities_device_factor: CudaFunction,
     pub csvr_sample_and_factor: CudaFunction,
@@ -468,6 +469,7 @@ impl NoseHooverKernels {
             "nose_hoover",
             &[
                 "kinetic_energy_reduce",
+                "kinetic_energy_reduce_partials",
                 "rescale_velocities",
                 "rescale_velocities_device_factor",
                 "csvr_sample_and_factor",
@@ -477,6 +479,11 @@ impl NoseHooverKernels {
         )?;
         Ok(NoseHooverKernels {
             kinetic_energy_reduce: get_func(device, "nose_hoover", "kinetic_energy_reduce")?,
+            kinetic_energy_reduce_partials: get_func(
+                device,
+                "nose_hoover",
+                "kinetic_energy_reduce_partials",
+            )?,
             rescale_velocities: get_func(device, "nose_hoover", "rescale_velocities")?,
             rescale_velocities_device_factor: get_func(
                 device,

@@ -154,9 +154,9 @@ fn barostat_with_builtins_exposes_berendsen() {
 fn compute_total_virial_zero_virial_returns_zero() {
     let gpu = init_device().unwrap();
     let state = make_state(vec![0.0; 1], vec![0.0; 1], vec![1.0; 1], vec![0.0; 1]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let w = compute_total_virial(&buffers, &mut scratch).unwrap();
+    let w = compute_total_virial(&mut buffers, &mut scratch).unwrap();
     assert_eq!(w, 0.0);
 }
 
@@ -171,9 +171,9 @@ fn compute_total_virial_matches_host_sum() {
         vec![1.0; 4],
         virials.clone(),
     );
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let w = compute_total_virial(&buffers, &mut scratch).unwrap();
+    let w = compute_total_virial(&mut buffers, &mut scratch).unwrap();
     let expected: Real = virials.iter().sum();
     assert!((w - expected).abs() < 1.0e-5);
 }
@@ -186,12 +186,12 @@ fn compute_total_virial_is_deterministic() {
     let virials: Vec<Real> = (0..n).map(|i| 0.5 - 0.001 * i as Real).collect();
     let zero = vec![0.0; n];
     let state = make_state(zero.clone(), zero.clone(), vec![1.0; n], virials);
-    let buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
-    let buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch_a = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let mut scratch_b = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let wa = compute_total_virial(&buffers_a, &mut scratch_a).unwrap();
-    let wb = compute_total_virial(&buffers_b, &mut scratch_b).unwrap();
+    let wa = compute_total_virial(&mut buffers_a, &mut scratch_a).unwrap();
+    let wb = compute_total_virial(&mut buffers_b, &mut scratch_b).unwrap();
     assert_eq!(wa.to_bits(), wb.to_bits());
 }
 
@@ -200,9 +200,9 @@ fn compute_total_virial_is_deterministic() {
 fn compute_total_virial_empty_state_returns_zero() {
     let gpu = init_device().unwrap();
     let state = make_state(Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let w = compute_total_virial(&buffers, &mut scratch).unwrap();
+    let w = compute_total_virial(&mut buffers, &mut scratch).unwrap();
     assert_eq!(w, 0.0);
 }
 

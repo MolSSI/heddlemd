@@ -312,7 +312,11 @@ Per-step launch counts (per `apply_post` invocation, excluding
 the per-particle velocity rescale which is dispatched from the
 composed kernel):
 
-- `kinetic_energy_reduce`: 1 launch (single block of 256 threads).
+- kinetic-energy reduction: 1 launch (`kinetic_energy_reduce`, single
+  block) for `n <= SINGLE_BLOCK_REDUCE_MAX`, else 2 launches
+  (`kinetic_energy_reduce_partials` over `REDUCE_PARTIAL_BLOCKS` blocks
+  followed by a single-block `virial_sum_reduce` of the partials). See
+  `nose-hoover-chain.md`.
 - `csvr_sample_and_factor`: 1 launch (single block).
 
 The per-particle velocity rescale (`v ← α · v`) is dispatched once
@@ -349,8 +353,9 @@ the CSVR-rescaled velocity.
 
 - `rescale_velocities` is deterministic by construction (see
   `nose-hoover-chain.md`).
-- `kinetic_energy_reduce` uses a single-block deterministic reduction
-  tree (see `nose-hoover-chain.md`).
+- the kinetic-energy reduction uses a deterministic reduction tree —
+  single-block for small `n`, a fixed-mapping two-pass multi-block
+  reduction for large `n` (see `nose-hoover-chain.md`).
 - The host-side Philox stream is pure functional; the chi-squared sum
   proceeds in fixed left-to-right sample-index order in `f64`.
 - The `draw_counter` advances by exactly `+1` per `apply_post`, so

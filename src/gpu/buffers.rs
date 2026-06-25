@@ -30,7 +30,18 @@ pub struct ParticleBuffers {
     pub masses: CudaSlice<Real>,
     pub type_indices: CudaSlice<u32>,
     pub particle_ids: CudaSlice<u32>,
+    /// Fixed-length scratch holding one partial sum per block for the
+    /// deterministic multi-block scalar reductions (kinetic energy,
+    /// virial, potential energy) on the large-`N` path. Length
+    /// `REDUCE_PARTIAL_BLOCKS`. See `rqm/integration/nose-hoover-chain.md`.
+    /// rq-1727d6bd
+    pub reduction_partials: CudaSlice<Real>,
 }
+
+/// Number of blocks in pass 1 of the multi-block reduction (and the
+/// length of `ParticleBuffers::reduction_partials`). Fixed so the launch
+/// dimensions are constant for CUDA-graph capture. rq-1727d6bd
+pub const REDUCE_PARTIAL_BLOCKS: u32 = 1024;
 
 /// Build a host-side `Vec<Real4>` of length `n` by interleaving the
 /// four scalar SoA arrays.
@@ -125,6 +136,9 @@ impl ParticleBuffers {
         let masses = device.htod_sync_copy(&state.masses).map_err(GpuError::from)?;
         let type_indices = device.htod_sync_copy(&state.type_indices).map_err(GpuError::from)?;
         let particle_ids = device.htod_sync_copy(&state.particle_ids).map_err(GpuError::from)?;
+        let reduction_partials = device
+            .alloc_zeros::<Real>(REDUCE_PARTIAL_BLOCKS as usize)
+            .map_err(GpuError::from)?;
 
         Ok(ParticleBuffers {
             device,
@@ -144,6 +158,7 @@ impl ParticleBuffers {
             masses,
             type_indices,
             particle_ids,
+            reduction_partials,
         })
     }
 

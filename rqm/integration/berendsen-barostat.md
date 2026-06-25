@@ -300,9 +300,13 @@ by `kinetic_energy_reduce`. The output is a length-1
 the host downloads via `dtoh_sync_copy_into` and promotes to `f64`
 before the pressure formula.
 
-Single-block execution underutilises the GPU for very large `n` but
-keeps the determinism analysis trivial; the cost is negligible
-relative to the force pipeline.
+For `n <= SINGLE_BLOCK_REDUCE_MAX` this single-block kernel is used
+directly. For larger `n` the reduction switches to the deterministic
+two-pass multi-block path (`virial_sum_reduce_partials` over
+`REDUCE_PARTIAL_BLOCKS` blocks, then a single-block `virial_sum_reduce`
+of the partials in `ParticleBuffers::reduction_partials`), so the whole
+GPU is used while the result stays byte-identical across runs. See
+`nose-hoover-chain.md` for the full multi-block reduction contract.
 
 #### `rescale_positions` <!-- rq-fece5481 -->
 
@@ -359,8 +363,9 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
 
 Per-step launch counts (per `apply` invocation):
 
-- `kinetic_energy_reduce`: 1 launch (single block of 256 threads).
-- `virial_sum_reduce`: 1 launch (single block of 256 threads).
+- kinetic-energy and virial reductions: 1 single-block launch each for
+  `n <= SINGLE_BLOCK_REDUCE_MAX`, else a 2-launch multi-block reduction
+  each (see `nose-hoover-chain.md`).
 - `rescale_positions`: 1 launch (block 256, grid `ceil(n/256)`).
 
 All launches go through the default stream of
