@@ -94,9 +94,14 @@ const BLOCK_SIZE: u32 = WARPS_PER_BLOCK * 32;
 // Minimum resident BLOCK_SIZE-thread blocks per SM requested through
 // `__launch_bounds__` on the packed-neighbour pass entry points. Caps
 // the per-thread register count so the scheduler can keep at least this
-// many blocks resident, trading register headroom for latency-hiding
-// warps. See `rqm/forces/jit-composed-pair-force.md` *Launch Bounds*.
-const PACKED_MIN_BLOCKS_PER_SM: u32 = 3;
+// many blocks resident. Value 4 is the spill-free occupancy ceiling on
+// SM 8.6: the `_fev` kernel fits in 63 registers (0 spill, 67% theoretical
+// occupancy) at this bound, and tightening further (>=5) forces register
+// spilling that lowers throughput. The kernel is not occupancy-limited —
+// 4 is throughput-neutral versus an unbounded launch and serves as a
+// register-creep guard. See `rqm/forces/jit-composed-pair-force.md`
+// *Launch Bounds*.
+const PACKED_MIN_BLOCKS_PER_SM: u32 = 4;
 
 /// Self-contained CUDA C++ source fragment plus identifying metadata,
 /// returned by `PotentialBuilder::pair_force_fragment(cx)`. All four

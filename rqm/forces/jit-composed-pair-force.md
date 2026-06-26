@@ -419,21 +419,26 @@ of 32 threads each that *Composed-Kernel Structure* describes.
 `PACKED_MIN_BLOCKS_PER_SM` is a compile-time `u32` constant giving
 the minimum number of resident `BLOCK_SIZE`-thread blocks the
 kernel must be able to keep on one streaming multiprocessor; its
-value is 3.
+value is 4.
 
 The attribute caps the per-thread register count the compiler may
 allocate: on hardware with a 64 K-register file the bound implies
 at most `65536 / (BLOCK_SIZE × PACKED_MIN_BLOCKS_PER_SM)` registers
 per thread, guaranteeing at least `PACKED_MIN_BLOCKS_PER_SM`
-resident blocks per SM. This trades register headroom for
-additional resident warps, which raise the kernel's ability to
-hide global-memory latency during the neighbour-list sweep — the
-regime that dominates throughput at small particle counts, where
-the warp-per-i-block kernel would otherwise leave the SMs
-under-occupied. `PACKED_MIN_BLOCKS_PER_SM` is the sole knob for
-this trade-off: raising it tightens the register cap (more resident
-warps, greater risk of register spilling to local memory),
+resident blocks per SM. `PACKED_MIN_BLOCKS_PER_SM` is the sole knob
+for this trade-off: raising it tightens the register cap (more
+resident warps, greater risk of register spilling to local memory),
 lowering it relaxes the cap.
+
+The value 4 is the spill-free occupancy ceiling for the `_fev`
+kernel on SM 8.6: at this bound the compiler fits the kernel in 63
+registers with no spilling (67% theoretical occupancy), whereas a
+bound of 5 or more forces register spilling that lowers throughput.
+The packed-neighbour kernel is not occupancy-limited on the GPUs
+measured — raising occupancy above ~50% yields no measurable
+speedup — so the bound is throughput-neutral and serves as a guard
+against future register-count growth silently dropping occupancy,
+not as a standalone optimization.
 
 The single-pair (`_single_f` / `_single_fev`) and
 exclusion-correction (`_correct_f` / `_correct_fev`) entry points
@@ -985,9 +990,9 @@ by compile-time constants, not runtime configuration:
 - `PACKED_MIN_BLOCKS_PER_SM: u32` — minimum resident <!-- rq-df249c4e -->
   `BLOCK_SIZE`-thread blocks per SM requested through the
   packed-neighbour kernels' `__launch_bounds__` (see *Launch
-  Bounds*). Value 3. Raising it caps the per-thread register count
-  more tightly, increasing the resident-warp count (more
-  latency-hiding) at the risk of register spilling; lowering it
+  Bounds*). Value 4 — the spill-free occupancy ceiling. Raising it
+  caps the per-thread register count more tightly, increasing the
+  resident-warp count at the risk of register spilling; lowering it
   relaxes the cap.
 
 The user guide (`book/`) carries a reference page documenting the
