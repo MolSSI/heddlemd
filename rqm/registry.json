@@ -403,6 +403,18 @@
     "title": "__device__",
     "type": "api-item"
   },
+  "rq-0314caab": {
+    "decl": "Scenario: Single-pair and correction entry points carry no launch bounds",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Single-pair and correction entry points carry no launch bounds",
+    "type": "scenario"
+  },
   "rq-032b4b79": {
     "decl": "Scenario: Reject a config whose derived root is empty",
     "file": "io/config-schema",
@@ -2445,6 +2457,18 @@
     "title": "Trait methods",
     "type": "section"
   },
+  "rq-139cffbe": {
+    "decl": "Scenario: The launch-bounds arguments equal BLOCK_SIZE and PACKED_MIN_BLOCKS_PER_SM",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The launch-bounds arguments equal BLOCK_SIZE and PACKED_MIN_BLOCKS_PER_SM",
+    "type": "scenario"
+  },
   "rq-13b931f8": {
     "decl": "Scenario: Bond row with non-integer index",
     "file": "forces/topology",
@@ -4201,6 +4225,18 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-20febc65": {
+    "decl": "Scenario: Packed-neighbour pass entry points are declared with launch bounds",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Packed-neighbour pass entry points are declared with launch bounds",
+    "type": "scenario"
   },
   "rq-21131a60": {
     "decl": "## Neighbour List",
@@ -7006,6 +7042,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-3a7a7426": {
+    "decl": "- `WARPS_PER_BLOCK: u32` — warps per block. Value 8.",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "WARPS_PER_BLOCK",
+    "type": "api-item"
+  },
   "rq-3a9cb990": {
     "decl": "Scenario: MTK-NPT emits ForceEval with ForcesAndScalars",
     "file": "integration/framework",
@@ -7345,6 +7388,19 @@
       }
     ],
     "title": "Host-side RNG utility",
+    "type": "section"
+  },
+  "rq-3d7e3ff7": {
+    "decl": "### Launch Bounds",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Launch Bounds",
     "type": "section"
   },
   "rq-3d83d0a4": {
@@ -8434,6 +8490,13 @@
     "title": "minimum_image after set_lattice reflects new tilts",
     "type": "scenario"
   },
+  "rq-4943ddd3": {
+    "decl": "- `BLOCK_SIZE: u32` — threads per block, `WARPS_PER_BLOCK × 32`.",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "BLOCK_SIZE",
+    "type": "api-item"
+  },
   "rq-494626a0": {
     "decl": "Scenario: Every governed error type implements std::error::Error",
     "file": "error-handling",
@@ -9177,6 +9240,19 @@
     "level": 2,
     "refs": [],
     "title": "Tile-Sorted Posq View",
+    "type": "section"
+  },
+  "rq-51209811": {
+    "decl": "### Compile-time tuning constants",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Compile-time tuning constants",
     "type": "section"
   },
   "rq-5137c6f5": {
@@ -18974,6 +19050,18 @@
     "title": "Cell index of a position outside the primary cell wraps before binning",
     "type": "scenario"
   },
+  "rq-a9a37874": {
+    "decl": "Scenario: The composed kernel with launch bounds compiles and loads",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The composed kernel with launch bounds compiles and loads",
+    "type": "scenario"
+  },
   "rq-a9ab33a8": {
     "decl": "Scenario: A wrap result lies inside the primary parallelepiped",
     "file": "simulation-box",
@@ -21708,6 +21796,18 @@
     "title": "__device__",
     "type": "api-item"
   },
+  "rq-c406ffcd": {
+    "decl": "Scenario: The user guide documents the launch-configuration tuning constants",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The user guide documents the launch-configuration tuning constants",
+    "type": "scenario"
+  },
   "rq-c4300389": {
     "decl": "## Out of Scope",
     "file": "registry-framework",
@@ -21768,6 +21868,18 @@
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
     "title": "NPT box transition flips SPC eligibility without graph re-capture",
+    "type": "scenario"
+  },
+  "rq-c47198a4": {
+    "decl": "Scenario: Launch bounds preserve same-GPU run-to-run bit-exactness",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "tests/determinism.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Launch bounds preserve same-GPU run-to-run bit-exactness",
     "type": "scenario"
   },
   "rq-c4845f90": {
@@ -24766,6 +24878,13 @@
     ],
     "title": "`Step`",
     "type": "section"
+  },
+  "rq-df249c4e": {
+    "decl": "- `PACKED_MIN_BLOCKS_PER_SM: u32` — minimum resident",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "PACKED_MIN_BLOCKS_PER_SM",
+    "type": "api-item"
   },
   "rq-df305128": {
     "decl": "Scenario: Log file header includes pressure, box_volume, and c_rescale_conserved when C-rescale is the configured barostat",

@@ -93,7 +93,10 @@ cutoff = 9.0e-10
     std::fs::write(dir.join("sim.in.toml"), cfg).unwrap();
 }
 
-// rq-c156295f
+// rq-c156295f rq-c47198a4
+// rq-c47198a4: the packed-neighbour pass kernels run under
+// `__launch_bounds__`; this byte-identical run-to-run check confirms the
+// register cap does not perturb the deterministic force output.
 #[test]
 fn repeated_runs_of_a_disordered_system_are_byte_identical() {
     let n_runs = 5;

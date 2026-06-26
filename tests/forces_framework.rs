@@ -1705,6 +1705,9 @@ fn potential_builder_displaces_default_returns_empty_slice() {
     assert!(d.is_empty());
 }
 
+// rq-a9a37874 — the LJ + spme_real composed kernel (packed-neighbour pass
+// declared with `__launch_bounds__`) compiles via nvrtc and loads; the
+// resolved `jit_composed` handle proves the `_f`/`_fev` entry points exist.
 #[test]
 fn lj_and_spme_real_both_in_slot_list_and_jit_composed_when_both_configured() {
     let gpu = init_device().unwrap();

@@ -90,6 +90,13 @@ const FEV_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_fev";
 
 const WARPS_PER_BLOCK: u32 = 8;
 const BLOCK_SIZE: u32 = WARPS_PER_BLOCK * 32;
+// rq-51209811 rq-3d7e3ff7
+// Minimum resident BLOCK_SIZE-thread blocks per SM requested through
+// `__launch_bounds__` on the packed-neighbour pass entry points. Caps
+// the per-thread register count so the scheduler can keep at least this
+// many blocks resident, trading register headroom for latency-hiding
+// warps. See `rqm/forces/jit-composed-pair-force.md` *Launch Bounds*.
+const PACKED_MIN_BLOCKS_PER_SM: u32 = 3;
 
 /// Self-contained CUDA C++ source fragment plus identifying metadata,
 /// returned by `PotentialBuilder::pair_force_fragment(cx)`. All four
@@ -1358,7 +1365,16 @@ fn emit_entry_point(
     entry_name: &str,
     write_ev: bool,
 ) {
-    s.push_str("\nextern \"C\" __global__ void ");
+    // rq-3d7e3ff7 — `__launch_bounds__` caps registers on the
+    // packed-neighbour pass so the SM keeps at least
+    // PACKED_MIN_BLOCKS_PER_SM resident blocks, raising the
+    // latency-hiding warp count. The single-pair and correction passes
+    // (one thread per pair, not occupancy-limited) carry no such bound.
+    s.push_str("\nextern \"C\" __global__ void __launch_bounds__(");
+    s.push_str(&BLOCK_SIZE.to_string());
+    s.push_str(", ");
+    s.push_str(&PACKED_MIN_BLOCKS_PER_SM.to_string());
+    s.push_str(") ");
     s.push_str(entry_name);
     s.push_str("(\n");
     s.push_str("    const Real4 *posq,\n");
@@ -2506,4 +2522,96 @@ where
         };
         on_fail(&log)
     })
+}
+
+#[cfg(test)]
+mod launch_bounds_tests {
+    use super::*;
+
+    // The entry-point scaffolding (including launch bounds) is emitted
+    // regardless of the fragment list, so a fragment-free composed source
+    // is sufficient to inspect the kernel declarations.
+    fn composed_source_for_inspection() -> String {
+        compose_source(&[], 1.0 as Real)
+    }
+
+    // rq-20febc65
+    #[test]
+    fn packed_neighbour_entry_points_declare_launch_bounds() {
+        let src = composed_source_for_inspection();
+        let lb = format!(
+            "__launch_bounds__({}, {})",
+            BLOCK_SIZE, PACKED_MIN_BLOCKS_PER_SM
+        );
+        assert!(
+            src.contains(&format!("{lb} {F_ENTRY}(")),
+            "packed _f entry point missing launch bounds"
+        );
+        assert!(
+            src.contains(&format!("{lb} {FEV_ENTRY}(")),
+            "packed _fev entry point missing launch bounds"
+        );
+    }
+
+    // rq-139cffbe
+    #[test]
+    fn launch_bounds_arguments_match_constants() {
+        assert_eq!(BLOCK_SIZE, 256);
+        let src = composed_source_for_inspection();
+        let lb = format!(
+            "__launch_bounds__({}, {})",
+            BLOCK_SIZE, PACKED_MIN_BLOCKS_PER_SM
+        );
+        assert!(src.contains(&format!("{lb} {F_ENTRY}(")));
+        assert!(src.contains(&format!("{lb} {FEV_ENTRY}(")));
+        // Every `__launch_bounds__` occurrence uses exactly these arguments.
+        assert_eq!(
+            src.matches("__launch_bounds__").count(),
+            src.matches(&lb).count(),
+            "a __launch_bounds__ occurrence uses arguments other than \
+             (BLOCK_SIZE, PACKED_MIN_BLOCKS_PER_SM)"
+        );
+    }
+
+    // rq-0314caab
+    #[test]
+    fn single_pair_and_correction_entry_points_have_no_launch_bounds() {
+        let src = composed_source_for_inspection();
+        // Only the two packed-neighbour entry points carry launch bounds.
+        assert_eq!(
+            src.matches("__launch_bounds__").count(),
+            2,
+            "exactly the two packed-neighbour entry points carry launch bounds"
+        );
+        for name in [
+            F_SINGLE_ENTRY,
+            FEV_SINGLE_ENTRY,
+            F_CORRECT_ENTRY,
+            FEV_CORRECT_ENTRY,
+        ] {
+            assert!(
+                src.contains(&format!("void {name}(")),
+                "entry point {name} should be declared `void {name}(` with no launch bounds"
+            );
+        }
+    }
+
+    // rq-c406ffcd
+    #[test]
+    fn book_documents_launch_configuration_constants() {
+        let doc = std::fs::read_to_string("book/src/reference/compile-time-constants.md")
+            .expect("compile-time-constants book page exists");
+        for needle in ["PACKED_MIN_BLOCKS_PER_SM", "BLOCK_SIZE", "WARPS_PER_BLOCK"] {
+            assert!(doc.contains(needle), "book page must document {needle}");
+        }
+        assert!(
+            doc.contains(&PACKED_MIN_BLOCKS_PER_SM.to_string()),
+            "book page must state the PACKED_MIN_BLOCKS_PER_SM value"
+        );
+        let lower = doc.to_lowercase();
+        assert!(
+            lower.contains("build time") && lower.contains("not"),
+            "book page must state the constants are build-time and not TOML-exposed"
+        );
+    }
 }
