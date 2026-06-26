@@ -286,6 +286,32 @@ impl Accumulator {
         self.count += 1;
         self.total_ns = self.total_ns.saturating_add(ns as u128);
     }
+
+    /// Fold `count` samples that all share the duration `ns` into the
+    /// accumulator in one shot. Used by the graph-replay timing path,
+    /// where one measured replay stands in for a whole batch of identical
+    /// replays: the total and count advance by the full batch while
+    /// min/max see the single representative value once.
+    fn record_ns_bulk(&mut self, ns: u64, count: u64) {
+        if count == 0 {
+            return;
+        }
+        if self.count == 0 {
+            self.min_ns = ns;
+            self.max_ns = ns;
+        } else {
+            if ns < self.min_ns {
+                self.min_ns = ns;
+            }
+            if ns > self.max_ns {
+                self.max_ns = ns;
+            }
+        }
+        self.count += count;
+        self.total_ns = self
+            .total_ns
+            .saturating_add((ns as u128).saturating_mul(count as u128));
+    }
 }
 
 #[derive(Debug)]
@@ -299,6 +325,12 @@ struct KernelStageState {
     /// this by the replay count to advance `acc.count` without
     /// re-firing any events.
     captured_stops_per_replay: u32,
+    /// Representative per-replay duration (ns) for this stage under graph
+    /// mode, snapshotted from the instrumented calibration steps the
+    /// runner executes before the replay loop (see
+    /// `snapshot_graph_representatives`). `record_graph_replays` folds
+    /// this value in for every replayed step.
+    representative_ns: u64,
 }
 
 // rq-baf03449
@@ -340,6 +372,7 @@ impl Timings {
                     outstanding_stop: false,
                     acc: Accumulator::default(),
                     captured_stops_per_replay: 0,
+                    representative_ns: 0,
                 },
             );
         }
@@ -374,18 +407,53 @@ impl Timings {
         self.in_capture = false;
     }
 
-    /// Bumps each `KernelStage`'s accumulator sample count by
-    /// `captured_stops_per_replay × n_launches`, recording zero
-    /// durations. Used by the runner's batched graph-replay loop to
-    /// keep the `.timings` file's sample counts consistent with the
-    /// per-step launch path; per-kernel elapsed durations are not
-    /// collected under graph mode (see `cuda-graphs.md`).
+    /// Snapshot each stage's mean accumulated duration as its
+    /// representative per-replay duration for the graph-replay loop.
+    /// Called once after the runner's instrumented calibration steps
+    /// (real per-step launches with live CUDA-event timing) and before
+    /// the batched replay loop, so the mean reflects the calibration
+    /// samples only. A stage with no calibration sample keeps a zero
+    /// representative. See `record_graph_replays` and `cuda-graphs.md`.
+    // rq-9ec19227
+    pub fn snapshot_graph_representatives(&mut self) {
+        for state in self.kernel_states.values_mut() {
+            state.representative_ns = if state.acc.count > 0 {
+                (state.acc.total_ns / state.acc.count as u128) as u64
+            } else {
+                0
+            };
+        }
+    }
+
+    /// Folds the calibrated per-kernel timings into a batch of
+    /// `n_launches` graph replays. CUDA rejects `cuEventElapsedTime` on
+    /// events captured into a graph (`CUDA_ERROR_INVALID_VALUE`), so the
+    /// in-graph events cannot be timed by replaying them. Each stage
+    /// instead carries a `representative_ns` measured from the runner's
+    /// instrumented calibration steps (see
+    /// `snapshot_graph_representatives`); this records that value
+    /// `captured_stops_per_replay × n_launches` times in one shot, so the
+    /// `.timings` sample count matches `n_steps` and the per-kernel
+    /// durations are representative rather than zero. A stage with no
+    /// calibration sample folds in zero. See `cuda-graphs.md`.
+    // rq-9ec19227
     pub fn record_graph_replays(&mut self, n_launches: u32) {
         for state in self.kernel_states.values_mut() {
-            let total = state.captured_stops_per_replay as u64 * n_launches as u64;
-            for _ in 0..total {
-                state.acc.record_ns(0);
+            let stops = state.captured_stops_per_replay as u64;
+            if stops == 0 {
+                continue;
             }
+            let count = stops * n_launches as u64;
+            // CUDA rejects `cuEventElapsedTime` on events that were used in
+            // a graph (CUDA_ERROR_INVALID_VALUE), so the per-kernel events
+            // captured into the phase graph cannot be timed by replaying
+            // them. Instead the runner measures a representative per-replay
+            // duration for each stage from a short run of instrumented
+            // (non-graph) steps before the replay loop, snapshotted into
+            // `representative_ns`; a batch of `count` identical replays
+            // folds that value in. Falls back to zero when no
+            // representative was captured. See `cuda-graphs.md`.
+            state.acc.record_ns_bulk(state.representative_ns, count);
         }
     }
 

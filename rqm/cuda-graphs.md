@@ -465,25 +465,50 @@ driver-overhead elimination for the rest of that phase.
 
 ## `Timings` Interaction <!-- rq-9ec19227 -->
 
+CUDA forbids `cuEventElapsedTime` on an event that has been recorded
+into a graph (it returns `CUDA_ERROR_INVALID_VALUE`), so the per-kernel
+`start`/`stop` events captured into the phase graph cannot be timed by
+replaying them. Graph-mode per-kernel timings are instead produced by a
+short **calibration** before the replay loop.
+
 When graph mode is active for a phase:
 
-- The captured graph contains kernel-launch nodes only. The
-  `Timings::kernel_start` / `Timings::kernel_stop` calls inside the
-  dry capture iteration emit one event-record pair per kernel stage;
-  every subsequent replay step contributes zero further event pairs.
-  Per-kernel rows in the phase's `.timings` file therefore show one
-  sample regardless of `n_steps`.
+- **Calibration.** The runner executes the first
+  `min(GRAPH_TIMING_CALIBRATION_STEPS, n_steps)` physical steps on the
+  instrumented per-step launch path (live CUDA-event timing per
+  `KernelStage`), then calls `Timings::snapshot_graph_representatives`,
+  which records each stage's mean calibrated duration as its
+  representative per-replay value. `GRAPH_TIMING_CALIBRATION_STEPS` is a
+  small constant (8). The captured graph then covers the remaining
+  steps. Because the per-step path is bit-identical to the graph replay
+  (forces accumulate in order-invariant fixed point), running these
+  steps per-step does not perturb the trajectory.
+- **Replay accounting.** For each batch of `n` replays,
+  `Timings::record_graph_replays` folds the representative duration into
+  every stage's accumulator scaled by `captured_stops_per_replay × n`,
+  so per-kernel rows in the `.timings` file carry a representative
+  per-step duration and a sample count equal to `n_steps` — not zeros.
+- **Representativeness.** The calibration measures the *first* few
+  steps. For a phase already near steady state (e.g. NPT production) the
+  per-kernel values match a full graphs-disabled run to within a few
+  percent. For a phase with a strong early transient (e.g. NVT
+  equilibration from a lattice, whose first steps carry more pair
+  interactions) the absolute values can run ~10–20% above the phase
+  mean; the *relative* per-kernel breakdown and ranking remain
+  representative. A stage that never runs during calibration keeps a
+  zero representative.
 - Aggregate per-phase total wall time and per-phase host stages are
   recorded normally. The per-batch host calls (`nl.pre_step`,
   `flush_pending_injection`, output writes) go through the existing
   host `Timings` stages.
 - The `total_runtime` per-phase sample reflects end-to-end phase
   wall-clock and is comparable between graph-mode and non-graph-mode
-  runs.
+  runs. The handful of calibration steps add negligible cost.
 
-A user who needs a full per-kernel profile sets
-`[simulation].cuda_graphs_disable = true` and re-runs. The per-step
-launch loop produces per-step samples for every `KernelStage`.
+A user who needs an exact per-step per-kernel profile sets
+`[simulation].cuda_graphs_disable = true` and re-runs; the per-step
+launch loop produces a real sample for every step of every
+`KernelStage`.
 
 ## Configuration <!-- rq-006bc38c -->
 

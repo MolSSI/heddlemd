@@ -1448,7 +1448,54 @@ pub(crate) fn run_md_phase_inner(
     // with full per-kernel `Timings`.
     let graph_eligible = !setup.config.simulation.cuda_graphs_disable
         && phase_slots_graph_compatible(setup, phase);
-    let graph_loop: Option<crate::gpu::CudaGraphExec> = if graph_eligible && n_steps >= 1 {
+
+    // Graph-timing calibration: CUDA forbids `cuEventElapsedTime` on the
+    // per-kernel events captured into a graph, so graph mode cannot time
+    // its own replays. Instead run a few instrumented per-step iterations
+    // up front (real CUDA-event timing) and snapshot a representative
+    // per-kernel duration; the replay loop folds it in for every step.
+    // The per-step path is bit-identical to the graph replay (fixed-point
+    // forces are summation-order invariant), so this does not perturb the
+    // trajectory; the cost is a handful of steps out of `n_steps`.
+    const GRAPH_TIMING_CALIBRATION_STEPS: u64 = 8;
+    let calib: u64 = if graph_eligible && n_steps >= 1 {
+        GRAPH_TIMING_CALIBRATION_STEPS.min(n_steps)
+    } else {
+        0
+    };
+    if calib > 0 {
+        run_per_step_range(
+            1,
+            calib,
+            setup,
+            phase,
+            &mut integrator,
+            &mut thermostat,
+            &mut barostat,
+            &mut constraint,
+            supports_constraints,
+            dt,
+            composed_post_force.as_ref(),
+            post_force_substep_index,
+            &mut timings,
+            &mut frame,
+            &mut traj_writer,
+            &mut log_writer,
+            &mut pe_scratch,
+            &type_indices,
+            n_thermal_dof,
+            &log_extra_columns,
+            phase_started,
+            phase_name,
+            progress_to_stdout,
+            progress_every,
+            &mut frames_written,
+            &mut log_rows_written,
+        )?;
+        timings.snapshot_graph_representatives();
+    }
+
+    let graph_loop: Option<crate::gpu::CudaGraphExec> = if graph_eligible && calib < n_steps {
         match capture_phase_graph(
             &mut setup.buffers,
             &mut setup.sim_box,
@@ -1487,6 +1534,7 @@ pub(crate) fn run_md_phase_inner(
             setup,
             phase,
             phase_index,
+            calib,
             &mut graph_exec,
             integrator.as_mut(),
             &mut thermostat,
@@ -1542,8 +1590,13 @@ pub(crate) fn run_md_phase_inner(
             )?;
         }
     } else {
+        // Steps `1..=calib` already ran on the per-step path as graph
+        // calibration; resume after them. When `calib == 0` (graphs
+        // disabled / ineligible) this is the whole phase; when
+        // `calib == n_steps` (tiny phase fully covered by calibration)
+        // the range is empty and this is a no-op.
         run_per_step_range(
-            1,
+            calib + 1,
             n_steps,
             setup,
             phase,
@@ -2471,6 +2524,7 @@ fn run_batched_graph_loop(
     setup: &mut SimulationSetup,
     phase: &crate::io::PhaseConfig,
     _phase_index: usize,
+    start_step: u64,
     graph_exec: &mut crate::gpu::CudaGraphExec,
     integrator: &mut dyn crate::integrator::Integrator,
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
@@ -2506,8 +2560,9 @@ fn run_batched_graph_loop(
     // The captured graph records a one-step kernel sequence with no
     // work executed during capture (`CU_STREAM_CAPTURE_MODE_GLOBAL`
     // semantics). The batched loop launches it for every physical step
-    // from 1 to n_steps.
-    let mut step: u64 = 0;
+    // from `start_step + 1` to `n_steps`; the first `start_step` steps
+    // ran on the instrumented per-step path (graph-timing calibration).
+    let mut step: u64 = start_step;
 
     while step < n_steps {
         let remaining = n_steps - step;

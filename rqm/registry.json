@@ -17801,7 +17801,12 @@
     "decl": "## `Timings` Interaction",
     "file": "cuda-graphs",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`Timings` Interaction",
     "type": "section"
   },
