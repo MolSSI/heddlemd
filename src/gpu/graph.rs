@@ -212,6 +212,35 @@ impl CudaGraphExec {
     }
 }
 
+/// Phase-owned executable graphs for the batched replay loop. Holds the
+/// always-present forces+scalars graph and, for phases without a
+/// barostat, the forces-only graph. `launch` selects between them by the
+/// per-step `scalars` flag. See `rqm/cuda-graphs.md` *Capture Lifecycle*
+/// and *Batched Replay Loop*.
+// rq-6887c76d
+#[derive(Debug)]
+pub struct GraphLoop {
+    /// The forces+scalars (`_fev`) graph. Always captured.
+    pub forces_and_scalars: CudaGraphExec,
+    /// The forces-only (`_f`) graph. `Some` when no barostat is active
+    /// for the phase, `None` otherwise (a barostat consumes the per-step
+    /// virial, so every step must evaluate scalars).
+    pub forces_only: Option<CudaGraphExec>,
+}
+
+impl GraphLoop {
+    /// Launch the graph for one physical step. Uses the forces+scalars
+    /// graph when `scalars` is true or when no forces-only graph was
+    /// captured; otherwise the forces-only graph.
+    // rq-6887c76d
+    pub fn launch(&self, scalars: bool) -> Result<(), GraphError> {
+        match (scalars, self.forces_only.as_ref()) {
+            (false, Some(forces_only)) => forces_only.launch(),
+            _ => self.forces_and_scalars.launch(),
+        }
+    }
+}
+
 impl Drop for CudaGraphExec {
     fn drop(&mut self) {
         if self.handle.is_null() {

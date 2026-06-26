@@ -314,6 +314,19 @@ impl Accumulator {
     }
 }
 
+/// Which captured graph a batch of replays came from. The two graphs
+/// differ only in the force evaluation's `AggregateLevel`, so a stage
+/// that runs only under `ForcesAndScalars` (the potential-energy and
+/// virial reductions, the `_fev` pair-force kernel) accrues `.timings`
+/// samples only from `ForcesAndScalars` replays. See `cuda-graphs.md`
+/// *`Timings` Interaction*.
+// rq-9ec19227
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphVariant {
+    ForcesOnly,
+    ForcesAndScalars,
+}
+
 #[derive(Debug)]
 struct KernelStageState {
     start: CUevent,
@@ -321,10 +334,15 @@ struct KernelStageState {
     outstanding_stop: bool,
     acc: Accumulator,
     /// Number of `kernel_stop` calls observed during the active
-    /// capture iteration. `Timings::record_graph_replays` multiplies
-    /// this by the replay count to advance `acc.count` without
-    /// re-firing any events.
+    /// capture iteration. Committed to one of the per-variant fields
+    /// below by `end_capture`.
     captured_stops_per_replay: u32,
+    /// `kernel_stop` count per replay of the forces-only graph,
+    /// committed by `end_capture(GraphVariant::ForcesOnly)`.
+    captured_stops_forces_only: u32,
+    /// `kernel_stop` count per replay of the forces+scalars graph,
+    /// committed by `end_capture(GraphVariant::ForcesAndScalars)`.
+    captured_stops_forces_and_scalars: u32,
     /// Representative per-replay duration (ns) for this stage under graph
     /// mode, snapshotted from the instrumented calibration steps the
     /// runner executes before the replay loop (see
@@ -372,6 +390,8 @@ impl Timings {
                     outstanding_stop: false,
                     acc: Accumulator::default(),
                     captured_stops_per_replay: 0,
+                    captured_stops_forces_only: 0,
+                    captured_stops_forces_and_scalars: 0,
                     representative_ns: 0,
                 },
             );
@@ -400,11 +420,25 @@ impl Timings {
         }
     }
 
-    /// Leave capture mode. The per-stage capture counts remain set
-    /// until the next `begin_capture` and are consumed by
-    /// `record_graph_replays`.
-    pub fn end_capture(&mut self) {
+    /// Leave capture mode, committing the per-stage `kernel_stop`
+    /// counts observed during the capture to `variant`'s per-replay
+    /// field. Each captured graph (forces-only, forces+scalars) calls
+    /// this with its own `variant`; `record_graph_replays` then folds in
+    /// the matching counts. See `cuda-graphs.md` *`Timings` Interaction*.
+    // rq-9ec19227
+    pub fn end_capture(&mut self, variant: GraphVariant) {
         self.in_capture = false;
+        for state in self.kernel_states.values_mut() {
+            match variant {
+                GraphVariant::ForcesOnly => {
+                    state.captured_stops_forces_only = state.captured_stops_per_replay;
+                }
+                GraphVariant::ForcesAndScalars => {
+                    state.captured_stops_forces_and_scalars =
+                        state.captured_stops_per_replay;
+                }
+            }
+        }
     }
 
     /// Snapshot each stage's mean accumulated duration as its
@@ -426,33 +460,31 @@ impl Timings {
     }
 
     /// Folds the calibrated per-kernel timings into a batch of
-    /// `n_launches` graph replays. CUDA rejects `cuEventElapsedTime` on
-    /// events captured into a graph (`CUDA_ERROR_INVALID_VALUE`), so the
-    /// in-graph events cannot be timed by replaying them. Each stage
-    /// instead carries a `representative_ns` measured from the runner's
-    /// instrumented calibration steps (see
-    /// `snapshot_graph_representatives`); this records that value
-    /// `captured_stops_per_replay × n_launches` times in one shot, so the
-    /// `.timings` sample count matches `n_steps` and the per-kernel
-    /// durations are representative rather than zero. A stage with no
-    /// calibration sample folds in zero. See `cuda-graphs.md`.
+    /// `n_launches` replays of the `variant` graph. CUDA rejects
+    /// `cuEventElapsedTime` on events captured into a graph
+    /// (`CUDA_ERROR_INVALID_VALUE`), so the in-graph events cannot be
+    /// timed by replaying them. Each stage instead carries a
+    /// `representative_ns` measured from the runner's instrumented
+    /// calibration steps (see `snapshot_graph_representatives`); this
+    /// records that value `captured_stops(variant) × n_launches` times in
+    /// one shot. A stage absent from `variant`'s graph has zero captured
+    /// stops there and accrues nothing, so a scalar-only stage's
+    /// `.timings` sample count tracks the number of `ForcesAndScalars`
+    /// replays — the scalar steps — rather than `n_steps`. A stage with no
+    /// calibration sample folds in a zero duration. See `cuda-graphs.md`.
     // rq-9ec19227
-    pub fn record_graph_replays(&mut self, n_launches: u32) {
+    pub fn record_graph_replays(&mut self, variant: GraphVariant, n_launches: u32) {
         for state in self.kernel_states.values_mut() {
-            let stops = state.captured_stops_per_replay as u64;
+            let stops = match variant {
+                GraphVariant::ForcesOnly => state.captured_stops_forces_only,
+                GraphVariant::ForcesAndScalars => {
+                    state.captured_stops_forces_and_scalars
+                }
+            } as u64;
             if stops == 0 {
                 continue;
             }
             let count = stops * n_launches as u64;
-            // CUDA rejects `cuEventElapsedTime` on events that were used in
-            // a graph (CUDA_ERROR_INVALID_VALUE), so the per-kernel events
-            // captured into the phase graph cannot be timed by replaying
-            // them. Instead the runner measures a representative per-replay
-            // duration for each stage from a short run of instrumented
-            // (non-graph) steps before the replay loop, snapshotted into
-            // `representative_ns`; a batch of `count` identical replays
-            // folds that value in. Falls back to zero when no
-            // representative was captured. See `cuda-graphs.md`.
             state.acc.record_ns_bulk(state.representative_ns, count);
         }
     }

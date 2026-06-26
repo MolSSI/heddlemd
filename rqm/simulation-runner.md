@@ -425,6 +425,17 @@ the simulation box.
     d. If `barostat.is_some()`,
        `barostat.apply(&mut buffers, &mut sim_box, P.dt, &mut timings)`.
 
+    The force evaluation inside `integrator.step` (step b) runs at
+    `AggregateLevel::ForcesAndScalars` — computing the total potential
+    energy and virial — only when the step produces a log row
+    (`P.output.log_every > 0` and `s % P.output.log_every == 0`) or a
+    barostat is active; otherwise it runs at
+    `AggregateLevel::ForcesOnly`. A trajectory frame carries positions
+    and velocities, and the thermostat reduces kinetic energy from
+    velocities independently, so neither requires force-kernel scalars.
+    The CUDA graph path selects between its forces-only and
+    forces+scalars graphs on the same condition (see `cuda-graphs.md`).
+
     The loop variable `s` is local to the phase and gates trajectory
     and log writes below; it is not passed to any slot.
 

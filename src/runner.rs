@@ -26,7 +26,8 @@ use crate::io::{
 use crate::io::log_output::{compute_kinetic_energy, compute_temperature};
 use crate::state::{ParticleState, ParticleStateError};
 use crate::timings::{
-    HostStage, KernelStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
+    GraphVariant, HostStage, KernelStage, Timings, TimingsError, TimingsWriterError,
+    write_timings_file,
 };
 use crate::precision::Real;
 
@@ -1495,7 +1496,7 @@ pub(crate) fn run_md_phase_inner(
         timings.snapshot_graph_representatives();
     }
 
-    let graph_loop: Option<crate::gpu::CudaGraphExec> = if graph_eligible && calib < n_steps {
+    let graph_loop: Option<crate::gpu::GraphLoop> = if graph_eligible && calib < n_steps {
         match capture_phase_graph(
             &mut setup.buffers,
             &mut setup.sim_box,
@@ -1523,7 +1524,7 @@ pub(crate) fn run_md_phase_inner(
         None
     };
 
-    if let Some(mut graph_exec) = graph_loop {
+    if let Some(mut graph_loop) = graph_loop {
         // rq-67a09135 rq-1217c816
         // The batched loop re-captures the phase graph in place when a
         // batch-boundary rebuild reallocates a packed-neighbour buffer.
@@ -1535,7 +1536,7 @@ pub(crate) fn run_md_phase_inner(
             phase,
             phase_index,
             calib,
-            &mut graph_exec,
+            &mut graph_loop,
             integrator.as_mut(),
             &mut thermostat,
             &mut barostat,
@@ -2160,6 +2161,32 @@ fn launch_composed_post_force(
 }
 
 /// See `cuda-graphs.md` for the capture lifecycle.
+// rq-76db55bb
+/// Whether a physical step's force evaluation must compute the total
+/// potential energy and virial. True only when the step produces a log
+/// row or a barostat consumes the per-step virial; a trajectory frame
+/// and the thermostat's kinetic-energy reduction need no force-kernel
+/// scalars. The per-step launch loop and the graph replay loop both
+/// select `AggregateLevel` / the captured graph through this predicate.
+fn step_needs_force_scalars(log_due: bool, barostat_active: bool) -> bool {
+    log_due || barostat_active
+}
+
+// rq-26dce0f6 rq-c6c56cdc
+/// Whether a phase captures the forces-only graph alongside the
+/// always-captured forces+scalars graph. A barostat consumes the virial
+/// on every step, so a barostat phase evaluates scalars every step and
+/// captures only the forces+scalars graph.
+fn captures_forces_only_graph(barostat_active: bool) -> bool {
+    !barostat_active
+}
+
+// rq-766c88fb rq-e35fa835
+/// Captures the phase's executable graphs: the forces+scalars graph
+/// always, and the forces-only graph unless a barostat is active. Both
+/// are recorded from the same pre-capture device state; stream capture
+/// records without executing, so neither advances the simulation. See
+/// `cuda-graphs.md` *Capture Lifecycle*.
 #[allow(clippy::too_many_arguments)]
 fn capture_phase_graph(
     buffers: &mut crate::gpu::ParticleBuffers,
@@ -2175,6 +2202,75 @@ fn capture_phase_graph(
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
     composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
     post_force_substep_index: Option<usize>,
+) -> Result<crate::gpu::GraphLoop, crate::gpu::GraphError> {
+    let forces_and_scalars = capture_one_graph(
+        buffers,
+        sim_box,
+        force_field,
+        integrator,
+        thermostat,
+        barostat,
+        constraint,
+        supports_constraints,
+        dt,
+        timings,
+        device,
+        composed_post_force,
+        post_force_substep_index,
+        true,
+        GraphVariant::ForcesAndScalars,
+    )?;
+    // A barostat consumes the per-step virial inside the captured
+    // sequence, so a barostat phase evaluates scalars on every step and
+    // does not capture a forces-only graph.
+    let forces_only = if captures_forces_only_graph(barostat.is_some()) {
+        Some(capture_one_graph(
+            buffers,
+            sim_box,
+            force_field,
+            integrator,
+            thermostat,
+            barostat,
+            constraint,
+            supports_constraints,
+            dt,
+            timings,
+            device,
+            composed_post_force,
+            post_force_substep_index,
+            false,
+            GraphVariant::ForcesOnly,
+        )?)
+    } else {
+        None
+    };
+    Ok(crate::gpu::GraphLoop {
+        forces_and_scalars,
+        forces_only,
+    })
+}
+
+/// Captures and instantiates a single one-step graph with the force
+/// evaluation at the `AggregateLevel` selected by `needs_scalars`, and
+/// commits its per-stage `kernel_stop` counts to `variant`.
+// rq-766c88fb
+#[allow(clippy::too_many_arguments)]
+fn capture_one_graph(
+    buffers: &mut crate::gpu::ParticleBuffers,
+    sim_box: &mut crate::pbc::SimulationBox,
+    force_field: &mut crate::forces::ForceField,
+    integrator: &mut dyn crate::integrator::Integrator,
+    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
+    barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
+    constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    supports_constraints: bool,
+    dt: Real,
+    timings: &mut Timings,
+    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
+    post_force_substep_index: Option<usize>,
+    needs_scalars: bool,
+    variant: GraphVariant,
 ) -> Result<crate::gpu::CudaGraphExec, crate::gpu::GraphError> {
     use crate::gpu::{CaptureMode, begin_stream_capture, end_stream_capture};
     // Settle any outstanding `Timings` event pairs from the warm-up
@@ -2209,14 +2305,11 @@ fn capture_phase_graph(
             Some(c) => Some(c.as_mut()),
             None => None,
         };
-        // Capture with scalars unconditionally so each graph replay
-        // produces a fresh (KE + PE) for the log-row output handler.
-        // The non-graph per-step loop only sets `runner_needs_scalars`
-        // on log/traj steps, but a captured graph is fixed at capture
-        // time — if scalars were off, log rows on every replay would
-        // read the same stale potential-energy buffer the capture left
-        // behind. The extra atomicAdds per step are cheap relative to
-        // the force-eval work.
+        // `needs_scalars` selects the force evaluation's `AggregateLevel`:
+        // `true` records the forces+scalars (`_fev`) graph, `false` the
+        // forces-only (`_f`) graph. The replay loop launches the
+        // forces-only graph on steps that need no scalars (see
+        // `cuda-graphs.md` *Batched Replay Loop*).
         let result = if let (Some(_), Some(skip_idx)) =
             (composed_post_force, post_force_substep_index)
         {
@@ -2232,7 +2325,7 @@ fn capture_phase_graph(
                     run_neighbor_pre_step: false,
                     skip_substep_index: Some(skip_idx),
                     install_constraint_hooks: supports_constraints,
-                    runner_needs_scalars: true,
+                    runner_needs_scalars: needs_scalars,
                 },
             )
         } else {
@@ -2247,7 +2340,7 @@ fn capture_phase_graph(
                 crate::integrator::RunStepOptions {
                     run_neighbor_pre_step: false,
                     install_constraint_hooks: supports_constraints,
-                    runner_needs_scalars: true,
+                    runner_needs_scalars: needs_scalars,
                     ..Default::default()
                 },
             )
@@ -2289,7 +2382,7 @@ fn capture_phase_graph(
     // Always end capture, even on inner failure — a captured stream
     // must be closed to avoid leaving the device in capture mode.
     let graph = end_stream_capture(device)?;
-    timings.end_capture();
+    timings.end_capture(variant);
     if let Some(reason) = inner_failure {
         eprintln!("warning: cuda graph capture inner sequence failed ({reason}); falling back");
         return Err(crate::gpu::GraphError::EndCaptureFailed(
@@ -2346,10 +2439,15 @@ fn run_per_step_range(
                     Some(b) => Some(b.as_mut()),
                     None => None,
                 };
-            let trajectory_due = phase.output.trajectory_every > 0
-                && step % phase.output.trajectory_every == 0;
+            // rq-76db55bb — the force evaluation computes total PE and
+            // virial only when the step produces a log row or a barostat
+            // consumes the virial. A trajectory frame carries positions
+            // and velocities (no force-kernel scalars), and the
+            // thermostat reduces kinetic energy independently, so neither
+            // forces a scalars step. The graph replay loop selects its
+            // forces-only / forces+scalars graphs on the same condition.
             let log_due = phase.output.log_every > 0 && step % phase.output.log_every == 0;
-            let runner_needs_scalars = trajectory_due || log_due || barostat.is_some();
+            let runner_needs_scalars = step_needs_force_scalars(log_due, barostat.is_some());
             let result = if let Some(skip_idx) = post_force_substep_index {
                 crate::integrator::run_step(
                     integrator.as_mut(),
@@ -2525,7 +2623,7 @@ fn run_batched_graph_loop(
     phase: &crate::io::PhaseConfig,
     _phase_index: usize,
     start_step: u64,
-    graph_exec: &mut crate::gpu::CudaGraphExec,
+    graph_loop: &mut crate::gpu::GraphLoop,
     integrator: &mut dyn crate::integrator::Integrator,
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
@@ -2577,8 +2675,18 @@ fn run_batched_graph_loop(
             remaining
         };
         let batch = batch_size.min(remaining).min(next_log).min(next_traj);
-        for _ in 0..batch {
-            graph_exec.launch().map_err(|e| {
+        let barostat_active = barostat.is_some();
+        let mut forces_only_launches: u32 = 0;
+        let mut forces_and_scalars_launches: u32 = 0;
+        for i in 1..=batch {
+            let s = step + i;
+            // rq-76db55bb — a step needs force-kernel scalars (total PE +
+            // virial) only when it produces a log row or a barostat
+            // consumes the per-step virial. Other steps replay the
+            // forces-only graph.
+            let needs_scalars =
+                step_needs_force_scalars(log_every > 0 && s % log_every == 0, barostat_active);
+            graph_loop.launch(needs_scalars).map_err(|e| {
                 (
                     RunnerError::Gpu(crate::gpu::GpuError(match e {
                         crate::gpu::GraphError::LaunchFailed(d) => d,
@@ -2590,11 +2698,24 @@ fn run_batched_graph_loop(
                     ExitPhase::Loop,
                 )
             })?;
+            if needs_scalars {
+                forces_and_scalars_launches += 1;
+            } else {
+                forces_only_launches += 1;
+            }
         }
-        // Advance per-stage sample counts to match what a per-step
-        // launch loop would have recorded across this batch; durations
-        // remain zero (see `cuda-graphs.md`).
-        timings.record_graph_replays(batch as u32);
+        // rq-9ec19227 — advance per-stage sample counts per graph variant,
+        // so a stage present only in the forces+scalars graph (the scalar
+        // reductions, the `_fev` pair-force kernel) accrues samples only
+        // from the scalar steps. Durations are the calibrated
+        // representatives (see `cuda-graphs.md`).
+        if forces_only_launches > 0 {
+            timings.record_graph_replays(GraphVariant::ForcesOnly, forces_only_launches);
+        }
+        if forces_and_scalars_launches > 0 {
+            timings
+                .record_graph_replays(GraphVariant::ForcesAndScalars, forces_and_scalars_launches);
+        }
         step += batch;
 
         // Displacement check + neighbor-list rebuild (if triggered)
@@ -2626,8 +2747,8 @@ fn run_batched_graph_loop(
                 composed_post_force,
                 post_force_substep_index,
             ) {
-                Ok(new_exec) => {
-                    *graph_exec = new_exec;
+                Ok(new_loop) => {
+                    *graph_loop = new_loop;
                 }
                 Err(e) => {
                     eprintln!(
@@ -3124,5 +3245,51 @@ fn cli_main_analyze(rest: Vec<String>) -> u8 {
                 _ => 1,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod scalar_predicate_tests {
+    use super::{captures_forces_only_graph, step_needs_force_scalars};
+
+    // rq-2af44cf4
+    #[test]
+    fn log_step_needs_force_scalars() {
+        // A log step (no barostat) evaluates forces+scalars.
+        assert!(step_needs_force_scalars(true, false));
+    }
+
+    // rq-ed183041
+    #[test]
+    fn plain_step_is_forces_only() {
+        // Neither a log step nor a barostat step: forces only.
+        assert!(!step_needs_force_scalars(false, false));
+    }
+
+    // rq-091a4341
+    #[test]
+    fn trajectory_only_step_is_forces_only() {
+        // A trajectory-only step is not a log step and has no barostat,
+        // so it does not require force-kernel scalars.
+        assert!(!step_needs_force_scalars(false, false));
+    }
+
+    #[test]
+    fn barostat_step_needs_force_scalars() {
+        // A barostat consumes the per-step virial regardless of logging.
+        assert!(step_needs_force_scalars(false, true));
+        assert!(step_needs_force_scalars(true, true));
+    }
+
+    // rq-26dce0f6
+    #[test]
+    fn no_barostat_captures_forces_only_graph() {
+        assert!(captures_forces_only_graph(false));
+    }
+
+    // rq-c6c56cdc
+    #[test]
+    fn barostat_skips_forces_only_graph() {
+        assert!(!captures_forces_only_graph(true));
     }
 }

@@ -110,6 +110,18 @@
     "title": "Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
     "type": "scenario"
   },
+  "rq-009eed1b": {
+    "decl": "Scenario: NVT graph phase evaluates force-kernel scalars only on log steps",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NVT graph phase evaluates force-kernel scalars only on log steps",
+    "type": "scenario"
+  },
   "rq-00bb491c": {
     "decl": "Scenario: Angle row with non-integer index",
     "file": "forces/topology",
@@ -1120,6 +1132,18 @@
     "refs": [],
     "title": "Comparison Procedure",
     "type": "section"
+  },
+  "rq-091a4341": {
+    "decl": "Scenario: Per-step loop does not compute scalars on a trajectory-only step",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Per-step loop does not compute scalars on a trajectory-only step",
+    "type": "scenario"
   },
   "rq-098fabd1": {
     "decl": "Scenario: compute_total_virial matches the host-side sum on small N",
@@ -3296,10 +3320,10 @@
     "type": "api-item"
   },
   "rq-1a85bb52": {
-    "decl": "Scenario: Captured iteration counts as physical step 1",
+    "decl": "Scenario: Graph replays cover every step after the calibration prefix",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Captured iteration counts as physical step 1",
+    "title": "Graph replays cover every step after the calibration prefix",
     "type": "scenario"
   },
   "rq-1a996f5d": {
@@ -3419,6 +3443,18 @@
     "refs": [],
     "title": "Row ordering",
     "type": "section"
+  },
+  "rq-1b40a671": {
+    "decl": "Scenario: NPT graph phase evaluates force-kernel scalars on every step",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NPT graph phase evaluates force-kernel scalars on every step",
+    "type": "scenario"
   },
   "rq-1b44b5da": {
     "decl": "Scenario: Lossy 100-step round trip does NOT restore observables",
@@ -4956,6 +4992,22 @@
     "title": "fill kernel handles a non-block-aligned buffer size",
     "type": "scenario"
   },
+  "rq-26dce0f6": {
+    "decl": "Scenario: A phase without a barostat captures both graphs",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A phase without a barostat captures both graphs",
+    "type": "scenario"
+  },
   "rq-26ff4aea": {
     "decl": "Scenario: log_column_values returns ke + pe − cumulative_injection",
     "file": "integration/andersen",
@@ -5404,6 +5456,18 @@
       }
     ],
     "title": "SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
+    "type": "scenario"
+  },
+  "rq-2af44cf4": {
+    "decl": "Scenario: Per-step loop computes ForcesAndScalars on a log step",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Per-step loop computes ForcesAndScalars on a log step",
     "type": "scenario"
   },
   "rq-2afb76f2": {
@@ -11825,9 +11889,14 @@
     "type": "scenario"
   },
   "rq-6887c76d": {
-    "decl": "- `GraphLoop` — phase-owned executable graph + replay state. Carries:",
+    "decl": "- `GraphLoop` — phase-owned executable graphs + replay state. Carries:",
     "file": "cuda-graphs",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/graph.rs",
+        "kind": "code"
+      }
+    ],
     "title": "GraphLoop",
     "type": "api-item"
   },
@@ -13409,7 +13478,12 @@
     "decl": "## Capture Lifecycle",
     "file": "cuda-graphs",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Capture Lifecycle",
     "type": "section"
   },
@@ -13440,7 +13514,12 @@
     "decl": "## Batched Replay Loop",
     "file": "cuda-graphs",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Batched Replay Loop",
     "type": "section"
   },
@@ -15157,6 +15236,18 @@
     "title": "Each slot's contribution is reflected in its class accumulator after step()",
     "type": "scenario"
   },
+  "rq-867630af": {
+    "decl": "Scenario: GraphLoop.launch routes by the scalars flag",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "GraphLoop.launch routes by the scalars flag",
+    "type": "scenario"
+  },
   "rq-86aa2be7": {
     "decl": "Scenario: Langevin BAOAB kind with valid parameters is accepted",
     "file": "io/config-schema",
@@ -15816,6 +15907,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-8c24f057": {
+    "decl": "Scenario: GraphLoop.launch ignores the scalars flag when forces_only is None",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "GraphLoop.launch ignores the scalars flag when forces_only is None",
+    "type": "scenario"
   },
   "rq-8c630ad6": {
     "decl": "Scenario: Charge-zero atoms issue no atomicAdd<i64> against rho_fixed",
@@ -17879,6 +17982,10 @@
     "level": 2,
     "refs": [
       {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/timings.rs",
         "kind": "code"
       }
@@ -19453,10 +19560,10 @@
     "type": "scenario"
   },
   "rq-accf1a4b": {
-    "decl": "Scenario: Per-kernel timings empty in graph mode",
+    "decl": "Scenario: Per-kernel timings are populated in graph mode",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Per-kernel timings empty in graph mode",
+    "title": "Per-kernel timings are populated in graph mode",
     "type": "scenario"
   },
   "rq-acfda5d4": {
@@ -22207,6 +22314,22 @@
     "title": "λ > 1 when K_old < K_target (system needs heating)",
     "type": "scenario"
   },
+  "rq-c6c56cdc": {
+    "decl": "Scenario: A phase with a barostat captures only the forces+scalars graph",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A phase with a barostat captures only the forces+scalars graph",
+    "type": "scenario"
+  },
   "rq-c6f6a13c": {
     "decl": "- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>`",
     "file": "forces/spme",
@@ -23527,6 +23650,18 @@
     "title": "CoulombState",
     "type": "api-item"
   },
+  "rq-d34ff8f7": {
+    "decl": "Scenario: Trajectory-only steps do not trigger force-kernel scalars in graph mode",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Trajectory-only steps do not trigger force-kernel scalars in graph mode",
+    "type": "scenario"
+  },
   "rq-d370907d": {
     "decl": "Scenario: validate_constraint_compatibility rejects lossless velocity-Verlet with constraints",
     "file": "io/config-schema",
@@ -24316,6 +24451,18 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "Capture-time CUDA driver error falls back gracefully",
+    "type": "scenario"
+  },
+  "rq-dae13654": {
+    "decl": "Scenario: Forces-only replay does not change the trajectory",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Forces-only replay does not change the trajectory",
     "type": "scenario"
   },
   "rq-dae150d9": {
@@ -25323,7 +25470,12 @@
   "rq-e35fa835": {
     "decl": "- `capture_phase_graph(setup: &mut SimulationSetup, phase: &Phase,",
     "file": "cuda-graphs",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "capture_phase_graph",
     "type": "api-item"
   },
@@ -26464,6 +26616,18 @@
     "file": "pipeline-reversibility",
     "refs": [],
     "title": "All observables are finite after the 100-step lossless forward run",
+    "type": "scenario"
+  },
+  "rq-ed183041": {
+    "decl": "Scenario: Per-step loop computes ForcesOnly on a non-log non-barostat step",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Per-step loop computes ForcesOnly on a non-log non-barostat step",
     "type": "scenario"
   },
   "rq-ed1d6c71": {

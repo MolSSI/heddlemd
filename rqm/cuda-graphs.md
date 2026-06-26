@@ -250,18 +250,45 @@ sequence:
    the system's true interaction count before any device pointer is
    captured (see `forces/packed-neighbour-pair-force.md` *Capacity*).
    The call happens outside any graph capture and is not recorded.
-3. The runner calls
+3. The runner captures the phase's executable graphs. Each graph is
+   captured by calling
    `device.begin_stream_capture(CaptureMode::ThreadLocal)` on the
-   default stream.
-4. The runner executes the kernel sequence for one physical step,
-   using `force_field.step_no_neighbor_check(...)` in place of the
-   ordinary `force_field.step(...)`. The sequence is:
+   default stream, recording one physical step's kernel sequence
+   (step 4), calling `device.end_stream_capture()` to obtain a
+   `CudaGraph`, and instantiating it with `CudaGraph::instantiate()`
+   to obtain a `CudaGraphExec`. Stream capture records the kernel
+   sequence without executing it, so capturing a graph advances no
+   simulation state. Up to two graphs are captured from the same
+   post-probe device state:
+   - **forces+scalars graph** — the recorded sequence with the force
+     evaluation at `AggregateLevel::ForcesAndScalars`: the `_fev`
+     composed pair-force kernel plus the per-step potential-energy and
+     virial reductions. Always captured.
+   - **forces-only graph** — the same sequence with the force
+     evaluation at `AggregateLevel::ForcesOnly`: the `_f` composed
+     pair-force kernel, with the scalar reductions absent. Captured
+     only when no barostat is active for the phase.
+
+   A barostat consumes the per-step scalar virial inside the captured
+   sequence (`barostat.apply` in step 4), so a barostat phase evaluates
+   scalars on every step and captures only the forces+scalars graph.
+   When no barostat is active the per-particle force, position, and
+   velocity results of the two graphs are bit-identical — the scalar
+   reductions are diagnostic outputs that do not feed back into the
+   dynamics — so replaying either graph for a given step produces the
+   same trajectory.
+4. The recorded one-step kernel sequence, run under capture once per
+   graph with `force_field.step_no_neighbor_check(...)` in place of the
+   ordinary `force_field.step(...)`, is:
    - `thermostat.apply_pre(buffers, dt, timings)` if a thermostat is
      active
    - `run_step(integrator, buffers, sim_box, force_field, constraint,
      dt, timings, RunStepOptions { run_neighbor_pre_step: false,
      skip_substep_index: Some(integrator.post_force_substep_index(dt).unwrap()),
-     install_constraint_hooks, runner_needs_scalars: true })`. The
+     install_constraint_hooks, runner_needs_scalars })`, where
+     `runner_needs_scalars` is `true` while recording the
+     forces+scalars graph and `false` while recording the forces-only
+     graph. The
      `run_neighbor_pre_step: false` flag routes every internal
      `force_field.step` call to `force_field.step_no_neighbor_check`,
      and `skip_substep_index` skips the integrator's post-force SubStep
@@ -291,14 +318,14 @@ sequence:
      minimum-image displacement exceeds `r_skin / 2`. The flag is
      sticky across replays of the captured graph until cleared by
      the host between batches.
-5. The runner calls `device.end_stream_capture()` to obtain a
-   `CudaGraph`.
-6. The runner instantiates the executable graph via
-   `CudaGraph::instantiate()` to obtain a `CudaGraphExec`. The
-   instantiated graph is stored as the phase's `GraphLoop`.
+5. Both instantiated graphs are stored in the phase's `GraphLoop`
+   (the forces-only graph as an `Option`, absent for barostat phases).
 
-The captured iteration counts as physical step 1; the timestep loop
-replays from step 2 onward.
+Capture records but does not execute, so capturing the graphs
+advances no simulation state; every physical step of the phase is
+produced by a graph replay in the batched replay loop (apart from the
+short instrumented per-step calibration run described under
+*`Timings` Interaction*).
 
 Force kernels whose result depends on the simulation box must read the
 box from the persistent device lattice buffer (`sim_box.lattice_device()`)
@@ -329,15 +356,15 @@ For an eligible phase with `[simulation].graph_batch_size = K`, the
 per-phase loop has the shape:
 
 ```text
-step = 1                                  // captured iteration is step 1
-remaining = P.n_steps - 1
+needs_scalars(s) = (log_every > 0 and s % log_every == 0) or barostat_active
 while remaining > 0:
     next_log    = if log_every  > 0 then log_every  - (step % log_every)  else remaining
     next_traj   = if traj_every > 0 then traj_every - (step % traj_every) else remaining
     batch = min(K, remaining, next_log, next_traj)
 
-    for _ in 0..batch:
-        graph_loop.launch(stream)
+    for i in 1..=batch:
+        s = step + i
+        graph_loop.launch(stream, scalars = needs_scalars(s))   // forces+scalars graph iff needs_scalars(s), else forces-only
 
     step      += batch
     remaining -= batch
@@ -361,6 +388,26 @@ while remaining > 0:
 cadences (`log_every`, `trajectory_every`) shrink the effective batch
 when they are not multiples of `graph_batch_size`. The captured graph
 itself is always one physical step.
+
+A step requires force-kernel scalars — the total potential energy and
+virial — only when it produces a log row (the log row reports the
+potential energy) or when a barostat is active (the barostat consumes
+the per-step virial). This is the `needs_scalars(s)` predicate above.
+A trajectory frame carries positions and velocities, not force-kernel
+scalars, and the thermostat's kinetic energy is reduced from
+velocities independently of the force evaluation, so neither forces a
+scalars step. The same predicate selects `AggregateLevel` in the
+per-step launch loop (see `simulation-runner.md`), so the two loops
+compute scalars on exactly the same steps.
+
+Each replay therefore launches the forces-only graph unless
+`needs_scalars(s)` holds, in which case it launches the
+forces+scalars graph. Because a batch is bounded so it ends on the
+next log or trajectory cadence boundary, the forces+scalars graph
+runs at most once per batch — on the boundary step that feeds a log
+row — and every other step in the batch runs forces-only. When a
+barostat is active every step requires scalars, the forces-only graph
+is not captured, and every replay launches the forces+scalars graph.
 
 Every per-batch `nl.pre_step` synchronises against the device only
 via a single 4-byte `dtoh_sync_copy` of `neighbor_status`. When the
@@ -483,11 +530,17 @@ When graph mode is active for a phase:
   steps. Because the per-step path is bit-identical to the graph replay
   (forces accumulate in order-invariant fixed point), running these
   steps per-step does not perturb the trajectory.
-- **Replay accounting.** For each batch of `n` replays,
-  `Timings::record_graph_replays` folds the representative duration into
-  every stage's accumulator scaled by `captured_stops_per_replay × n`,
-  so per-kernel rows in the `.timings` file carry a representative
-  per-step duration and a sample count equal to `n_steps` — not zeros.
+- **Replay accounting.** For each batch the runner records, per graph
+  variant launched, the number of forces-only replays and the number of
+  forces+scalars replays. `Timings::record_graph_replays` folds the
+  representative duration into every stage's accumulator scaled by that
+  graph's `captured_stops_per_replay × (its replay count)`. A stage that
+  appears only in the forces+scalars graph — the potential-energy and
+  virial reductions, and the `_fev` pair-force kernel — therefore
+  accrues samples only from forces+scalars replays, so its `.timings`
+  sample count tracks the number of scalar steps rather than `n_steps`.
+  Stages present in both graphs carry a sample count equal to the total
+  step count.
 - **Representativeness.** The calibration measures the *first* few
   steps. For a phase already near steady state (e.g. NPT production) the
   per-kernel values match a full graphs-disabled run to within a few
@@ -548,12 +601,17 @@ rejected as `ConfigError::InvalidValue { field:
   - `launch(&self, stream: &CudaStream) -> Result<(), GraphError>` —
     invokes `cuGraphLaunch`.
 
-- `GraphLoop` — phase-owned executable graph + replay state. Carries: <!-- rq-6887c76d -->
-  - `exec: CudaGraphExec` — the instantiated graph for one physical
-    step.
+- `GraphLoop` — phase-owned executable graphs + replay state. Carries: <!-- rq-6887c76d -->
+  - `forces_and_scalars: CudaGraphExec` — the instantiated
+    forces+scalars graph for one physical step. Always present.
+  - `forces_only: Option<CudaGraphExec>` — the instantiated
+    forces-only graph for one physical step. `Some` when no barostat
+    is active for the phase, `None` otherwise.
   - `batch_size: u32` — the phase's `graph_batch_size`.
-  - `launch(&self, stream: &CudaStream) -> Result<(), GraphError>` —
-    forwards to `exec.launch(stream)`.
+  - `launch(&self, stream: &CudaStream, scalars: bool) -> Result<(),
+    GraphError>` — forwards to `forces_and_scalars.launch(stream)`
+    when `scalars` is `true` or when `forces_only` is `None`,
+    otherwise to `forces_only`'s `launch(stream)`.
 
   The runner holds the phase's `GraphLoop` in a mutable binding so it
   can replace it mid-phase: when `nl.pre_step` reports a
@@ -586,8 +644,10 @@ rejected as `ConfigError::InvalidValue { field:
   integrator: &mut dyn Integrator, thermostat: Option<&mut dyn
   Thermostat>, barostat: Option<&mut dyn Barostat>, constraint:
   Option<&mut dyn Constraint>, timings: &mut Timings) ->
-  Result<Option<GraphLoop>, GraphError>` — runs the five-step capture
-  procedure described under *Capture Lifecycle*. Returns `Ok(None)`
+  Result<Option<GraphLoop>, GraphError>` — runs the capture procedure
+  described under *Capture Lifecycle*, capturing the forces+scalars
+  graph and, when no barostat is active, the forces-only graph, and
+  returning them in one `GraphLoop`. Returns `Ok(None)`
   when any of the supplied slots reports `graph_compatible = false`
   or when `[simulation].cuda_graphs_disable = true`. Returns
   `Err(...)` only when a CUDA driver call fails during capture or
@@ -655,16 +715,19 @@ Feature: CUDA graph capture and replay
     And the GraphLoop is stored on the phase
 
   @rq-1a85bb52
-  Scenario: Captured iteration counts as physical step 1
+  Scenario: Graph replays cover every step after the calibration prefix
     Given a phase with n_steps = 100 enters graph mode
+    And GRAPH_TIMING_CALIBRATION_STEPS = 8
     When the timestep loop runs to completion
-    Then cuGraphLaunch is invoked 99 times in total across batches
+    Then the first 8 steps run on the per-step launch path
+    And cuGraphLaunch is invoked 92 times in total across batches, one launch per remaining step
 
   @rq-accf1a4b
-  Scenario: Per-kernel timings empty in graph mode
+  Scenario: Per-kernel timings are populated in graph mode
     Given an eligible MD phase runs to completion in graph mode
     When the phase's .timings file is written
-    Then every per-kernel KernelStage row reports 1 sample
+    Then every per-kernel KernelStage row reports a non-zero representative duration
+    And a stage present in both graphs reports a sample count equal to the step count
     And the per-phase total_runtime row is populated normally
 
   @rq-882db733
@@ -1021,4 +1084,79 @@ Feature: CUDA graph capture and replay
     When the runtime is inspected
     Then no trait method named set_jit_composed_post_force_active is declared
     And slot behaviour is single-mode: apply methods always do scalar prep only
+
+  # --- Forces-only / forces+scalars graph selection ---
+
+  @rq-26dce0f6
+  Scenario: A phase without a barostat captures both graphs
+    Given an MD phase with a thermostat and no barostat
+    When the runner captures the phase graphs
+    Then the GraphLoop's forces_and_scalars graph is present
+    And the GraphLoop's forces_only graph is Some
+
+  @rq-c6c56cdc
+  Scenario: A phase with a barostat captures only the forces+scalars graph
+    Given an MD phase with a c-rescale barostat
+    When the runner captures the phase graphs
+    Then the GraphLoop's forces_and_scalars graph is present
+    And the GraphLoop's forces_only graph is None
+
+  @rq-867630af
+  Scenario: GraphLoop.launch routes by the scalars flag
+    Given a GraphLoop whose forces_only graph is Some
+    When launch(stream, scalars = false) is called
+    Then the forces_only graph is launched
+    When launch(stream, scalars = true) is called
+    Then the forces_and_scalars graph is launched
+
+  @rq-8c24f057
+  Scenario: GraphLoop.launch ignores the scalars flag when forces_only is None
+    Given a GraphLoop whose forces_only graph is None
+    When launch(stream, scalars = false) is called
+    Then the forces_and_scalars graph is launched
+
+  @rq-009eed1b
+  Scenario: NVT graph phase evaluates force-kernel scalars only on log steps
+    Given an MD phase with a thermostat, no barostat, n_steps = 100, log_every = 25, trajectory_every = 0
+    When the phase runs to completion in graph mode
+    Then the potential_energy_reduce KernelStage sample count equals the number of log steps, not n_steps
+
+  @rq-d34ff8f7
+  Scenario: Trajectory-only steps do not trigger force-kernel scalars in graph mode
+    Given an NVT graph phase with trajectory_every = 10, log_every = 0, n_steps = 100
+    When the phase runs to completion
+    Then no replay launches the forces+scalars graph
+    And the potential_energy_reduce KernelStage records zero samples from the replay loop
+
+  @rq-1b40a671
+  Scenario: NPT graph phase evaluates force-kernel scalars on every step
+    Given an MD phase with a c-rescale barostat, n_steps = 100, log_every = 25
+    When the phase runs to completion in graph mode
+    Then every replayed step launches the forces+scalars graph
+
+  @rq-dae13654
+  Scenario: Forces-only replay does not change the trajectory
+    Given an NVT phase with a thermostat, no barostat, and a disordered liquid configuration
+    When the phase is run to completion in graph mode twice on the same GPU
+    Then the two runs produce byte-identical per-particle positions and velocities
+
+  # --- Per-step launch loop scalar cadence ---
+
+  @rq-ed183041
+  Scenario: Per-step loop computes ForcesOnly on a non-log non-barostat step
+    Given the per-step launch loop on an NVT phase with log_every = 25 and no barostat
+    When a step that is neither a log nor trajectory boundary is executed
+    Then runner_needs_scalars is false and the force evaluation runs at AggregateLevel::ForcesOnly
+
+  @rq-2af44cf4
+  Scenario: Per-step loop computes ForcesAndScalars on a log step
+    Given the per-step launch loop on an NVT phase with log_every = 25
+    When a step on the log cadence boundary is executed
+    Then runner_needs_scalars is true and the force evaluation runs at AggregateLevel::ForcesAndScalars
+
+  @rq-091a4341
+  Scenario: Per-step loop does not compute scalars on a trajectory-only step
+    Given the per-step launch loop on an NVT phase with trajectory_every = 10, log_every = 0, no barostat
+    When a step on the trajectory cadence boundary is executed
+    Then runner_needs_scalars is false and the force evaluation runs at AggregateLevel::ForcesOnly
 ```

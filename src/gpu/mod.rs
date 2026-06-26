@@ -12,8 +12,8 @@ pub use buffers::ParticleBuffers;
 pub use device::{GpuContext, GpuError, Kernels, init_device};
 pub use fill::FillKernels;
 pub use graph::{
-    CaptureMode, CudaGraph, CudaGraphExec, GraphError, GraphNodeSummary, begin_stream_capture,
-    end_stream_capture,
+    CaptureMode, CudaGraph, CudaGraphExec, GraphError, GraphLoop, GraphNodeSummary,
+    begin_stream_capture, end_stream_capture,
 };
 pub use kernels::{
     CSVR_PARTIAL_BLOCKS, K_COULOMB_F32, LennardJonesParameterTable, SPATIAL_HASH_SCAN_BLOCK_SIZE,
