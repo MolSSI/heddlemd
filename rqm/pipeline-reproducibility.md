@@ -12,7 +12,7 @@ across the two runs.
 
 The test lives in `tests/pipeline_reproducibility.rs`. It introduces no
 new public types or functions; the velocity-Verlet loop is inlined in the
-test using the existing `lj_pair_force`, `lj_pair_force_f`,
+test using the existing `jit_composed_pair_force`,
 `vv_kick_drift`, and `vv_kick` launchers.
 
 ## Test Fixture <!-- rq-8dfac0eb -->
@@ -39,9 +39,10 @@ evolves.
 - Lennard-Jones parameters: `sigma = 1.0`, `epsilon = 1.0`,
   `cutoff = 2.5`.
 - Timestep: `dt = 0.001`.
-- particle_count = 64; max_neighbors = 64 (the shared neighbour list is sized to this).
-- `neighbor_counts`: every entry equals `64` (every particle pairs with
-  every other; the self slot contributes zero by construction).
+- Neighbour list: the packed neighbour list (`interacting_tiles`,
+  `interacting_atoms`, `interaction_count`) built by `NeighborListState`
+  during the pipeline. It is sized automatically by the rebuild; the test
+  drives the production pipeline rather than hand-building any list.
 
 ## Velocity-Verlet Loop <!-- rq-6b6180af -->
 
@@ -49,11 +50,11 @@ A single timestep follows the standard kick-drift / force / kick pattern:
 
 ```
 vv_kick_drift(particle_buffers, dt)
-lj_pair_force_f(particle_buffers, output, sim_box, params, ...)
+jit_composed_pair_force(particle_buffers, output, sim_box, params, ...)
 vv_kick(particle_buffers, dt)
 ```
 
-Before the first timestep, `lj_pair_force_f` are
+Before the first timestep, `jit_composed_pair_force` are
 invoked once to populate `forces_*` with `F(0)`. This warm-up is required
 because `vv_kick_drift` consumes the current force state.
 
@@ -87,12 +88,12 @@ Feature: End-to-end pipeline reproducibility
 
   Background:
     Given the test fixture defined above (N=64 LJ fluid, 4×4×4 perturbed lattice, dt=0.001)
-    And two independent pipeline instances A and B, each consisting of fresh ParticleBuffers, fresh SlotOutputView, and a fresh neighbor_counts CudaSlice constructed from byte-identical ParticleState inputs
+    And two independent pipeline instances A and B, each consisting of fresh ParticleBuffers and a fresh SlotOutputView constructed from byte-identical ParticleState inputs, each owning the packed neighbour list built by its NeighborListState
 
   @rq-b2314952
   Scenario: Bit-exact equality after a single full velocity-Verlet step
-    Given each pipeline has been warmed up with one lj_pair_force_f pass
-    When one full step (vv_kick_drift, lj_pair_force_f, vv_kick) is executed on each pipeline
+    Given each pipeline has been warmed up with one jit_composed_pair_force pass
+    When one full step (vv_kick_drift, jit_composed_pair_force, vv_kick) is executed on each pipeline
     And each pipeline's ParticleBuffers is downloaded into a host ParticleState
     Then state_A.positions_x equals state_B.positions_x byte-for-byte
     And state_A.positions_y equals state_B.positions_y byte-for-byte
@@ -108,7 +109,7 @@ Feature: End-to-end pipeline reproducibility
 
   @rq-2846ee8b
   Scenario: Bit-exact equality after a 100-step run
-    Given each pipeline has been warmed up with one lj_pair_force_f pass
+    Given each pipeline has been warmed up with one jit_composed_pair_force pass
     When 100 full velocity-Verlet steps are executed on each pipeline
     And each pipeline's ParticleBuffers is downloaded into a host ParticleState
     Then state_A.positions_x equals state_B.positions_x byte-for-byte

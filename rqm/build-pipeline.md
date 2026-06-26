@@ -104,9 +104,6 @@ per-subsystem nested handle to every kernel function.
   | ---           | ---                  | ---                                            | ---             | ---                                                                                              |
   | `fill`        | `FillKernels`        | `src/gpu/fill.rs`                              | `fill`          | `fill`                                                                                            |
   | `integrate`   | `IntegrateKernels`   | `src/integrator/velocity_verlet.rs`            | `integrate`     | `vv_kick_drift`, `vv_kick`, `vv_kick_drift_lossless`, `vv_kick_lossless`                          |
-  | `lj`          | `LjKernels`          | `src/forces/lj.rs`                             | `pair_force`    | `lj_pair_force_f`, `lj_pair_force_fev`                                                            |
-  | `coulomb`     | `CoulombKernels`     | `src/forces/coulomb.rs`                        | `coulomb`       | `coulomb_pair_force_f`, `coulomb_pair_force_fev`                                                  |
-  | `spme_real`   | `SpmeRealKernels`    | `src/forces/spme.rs`                           | `spme_real`     | `spme_real_pair_force_f`, `spme_real_pair_force_fev`                                              |
   | `spme_recip`  | `SpmeRecipKernels`   | `src/forces/spme.rs`                           | `spme_recip`    | `spme_charge_spread`, `spme_influence_multiply`, `spme_force_gather`                              |
   | `langevin`    | `LangevinKernels`    | `src/integrator/langevin_baoab.rs`             | `langevin`      | `lan_drift_half`, `lan_ou_step`                                                                   |
   | `morse`       | `MorseKernels`       | `src/forces/morse.rs`                          | `morse`         | `morse_bond_force`, `reduce_bond_forces`                                                          |
@@ -117,7 +114,7 @@ per-subsystem nested handle to every kernel function.
   | `mtk`         | `MtkKernels`         | `src/integrator/mtk_npt.rs`                    | `mtk`           | `mtk_velocity_half_kick`, `mtk_position_drift`                                                    |
   | `shake`       | `ShakeKernels`       | `src/integrator/shake.rs`                      | `shake`         | `shake_snapshot`, `shake_positions`, `rattle_velocities`, `constraint_virial_scatter`, `shake_positions_no_velocity`                                                                                                                                              |
   | `forces`      | `ForcesKernels`      | `src/forces/mod.rs`                            | `forces`        | `accumulate_forces`                                                                               |
-  | `neighbor`    | `NeighborKernels`    | `src/forces/neighbor_list.rs`                  | `neighbor`      | `neighbor_displacement_squared`, `neighbor_list_build`, `copy_positions_into_reference`, `compute_cell_indices_and_histogram`, `prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`, `prefix_scan_finalize_offsets`, `scatter_atoms_into_cells`, `sort_cells_by_particle_id` |
+  | `neighbor`    | `NeighborKernels`    | `src/forces/neighbor_list.rs`                  | `neighbor`      | `neighbor_displacement_squared`, `copy_positions_into_reference`, `compute_cell_indices_and_histogram`, `prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`, `prefix_scan_finalize_offsets`, `scatter_atoms_into_cells`, `sort_cells_by_particle_id` |
 
   Each subsystem's sub-struct carries one `pub <name>: CudaFunction`
   field per kernel listed in its row, and provides an associated
@@ -254,18 +251,18 @@ Feature: CUDA build pipeline and smoke test kernel
   Scenario: Kernels is composed of per-subsystem sub-structs
     Given a GpuContext obtained from init_device()
     Then gpu_context.kernels has fields named after each subsystem
-      in the Types table: fill, integrate, lj, coulomb, spme_real,
-      spme_recip, langevin, morse, angle, nose_hoover, andersen,
-      barostat, mtk, settle, forces, neighbor
+      in the Types table: fill, integrate, spme_recip, langevin,
+      morse, angle, nose_hoover, andersen, barostat, mtk, settle,
+      forces, neighbor
     And each field is the matching subsystem's typed kernel struct
 
   @rq-6745e7c5
   Scenario: Each subsystem's XKernels::load returns its kernel handle
     Given a CUDA-capable GPU initialized via CudaDevice::new(0)
-    When LjKernels::load(&device) is called
-    Then it returns Ok(LjKernels) whose `pair_force` field is a
-      launchable CudaFunction
-    And the PTX module `pair_force` is now loaded on the device
+    When SpmeRecipKernels::load(&device) is called
+    Then it returns Ok(SpmeRecipKernels) whose `spme_charge_spread` field
+      is a launchable CudaFunction
+    And the PTX module `spme_recip` is loaded on the device
 
   @rq-cfc89131
   Scenario: A subsystem load that names a missing kernel surfaces as GpuError at init_device

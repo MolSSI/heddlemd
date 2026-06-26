@@ -102,9 +102,8 @@ quantisation step; this small deviation from a notional
 - Warp-tree butterfly reduction of per-particle accumulators.
   Forces accumulate via fixed-point atomicAdd; no warp-tree
   reduction runs over the per-particle outputs.
-- Per-particle padded neighbour lists indexed by `i * max_neighbors
-  + k`. The packed-neighbour list (see
-  `packed-neighbour-pair-force.md`) replaces this structure.
+- Per-particle padded neighbour lists. The kernel sweeps only the
+  packed-neighbour list (see `packed-neighbour-pair-force.md`).
 - Bonded and angle potentials. Those slots use their own bond /
   angle index tables and per-bond / per-angle intermediates; see
   `morse-bonded.md` and `harmonic-angle.md`.

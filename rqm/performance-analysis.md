@@ -34,20 +34,20 @@ One CUDA event pair per stage. The runner (or the integrator slot acting
 through the runner) records the start event immediately before each kernel
 launch and the stop event immediately after. Stages:
 
-Lennard-Jones potential slot (always present in the `ForceField`):
+Pair-force evaluation (always present in the `ForceField`):
 
-- `lj_pair_force` — all-pairs kernel; recorded only when
-  `NeighborListConfig::AllPairs` is selected.
-- `lj_pair_force_neighbor` — neighbor-list-driven kernel; recorded
-  only when `NeighborListConfig::CellList` is selected.
+- `jit_composed_pair_force` — the JIT-composed packed pair-force kernel
+  that evaluates every active pair potential (Lennard-Jones, Coulomb,
+  SPME real-space, …) in a single fused launch and writes per-particle
+  output directly. Recorded once per force evaluation in both
+  `NeighborListConfig::AllPairs` and `NeighborListConfig::CellList`
+  modes.
 
 Neighbor list (present when `NeighborListConfig::CellList` is selected;
 see `forces/neighbor-list.md`):
 
 - `neighbor_displacement_squared` — per-atom displacement² versus the
   reference positions. Launched once per timestep.
-- `neighbor_list_build` — full cell-list neighbor search. Launched
-  once per rebuild.
 - `copy_positions_into_reference` — refresh of the reference positions
   array. Launched once per rebuild.
 
@@ -256,29 +256,28 @@ Rows appear in this fixed order, with absent stages skipped:
 4. `langevin_ou_step` (O step)
 5. `neighbor_displacement_squared`
 6. `copy_positions_into_reference`
-7. `neighbor_list_build`
-8. `lj_pair_force` or `lj_pair_force_neighbor` (whichever is present)
-10. `morse_bond_force`
-11. `reduce_bond_forces`
-12. `accumulate_forces`
-13. `vv_kick` or `vv_kick_lossless` (whichever is present)
-14. `host_to_device_upload`
-15. `device_to_host_download`
-16. `neighbor_list_rebuild`
-17. `trajectory_write`
-18. `log_write`
-19. `velocity_generation`
-20. `config_load`
-21. `init_load`
-22. `gpu_init`
-23. `total_runtime`
+7. `jit_composed_pair_force`
+8. `morse_bond_force`
+9. `reduce_bond_forces`
+10. `accumulate_forces`
+11. `vv_kick` or `vv_kick_lossless` (whichever is present)
+12. `host_to_device_upload`
+13. `device_to_host_download`
+14. `neighbor_list_rebuild`
+15. `trajectory_write`
+16. `log_write`
+17. `velocity_generation`
+18. `config_load`
+19. `init_load`
+20. `gpu_init`
+21. `total_runtime`
 
 ### Example <!-- rq-6289f344 -->
 
 ```
 stage                             count       total_ms       mean_us      min_us      max_us
 vv_kick_drift                       100         2.345          23.5        20.1        28.7
-lj_pair_force                       101        12.467         123.4        98.7       145.2
+jit_composed_pair_force             101        12.467         123.4        98.7       145.2
 vv_kick                             100         2.111          21.1        18.5        25.9
 host_to_device_upload                 1         1.890        1890.0      1890.0      1890.0
 device_to_host_download              20         8.910         445.5       420.3       482.1
@@ -318,8 +317,7 @@ partial timings are discarded).
   - `KernelStage::VV_KICK` → `"vv_kick"`
   - `KernelStage::VV_KICK_DRIFT_LOSSLESS` → `"vv_kick_drift_lossless"`
   - `KernelStage::VV_KICK_LOSSLESS` → `"vv_kick_lossless"`
-  - `KernelStage::LJ_PAIR_FORCE` → `"lj_pair_force"`
-  - `KernelStage::LJ_PAIR_FORCE` → `"lj_pair_force"` (and per-potential analogues for Coulomb / SPME-real)
+  - `KernelStage::JIT_COMPOSED_PAIR_FORCE` → `"jit_composed_pair_force"`
   - `KernelStage::LANGEVIN_KICK_HALF` → `"langevin_kick_half"`
   - `KernelStage::LANGEVIN_DRIFT_HALF` → `"langevin_drift_half"`
   - `KernelStage::LANGEVIN_OU_STEP` → `"langevin_ou_step"`
@@ -327,7 +325,6 @@ partial timings are discarded).
   - `KernelStage::REDUCE_BOND_FORCES` → `"reduce_bond_forces"`
   - `KernelStage::ACCUMULATE_FORCES` → `"accumulate_forces"`
   - `KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED` → `"neighbor_displacement_squared"`
-  - `KernelStage::NEIGHBOR_LIST_BUILD` → `"neighbor_list_build"`
   - `KernelStage::COPY_POSITIONS_INTO_REFERENCE` → `"copy_positions_into_reference"`
   - `KernelStage::POTENTIAL_ENERGY_REDUCE` → `"potential_energy_reduce"` —
     the runner's per-log-row launch of `virial_sum_reduce` against
@@ -458,14 +455,14 @@ sequence of recorded stages within `run_simulation` is:
 2. `velocity_generation` — `Instant` measurement around the
    `generate_velocities` call. Skipped when explicit velocities are read
    from the init file.
-3. Warm-up: `kernel_start(KernelStage::LJ_PAIR_FORCE)` / launch /
-   `kernel_stop(KernelStage::LJ_PAIR_FORCE)`.
+3. Warm-up: `kernel_start(KernelStage::JIT_COMPOSED_PAIR_FORCE)` / launch /
+   `kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)`.
 4. For each timestep:
    - `kernel_start` / launch / `kernel_stop` for the active kick-drift
      variant.
-   - `kernel_start` / launch / `kernel_stop` for `LJ_PAIR_FORCE` (the
-     fused pair-force kernel writes per-particle output directly; there
-     is no separate reduction stage).
+   - `kernel_start` / launch / `kernel_stop` for `JIT_COMPOSED_PAIR_FORCE`
+     (the fused pair-force kernel writes per-particle output directly;
+     there is no separate reduction stage).
    - `kernel_start` / launch / `kernel_stop` for the active kick variant.
    - If a snapshot/log download is happening this step:
      - `Instant` measurement around `frame.download_from(&buffers)`.
@@ -627,19 +624,17 @@ Feature: Performance analysis and timings output
     Given a valid config with kind="velocity-verlet", N=0 particles, n_steps=5
     When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has no rows whose stage column begins with "vv_"
-      or "langevin_" or "morse_" or "reduce_" or equals "lj_pair_force"
+      or "langevin_" or "morse_" or "reduce_" or equals "jit_composed_pair_force"
       or "accumulate_forces"
     And tmp/sim.out.timings has a row whose stage column equals "gpu_init"
     And tmp/sim.out.timings has a row whose stage column equals "total_runtime"
 
   @rq-62300a18
-  Scenario: All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows
+  Scenario: All-pairs neighbor mode records the pair-force row and omits neighbor-list rows
     Given a valid config with [neighbor_list] mode="all-pairs" and n_steps=5
     When heddlemd run sim.in.toml is invoked
-    Then tmp/sim.out.timings has a row whose stage column equals "lj_pair_force"
-    And tmp/sim.out.timings has no row whose stage column equals "lj_pair_force_neighbor"
+    Then tmp/sim.out.timings has a row whose stage column equals "jit_composed_pair_force"
     And tmp/sim.out.timings has no row whose stage column equals "neighbor_displacement_squared"
-    And tmp/sim.out.timings has no row whose stage column equals "neighbor_list_build"
     And tmp/sim.out.timings has no row whose stage column equals "copy_positions_into_reference"
     And tmp/sim.out.timings has no row whose stage column equals "neighbor_list_rebuild"
 
@@ -647,11 +642,9 @@ Feature: Performance analysis and timings output
   Scenario: Cell-list neighbor mode records the neighbor-list host stages
     Given a valid config with [neighbor_list] mode="cell-list" and n_steps=10
     When heddlemd run sim.in.toml is invoked
-    Then tmp/sim.out.timings has a row whose stage column equals "lj_pair_force"
-      (the single LJ pair-force KernelStage is used in both modes; the
-      "_neighbor" suffix is not a separate stage)
+    Then tmp/sim.out.timings has a row whose stage column equals "jit_composed_pair_force"
+      (a single packed pair-force KernelStage is used in both neighbor modes)
     And tmp/sim.out.timings has a row whose stage column equals "neighbor_displacement_squared"
-    And tmp/sim.out.timings has a row whose stage column equals "neighbor_list_build"
     And tmp/sim.out.timings has a row whose stage column equals "copy_positions_into_reference"
     And tmp/sim.out.timings has a row whose stage column equals "neighbor_list_rebuild"
 
@@ -662,12 +655,11 @@ Feature: Performance analysis and timings output
     Then the row for neighbor_displacement_squared has count = 10
 
   @rq-7f2310ac
-  Scenario: neighbor_list_build and copy_positions_into_reference counts match rebuilds
+  Scenario: copy_positions_into_reference and neighbor_list_rebuild counts match rebuilds
     Given a valid cell-list config with n_steps=10 and r_skin chosen so that exactly
       one rebuild fires after the initial build (i.e. two builds total: warm-up + one)
     When heddlemd run sim.in.toml is invoked
-    Then the row for neighbor_list_build has count = 2
-    And the row for copy_positions_into_reference has count = 2
+    Then the row for copy_positions_into_reference has count = 2
     And the row for neighbor_list_rebuild has count = 2
 
   @rq-3bd5336c
@@ -689,7 +681,7 @@ Feature: Performance analysis and timings output
   Scenario: Kernel-stage counts match the runner's launch counts
     Given a valid lossy config with n_steps=10
     When heddlemd run sim.in.toml is invoked
-    Then the row for lj_pair_force has count = 11 (one warm-up + ten loop)
+    Then the row for jit_composed_pair_force has count = 11 (one warm-up + ten loop)
     And no row for reduce_pair_forces exists (the fused pair-force kernel writes per-particle output directly)
     And the row for vv_kick_drift has count = 10
     And the row for vv_kick has count = 10
@@ -749,7 +741,7 @@ Feature: Performance analysis and timings output
     Given a valid lossy config with n_steps=10, trajectory_every=5, log_every=5
     When heddlemd run sim.in.toml is invoked
     Then the stage column of consecutive data rows of tmp/sim.out.timings reads
-      ["vv_kick_drift", "lj_pair_force", "vv_kick",
+      ["vv_kick_drift", "jit_composed_pair_force", "vv_kick",
        "host_to_device_upload", "device_to_host_download", "trajectory_write",
        "log_write", "config_load", "init_load", "gpu_init", "total_runtime"]
       (omitting any absent stages; "velocity_generation" is absent because
@@ -841,19 +833,19 @@ Feature: Performance analysis and timings output
   @rq-79291197
   Scenario: kernel_start followed by kernel_stop and finalize records one sample
     Given a Timings constructed on a fresh device
-    When timings.kernel_start(KernelStage::LJ_PAIR_FORCE) is called
+    When timings.kernel_start(KernelStage::JIT_COMPOSED_PAIR_FORCE) is called
     And a small kernel is launched
-    And timings.kernel_stop(KernelStage::LJ_PAIR_FORCE) is called
+    And timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE) is called
     And timings.finalize() is called
-    Then the resulting report contains exactly one StageStats entry for lj_pair_force
+    Then the resulting report contains exactly one StageStats entry for jit_composed_pair_force
     And that entry's count equals 1
 
   @rq-56043142
   Scenario: Repeated kernel_start/kernel_stop pairs accumulate
     Given a Timings constructed on a fresh device
-    When ten matched kernel_start/kernel_stop pairs for KernelStage::LJ_PAIR_FORCE are issued around real launches
+    When ten matched kernel_start/kernel_stop pairs for KernelStage::JIT_COMPOSED_PAIR_FORCE are issued around real launches
     And timings.finalize() is called
-    Then the resulting report's lj_pair_force entry has count = 10
+    Then the resulting report's jit_composed_pair_force entry has count = 10
     And the total_ns is non-zero
 
   @rq-2cbe0828

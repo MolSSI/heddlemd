@@ -37,8 +37,9 @@ handed to it through `Potential::compute` — no per-pair intermediate
 buffer is materialised on the device.
 
 This file specifies `LennardJonesParameterTable` (the device-resident
-per-pair-type parameter table), the two `lj_pair_force_*` CUDA kernels
-in `kernels/pair_force.cu`, and the Rust launch helper that drives them.
+per-pair-type parameter table) and the per-pair fragment functor that
+composes the Lennard-Jones functional form into the JIT-composed packed
+pair-force kernel (see `jit-composed-pair-force.md`).
 
 Each pair contribution is multiplied by a CHARMM-style C¹ switching
 function `S(r²)` over the interval `[r_switch, r_cut]` so that both
@@ -164,10 +165,11 @@ zero ever occurs.
 
 ### JIT fragment behaviour <!-- rq-lj-jit-frag --> <!-- rq-9cd4085e -->
 
-When `LennardJonesBuilder::pair_force_fragment(cx)` participates in
-the JIT-composed pair-force kernel (see
-`jit-composed-pair-force.md`), the fragment differs from the
-standalone kernel above in three ways:
+`LennardJonesBuilder::pair_force_fragment(cx)` produces the per-pair
+functor that the JIT-composed pair-force kernel (see
+`jit-composed-pair-force.md`) invokes for every pair the packed
+neighbour list yields. The functor specialises the per-pair recipe of
+*Algorithm* in three ways:
 
 1. **Shared `(inv_r, r, qi, qj)` inputs.** The fragment's
    `evaluate` signature is
@@ -222,10 +224,6 @@ standalone kernel above in three ways:
    call at any positive `r²` because `inv_r` and `r` are
    well-defined for all positive `r²` and the LJ functional form
    `(σ·inv_r)¹² − (σ·inv_r)⁶` is finite for all positive `r²`.
-
-The standalone `lj_pair_force_*` kernels documented below keep
-the per-pair recipe in *Algorithm*; the JIT-fragment changes are
-scoped to the JIT path.
 
 ### Parameter-table symmetry <!-- rq-7d92b551 -->
 
@@ -427,20 +425,12 @@ Feature: Lennard-Jones O(N²) pair force kernel
     Scenarios that exercise the switching region override `switch`
     explicitly in their `Given` clauses.
 
-  # --- Module loading ---
-
-  @rq-06058b71
-  Scenario: init_device exposes the LJ kernel on the Kernels handle
-    Given a CUDA-capable GPU is available as device 0
-    When init_device() is called
-    Then the returned GpuContext's kernels handle exposes the lj_pair_force function
-
   # --- Two-particle correctness ---
 
   @rq-c538b29d
   Scenario: Two particles at a fixed separation produce the closed-form LJ force
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
-    When the _f variant of lj_pair_force is called with sigma=1.0, epsilon=1.0, cutoff=5.0
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel with sigma=1.0, epsilon=1.0, cutoff=5.0
     Then slot_force_x[0] equals the closed-form LJ force on particle 0 due to particle 1 at r=1.5
     And slot_force_y[0] equals 0
     And slot_force_z[0] equals 0
@@ -448,7 +438,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   @rq-975b5ae0
   Scenario: Newton's third law is bit-exact for non-boundary displacements
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.3, 0.4, -0.2)
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals -slot_force_x[1] bitwise
     And slot_force_y[0] equals -slot_force_y[1] bitwise
     And slot_force_z[0] equals -slot_force_z[1] bitwise
@@ -458,7 +448,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   @rq-cc87744c
   Scenario: Self-interaction slots are zero
     Given a ParticleState of N=4 with arbitrary positions
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then for every i in 0..4, slot_force_x[i], slot_force_y[i], slot_force_z[i] are all 0.0_f32
 
   # --- Cutoff handling ---
@@ -467,7 +457,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Slot for a pair beyond cutoff is zero
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(6.0, 0, 0)
     And cutoff=5.0
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
     And slot_force_x[1], slot_force_y[1], slot_force_z[1] are all 0.0_f32
 
@@ -475,7 +465,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(5.0, 0, 0)
     And cutoff=5.0 and switch=5.0
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form LJ force at r=5.0
 
   # --- Switching function ---
@@ -484,7 +474,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair inside r_switch sees the unmodified Lennard-Jones force
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form LJ force at r=1.5
     And slot_energy[0] + slot_energy[1] equals 4.0 * ε * (sr12 - sr6) at r=1.5 within f32 round-off
       (half-sum convention: each particle's slot carries 0.5 · U_ij; the sum recovers U_ij)
@@ -493,7 +483,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair exactly at r_switch sees the unmodified Lennard-Jones force
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.0, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form LJ force at r=4.0
     And slot_energy[0] + slot_energy[1] equals 4.0 * ε * (sr12 - sr6) at r=4.0 within f32 round-off
 
@@ -501,7 +491,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair exactly at r_cut yields zero force and zero energy when switch < cutoff
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(5.0, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
     And slot_energy[0] and slot_virial[0] are both 0.0_f32
     And slot_energy[1] and slot_virial[1] are both 0.0_f32
@@ -510,8 +500,8 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair near r_cut inside the switching window has force smaller than the unmodified value
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.95, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _fev variant of lj_pair_force is called to obtain f_switched (slot_force, slot_energy)
-    And lj_pair_force is called with switch=cutoff to obtain f_unmodified
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel to obtain f_switched (slot_force, slot_energy)
+    And the Lennard-Jones functor is evaluated in the composed pair-force kernel with switch=cutoff to obtain f_unmodified
     Then |f_switched.slot_force_x[0]| is strictly less than |f_unmodified.slot_force_x[0]|
       (the switching function drives the force toward zero at r = r_cut, dominating the
       chain-rule correction term once r is well inside the inner switching window)
@@ -524,22 +514,22 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Force is C¹ continuous at r_switch
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(r, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called at r = 4.0 - 1e-3 to obtain f_below
-    And lj_pair_force is called at r = 4.0 + 1e-3 to obtain f_above
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel at r = 4.0 - 1e-3 to obtain f_below
+    And the Lennard-Jones functor is evaluated in the composed pair-force kernel at r = 4.0 + 1e-3 to obtain f_above
     Then |f_below.x - f_above.x| is bounded by 1e-2 * |f_below.x|
 
   @rq-e5e3443f
   Scenario: Force is C¹ continuous at r_cut
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(r, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called at r = 5.0 - 1e-3 to obtain f_inside
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel at r = 5.0 - 1e-3 to obtain f_inside
     Then |f_inside.x| is bounded by 1e-2 * |closed-form LJ force at r = 4.0|
 
   @rq-916f99f3
   Scenario: switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(r, 0, 0) for r in {1.5, 3.0, 4.5}
     And cutoff=5.0 and switch=5.0
-    When the _fev variant of lj_pair_force is called for each r
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel for each r
     Then slot_force_x[0] equals the closed-form LJ force at that r
     And slot_energy[0] + slot_energy[1]
       equals 4.0 * ε * (sr12 - sr6) at that r within f32 round-off
@@ -548,7 +538,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair beyond r_cut yields zero independent of r_switch
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(6.0, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
     And slot_energy[0] and slot_virial[0] are both 0.0_f32
     And slot_energy[1] and slot_virial[1] are both 0.0_f32
@@ -557,7 +547,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair virial inside the switching window equals factor_switched * r²
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_virial[0] + slot_virial[1]
       equals factor_switched * r² at r=4.5 within f32 round-off,
       where factor_switched = S(r²) · factor_lj − 2 · dS/d(r²) · U_lj
@@ -566,7 +556,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Newton's third law holds bitwise across the switching window
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0.4, -0.2)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals -slot_force_x[1] bitwise
     And slot_force_y[0] equals -slot_force_y[1] bitwise
     And slot_force_z[0] equals -slot_force_z[1] bitwise
@@ -576,8 +566,8 @@ Feature: Lennard-Jones O(N²) pair force kernel
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
     And cutoff=5.0 and switch=4.0
     And a DeviceExclusionList containing the entry (0, 1, 0.5)
-    When the _f variant of lj_pair_force is called to obtain slot_force_scaled
-    And lj_pair_force is called with an empty DeviceExclusionList
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel to obtain slot_force_scaled
+    And the Lennard-Jones functor is evaluated in the composed pair-force kernel with an empty DeviceExclusionList
       to obtain slot_force_unscaled
     Then slot_force_scaled_x[0] equals 0.5 * slot_force_unscaled_x[0]
       within f32 round-off
@@ -589,10 +579,10 @@ Feature: Lennard-Jones O(N²) pair force kernel
       sigma=[1.0, 1.0, 1.0, 1.0], epsilon=[1.0, 1.0, 1.0, 1.0],
       cutoff=[5.0, 5.0, 5.0, 5.0], switch=[5.0, 4.0, 4.0, 5.0]
     And a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
-    When the _f variant of lj_pair_force is called with type_indices = [0, 1]
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel with type_indices = [0, 1]
     Then slot_force_x[0] equals S(r²) * closed-form LJ force at r=4.5
       using the off-diagonal switch=4.0
-    And lj_pair_force called with type_indices = [0, 0] under the same positions
+    And the Lennard-Jones functor evaluated with type_indices = [0, 0] under the same positions
       yields slot_force_x[0] equal to the unswitched closed-form LJ force at r=4.5
       using the diagonal switch=5.0
 
@@ -600,7 +590,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Bit-exact reproducibility across runs with switching active
     Given two ParticleBuffers built from byte-identical ParticleState inputs of N=64
     And the LennardJonesParameterTable for each run has switch < cutoff
-    When lj_pair_force is launched on each with identical parameters
+    When the composed pair-force kernel is launched on each with identical parameters
     Then run A's slot_force_x, slot_force_y, slot_force_z, slot_energy, and slot_virial agree byte-for-byte with run B's
 
   @rq-214639c9
@@ -626,7 +616,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(2^(1/6), 0, 0)
     And sigma=1.0
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32 to within f32 round-off
 
   # --- Parameter scaling ---
@@ -634,8 +624,8 @@ Feature: Lennard-Jones O(N²) pair force kernel
   @rq-26ffa053
   Scenario: Doubling epsilon doubles the force at the same separation
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
-    When the _f variant of lj_pair_force is called with epsilon=1.0 to obtain f1
-    And lj_pair_force is called with epsilon=2.0 to obtain f2
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel with epsilon=1.0 to obtain f1
+    And the Lennard-Jones functor is evaluated in the composed pair-force kernel with epsilon=2.0 to obtain f2
     Then f2 equals 2.0 * f1 within f32 round-off
 
   # --- PBC minimum-image ---
@@ -645,7 +635,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
     Given a SimulationBox with lx=10.0, ly=10.0, lz=10.0
     And a ParticleState of N=2 with positions p0=(-4.5, 0, 0) and p1=(4.5, 0, 0)
     And cutoff=2.0
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form LJ force at r=1.0 (computed via minimum-image dx=-1.0)
 
   # --- N=1 and N=0 ---
@@ -653,13 +643,13 @@ Feature: Lennard-Jones O(N²) pair force kernel
   @rq-681afa90
   Scenario: Single-particle state produces only a zero self slot
     Given a ParticleState of N=1
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
 
   @rq-fc220d87
   Scenario: Empty state is a no-op
     Given a ParticleState of N=0
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then it returns Ok(())
 
   # --- Block-non-aligned ---
@@ -667,7 +657,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   @rq-d1e7cb57
   Scenario: Block-non-aligned particle count is handled by the bounds check
     Given a ParticleState of N=17 with positions distributed within the box
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then for every i in 0..17, slot_force_x[i] equals 0
     And for every i in 0..17, k in 0..17, k != i, the slot equals the closed-form LJ force on i due to k
 
@@ -676,7 +666,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   @rq-dfca62d2
   Scenario: Two independent runs produce byte-identical pair-force buffers
     Given two ParticleBuffers built from identical ParticleState inputs of N=64
-    When lj_pair_force is launched on each with identical parameters
+    When the composed pair-force kernel is launched on each with identical parameters
     Then run A's slot_force_x, slot_force_y, slot_force_z agree byte-for-byte with run B's
 
   # --- Slots beyond N are untouched ---
@@ -685,7 +675,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Kernel does not write slots with k >= n
     Given a ParticleState of N=4
     And every slot_force_* entry pre-loaded with the sentinel value 13.5_f32
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then for every i in 0..4 and k in 4..8, slot_force_x[i] for every i in 0..4 equals only the in-cutoff contributions and the sentinel-loaded scratch is left untouched
 
   # --- Side effects ---
@@ -694,20 +684,9 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Kernel does not modify positions, velocities, masses, or net forces
     Given a ParticleBuffers built from a ParticleState with N=4 known nonzero values
     And a snapshot of positions_*, velocities_*, masses, forces_*, particle_ids before launch
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     And particle_buffers is downloaded to a host ParticleState
     Then every snapshot field is byte-identical to the corresponding downloaded field
-
-  # --- End-to-end through the framework ---
-
-  @rq-ec53799e
-  Scenario: lj_pair_force writes the correct per-particle net force directly into the slot output
-    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
-    And neighbor_counts on the device equal to [2, 2]
-    When the _f variant of lj_pair_force is called against a SlotOutputView
-    And the SlotOutputView is downloaded to the host
-    Then slot_force_x[0] equals the closed-form LJ force on particle 0 due to particle 1 at r=1.5
-    And slot_force_x[1] equals -slot_force_x[0] bitwise
 
   # --- Exclusion list ---
 
@@ -715,14 +694,14 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Empty exclusion list leaves all pair forces unchanged
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
     And an empty DeviceExclusionList
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form LJ force at r=1.5
 
   @rq-80dcfa97
   Scenario: Full exclusion (scale=0) zeros the LJ contribution for the excluded pair
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
     And a DeviceExclusionList containing the entry (0, 1, 0.0)
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
     And slot_force_x[1], slot_force_y[1], slot_force_z[1] are all 0.0_f32
 
@@ -730,7 +709,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Half-strength exclusion (scale=0.5) halves the LJ contribution
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
     And a DeviceExclusionList containing the entry (0, 1, 0.5)
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals 0.5 * closed-form LJ force at r=1.5 within f32 round-off
     And slot_force_x[1] equals -slot_force_x[0]
 
@@ -738,7 +717,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Exclusion only applies to the listed pair
     Given a ParticleState of N=3 with positions p0=(0,0,0), p1=(1.5,0,0), p2=(3.0,0,0)
     And a DeviceExclusionList containing only the entry (0, 1, 0.0)
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the contribution of every in-cutoff neighbour other than particle 1 (the (0,1) pair is scaled by 0.0 and contributes nothing)
     And particle 0's slot_force_x reflects the unscaled (0,2) pair contribution
     And particle 1's slot_force_x reflects the unscaled (1,2) pair contribution
@@ -746,7 +725,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   @rq-3a1eea58
   Scenario: Scale = 1.0 is equivalent to no exclusion
     Given a ParticleState of N=2 and an exclusion (0, 1, 1.0)
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form LJ force at the pair distance
 
   # --- NaN propagation ---
@@ -754,7 +733,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   @rq-daf7550b
   Scenario: NaN positions propagate to NaN pair forces
     Given a ParticleState of N=2 with positions_x[0] = f32::NAN and otherwise valid finite values
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] is NaN
     And slot_force_x[1] is NaN
 
@@ -766,7 +745,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
       sigma=[1.0, 2.0, 2.0, 3.0], epsilon=[1.0, 0.5, 0.5, 2.0], cutoff=[5.0, 5.0, 5.0, 5.0]
     And a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
     And type_indices = [0, 0]
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form LJ force at r=1.5
       using sigma=1.0 and epsilon=1.0
 
@@ -776,7 +755,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
       sigma=[1.0, 2.0, 2.0, 3.0], epsilon=[1.0, 0.5, 0.5, 2.0], cutoff=[5.0, 5.0, 5.0, 5.0]
     And a ParticleState of N=2 with positions p0=(0,0,0) and p1=(2.5,0,0)
     And type_indices = [0, 1]
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form LJ force at r=2.5
       using sigma=2.0 and epsilon=0.5
 
@@ -786,7 +765,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
       from one [[pair_interactions]] entry per unordered pair
     And a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.3, 0.4, -0.2)
     And type_indices = [0, 1]
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals -slot_force_x[1] bitwise
     And slot_force_y[0] equals -slot_force_y[1] bitwise
     And slot_force_z[0] equals -slot_force_z[1] bitwise
@@ -797,7 +776,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
       cutoff[(0,0)] = 5.0 and cutoff[(0,1)] = cutoff[(1,0)] = 1.0 and cutoff[(1,1)] = 5.0
     And a ParticleState of N=3 with positions p0=(0,0,0), p1=(1.5,0,0), p2=(2.0,0,0)
     And type_indices = [0, 0, 1]
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then particle 0's slot_force_x reflects the (0,0)-type pair at r=1.5 (inside cutoff 5.0)
     And particle 0's slot_force_x carries no contribution from the (0,1)-type pair at r=2.0 (exceeds cutoff 1.0)
     And particle 1's slot_force_x reflects the (0,1)-type pair at r=0.5 (inside cutoff 1.0)
@@ -806,7 +785,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Three-type table dispatches correctly per pair
     Given a LennardJonesParameterTable with n_types=3 whose σ entries differ for every (ti,tj)
     And a ParticleState of N=3 with one atom of each type and fixed positions
-    When the _f variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then for every particle i, slot_force_x[i] matches the sum over k of the closed-form LJ contributions from each in-cutoff partner k
       force computed using sigma[type_indices[i] * 3 + type_indices[k]] and the
       corresponding epsilon and cutoff entries
@@ -829,29 +808,13 @@ Feature: Lennard-Jones O(N²) pair force kernel
     When max_cutoff() is queried
     Then it returns Some(5.0)
 
-  @rq-535c2b1e
-  Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext
-    Given a ForceField with one LennardJones slot in CellList mode
-    And a particle configuration that places two atoms within the LJ cutoff
-    When ForceField::step is called
-    Then ForceField::neighbor_list has been pre_step'd once before contribute runs
-    And the LJ kernel reads neighbor_list / neighbor_counts from the shared state
-
-  @rq-e90c6feb
-  Scenario: Trivial-mode and cell-list-mode forces agree within tolerance
-    Given two ForceField instances built from byte-identical particle states
-      one with NeighborListConfig::AllPairs (Trivial shared list)
-      and the other with NeighborListConfig::CellList { max_neighbors, r_skin }
-    When ForceField::step is called on each
-    Then forces_* agree componentwise within 1e-4 relative error
-
   # --- Energy and virial outputs ---
 
   @rq-b68b3445
   Scenario: Two-particle pair energy matches the closed-form Lennard-Jones expression
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
     And a LennardJonesParameterTable with σ=1.0, ε=1.0, cutoff=5.0
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_energy[0] + slot_energy[1]
       equals 4.0 * ε * (sr12 - sr6) within f32 round-off
       where sr2 = (σ/r)^2, sr6 = sr2^3, sr12 = sr6^2, r = 1.5
@@ -860,7 +823,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Two-particle pair virial matches r_ij · F_ij
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
     And a LennardJonesParameterTable with σ=1.0, ε=1.0, cutoff=5.0
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_virial[0] + slot_virial[1]
       equals r_ij · F_ij within f32 round-off
       where F_ij is the force on particle 0 due to particle 1
@@ -869,22 +832,15 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair beyond cutoff yields zero per-particle energy and virial
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(6.0,0,0)
     And cutoff=5.0
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_energy[0] and slot_virial[0] are both 0.0_f32
     And slot_energy[1] and slot_virial[1] are both 0.0_f32
-
-  @rq-82f8d168
-  Scenario: A particle whose only listed neighbour is itself carries zero energy and virial
-    Given a ParticleState of N=4 with arbitrary positions
-    And the neighbour list for each particle i lists only itself (count=1, neighbor_list[i*4 + 0] = i)
-    When the _fev variant of lj_pair_force is called
-    Then for every i in 0..4, slot_energy[i] and slot_virial[i] are both 0.0_f32
 
   @rq-95c2f543
   Scenario: Exclusion scaling applies uniformly to force, energy, and virial
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
     And a DeviceExclusionList containing the entry (0, 1, 0.5)
-    When the _fev variant of lj_pair_force is called
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then slot_energy[0] equals 0.5 * (un-excluded LJ energy / 2) within f32 round-off
       (the 0.5 is the exclusion scale; the 1/2 is the half-sum convention; the slot accumulates one pair contribution)
     And slot_virial[0] equals 0.5 * (un-excluded virial / 2) within f32 round-off

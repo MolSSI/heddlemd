@@ -737,13 +737,6 @@
     "title": "Reject zero ly",
     "type": "scenario"
   },
-  "rq-06058b71": {
-    "decl": "Scenario: init_device exposes the LJ kernel on the Kernels handle",
-    "file": "forces/lj-pair-force",
-    "refs": [],
-    "title": "init_device exposes the LJ kernel on the Kernels handle",
-    "type": "scenario"
-  },
   "rq-060b1fab": {
     "decl": "- `NeighborListConfig` — value of the parsed `[neighbor_list]` table.",
     "file": "forces/neighbor-list",
@@ -1461,12 +1454,7 @@
   "rq-0c4f8da8": {
     "decl": "Scenario: Pair inside r_switch sees the unmodified Lennard-Jones force",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair inside r_switch sees the unmodified Lennard-Jones force",
     "type": "scenario"
   },
@@ -2416,6 +2404,13 @@
     "file": "precision",
     "refs": [],
     "title": "__device__",
+    "type": "api-item"
+  },
+  "rq-13424eab": {
+    "decl": "- `CoulombBuilder` — `PotentialBuilder` that constructs the slot when",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "CoulombBuilder",
     "type": "api-item"
   },
   "rq-135a6e30": {
@@ -4116,14 +4111,6 @@
     "refs": [
       {
         "file": "src/forces/angle.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/forces/coulomb.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/forces/lj.rs",
         "kind": "code"
       },
       {
@@ -6789,12 +6776,7 @@
   "rq-38441c15": {
     "decl": "Scenario: Pair exactly at r_switch sees the unmodified Lennard-Jones force",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair exactly at r_switch sees the unmodified Lennard-Jones force",
     "type": "scenario"
   },
@@ -6821,18 +6803,6 @@
     ],
     "title": "Langevin BAOAB rejects friction=0",
     "type": "scenario"
-  },
-  "rq-38676211": {
-    "decl": "- `coulomb_pair_force(particle_buffers: &ParticleBuffers, output: &mut SlotOutputView<'_>, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>, max_neighbors: u32, level: AggregateLevel) -> Result<(), GpuError>`",
-    "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "coulomb_pair_force",
-    "type": "api-item"
   },
   "rq-386cfae3": {
     "decl": "Scenario: vv_kick on an empty state is a no-op",
@@ -7654,6 +7624,14 @@
     "title": "Constraint-Type Validation",
     "type": "section"
   },
+  "rq-402e2963": {
+    "decl": "### Cutoff gating <!-- inline -->",
+    "file": "forces/coulomb-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Cutoff gating <!-- inline -->",
+    "type": "section"
+  },
   "rq-408e4dc1": {
     "decl": "Scenario: SI-mode c-rescale barostat params are converted to atomic units",
     "file": "io/unit-system",
@@ -8014,15 +7992,10 @@
     "type": "scenario"
   },
   "rq-44cce069": {
-    "decl": "- Every SPME kernel and cuFFT call dispatched by either SPME slot —",
+    "decl": "- Every SPME kernel and cuFFT call dispatched by the SPME",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "- Every SPME kernel and cuFFT call dispatched by either SPME slot —",
+    "refs": [],
+    "title": "- Every SPME kernel and cuFFT call dispatched by the SPME",
     "type": "anchor"
   },
   "rq-44ce75ec": {
@@ -8393,7 +8366,7 @@
     "type": "scenario"
   },
   "rq-4896a257": {
-    "decl": "- `NeighborListState::rebuild` (existing) calls the construction",
+    "decl": "- `NeighborListState::rebuild` runs the cell-list pre-step followed by",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
     "title": "NeighborListState",
@@ -8600,22 +8573,6 @@
     ],
     "title": "ParticleBuffers",
     "type": "api-item"
-  },
-  "rq-4a902e65": {
-    "decl": "## Practical Bounds",
-    "file": "forces/lj-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Practical Bounds",
-    "type": "section"
-  },
-  "rq-4a96b705": {
-    "decl": "### CUDA kernel",
-    "file": "forces/coulomb-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "CUDA kernel",
-    "type": "section"
   },
   "rq-4ac937ef": {
     "decl": "### Shared Philox header",
@@ -8919,11 +8876,11 @@
     "type": "scenario"
   },
   "rq-4ddab3c7": {
-    "decl": "### CUDA Kernels",
+    "decl": "### Force evaluation",
     "file": "forces/lj-pair-force",
     "level": 3,
     "refs": [],
-    "title": "CUDA Kernels",
+    "title": "Force evaluation",
     "type": "section"
   },
   "rq-4e095363": {
@@ -9068,14 +9025,6 @@
     "level": 2,
     "refs": [],
     "title": "Feature API",
-    "type": "section"
-  },
-  "rq-4fd872f5": {
-    "decl": "## Launch Configuration",
-    "file": "forces/lj-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Launch Configuration",
     "type": "section"
   },
   "rq-4fe2658a": {
@@ -9410,12 +9359,7 @@
   "rq-531afe39": {
     "decl": "Scenario: Pair beyond r_cut yields zero independent of r_switch",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair beyond r_cut yields zero independent of r_switch",
     "type": "scenario"
   },
@@ -9462,13 +9406,6 @@
     "title": "wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
     "type": "scenario"
   },
-  "rq-535c2b1e": {
-    "decl": "Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext",
-    "file": "forces/lj-pair-force",
-    "refs": [],
-    "title": "LJ kernel reads the shared neighbor list from ForceFieldContext",
-    "type": "scenario"
-  },
   "rq-53620d2c": {
     "decl": "- `CRescaleBarostat::draw_counter_device: CudaSlice<u64>`",
     "file": "cuda-graphs",
@@ -9487,6 +9424,13 @@
     ],
     "title": "Time-averaged kinetic energy tracks (3 N − n_constraints) / 2 · k_B · T",
     "type": "scenario"
+  },
+  "rq-537cbe5e": {
+    "decl": "- `CoulombState::pair_force_fragment(&self) -> PairForceFragment` —",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "CoulombState",
+    "type": "api-item"
   },
   "rq-53800cef": {
     "decl": "### CUDA Kernels",
@@ -11181,7 +11125,7 @@
     "type": "scenario"
   },
   "rq-62300a18": {
-    "decl": "Scenario: All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows",
+    "decl": "Scenario: All-pairs neighbor mode records the pair-force row and omits neighbor-list rows",
     "file": "performance-analysis",
     "refs": [
       {
@@ -11189,7 +11133,7 @@
         "kind": "code"
       }
     ],
-    "title": "All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows",
+    "title": "All-pairs neighbor mode records the pair-force row and omits neighbor-list rows",
     "type": "scenario"
   },
   "rq-623447db": {
@@ -11578,6 +11522,14 @@
     ],
     "title": "init_device exposes the Langevin kernels on the Kernels handle",
     "type": "scenario"
+  },
+  "rq-66bcfbe3": {
+    "decl": "### Exclusion scaling <!-- inline -->",
+    "file": "forces/coulomb-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Exclusion scaling <!-- inline -->",
+    "type": "section"
   },
   "rq-66bf31c6": {
     "decl": "Scenario: Missing [integrator] section is rejected",
@@ -13687,19 +13639,6 @@
     "title": "Switching-function degenerate case <!-- inline -->",
     "type": "section"
   },
-  "rq-78d9fd1c": {
-    "decl": "### PTX Module Loading",
-    "file": "forces/lj-pair-force",
-    "level": 3,
-    "refs": [
-      {
-        "file": "src/forces/lj.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PTX Module Loading",
-    "type": "section"
-  },
   "rq-78f484d9": {
     "decl": "- `Integrator` — object-safe trait implemented by every concrete",
     "file": "integration/framework",
@@ -14030,14 +13969,6 @@
     "title": "Reject row with NaN position",
     "type": "scenario"
   },
-  "rq-7b13d9cf": {
-    "decl": "#### `lj_pair_force_f`, `lj_pair_force_fev`",
-    "file": "forces/lj-pair-force",
-    "level": 4,
-    "refs": [],
-    "title": "`lj_pair_force_f`, `lj_pair_force_fev`",
-    "type": "section"
-  },
   "rq-7b27c75b": {
     "decl": "## Kernel Variants",
     "file": "forces/pair-force-kernel",
@@ -14086,14 +14017,6 @@
     "level": 2,
     "refs": [],
     "title": "Force Evaluation Pipeline",
-    "type": "section"
-  },
-  "rq-7bae4b69": {
-    "decl": "### Functions",
-    "file": "forces/coulomb-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "Functions",
     "type": "section"
   },
   "rq-7bcdd62f": {
@@ -14475,7 +14398,7 @@
     "type": "scenario"
   },
   "rq-7f2310ac": {
-    "decl": "Scenario: neighbor_list_build and copy_positions_into_reference counts match rebuilds",
+    "decl": "Scenario: copy_positions_into_reference and neighbor_list_rebuild counts match rebuilds",
     "file": "performance-analysis",
     "refs": [
       {
@@ -14483,7 +14406,7 @@
         "kind": "code"
       }
     ],
-    "title": "neighbor_list_build and copy_positions_into_reference counts match rebuilds",
+    "title": "copy_positions_into_reference and neighbor_list_rebuild counts match rebuilds",
     "type": "scenario"
   },
   "rq-7f5b3a74": {
@@ -14875,13 +14798,6 @@
     "title": "Same-sign charges repel",
     "type": "scenario"
   },
-  "rq-82f8d168": {
-    "decl": "Scenario: A particle whose only listed neighbour is itself carries zero energy and virial",
-    "file": "forces/lj-pair-force",
-    "refs": [],
-    "title": "A particle whose only listed neighbour is itself carries zero energy and virial",
-    "type": "scenario"
-  },
   "rq-83088c2f": {
     "decl": "Scenario: Real-space slot matches the closed-form erfc force for an isolated pair",
     "file": "forces/spme",
@@ -15020,10 +14936,6 @@
         "kind": "code"
       },
       {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/io/config.rs",
         "kind": "code"
       }
@@ -15061,14 +14973,6 @@
     ],
     "title": "Missing seed rejected",
     "type": "scenario"
-  },
-  "rq-84af056c": {
-    "decl": "## Launch Configuration",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Launch Configuration",
-    "type": "section"
   },
   "rq-84b2667f": {
     "decl": "## Launch Configuration",
@@ -16317,12 +16221,7 @@
   "rq-916f99f3": {
     "decl": "Scenario: switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "type": "scenario"
   },
@@ -16849,12 +16748,7 @@
   "rq-95c2f543": {
     "decl": "Scenario: Exclusion scaling applies uniformly to force, energy, and virial",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Exclusion scaling applies uniformly to force, energy, and virial",
     "type": "scenario"
   },
@@ -17247,23 +17141,6 @@
     ],
     "title": "atom_angle_offsets reflects sorted angle list",
     "type": "scenario"
-  },
-  "rq-9a512ed1": {
-    "decl": "### Real-space CUDA kernels",
-    "file": "forces/spme",
-    "level": 3,
-    "refs": [
-      {
-        "file": "src/forces/spme.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Real-space CUDA kernels",
-    "type": "section"
   },
   "rq-9a80c43c": {
     "decl": "## Algorithm",
@@ -19615,12 +19492,7 @@
   "rq-ae20ddac": {
     "decl": "Scenario: Force is C¹ continuous at r_switch",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Force is C¹ continuous at r_switch",
     "type": "scenario"
   },
@@ -19798,6 +19670,14 @@
     "refs": [],
     "title": "Real-space slot produces zero outside r_cut_real",
     "type": "scenario"
+  },
+  "rq-af7718be": {
+    "decl": "### Force evaluation <!-- inline -->",
+    "file": "forces/coulomb-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Force evaluation <!-- inline -->",
+    "type": "section"
   },
   "rq-af9257bb": {
     "decl": "Scenario: rescale_isotropic multiplies all six lattice parameters",
@@ -21449,13 +21329,6 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
-  "rq-bf7dfc6d": {
-    "decl": "Scenario: Self pair in trivial-mode neighbour list contributes nothing",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Self pair in trivial-mode neighbour list contributes nothing",
-    "type": "scenario"
-  },
   "rq-bf98584a": {
     "decl": "Scenario: Reject an analysis filename whose derived root is empty",
     "file": "analysis/framework",
@@ -22730,12 +22603,7 @@
   "rq-cb85cf61": {
     "decl": "Scenario: Pair near r_cut inside the switching window has force smaller than the unmodified value",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair near r_cut inside the switching window has force smaller than the unmodified value",
     "type": "scenario"
   },
@@ -23259,12 +23127,7 @@
   "rq-d0f489d7": {
     "decl": "Scenario: Pair virial inside the switching window equals factor_switched * r²",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair virial inside the switching window equals factor_switched * r²",
     "type": "scenario"
   },
@@ -23558,22 +23421,6 @@
     ],
     "title": "validate_constraint_compatibility rejects lossless velocity-Verlet with constraints",
     "type": "scenario"
-  },
-  "rq-d3a14184": {
-    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, output: &mut SlotOutputView<'_>, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>, max_neighbors: u32, level: AggregateLevel) -> Result<(), GpuError>`",
-    "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "src/forces/lj.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "lj_pair_force",
-    "type": "api-item"
   },
   "rq-d3aeaa23": {
     "decl": "Scenario: set_lattice leaves the device buffer unchanged on validation failure",
@@ -23909,14 +23756,6 @@
     "refs": [],
     "title": "Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff",
     "type": "scenario"
-  },
-  "rq-d6beaed7": {
-    "decl": "### Rust Launcher",
-    "file": "forces/lj-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "Rust Launcher",
-    "type": "section"
   },
   "rq-d6c4e0f5": {
     "decl": "### CUDA Kernels and launch helpers",
@@ -25716,12 +25555,7 @@
   "rq-e5e3443f": {
     "decl": "Scenario: Force is C¹ continuous at r_cut",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Force is C¹ continuous at r_cut",
     "type": "scenario"
   },
@@ -26081,13 +25915,6 @@
     "title": "Reject non-finite lattice value",
     "type": "scenario"
   },
-  "rq-e90c6feb": {
-    "decl": "Scenario: Trivial-mode and cell-list-mode forces agree within tolerance",
-    "file": "forces/lj-pair-force",
-    "refs": [],
-    "title": "Trivial-mode and cell-list-mode forces agree within tolerance",
-    "type": "scenario"
-  },
   "rq-e92c18c6": {
     "decl": "Scenario: Two SD runs on the same GPU with identical inputs are byte-identical",
     "file": "minimization/steepest-descent",
@@ -26362,18 +26189,6 @@
     "title": "run_simulation rejects a custom-kind config because its built-in registries do not match",
     "type": "scenario"
   },
-  "rq-eb9e5cc3": {
-    "decl": "- `spme_real_pair_force_f` / `spme_real_pair_force_fev`: 256 threads",
-    "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "spme_real_pair_force_f",
-    "type": "api-item"
-  },
   "rq-eba43990": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/csvr",
@@ -26440,13 +26255,6 @@
       }
     ],
     "title": "neighbor_list rejects non-finite r_skin",
-    "type": "scenario"
-  },
-  "rq-ec53799e": {
-    "decl": "Scenario: lj_pair_force writes the correct per-particle net force directly into the slot output",
-    "file": "forces/lj-pair-force",
-    "refs": [],
-    "title": "lj_pair_force writes the correct per-particle net force directly into the slot output",
     "type": "scenario"
   },
   "rq-ec5b6cf1": {
@@ -26825,12 +26633,7 @@
   "rq-ef8013be": {
     "decl": "Scenario: Newton's third law holds bitwise across the switching window",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Newton's third law holds bitwise across the switching window",
     "type": "scenario"
   },
@@ -27711,10 +27514,6 @@
       {
         "file": "src/forces/spme.rs",
         "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
       }
     ],
     "title": "Real-space slot",
@@ -27767,18 +27566,6 @@
     ],
     "title": "vv_kick does not modify forces, masses, or positions",
     "type": "scenario"
-  },
-  "rq-f735ea05": {
-    "decl": "- `spme_real_pair_force(particle_buffers, output, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts, max_neighbors, level) -> Result<(), GpuError>`",
-    "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "spme_real_pair_force",
-    "type": "api-item"
   },
   "rq-f73a0f99": {
     "decl": "- `SimulationBox::lx(&self) -> f32`, `SimulationBox::ly(&self) -> f32`,",
@@ -28026,12 +27813,7 @@
   "rq-f93d278e": {
     "decl": "Scenario: Pair exactly at r_cut yields zero force and zero energy when switch < cutoff",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair exactly at r_cut yields zero force and zero energy when switch < cutoff",
     "type": "scenario"
   },
@@ -28209,12 +27991,7 @@
   "rq-fb55af77": {
     "decl": "Scenario: Exclusion scaling multiplies the switched force, energy, and virial",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Exclusion scaling multiplies the switched force, energy, and virial",
     "type": "scenario"
   },

@@ -38,10 +38,11 @@ SPME contributes two `Potential` slots to the `ForceField`:
   in the JIT-composed pair-force kernel (see
   `jit-composed-pair-force.md`); when LJ is also configured, both
   fragments are composed into one composed pair-force kernel that
-  walks the shared neighbour list once and accumulates both
-  contributions in registers. A standalone
-  `spme_real_pair_force_{f,fev}` kernel pair exists for unit-test
-  fixtures that drive the per-pair functional form in isolation.
+  walks the packed neighbour list once (see
+  `packed-neighbour-pair-force.md`) and accumulates both
+  contributions in registers. The slot is a JIT participant
+  (`jit_participant` returns `Some(JitParticipant::PairForce(self))`)
+  and launches no pair-force kernel of its own.
 - `SpmeReciprocalState` — owns the FFT grid buffers, the cuFFT plan, the
   precomputed influence function, and a dedicated bin-only cell-list
   used by the spread and gather kernels. Unaffected by displacement;
@@ -88,14 +89,14 @@ charges carried in `posq.w` on `ParticleBuffers`, and the shared
 
 ### Algorithm <!-- rq-39b05bc9 -->
 
-The kernel topology, sweep loop, warp-tree reduction, and per-particle
-output write follow the common warp-per-particle pattern specified in
-`pair-force-kernel.md`. The real-space-SPME contribution at each
-`(i, k)` pair is computed as follows.
+The composed pair-force kernel's topology, sweep loop, warp-tree
+reduction, and per-particle output write follow the common
+warp-per-particle pattern specified in `pair-force-kernel.md`, walking
+the packed neighbour list (see `packed-neighbour-pair-force.md`). The
+real-space-SPME contribution at each `(i, j)` pair the kernel visits is
+computed as follows.
 
-For lane `lane` of the warp handling particle `i` at sweep step `s`,
-when `k = s * 32 + lane` satisfies `k < neighbor_counts[i]` and
-`j = neighbor_list[i * max_neighbors + k]` is not equal to `i`:
+For a pair `(i, j)` with `j` not equal to `i`:
 
 1. Load `posq[i]` and `posq[j]` (each as one 16-byte `Real4`
    coalesced load). Compute the displacement
@@ -127,15 +128,17 @@ when `k = s * 32 + lane` satisfies `k < neighbor_counts[i]` and
    `scale = exclusion_scale(i, j, atom_excl_offsets, atom_excl_partners,
    atom_excl_coul_scales)`. Multiply `factor` and `energy` by `scale`,
    and compute the scalar virial `w = factor · r²`.
-6. Add `(factor * dx, factor * dy, factor * dz)` to the lane's
-   `(p_x, p_y, p_z)` register accumulators. The `_fev` variant
-   additionally adds `energy * 0.5f` to `p_e` and `w * 0.5f` to `p_w`.
-   The `0.5` factor distributes each unordered pair's energy and virial
-   across the two ordered contributions `(i, j)` and `(j, i)`.
+6. The functor returns `(factor, energy, w)`; the composed kernel adds
+   `(factor * dx, factor * dy, factor * dz)` to the warp lane's
+   `(p_x, p_y, p_z)` register accumulators. On a `ForcesAndScalars`
+   evaluation it additionally adds `energy * 0.5f` to `p_e` and
+   `w * 0.5f` to `p_w`. The `0.5` factor distributes each unordered
+   pair's energy and virial across the two ordered contributions
+   `(i, j)` and `(j, i)`.
 
 After every lane has processed every assigned neighbour, the warp-tree
 butterfly reduction collapses the 32 lane accumulators to lane 0, which
-adds the particle's net force (and, in the `_fev` variant,
+adds the particle's net force (and, on a `ForcesAndScalars` evaluation,
 energy/virial) into its class accumulator via a read-modify-write at
 the per-particle slot of the `SlotOutputView` it received. See
 `pair-force-kernel.md` for the topology and reduction details, and
@@ -151,8 +154,8 @@ user-tuning concern documented in `io/config-schema.md`).
 
 When `SpmeRealBuilder::pair_force_fragment(cx)` participates in the
 JIT-composed pair-force kernel (see `jit-composed-pair-force.md`),
-the fragment differs from the standalone kernel above in three
-ways:
+the fragment realises the *Algorithm* per-pair recipe with three
+implementation specifics:
 
 1. **Shared `(inv_r, r, qi, qj)` inputs.** The fragment's
    `evaluate` signature is
@@ -202,58 +205,6 @@ ways:
    any positive `r²` because every intermediate (`α · r`,
    `expf(-(α · r)²)`, the polynomial in `t`) is well-defined and
    finite for any non-negative `r`.
-
-The standalone `spme_real_pair_force_*` kernels documented below
-keep the per-pair recipe in *Algorithm*; the JIT-fragment changes
-are scoped to the JIT path.
-
-### Real-space CUDA kernels <!-- rq-9a512ed1 -->
-
-`kernels/spme_real.cu` declares two `extern "C"` kernels (forces-only
-and forces + energy + virial) that share the warp-per-particle pattern
-documented in `pair-force-kernel.md`:
-
-```c
-extern "C" __global__ void spme_real_pair_force_f(
-    const float4 *posq,
-    unsigned int max_neighbors,
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    float k_coulomb,
-    float alpha,
-    float r_cut_real,
-    const unsigned int *atom_excl_offsets,
-    const unsigned int *atom_excl_partners,
-    const float *atom_excl_coul_scales,
-    const unsigned int *neighbor_list,
-    const unsigned int *neighbor_counts,
-    float *slot_force_x,
-    float *slot_force_y,
-    float *slot_force_z,
-    unsigned int n);
-
-extern "C" __global__ void spme_real_pair_force_fev(
-    const float4 *posq,
-    unsigned int max_neighbors,
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    float k_coulomb,
-    float alpha,
-    float r_cut_real,
-    const unsigned int *atom_excl_offsets,
-    const unsigned int *atom_excl_partners,
-    const float *atom_excl_coul_scales,
-    const unsigned int *neighbor_list,
-    const unsigned int *neighbor_counts,
-    float *slot_force_x,
-    float *slot_force_y,
-    float *slot_force_z,
-    float *slot_energy,
-    float *slot_virial,
-    unsigned int n);
-```
-
-Launch configuration: `block_dim = (256, 1, 1)`,
-`grid_dim = (ceil(n / 8), 1, 1)`, matching the LJ and truncated-Coulomb
-kernels (see `pair-force-kernel.md`).
 
 ### Real-space reproducibility <!-- rq-cf6116b8 -->
 
@@ -906,12 +857,15 @@ only inside the `SpmeReciprocalState` construction path.
 - `SpmeRealSpaceState` — implements `Potential` with <!-- rq-22171569 -->
   `label() == "spme_real"`. Reports
   `max_cutoff() = Some(r_cut_real as f32)` so the shared neighbor list
-  sizes its search radius. Fields private; the slot's public surface is
-  the per-step methods invoked by `ForceField::step` (see
+  sizes its search radius. `jit_participant()` returns
+  `Some(JitParticipant::PairForce(self))`; the slot contributes its
+  real-space fragment to the JIT-composed pair-force kernel and
+  launches no kernel of its own. Fields private; the slot's public
+  surface is the per-step methods invoked by `ForceField::step` (see
   `framework.md`).
 
   Constructor:
-  - `SpmeRealSpaceState::new(gpu: &GpuContext, particle_count: usize, alpha: f32, r_cut_real: f32, max_neighbors: u32, exclusion_list: &ExclusionList) -> Result<SpmeRealSpaceState, NeighborListError>`
+  - `SpmeRealSpaceState::new(gpu: &GpuContext, particle_count: usize, alpha: f32, r_cut_real: f32, exclusion_list: &ExclusionList) -> Result<SpmeRealSpaceState, NeighborListError>`
 
 - `SpmeReciprocalState` — implements `Potential` with <!-- rq-b1148667 -->
   `label() == "spme_reciprocal"`. Reports `max_cutoff() = None` (it does
@@ -951,13 +905,6 @@ only inside the `SpmeReciprocalState` construction path.
   the implementation (`InvalidPlan`, `ExecFailed`, etc.).
 
 ### Functions <!-- rq-cf82e422 -->
-
-- `spme_real_pair_force(particle_buffers, output, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts, max_neighbors, level) -> Result<(), GpuError>` <!-- rq-f735ea05 -->
-  Selects the kernel variant based on `level`:
-  `AggregateLevel::ForcesOnly` dispatches to `spme_real_pair_force_f`;
-  `AggregateLevel::ForcesAndScalars` dispatches to
-  `spme_real_pair_force_fev`. Writes per-particle output directly into
-  `output`'s slot rows.
 
 - `spme_recip_compute_influence(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex) -> Result<(), GpuError>` <!-- rq-99d3d796 -->
   Launches `spme_recip_compute_influence` on the device's default
@@ -1061,14 +1008,6 @@ only inside the `SpmeReciprocalState` construction path.
 
 ### CUDA kernels <!-- rq-7225b86f -->
 
-`kernels/spme_real.cu` declares two `extern "C"` kernels (signatures
-shown in the *Real-space CUDA kernels* section above):
-
-```c
-extern "C" __global__ void spme_real_pair_force_f(/* ... */);
-extern "C" __global__ void spme_real_pair_force_fev(/* ... */);
-```
-
 `kernels/spme_recip.cu` declares:
 
 ```c
@@ -1151,9 +1090,6 @@ on the launch block size (256), not on thread scheduling.
 
 ### Launch configuration <!-- rq-03d9869d -->
 
-- `spme_real_pair_force_f` / `spme_real_pair_force_fev`: 256 threads <!-- rq-eb9e5cc3 -->
-  per block (8 warps × 32 lanes), grid `ceil(N / 8)`. Matches the
-  common pair-force pattern (see `pair-force-kernel.md`).
 - `spme_recip_compute_influence`: one thread per complex grid cell, <!-- rq-17b52850 -->
   block size 256, grid `ceil(M_complex / 256)`. No shared memory.
 - `spme_spread_fixed_point`: one warp per sorted slot, block size 256 <!-- rq-996edcaf -->
@@ -1195,8 +1131,8 @@ on the launch block size (256), not on thread scheduling.
 
 Stream assignment:
 
-- Every SPME kernel and cuFFT call dispatched by either SPME slot — <!-- rq-44cce069 -->
-  `spme_real_pair_force_*`, `spme_force_gather`,
+- Every SPME kernel and cuFFT call dispatched by the SPME <!-- rq-44cce069 -->
+  reciprocal slot — `spme_force_gather`,
   `spme_recip_compute_influence` (when triggered by a box-generation
   change), the atom-sort pipeline (`spme_compute_bin_key`,
   the prefix-scan family, `scatter_atoms_into_cells`,
@@ -1420,15 +1356,15 @@ Feature: Smooth particle-mesh Ewald (SPME)
   Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)
     Given two oppositely charged particles within r_cut_real
     And an ExclusionList listing the pair with scale_coul=0.0
-    When the _fev variant of spme_real_pair_force is called
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] are all 0.0
 
   @rq-d150a16b
   Scenario: Real-space slot scales contribution by 0.5 when scale_coul = 0.5
     Given two oppositely charged particles at separation r = 3e-10 (< r_cut_real)
     And an ExclusionList listing the pair with scale_coul = 0.5
-    When the _fev variant of spme_real_pair_force is called to obtain values_scaled
-    And the _fev variant of spme_real_pair_force is called with an empty exclusion list to obtain values_unscaled
+    When the SPME real-space functor is evaluated in the composed pair-force kernel to obtain values_scaled
+    And the SPME real-space functor is evaluated in the composed pair-force kernel with an empty exclusion list to obtain values_unscaled
     Then values_scaled.slot_force_x[0] equals 0.5 * values_unscaled.slot_force_x[0] bit-for-bit
     And values_scaled.slot_energy[0] equals 0.5 * values_unscaled.slot_energy[0] bit-for-bit
     And values_scaled.slot_virial[0] equals 0.5 * values_unscaled.slot_virial[0] bit-for-bit
@@ -1437,8 +1373,8 @@ Feature: Smooth particle-mesh Ewald (SPME)
   Scenario: Real-space slot with scale_coul = 1.0 reproduces the un-excluded value
     Given two oppositely charged particles at separation r = 3e-10
     And an ExclusionList listing the pair with scale_coul = 1.0
-    When the _fev variant of spme_real_pair_force is called to obtain values_explicit
-    And the _fev variant of spme_real_pair_force is called with an empty exclusion list to obtain values_implicit
+    When the SPME real-space functor is evaluated in the composed pair-force kernel to obtain values_explicit
+    And the SPME real-space functor is evaluated in the composed pair-force kernel with an empty exclusion list to obtain values_implicit
     Then values_explicit.slot_force_x[0] equals values_implicit.slot_force_x[0] bit-for-bit
     And values_explicit.slot_energy[0] equals values_implicit.slot_energy[0] bit-for-bit
     And values_explicit.slot_virial[0] equals values_implicit.slot_virial[0] bit-for-bit
@@ -1448,7 +1384,7 @@ Feature: Smooth particle-mesh Ewald (SPME)
     Given a ParticleState of N=3 with positions p0=(0,0,0), p1=(2e-10,0,0), p2=(4e-10,0,0)
       and charges (+1e, -1e, +1e)
     And an ExclusionList listing only pair (0, 1) with scale_coul = 0.0
-    When the _fev variant of spme_real_pair_force is called
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the SPME real-space force on particle 0 due to particle 2 only
       (the (0, 1) contribution is suppressed; the (0, 2) contribution is unscaled)
     And slot_force_x[2] equals the SPME real-space force on particle 2 due to particles 0 and 1
@@ -1457,14 +1393,14 @@ Feature: Smooth particle-mesh Ewald (SPME)
   @rq-af7018c0
   Scenario: Real-space slot produces zero outside r_cut_real
     Given two particles at separation greater than r_cut_real
-    When the _fev variant of spme_real_pair_force is called
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] are all 0.0
 
   @rq-83088c2f
   Scenario: Real-space slot matches the closed-form erfc force for an isolated pair
     Given two unit-charge particles at separation r = 4.0e-10 inside the cutoff
     And alpha = 2.0e10
-    When the _f variant of spme_real_pair_force is called
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals the closed-form
       k_C · q_i · q_j · (erfc(α r) · inv_r2 + (2 α / √π) · exp(-α² r²) · inv_r2) · dx · inv_r
       to within 1e-5 relative
@@ -1472,7 +1408,7 @@ Feature: Smooth particle-mesh Ewald (SPME)
   @rq-0caebe37
   Scenario: Real-space slot obeys Newton's third law for a non-boundary pair
     Given two particles at non-boundary separation
-    When the _f variant of spme_real_pair_force is called
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
     Then slot_force_x[0] equals -slot_force_x[1] bit-exactly (Newton's third law for an isolated pair)
 
   # --- JIT fragment behaviour ---

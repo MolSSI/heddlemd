@@ -1,4 +1,4 @@
-// rq-a5a919df rq-d3a14184
+// rq-a5a919df
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;

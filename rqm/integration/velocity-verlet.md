@@ -485,7 +485,7 @@ carries no per-call counter.
   force-evaluation pipeline. The lossless integrator kernels are
   reversibility-correct in isolation; whole-pipeline reversibility is the
   responsibility of a future end-to-end reversibility test that drives
-  `lj_pair_force_f` between integrator calls.
+  the composed pair-force kernel between integrator calls.
 
 ---
 

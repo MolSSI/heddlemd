@@ -1066,8 +1066,8 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `neighbor-list.md` *Rebuild Policy*).
 - `crate::gpu::finalize_fast_class_forces(kernels, fp_buffers, <!-- rq-5a7f78c4 -->
   particle_buffers, n) -> Result<(), GpuError>`.
-- `NeighborListState::rebuild` (existing) calls the construction <!-- rq-4896a257 -->
-  pipeline above instead of `neighbor_list_build`. It zeros
+- `NeighborListState::rebuild` runs the cell-list pre-step followed by <!-- rq-4896a257 -->
+  the construction pipeline above. It zeros
   `neighbor_status` before the cell-list and construction kernels run,
   copies no interaction count to the host, and reports buffer growth
   through `PreStepOutcome.reallocated`. A steady-state (non-probe)
