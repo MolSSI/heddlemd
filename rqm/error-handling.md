@@ -26,7 +26,10 @@ variant list — in the requirements file for the feature that owns it.
   host/device transfer.
 - `SimulationBoxError` (`src/pbc.rs`) — simulation-box construction.
 - `NeighborListError` (`src/forces/neighbor_list.rs`) — neighbor-list
-  construction and rebuild.
+  construction and rebuild. Its `PackedNeighborOverflow { buffer }`
+  variant is returned when a steady-state rebuild's `neighbor_status`
+  read shows a packed-neighbour buffer dropped within-`r_search`
+  entries (see `forces/packed-neighbour-pair-force.md` *Capacity*).
 - `ForceFieldError` (`src/forces/mod.rs`) — force-field assembly and the
   per-step force pipeline.
 - `IntegratorError` (`src/integrator/mod.rs`) — integrator construction and

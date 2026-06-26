@@ -243,7 +243,7 @@ sequence:
    fallback.
 2. The runner calls `nl.pre_step(sim_box, buffers, timings)` once.
    `pre_step` downloads the single-word
-   `disp_rebuild_flag` and rebuilds the neighbor list when the flag
+   `neighbor_status` and rebuilds the neighbor list when the flag
    is non-zero (see `forces/neighbor-list.md` *Displacement Check*).
    Because `needs_rebuild` starts `true`, this first call always
    rebuilds; that probe rebuild sizes the packed-neighbour buffers to
@@ -287,7 +287,7 @@ sequence:
      `force_field.step_no_neighbor_check` after the post-force
      per-particle kernel. The kernel reads the now-updated positions
      against `reference_positions_*` and sets
-     `cl.disp_rebuild_flag` to `1u` via `atomicOr` if any atom's
+     `cl.neighbor_status` to `1u` via `atomicOr` if any atom's
      minimum-image displacement exceeds `r_skin / 2`. The flag is
      sticky across replays of the captured graph until cleared by
      the host between batches.
@@ -342,7 +342,7 @@ while remaining > 0:
     step      += batch
     remaining -= batch
 
-    outcome = nl.pre_step(sim_box, buffers, timings)    // 4-byte dtoh of disp_rebuild_flag; rebuild iff non-zero
+    outcome = nl.pre_step(sim_box, buffers, timings)    // 4-byte dtoh of neighbor_status; rebuild iff non-zero
     if outcome.reallocated and remaining > 0:           // a rebuild grew (reallocated) a packed-neighbour buffer
         graph_loop = capture_phase_graph(...)           // re-capture against new pointers / grid dims; records, does not execute
     if step % traj_every == 0:
@@ -363,11 +363,11 @@ when they are not multiples of `graph_batch_size`. The captured graph
 itself is always one physical step.
 
 Every per-batch `nl.pre_step` synchronises against the device only
-via a single 4-byte `dtoh_sync_copy` of `disp_rebuild_flag`. When the
+via a single 4-byte `dtoh_sync_copy` of `neighbor_status`. When the
 flag is zero (the common case at typical liquid-MD displacement
 rates and the default `K = 50` cadence) no further host work happens.
 When the flag is non-zero, the rebuild pipeline runs synchronously,
-the reference positions are refreshed, and `disp_rebuild_flag` is
+the reference positions are refreshed, and `neighbor_status` is
 zeroed via a single `memset_zeros` before the next batch's first
 graph launch.
 
@@ -384,7 +384,7 @@ The neighbor-list rebuild trigger fires when any particle's
 displacement from its last-reference position exceeds `r_skin / 2`
 *at any captured step inside the batch*. The displacement-check
 kernel runs every step inside the captured graph and writes
-`disp_rebuild_flag = 1u` via `atomicOr` the first time a step's
+`neighbor_status = 1u` via `atomicOr` the first time a step's
 particle exceeds the threshold; the flag is sticky until the host
 clears it. With `graph_batch_size = K` the host consults the flag
 once per K steps; in the worst case a particle covers
@@ -426,14 +426,20 @@ The captured graph references those buffers by device pointer only;
 their contents change but the pointers do not, so the captured graph
 remains valid across such rebuilds without re-capture.
 
-A rebuild that grows a packed-neighbour buffer (`interacting_tiles`,
-`interacting_atoms`, or `single_pair_atoms`) reallocates it,
-invalidating both the device pointers the captured nodes hold and
-the single-pair launch's captured grid dimensions. `nl.pre_step`
-reports this through its outcome's `reallocated` flag (see
-`forces/neighbor-list.md` *Displacement Check* and
-`forces/packed-neighbour-pair-force.md` *Capacity*). When the flag is
-set, the runner re-captures the phase graph at that batch boundary:
+A rebuild grows a packed-neighbour buffer (`interacting_tiles`,
+`interacting_atoms`, or `single_pair_atoms`) when the combined
+`neighbor_status` word the runner reads at the batch boundary carries
+a `*_high_water` bit — the previous build came within
+`tile_pair_fill_threshold` of capacity while dropping nothing (see
+`forces/packed-neighbour-pair-force.md` *Capacity*). Growth reallocates
+the buffer, invalidating both the device pointers the captured nodes
+hold and the single-pair launch's captured grid dimensions.
+`nl.pre_step` reports this through its outcome's `reallocated` flag
+(see `forces/neighbor-list.md` *Rebuild Policy*). A `*_overflow` bit in
+the same word means a build actually dropped within-`r_search` entries;
+`nl.pre_step` then returns `PackedNeighborOverflow` and the run halts
+rather than re-capturing. When the `reallocated` flag is set, the
+runner re-captures the phase graph at that batch boundary:
 it drops the current `GraphLoop`, runs `capture_phase_graph` again to
 record a fresh one-step graph against the new pointers and grid
 dimensions, and continues replaying in graph mode. Stream capture
@@ -771,14 +777,14 @@ Feature: CUDA graph capture and replay
     Given an eligible phase running in graph mode with graph_batch_size = 50
     And no log_every or traj_every output is due at this batch boundary
     When the batch completes its 50 graph launches
-    Then nl.pre_step issues exactly one dtoh_sync_copy of length 1 (u32) against disp_rebuild_flag
+    Then nl.pre_step issues exactly one dtoh_sync_copy of length 1 (u32) against neighbor_status
     And no host-device particle transfer is performed at this batch boundary
 
   @rq-c4cc1d99
   Scenario: Quiescent batch incurs no rebuild
     Given an eligible phase in which no particle exceeds r_skin / 2 across any of the 50 captured replays
     When the batch completes
-    Then disp_rebuild_flag downloaded by nl.pre_step is 0u
+    Then neighbor_status downloaded by nl.pre_step is 0u
     And nl.pre_step performs no cell-list rebuild
     And reference_positions_{x,y,z} are unchanged
 
@@ -786,9 +792,9 @@ Feature: CUDA graph capture and replay
   Scenario: Triggered batch rebuilds exactly once
     Given an eligible phase in which at least one particle exceeds r_skin / 2 on some captured replay inside the batch
     When the batch completes
-    Then disp_rebuild_flag downloaded by nl.pre_step is 1u
+    Then neighbor_status downloaded by nl.pre_step is 1u
     And nl.pre_step performs exactly one cell-list rebuild
-    And disp_rebuild_flag is zeroed via memset_zeros before the next batch's first graph launch
+    And neighbor_status is zeroed via memset_zeros before the next batch's first graph launch
 
   @rq-151a7e82
   Scenario: Default graph_batch_size is 50

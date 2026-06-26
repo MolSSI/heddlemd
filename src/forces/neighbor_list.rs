@@ -24,6 +24,9 @@ pub enum NeighborListError {
     Gpu(#[from] GpuError),
     #[error("an atom has more than {max} neighbors")]
     NeighborListOverflow { max: u32 },
+    // rq-2dda3169
+    #[error("packed-neighbour buffer `{buffer}` overflowed: a build would have dropped interactions within the search radius")]
+    PackedNeighborOverflow { buffer: &'static str },
     #[error("simulation box perpendicular width along lattice direction `{direction}` is {width}, below the required {required}")]
     BoxTooSmallForCells {
         direction: &'static str,
@@ -66,13 +69,6 @@ pub struct CellListData {
     pub reference_positions_x: CudaSlice<Real>,
     pub reference_positions_y: CudaSlice<Real>,
     pub reference_positions_z: CudaSlice<Real>,
-    /// Single-word device flag that the per-step displacement-check
-    /// kernel sets via `atomicOr` when any atom's minimum-image
-    /// displacement from its reference position exceeds
-    /// `sqrt(threshold_sq)`. Sticky across captured-graph replays;
-    /// zeroed by `memset_zeros` after every rebuild. See
-    /// `rqm/forces/neighbor-list.md` *Displacement Check*.
-    pub disp_rebuild_flag: CudaSlice<u32>,
     /// `(r_skin / 2)²` cached as a host-side scalar so it can be
     /// passed by value to the displacement-check kernel without an
     /// extra device read. Set once at construction and again only
@@ -114,16 +110,28 @@ pub struct PackedNeighborData {
     /// `interacting_tiles_capacity * 32`.
     pub interacting_atoms: CudaSlice<u32>,
     /// Live interaction counts: `[interacting_tiles_count,
-    /// single_pairs_count]`.
+    /// single_pairs_count]`. Read on the device by every downstream
+    /// kernel (histogram, scan, scatter, force passes); never copied to
+    /// the host on a steady-state rebuild. rq-67a09135
     pub interaction_count: CudaSlice<u32>,
-    /// Set non-zero by the construction kernel when capacity overflows.
-    pub overflow_flag: CudaSlice<u32>,
+    /// Combined rebuild status word. Bit 0 (`displacement_tripped`) is
+    /// set by the per-step displacement-check kernel; bits 1-4
+    /// (`tiles_high_water`, `single_pairs_high_water`, `tiles_overflow`,
+    /// `single_pairs_overflow`) by the packed construction's
+    /// `set_neighbor_status_bits`. Zeroed at the start of every rebuild
+    /// and read once per batch boundary by `pre_step`. See
+    /// `rqm/forces/neighbor-list.md` *Displacement Check*. rq-67a09135 rq-1f38d78a
+    pub neighbor_status: CudaSlice<u32>,
     /// Current allocated capacity.
     pub interacting_tiles_capacity: u32,
     /// Live entry count after the most recent rebuild.
     pub interacting_tiles_count: u32,
-    /// Multiplier applied to the capacity on overflow.
+    /// Geometric multiplier applied to a capacity when it is grown.
     pub tile_pair_growth_factor: f64,
+    /// Fraction of a capacity at which a build is treated as near-full
+    /// and the capacity is grown ahead of any dropped entry. In `(0, 1)`.
+    /// rq-67a09135
+    pub tile_pair_fill_threshold: f64,
     /// Per-i-block count of entries belonging to that i-block.
     /// Length `n_blocks`. Filled by `histogram_entries_by_iblock` at
     /// each rebuild from the live `interacting_tiles` array.
@@ -194,7 +202,31 @@ pub struct NeighborListState {
     // observed value and re-run their per-rebuild work when the
     // generation advances.
     rebuild_generation: u64,
+    /// `false` until the first (probe) rebuild of the state has run. The
+    /// probe sizes the packed-neighbour capacity by reading
+    /// `neighbor_status` synchronously and growing geometrically until no
+    /// high-water or overflow bit is set; every later rebuild is
+    /// dtoh-free and relies on the per-batch status read for growth.
+    /// rq-67a09135
+    has_probed: bool,
 }
+
+/// Default fraction of a packed-neighbour capacity at which a build is
+/// treated as near-full and the capacity is grown ahead of any dropped
+/// entry. See `rqm/forces/packed-neighbour-pair-force.md` *Capacity*.
+/// rq-67a09135
+pub const DEFAULT_TILE_PAIR_FILL_THRESHOLD: f64 = 0.8;
+
+/// Default geometric growth multiplier for packed-neighbour capacities.
+pub const DEFAULT_TILE_PAIR_GROWTH_FACTOR: f64 = 1.5;
+
+// Bit layout of the combined `neighbor_status` word. See
+// `rqm/forces/neighbor-list.md` *Displacement Check*. rq-1f38d78a rq-67a09135
+const STATUS_DISPLACEMENT_TRIPPED: u32 = 1 << 0;
+const STATUS_TILES_HIGH_WATER: u32 = 1 << 1;
+const STATUS_SINGLE_PAIRS_HIGH_WATER: u32 = 1 << 2;
+const STATUS_TILES_OVERFLOW: u32 = 1 << 3;
+const STATUS_SINGLE_PAIRS_OVERFLOW: u32 = 1 << 4;
 
 /// O(N) seed capacity for `interacting_tiles`. The buffers are sized
 /// to the *actual* interaction count, never to the `O(n_blocks^2)`
@@ -237,6 +269,7 @@ fn alloc_packed_neighbor_data(
     particle_count: usize,
     interacting_tiles_capacity: u32,
     tile_pair_growth_factor: f64,
+    tile_pair_fill_threshold: f64,
     trivial_mode: bool,
 ) -> Result<PackedNeighborData, NeighborListError> {
     let n_blocks = ((particle_count as u32) + 31) / 32;
@@ -289,7 +322,7 @@ fn alloc_packed_neighbor_data(
         .alloc_zeros::<u32>(cap_alloc * 32)
         .map_err(GpuError::from)?;
     let interaction_count = device.alloc_zeros::<u32>(2).map_err(GpuError::from)?;
-    let overflow_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
+    let neighbor_status = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
     let iblock_count = device
         .alloc_zeros::<u32>(n_blocks_alloc)
         .map_err(GpuError::from)?;
@@ -327,10 +360,11 @@ fn alloc_packed_neighbor_data(
         interacting_tiles,
         interacting_atoms,
         interaction_count,
-        overflow_flag,
+        neighbor_status,
         interacting_tiles_capacity: cap,
         interacting_tiles_count: 0,
         tile_pair_growth_factor,
+        tile_pair_fill_threshold,
         iblock_count,
         iblock_offset,
         iblock_cursor,
@@ -343,19 +377,32 @@ fn alloc_packed_neighbor_data(
 }
 
 impl PackedNeighborData {
-    /// Grow the entry-list buffers to at least `required` entries. The
-    /// new capacity is `required * tile_pair_growth_factor`. Growth is
-    /// driven by the build's deterministic interaction count, so it
-    /// converges after one or two retries.
+    /// High-water mark for the tile list: `floor(capacity * fill_threshold)`.
+    /// A build whose live tile count exceeds this is grown ahead of an
+    /// actual overflow. rq-67a09135
+    pub fn tiles_high_water_mark(&self) -> u32 {
+        ((self.interacting_tiles_capacity as f64) * self.tile_pair_fill_threshold)
+            .floor() as u32
+    }
+
+    /// High-water mark for the single-pair list. rq-67a09135
+    pub fn single_pairs_high_water_mark(&self) -> u32 {
+        ((self.single_pairs_capacity as f64) * self.tile_pair_fill_threshold)
+            .floor() as u32
+    }
+
+    /// Grow the entry-list buffers geometrically: the new capacity is
+    /// `ceil(capacity * tile_pair_growth_factor)`. Count-free — the host
+    /// never reads the live interaction count — so it is usable both in
+    /// the synchronous probe loop and at a steady-state batch boundary.
     ///
     /// rq-67a09135
-    pub fn grow_to(
-        &mut self,
-        device: &Arc<CudaDevice>,
-        required: u32,
-    ) -> Result<(), GpuError> {
-        let new_cap_f = (required as f64) * self.tile_pair_growth_factor;
-        let new_cap = (new_cap_f.ceil() as u32).max(required).max(1);
+    pub fn grow_tiles(&mut self, device: &Arc<CudaDevice>) -> Result<(), GpuError> {
+        let new_cap_f = (self.interacting_tiles_capacity as f64)
+            * self.tile_pair_growth_factor;
+        let new_cap = (new_cap_f.ceil() as u32)
+            .max(self.interacting_tiles_capacity + 1)
+            .max(1);
         let new_alloc = new_cap as usize;
         self.interacting_tiles = device.alloc_zeros::<u32>(new_alloc)?;
         self.interacting_atoms = device.alloc_zeros::<u32>(new_alloc * 32)?;
@@ -364,16 +411,12 @@ impl PackedNeighborData {
         Ok(())
     }
 
-    /// Grow `single_pair_atoms` to at least `required` pairs.
-    ///
-    /// rq-67a09135
-    pub fn grow_single_pairs_to(
-        &mut self,
-        device: &Arc<CudaDevice>,
-        required: u32,
-    ) -> Result<(), GpuError> {
-        let new_cap_f = (required as f64) * self.tile_pair_growth_factor;
-        let new_cap = (new_cap_f.ceil() as u32).max(required).max(1);
+    /// Grow `single_pair_atoms` geometrically. rq-67a09135
+    pub fn grow_single_pairs(&mut self, device: &Arc<CudaDevice>) -> Result<(), GpuError> {
+        let new_cap_f = (self.single_pairs_capacity as f64) * self.tile_pair_growth_factor;
+        let new_cap = (new_cap_f.ceil() as u32)
+            .max(self.single_pairs_capacity + 1)
+            .max(1);
         self.single_pair_atoms =
             device.alloc_zeros::<u32>(2 * new_cap as usize)?;
         self.single_pairs_capacity = new_cap;
@@ -470,7 +513,6 @@ impl NeighborListState {
         let reference_positions_z = device
             .alloc_zeros::<Real>(particle_count.max(1))
             .map_err(GpuError::from)?;
-        let disp_rebuild_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
         let half_skin = (r_skin as f64) * 0.5;
         let threshold_sq: Real = (half_skin * half_skin) as Real;
         let overflow_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
@@ -481,7 +523,8 @@ impl NeighborListState {
             &device,
             particle_count,
             initial_cap,
-            1.5,
+            DEFAULT_TILE_PAIR_GROWTH_FACTOR,
+            DEFAULT_TILE_PAIR_FILL_THRESHOLD,
             false, // CellList mode uses cell-list's sorted_particle_ids
         )?;
 
@@ -509,12 +552,12 @@ impl NeighborListState {
                 reference_positions_x,
                 reference_positions_y,
                 reference_positions_z,
-                disp_rebuild_flag,
                 threshold_sq,
                 overflow_flag,
                 needs_rebuild: true,
             }),
             rebuild_generation: 0,
+            has_probed: false,
         })
     }
 
@@ -574,11 +617,6 @@ impl NeighborListState {
         let reference_positions_x = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
         let reference_positions_y = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
         let reference_positions_z = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
-        // CellListOnly mode has no displacement check; the flag is
-        // never consulted but the field shape is shared with CellList,
-        // so allocate a length-1 device slot to keep the CudaSlice
-        // handle valid.
-        let disp_rebuild_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
         let overflow_flag = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
 
         Ok(NeighborListState {
@@ -605,12 +643,12 @@ impl NeighborListState {
                 reference_positions_x,
                 reference_positions_y,
                 reference_positions_z,
-                disp_rebuild_flag,
                 threshold_sq: 0.0,
                 overflow_flag,
                 needs_rebuild: true,
             }),
             rebuild_generation: 0,
+            has_probed: false,
         })
     }
 
@@ -664,7 +702,8 @@ impl NeighborListState {
                 &device,
                 particle_count,
                 cap,
-                1.5,
+                DEFAULT_TILE_PAIR_GROWTH_FACTOR,
+                DEFAULT_TILE_PAIR_FILL_THRESHOLD,
                 true,
             )?;
 
@@ -760,6 +799,9 @@ impl NeighborListState {
             packed,
             mode: NeighborListMode::Trivial,
             rebuild_generation: 0,
+            // Trivial mode pre-populates the packed list on the host and
+            // never runs the construction probe.
+            has_probed: true,
         })
     }
 
@@ -848,24 +890,37 @@ impl NeighborListState {
         if self.particle_count == 0 {
             return Ok(());
         }
-        let cl = match &mut self.mode {
+        // Disjoint field borrows: reference positions live in `self.mode`
+        // (CellListData); the status word lives in `self.packed`.
+        let cl = match &self.mode {
             NeighborListMode::Trivial => return Ok(()),
             // Bin-only mode rebuilds unconditionally each pre_step; no
             // displacement check is queued.
             NeighborListMode::CellListOnly(_) => return Ok(()),
             NeighborListMode::CellList(cl) => cl,
         };
-        timings
-            .kernel_start(KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED)
-            .map_err(map_timings_err)?;
-        neighbor_displacement_check_flag(
-            buffers,
+        let threshold_sq = cl.threshold_sq;
+        let (ref_x, ref_y, ref_z) = (
             &cl.reference_positions_x,
             &cl.reference_positions_y,
             &cl.reference_positions_z,
+        );
+        let status = match self.packed.as_mut() {
+            Some(p) => &mut p.neighbor_status,
+            None => return Ok(()),
+        };
+        timings
+            .kernel_start(KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED)
+            .map_err(map_timings_err)?;
+        // rq-1f38d78a — sets bit 0 of the shared status word via atomicOr.
+        neighbor_displacement_check_flag(
+            buffers,
+            ref_x,
+            ref_y,
+            ref_z,
             sim_box,
-            cl.threshold_sq,
-            &mut cl.disp_rebuild_flag,
+            threshold_sq,
+            status,
         )?;
         timings
             .kernel_stop(KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED)
@@ -873,11 +928,28 @@ impl NeighborListState {
         Ok(())
     }
 
+    /// Read the combined `neighbor_status` word with a single 4-byte
+    /// `dtoh_sync_copy`. Returns `0` in `Trivial` / `CellListOnly` modes
+    /// (no status word is consulted). This is the only device-to-host
+    /// transfer the neighbour path performs per batch boundary.
+    /// rq-1f38d78a rq-67a09135
+    fn read_neighbor_status(&self) -> Result<u32, NeighborListError> {
+        let status_buf = match (&self.mode, self.packed.as_ref()) {
+            (NeighborListMode::CellList(_), Some(p)) => &p.neighbor_status,
+            _ => return Ok(0),
+        };
+        let host: Vec<u32> = self
+            .device
+            .dtoh_sync_copy(status_buf)
+            .map_err(GpuError::from)?;
+        Ok(host[0])
+    }
+
     // rq-c49b2fe6
-    /// Host-side consumer of `disp_rebuild_flag`: issues a single
-    /// 4-byte `dtoh_sync_copy` against the flag, returning `true` if
-    /// the kernel has signalled at any captured step since the last
-    /// rebuild that an atom's displacement exceeded `r_skin / 2`.
+    /// Host-side consumer of bit 0 of `neighbor_status`: issues a single
+    /// 4-byte `dtoh_sync_copy` against the word, returning `true` if the
+    /// displacement-check kernel has signalled at any captured step since
+    /// the last rebuild that an atom's displacement exceeded `r_skin / 2`.
     pub fn displacement_check(
         &mut self,
         _sim_box: &SimulationBox,
@@ -887,16 +959,7 @@ impl NeighborListState {
         if self.particle_count == 0 {
             return Ok(false);
         }
-        let cl = match &mut self.mode {
-            NeighborListMode::Trivial => return Ok(false),
-            NeighborListMode::CellListOnly(_) => return Ok(false),
-            NeighborListMode::CellList(cl) => cl,
-        };
-        let host: Vec<u32> = self
-            .device
-            .dtoh_sync_copy(&cl.disp_rebuild_flag)
-            .map_err(GpuError::from)?;
-        Ok(host[0] != 0)
+        Ok((self.read_neighbor_status()? & STATUS_DISPLACEMENT_TRIPPED) != 0)
     }
 
     // rq-7db97132
@@ -922,7 +985,21 @@ impl NeighborListState {
             return Ok(false);
         }
         let started = Instant::now();
-        let result = self.rebuild_impl(sim_box, buffers, timings);
+        // rq-67a09135 rq-1f38d78a — Zero the combined status word at the
+        // start of the rebuild so the construction kernel's high-water /
+        // overflow bits (and the next batch's displacement bit) start
+        // clean. The first rebuild of the state runs the synchronous
+        // sizing probe; every later rebuild is dtoh-free.
+        let probe = !self.has_probed;
+        if let Some(p) = self.packed.as_mut() {
+            self.device
+                .memset_zeros(&mut p.neighbor_status)
+                .map_err(GpuError::from)?;
+        }
+        let result = self.rebuild_impl(sim_box, buffers, timings, probe);
+        if result.is_ok() {
+            self.has_probed = true;
+        }
         timings.record_host(HostStage::NEIGHBOR_LIST_REBUILD, started.elapsed());
         result
     }
@@ -932,6 +1009,7 @@ impl NeighborListState {
         sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
+        probe: bool,
     ) -> Result<bool, NeighborListError> {
         let device = self.device.clone();
         let kernels = self.kernels.clone();
@@ -961,7 +1039,7 @@ impl NeighborListState {
                 &mut cl.cell_offsets,
                 &mut cl.scan_block_totals,
                 cl.n_cells_total,
-                particle_count,
+                crate::gpu::PrefixScanSentinel::Host(particle_count as u32),
             )?;
 
             scatter_atoms_into_cells(
@@ -990,15 +1068,20 @@ impl NeighborListState {
         }
 
         // Packed-neighbour construction. `reallocated` is `true` when a
-        // packed buffer grew during this rebuild. rq-67a09135
-        let reallocated = self.rebuild_packed_neighbour(buffers, sim_box, r_search_sq)?;
+        // packed buffer grew during this rebuild (probe path only — a
+        // steady-state rebuild never grows; growth happens in `pre_step`
+        // before the rebuild). rq-67a09135
+        let reallocated = self.rebuild_packed_neighbour(buffers, sim_box, r_search_sq, probe)?;
 
         {
-            let device = self.device.clone();
             let cl = self.cell_list_data_mut().expect("non-Trivial mode");
             timings
                 .kernel_start(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
                 .map_err(map_timings_err)?;
+            // The reference positions are refreshed so the next batch's
+            // displacement check measures from this rebuild's positions.
+            // The status word (including bit 0) was already zeroed at the
+            // start of the rebuild, so no end-of-rebuild reset is needed.
             copy_positions_into_reference(
                 buffers,
                 &mut cl.reference_positions_x,
@@ -1008,18 +1091,6 @@ impl NeighborListState {
             timings
                 .kernel_stop(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
                 .map_err(map_timings_err)?;
-
-            // rq-1f38d78a
-            // Clear the device-side displacement-trip flag the rebuild
-            // just consumed. Without this reset the flag would remain
-            // sticky-`1u` and every subsequent `pre_step` download
-            // would observe a trip and trigger another rebuild. The
-            // memset queues on the default stream after the reference
-            // refresh, so subsequent step launches observe the cleared
-            // flag against the freshly written reference positions.
-            device
-                .memset_zeros(&mut cl.disp_rebuild_flag)
-                .map_err(GpuError::from)?;
 
             cl.needs_rebuild = false;
         }
@@ -1035,6 +1106,7 @@ impl NeighborListState {
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
         r_search_sq: Real,
+        probe: bool,
     ) -> Result<bool, NeighborListError> {
         let device = self.device.clone();
         let kernels = self.kernels.clone();
@@ -1087,20 +1159,32 @@ impl NeighborListState {
             n_blocks,
         )?;
 
-        // 4. Find blocks with interactions (with grow+retry on overflow).
-        //    `reallocated` records whether any packed buffer grew during
-        //    this rebuild so the caller can re-capture a CUDA graph that
-        //    holds now-stale device pointers (see `cuda-graphs.md`).
+        // 4. Find blocks with interactions, then record the high-water /
+        //    overflow state in `neighbor_status` from the device-resident
+        //    counts. No interaction count is copied to the host.
+        //
+        //    Steady-state (`probe == false`): run exactly once, no dtoh.
+        //    Growth, when needed, was already applied by `pre_step` before
+        //    this rebuild, so `reallocated` is always `false` here.
+        //
+        //    Probe (`probe == true`): read `neighbor_status` synchronously
+        //    and grow geometrically until neither a high-water nor an
+        //    overflow bit is set, sizing capacity with headroom. Runs once
+        //    per state, before CUDA-graph capture.
         //    rq-67a09135
         let mut reallocated = false;
         loop {
-            // Zero counters and overflow flag.
             device
                 .memset_zeros(&mut packed.interaction_count)
                 .map_err(GpuError::from)?;
-            device
-                .memset_zeros(&mut packed.overflow_flag)
-                .map_err(GpuError::from)?;
+            if probe {
+                // A retry's set_neighbor_status_bits must start from a
+                // clean word; the first iteration's zero is redundant with
+                // the one `rebuild` issued, which is harmless.
+                device
+                    .memset_zeros(&mut packed.neighbor_status)
+                    .map_err(GpuError::from)?;
+            }
 
             let max_entries = packed.interacting_tiles_capacity;
             let max_single_pairs = packed.single_pairs_capacity;
@@ -1120,34 +1204,41 @@ impl NeighborListState {
                 &mut packed.interacting_atoms,
                 &mut packed.single_pair_atoms,
                 &mut packed.interaction_count,
-                &mut packed.overflow_flag,
+            )?;
+            // rq-67a09135 — set bits 1-4 of neighbor_status on the device.
+            let tiles_hw = packed.tiles_high_water_mark();
+            let sp_hw = packed.single_pairs_high_water_mark();
+            crate::gpu::set_neighbor_status_bits(
+                &kernels,
+                &packed.interaction_count,
+                packed.interacting_tiles_capacity,
+                packed.single_pairs_capacity,
+                tiles_hw,
+                sp_hw,
+                &mut packed.neighbor_status,
             )?;
 
-            let flag: Vec<u32> = device
-                .dtoh_sync_copy(&packed.overflow_flag)
-                .map_err(GpuError::from)?;
-            let counts: Vec<u32> = device
-                .dtoh_sync_copy(&packed.interaction_count)
-                .map_err(GpuError::from)?;
-            // bit 0 = interacting_tiles overflow; bit 1 = single_pair_atoms overflow.
-            if flag[0] == 0 {
-                packed.interacting_tiles_count = counts[0];
-                packed.single_pairs_count = counts[1];
+            if !probe {
                 break;
             }
-            // Grow on overflow until the build fits. The interaction
-            // count is deterministic, so this converges after one or two
-            // retries; the seed is O(N) and growth tracks the true count,
-            // never the O(n_blocks^2) all-pairs pre-allocation. rq-67a09135
-            if (flag[0] & 1) != 0 {
-                let required = counts[0].max(packed.interacting_tiles_capacity + 1);
-                packed.grow_to(&device, required).map_err(NeighborListError::Gpu)?;
+            let status = device
+                .dtoh_sync_copy(&packed.neighbor_status)
+                .map_err(GpuError::from)?[0];
+            let grow_tiles =
+                (status & (STATUS_TILES_HIGH_WATER | STATUS_TILES_OVERFLOW)) != 0;
+            let grow_sp = (status
+                & (STATUS_SINGLE_PAIRS_HIGH_WATER | STATUS_SINGLE_PAIRS_OVERFLOW))
+                != 0;
+            if !grow_tiles && !grow_sp {
+                break;
+            }
+            if grow_tiles {
+                packed.grow_tiles(&device).map_err(NeighborListError::Gpu)?;
                 reallocated = true;
             }
-            if (flag[0] & 2) != 0 {
-                let required = counts[1].max(packed.single_pairs_capacity + 1);
+            if grow_sp {
                 packed
-                    .grow_single_pairs_to(&device, required)
+                    .grow_single_pairs(&device)
                     .map_err(NeighborListError::Gpu)?;
                 reallocated = true;
             }
@@ -1155,7 +1246,8 @@ impl NeighborListState {
 
         // 5. Sort entries by i-block so the force kernel can process
         //    consecutive same-i-block entries with register carryover
-        //    on the i-side accumulator.
+        //    on the i-side accumulator. The scan's trailing sentinel comes
+        //    from the device-resident interaction count (rq-67a09135).
         device
             .memset_zeros(&mut packed.iblock_count)
             .map_err(GpuError::from)?;
@@ -1173,7 +1265,7 @@ impl NeighborListState {
             &mut packed.iblock_offset,
             &mut packed.iblock_scan_block_totals,
             n_blocks as usize,
-            packed.interacting_tiles_count as usize,
+            crate::gpu::PrefixScanSentinel::Device(&packed.interaction_count),
         )?;
         device
             .memset_zeros(&mut packed.iblock_cursor)
@@ -1220,24 +1312,55 @@ impl NeighborListState {
             });
         }
 
-        let refreshed = self.refresh_cell_layout_if_box_changed(sim_box)?;
+        let n_cells_changed = self.refresh_cell_layout_if_box_changed(sim_box)?;
 
         let mut rebuild_required = match &self.mode {
             NeighborListMode::Trivial | NeighborListMode::CellListOnly(_) => unreachable!(),
             NeighborListMode::CellList(cl) => cl.needs_rebuild,
         };
+        // `true` when this call grows a packed buffer (high-water), which
+        // — like a probe-time grow — forces a phase-graph re-capture.
+        let mut grew = false;
 
-        if !refreshed && !rebuild_required {
-            // rq-c49b2fe6
-            // Single-word `dtoh_sync_copy` of the device-resident
-            // displacement-trip flag. The flag was set by the per-step
-            // displacement-check kernel queued at the end of every
-            // captured force evaluation; a non-zero value means at
-            // least one captured step since the last rebuild observed
-            // an atom whose minimum-image displacement exceeded
-            // `r_skin / 2`.
-            let tripped = self.displacement_check(sim_box, buffers, timings)?;
-            if tripped {
+        if !n_cells_changed && !rebuild_required {
+            // rq-1f38d78a rq-67a09135 rq-2dda3169
+            // Single-word `dtoh_sync_copy` of the combined status word —
+            // the only device-to-host transfer the neighbour path performs
+            // per batch. It surfaces the displacement (bit 0), high-water
+            // (bits 1-2), and overflow (bits 3-4) signals together; the
+            // rebuild itself copies nothing.
+            let status = self.read_neighbor_status()?;
+            // Overflow: a build dropped within-`r_search` entries, so the
+            // no-silent-drop guarantee is violated. Halt.
+            if (status & STATUS_TILES_OVERFLOW) != 0 {
+                return Err(NeighborListError::PackedNeighborOverflow {
+                    buffer: "interacting_tiles",
+                });
+            }
+            if (status & STATUS_SINGLE_PAIRS_OVERFLOW) != 0 {
+                return Err(NeighborListError::PackedNeighborOverflow {
+                    buffer: "single_pair_atoms",
+                });
+            }
+            // High-water: the build came within `tile_pair_fill_threshold`
+            // of capacity while dropping nothing. Grow geometrically before
+            // the rebuild so the resized buffers are populated this call.
+            if (status & STATUS_TILES_HIGH_WATER) != 0 {
+                if let Some(p) = self.packed.as_mut() {
+                    p.grow_tiles(&self.device).map_err(NeighborListError::Gpu)?;
+                    grew = true;
+                }
+                rebuild_required = true;
+            }
+            if (status & STATUS_SINGLE_PAIRS_HIGH_WATER) != 0 {
+                if let Some(p) = self.packed.as_mut() {
+                    p.grow_single_pairs(&self.device)
+                        .map_err(NeighborListError::Gpu)?;
+                    grew = true;
+                }
+                rebuild_required = true;
+            }
+            if (status & STATUS_DISPLACEMENT_TRIPPED) != 0 {
                 rebuild_required = true;
             }
         }
@@ -1248,7 +1371,7 @@ impl NeighborListState {
             let reallocated = self.rebuild(sim_box, buffers, timings)?;
             return Ok(PreStepOutcome {
                 rebuilt: true,
-                reallocated,
+                reallocated: reallocated || grew,
             });
         }
         Ok(PreStepOutcome::default())
@@ -1354,12 +1477,16 @@ pub struct NeighborKernels {
     pub prefix_scan_local_blocks: CudaFunction,
     pub prefix_scan_apply_block_totals: CudaFunction,
     pub prefix_scan_finalize_offsets: CudaFunction,
+    // rq-67a09135
+    pub prefix_scan_finalize_offsets_dev: CudaFunction,
     pub scatter_atoms_into_cells: CudaFunction,
     pub sort_cells_by_particle_id: CudaFunction,
     pub scatter_positions_to_tile_order: CudaFunction,
     pub fill_tile_position_padding: CudaFunction,
     pub compute_block_bbox: CudaFunction,
     pub find_blocks_with_interactions: CudaFunction,
+    // rq-67a09135
+    pub set_neighbor_status_bits: CudaFunction,
     pub finalize_packed_forces: CudaFunction,
     pub histogram_entries_by_iblock: CudaFunction,
     pub scatter_entries_by_iblock: CudaFunction,
@@ -1378,12 +1505,14 @@ impl NeighborKernels {
                 "prefix_scan_local_blocks",
                 "prefix_scan_apply_block_totals",
                 "prefix_scan_finalize_offsets",
+                "prefix_scan_finalize_offsets_dev",
                 "scatter_atoms_into_cells",
                 "sort_cells_by_particle_id",
                 "scatter_positions_to_tile_order",
                 "fill_tile_position_padding",
                 "compute_block_bbox",
                 "find_blocks_with_interactions",
+                "set_neighbor_status_bits",
                 "finalize_packed_forces",
                 "histogram_entries_by_iblock",
                 "scatter_entries_by_iblock",
@@ -1417,6 +1546,11 @@ impl NeighborKernels {
                 "neighbor",
                 "prefix_scan_finalize_offsets",
             )?,
+            prefix_scan_finalize_offsets_dev: get_func(
+                device,
+                "neighbor",
+                "prefix_scan_finalize_offsets_dev",
+            )?,
             scatter_atoms_into_cells: get_func(device, "neighbor", "scatter_atoms_into_cells")?,
             sort_cells_by_particle_id: get_func(device, "neighbor", "sort_cells_by_particle_id")?,
             scatter_positions_to_tile_order: get_func(
@@ -1434,6 +1568,11 @@ impl NeighborKernels {
                 device,
                 "neighbor",
                 "find_blocks_with_interactions",
+            )?,
+            set_neighbor_status_bits: get_func(
+                device,
+                "neighbor",
+                "set_neighbor_status_bits",
             )?,
             finalize_packed_forces: get_func(device, "neighbor", "finalize_packed_forces")?,
             histogram_entries_by_iblock: get_func(

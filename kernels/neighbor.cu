@@ -52,7 +52,7 @@ extern "C" __global__ void neighbor_displacement_check_flag(
     const Real *reference_x, const Real *reference_y, const Real *reference_z,
     const Real *lattice,
     Real threshold_sq,
-    unsigned int *disp_rebuild_flag,
+    unsigned int *neighbor_status,
     unsigned int n)
 {
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
@@ -68,7 +68,9 @@ extern "C" __global__ void neighbor_displacement_check_flag(
   triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
   Real d2 = dx * dx + dy * dy + dz * dz;
   if (d2 > threshold_sq) {
-    atomicOr(disp_rebuild_flag, 1u);
+    // Bit 0 of the shared status word; bits 1-4 are owned by the
+    // packed-neighbour construction (set_neighbor_status_bits).
+    atomicOr(neighbor_status, 1u);
   }
 }
 
@@ -348,6 +350,21 @@ extern "C" __global__ void prefix_scan_finalize_offsets(
   }
 }
 
+// rq-67a09135
+// Device-sourced variant of the sentinel write: `offsets[n] = count[0]`.
+// Used by the i-block offset scan so the trailing total comes from the
+// device-resident interaction count rather than a host-read value,
+// keeping a steady-state rebuild free of any device-to-host copy.
+extern "C" __global__ void prefix_scan_finalize_offsets_dev(
+    unsigned int *offsets,
+    unsigned int n,
+    const unsigned int *count)
+{
+  if (blockIdx.x == 0u && threadIdx.x == 0u) {
+    offsets[n] = count[0];
+  }
+}
+
 extern "C" __global__ void scatter_atoms_into_cells(
     const unsigned int *cell_indices,
     const unsigned int *cell_offsets,
@@ -576,8 +593,7 @@ extern "C" __global__ void find_blocks_with_interactions(
     unsigned int *interacting_tiles,
     unsigned int *interacting_atoms,
     unsigned int *single_pair_atoms,
-    unsigned int *interaction_count,
-    unsigned int *overflow_flag)
+    unsigned int *interaction_count)
 {
   __shared__ Real warp_ix[PACKED_NL_WARPS_PER_BLOCK][TILE_SIZE];
   __shared__ Real warp_iy[PACKED_NL_WARPS_PER_BLOCK][TILE_SIZE];
@@ -693,11 +709,12 @@ extern "C" __global__ void find_blocks_with_interactions(
             local_mask &= local_mask - 1u;
             unsigned int aid = warp_iid[warp_in_block][m];
             unsigned int slot = atomicAdd(&interaction_count[1], 1u);
+            // interaction_count[1] accumulates the true required count even
+            // past capacity; entries beyond capacity are not written. The
+            // host learns of the overflow from set_neighbor_status_bits.
             if (slot < max_single_pairs) {
               single_pair_atoms[2u * slot] = aid;
               single_pair_atoms[2u * slot + 1u] = jid;
-            } else {
-              atomicOr(overflow_flag, 2u);
             }
           }
         }
@@ -729,10 +746,6 @@ extern "C" __global__ void find_blocks_with_interactions(
             interacting_tiles[slot] = b;
           }
           interacting_atoms[slot * TILE_SIZE + lane] = warp_buffer[warp_in_block][lane];
-        } else {
-          if (lane == 0u) {
-            atomicOr(overflow_flag, 1u);
-          }
         }
         // Shift remaining buffer down by 32.
         unsigned int remaining = warp_buf_len[warp_in_block] - TILE_SIZE;
@@ -767,14 +780,47 @@ extern "C" __global__ void find_blocks_with_interactions(
         v = n_atoms; // sentinel
       }
       interacting_atoms[slot * TILE_SIZE + lane] = v;
-    } else {
-      if (lane == 0u) {
-        atomicOr(overflow_flag, 1u);
-      }
     }
   }
 }
 #undef MAX_BITS_FOR_PAIRS
+
+// rq-67a09135 rq-0acba2a0
+// Single designated thread compares the live interaction counts against
+// their capacities and high-water marks and sets bits 1-4 of the shared
+// `neighbor_status` word via atomicOr (bit 0 is owned by the
+// displacement-check kernel). Bits: 1 = tiles_high_water,
+// 2 = single_pairs_high_water, 3 = tiles_overflow,
+// 4 = single_pairs_overflow. Counts are read device-side; nothing is
+// copied to the host. See `rqm/forces/packed-neighbour-pair-force.md`
+// *Capacity*.
+extern "C" __global__ void set_neighbor_status_bits(
+    const unsigned int *interaction_count,
+    unsigned int tiles_capacity,
+    unsigned int single_pairs_capacity,
+    unsigned int tiles_high_water_mark,
+    unsigned int single_pairs_high_water_mark,
+    unsigned int *neighbor_status)
+{
+  if (blockIdx.x == 0u && threadIdx.x == 0u) {
+    unsigned int c0 = interaction_count[0];
+    unsigned int c1 = interaction_count[1];
+    unsigned int bits = 0u;
+    if (c0 > tiles_capacity) {
+      bits |= (1u << 3);
+    } else if (c0 > tiles_high_water_mark) {
+      bits |= (1u << 1);
+    }
+    if (c1 > single_pairs_capacity) {
+      bits |= (1u << 4);
+    } else if (c1 > single_pairs_high_water_mark) {
+      bits |= (1u << 2);
+    }
+    if (bits != 0u) {
+      atomicOr(neighbor_status, bits);
+    }
+  }
+}
 
 // Histogram entries by i-block. For each entry e in 0..entry_count,
 // reads interacting_tiles[e] and increments the corresponding

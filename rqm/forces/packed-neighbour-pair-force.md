@@ -336,6 +336,14 @@ produced `sorted_particle_ids`:
    `MAX_BITS_FOR_PAIRS` is `3` (compile-time constant in
    `kernels/neighbor.cu`).
 
+   As its final action the kernel writes the live counts to
+   `interaction_count[0]` and `interaction_count[1]` on the device and,
+   from a single designated thread, sets the `*_high_water` and
+   `*_overflow` bits of `neighbor_status` by comparing each count
+   against its capacity and high-water mark (see *Capacity*). The
+   counts and status are left device-resident; the kernel returns no
+   value to the host.
+
 The kernel observes a `force_rebuild` flag from the displacement
 check (see *Per-Step Pipeline*) and returns immediately if no
 rebuild is needed.
@@ -356,48 +364,102 @@ mechanism).
 - `single_pairs_capacity: u32` — current allocated capacity of
   `single_pair_atoms` measured in pairs (the `CudaSlice<u32>` has
   `2 · single_pairs_capacity` slots).
-- `tile_pair_growth_factor: f64` — multiplier applied on overflow.
-  Must be greater than 1.0. Default 1.5.
+- `tile_pair_growth_factor: f64` — geometric multiplier applied to
+  a capacity when it is grown. Greater than 1.0. Default 1.5.
+- `tile_pair_fill_threshold: f64` — fraction of a capacity at which
+  a build is treated as near-full and the capacity is grown ahead of
+  any dropped entry. In the open interval `(0, 1)`. Default 0.8.
 
-The construction kernel observes both capacities and writes
-overflow flags to a small status buffer when a flush would exceed
-capacity. The host reads the status after the kernel completes; if
-either overflowed, the host grows the respective buffer to
-`required * tile_pair_growth_factor` and re-runs the construction
-from step 6. Steps 1–5 are not repeated.
+Capacities are sized to the *actual* interaction count, never to the
+`O(n_blocks²)` all-pairs upper bound. For a cutoff system the live
+entry count is `O(N)` — proportional to the number of interacting
+atom pairs, not to `n_blocks²`. The initial seed is `O(N)`, a small
+multiple of `n_blocks`, clamped down to the all-pairs reference
+`n_blocks²` for tiny systems. There is no configuration knob for the
+initial capacity; the probe rebuild (below) determines it.
 
-The buffers are sized to the *actual* interaction count, never to
-the `O(n_blocks²)` all-pairs upper bound. At `NeighborListState`
-construction the buffers are allocated at a small seed length; the
-first rebuild — a probe rebuild the runner performs before any
-CUDA-graph capture (see `cuda-graphs.md` *Capture Lifecycle*) —
-grows them to that build's true count × `tile_pair_growth_factor`.
-For a cutoff system this is `O(N)`: the live entry count is
-proportional to the number of interacting atom pairs, not to
-`n_blocks²`. There is no configuration knob for the initial
-capacity; the probe rebuild always determines it.
+**Device-resident counts.** A steady-state rebuild copies no count
+to the host. The construction kernel writes the live counts to the
+two-element device buffer `interaction_count` (`[0]` = packed-tile
+entries, `[1]` = single pairs). Every downstream consumer launches a
+grid sized by a host-known capacity and reads the live count from
+`interaction_count` on the device:
 
-Growth is permitted at *any* rebuild, including a rebuild that runs
-at a batch boundary inside a CUDA-graph-captured phase. When a
-rebuild grows (and therefore reallocates) `interacting_tiles`,
-`interacting_atoms`, or `single_pair_atoms`, the rebuild reports the
-reallocation through its `pre_step` outcome (see
-`forces/neighbor-list.md` *Displacement Check*). The runner responds
-by re-capturing the phase graph so the captured nodes record the new
-device pointers and the single-pair launch's new grid dimensions
-(see `cuda-graphs.md` *Neighbor-List Pre-Step Decomposition*). A
-captured graph's buffer pointers and launch dimensions must be
-stable only for the lifetime of one graph instance, not for the
-whole phase — the buffer-sizing strategy is therefore decoupled from
-the capture lifetime.
+- `histogram_entries_by_iblock`, `scatter_entries_by_iblock`, and the
+  i-block prefix scan launch over `interacting_tiles_capacity` (and
+  `n_blocks`); threads past `interaction_count[0]` exit early.
+- The i-block prefix scan's trailing offset sentinel
+  `iblock_offset[n_blocks]` is written by a device thread that reads
+  `interaction_count[0]`, not from a host value.
+- The packed-neighbour force pass launches over `n_blocks`; the
+  single-pair force pass launches over `single_pairs_capacity` and
+  reads `interaction_count[1]` on the device (see *Single-Pair Pass*).
 
-The initial seed is `O(N)` — a small multiple of `n_blocks`, clamped
-down to the all-pairs reference `n_blocks²` for tiny systems where the
-density heuristic would otherwise exceed it. Growth on overflow is
-driven by the build's deterministic interaction count: the buffers
-grow to `count × tile_pair_growth_factor` and the construction retries
-until the build fits, converging after one or two retries. No
-`O(n_blocks²)` capacity is ever pre-allocated.
+**Status word.** `CellListData` carries the single-`u32` device
+buffer `neighbor_status` (see `neighbor-list.md` *Displacement Check*)
+whose bits are:
+
+| Bit | Name | Writer |
+|---|---|---|
+| 0 | `displacement_tripped` | displacement-check kernel, every step |
+| 1 | `tiles_high_water` | construction kernel |
+| 2 | `single_pairs_high_water` | construction kernel |
+| 3 | `tiles_overflow` | construction kernel |
+| 4 | `single_pairs_overflow` | construction kernel |
+
+After the construction sweep, a single device thread compares each
+live count `interaction_count[c]` against the capacity `capacity_c`
+and sets bits via `atomicOr(neighbor_status, …)`:
+
+- `interaction_count[c] > floor(capacity_c · tile_pair_fill_threshold)`
+  sets the matching `*_high_water` bit. The build is **complete** — no
+  entry was dropped — but the capacity is nearly full.
+- A flush that would have exceeded `capacity_c` (an entry would be
+  dropped) sets the matching `*_overflow` bit. The construction stops
+  writing that buffer past capacity while `interaction_count[c]` keeps
+  accumulating the true required count via `atomicAdd`.
+
+**Host response.** The host reads `neighbor_status` exactly once per
+batch boundary, folded into the displacement-check read it issues
+anyway (see `neighbor-list.md` *Rebuild Policy*); a steady-state
+rebuild therefore issues **no** device-to-host transfer of its own.
+The host acts on the bits as follows:
+
+- **High-water, no overflow:** grow each flagged capacity geometrically
+  to `ceil(capacity_c · tile_pair_growth_factor)`, reallocate the
+  buffer, and run a fresh rebuild into the resized buffers so the
+  populated list matches the new allocation. `pre_step` reports
+  `reallocated = true` and the runner recaptures the phase graph (see
+  `cuda-graphs.md` *Neighbor-List Pre-Step Decomposition*). Because
+  high-water fires below capacity, the build that raised it dropped
+  nothing, so the in-flight list stays correct until the grow-and-
+  rebuild completes. Geometric growth is count-free — the host never
+  reads the count — and converges in `O(log)` steps for any density.
+- **Overflow:** a build dropped within-`r_search` entries, violating
+  the no-silent-drop guarantee (`architecture.md`). `pre_step` returns
+  `Err(NeighborListError::PackedNeighborOverflow { buffer })`, halting
+  the run. With `tile_pair_fill_threshold < 1` and
+  `tile_pair_growth_factor > 1`, and atom motion between rebuilds
+  bounded by `r_skin / 2`, the per-rebuild count cannot climb from
+  below the high-water mark to past capacity between two consecutive
+  rebuilds, so this state is unreachable in a well-behaved run and
+  exists only as a guard against pathology.
+
+Growth is permitted at *any* rebuild, including one that runs at a
+batch boundary inside a CUDA-graph-captured phase. A captured graph's
+buffer pointers and launch dimensions must be stable only for the
+lifetime of one graph instance, not for the whole phase, so the
+buffer-sizing strategy is decoupled from the capture lifetime.
+
+**Probe rebuild.** The first rebuild of a phase runs before CUDA-graph
+capture (see `cuda-graphs.md` *Capture Lifecycle*). It reads
+`neighbor_status` synchronously and grows-and-retries — growing each
+flagged capacity geometrically and re-running the construction from
+step 6 (steps 1–5 are not repeated) — until neither a high-water nor
+an overflow bit is set, sizing the initial capacities with headroom
+below `tile_pair_fill_threshold`. The probe runs once per phase and is
+not part of the captured replay loop, so its blocking read does not
+appear in the steady-state per-step cost.
 
 ## Fixed-Point Force Buffers <!-- rq-a2f419db -->
 
@@ -830,14 +892,18 @@ The `[neighbor_list]` section of the simulation config carries:
   `NeighborListConfig`.
 - `r_skin: f64` (length, in active unit system) — unchanged from
   the existing `NeighborListConfig`.
-- `tile_pair_growth_factor: f64` — multiplier applied to the
-  `interacting_tiles` and `single_pair_atoms` capacities on
-  overflow. Must be greater than 1.0. Default 1.5.
+- `tile_pair_growth_factor: f64` — geometric multiplier applied to
+  the `interacting_tiles` and `single_pair_atoms` capacities when one
+  is grown. Must be greater than 1.0. Default 1.5.
+- `tile_pair_fill_threshold: f64` — fraction of a capacity at which a
+  build is treated as near-full and the capacity is grown ahead of any
+  dropped entry (see *Capacity*). Must lie in the open interval
+  `(0, 1)`. Default 0.8.
 
-The `interacting_tiles` and `single_pair_atoms` capacities are not
-configurable. They are sized automatically from the first rebuild's
-true interaction count (see *Capacity*) and grown on demand, so
-there is no initial-capacity field to tune.
+The `interacting_tiles` and `single_pair_atoms` capacities themselves
+are not configurable. They are sized automatically from the first
+rebuild's true interaction count (see *Capacity*) and grown on demand,
+so there is no initial-capacity field to tune.
 
 The field `max_neighbors` is **not** part of `NeighborListConfig`.
 Specifying it in the configuration file is a load-time error with
@@ -910,9 +976,18 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   bonded and angle slots, and for slow-class slots not using
   packed-neighbour).
 - `NeighborListConfig` carries the fields documented under <!-- rq-3fbb8dea -->
-  *Configuration*. The `max_neighbors` field is absent; the
-  TOML parser reports an explicit error if `max_neighbors`
-  appears in the config text.
+  *Configuration*, including `tile_pair_growth_factor` (default 1.5,
+  `> 1.0`) and `tile_pair_fill_threshold` (default 0.8, in `(0, 1)`).
+  The `max_neighbors` field is absent; the TOML parser reports an
+  explicit error if `max_neighbors` appears in the config text.
+- `NeighborListError` carries the variant <!-- rq-2dda3169 -->
+  `PackedNeighborOverflow { buffer: &'static str }` — returned by
+  `NeighborListState::pre_step` when a steady-state build set a
+  `*_overflow` bit of `neighbor_status`, meaning a packed-neighbour
+  buffer would have dropped within-`r_search` entries. `buffer` names
+  the buffer that overflowed (`"interacting_tiles"` or
+  `"single_pair_atoms"`). This is the only neighbour-overflow error;
+  there is no per-particle neighbour cap to exceed.
 
 ### CUDA Kernels <!-- rq-2647cb7e -->
 
@@ -934,11 +1009,17 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   sorted_block_centre, sorted_block_bbox, tile_sorted_positions_*,
   interacting_tiles, interacting_atoms, single_pair_atoms,
   interaction_count, interacting_tiles_capacity,
-  single_pairs_capacity, r_search_sq, lattice,
-  force_rebuild_flag, n_blocks, n_atoms, overflow_flag)` — main
+  single_pairs_capacity, tiles_high_water_mark,
+  single_pairs_high_water_mark, r_search_sq, lattice,
+  force_rebuild_flag, n_blocks, n_atoms, neighbor_status)` — main
   construction kernel. One warp per i-block iterating through
-  `sorted_blocks`. The `MAX_BITS_FOR_PAIRS = 3` threshold is a
-  compile-time `#define`.
+  `sorted_blocks`. Writes the live counts to `interaction_count` and,
+  from a single designated thread, sets the `*_high_water` and
+  `*_overflow` bits of `neighbor_status` (see *Capacity*); it returns
+  no count or status to the host. The `*_high_water_mark` arguments are
+  `floor(capacity · tile_pair_fill_threshold)`, computed on the host
+  from the current capacities. The `MAX_BITS_FOR_PAIRS = 3` threshold
+  is a compile-time `#define`.
 - `heddle_jit_composed_pair_force_f` / <!-- rq-42e29605 -->
   `heddle_jit_composed_pair_force_fev` — JIT-composed packed-
   neighbour entry points; argument list documented under
@@ -977,13 +1058,20 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   (compute keys, radix sort, sort_block_data) as a single
   callable.
 - `crate::gpu::find_blocks_with_interactions(kernels, …) -> <!-- rq-68a9602b -->
-  Result<u32, GpuError>` — returns the post-build live count of
-  `interacting_tiles`, or an overflow error indicating which
-  capacity to grow.
+  Result<(), GpuError>` — launches the construction kernel. The live
+  counts stay in `interaction_count` and the near-full / overflow
+  state stays in `neighbor_status`, both on the device; the wrapper
+  copies nothing to the host. The host learns of high-water or overflow
+  only through the once-per-batch `neighbor_status` read (see
+  `neighbor-list.md` *Rebuild Policy*).
 - `crate::gpu::finalize_fast_class_forces(kernels, fp_buffers, <!-- rq-5a7f78c4 -->
   particle_buffers, n) -> Result<(), GpuError>`.
-- `NeighborListState::rebuild` (existing) extends to call the <!-- rq-4896a257 -->
-  construction pipeline above instead of `neighbor_list_build`.
+- `NeighborListState::rebuild` (existing) calls the construction <!-- rq-4896a257 -->
+  pipeline above instead of `neighbor_list_build`. It zeros
+  `neighbor_status` before the cell-list and construction kernels run,
+  copies no interaction count to the host, and reports buffer growth
+  through `PreStepOutcome.reallocated`. A steady-state (non-probe)
+  rebuild issues no device-to-host transfer.
 
 ### Helper Functions in the JIT-Composed Source <!-- rq-49f2304c -->
 
@@ -1168,29 +1256,73 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then `MAX_BITS_FOR_PAIRS` resolves to the literal 3
 
   @rq-7646dd13
-  Scenario: interacting_tiles overflow grows the buffer and re-runs construction
-    Given interacting_tiles_capacity = 100
-    And a system that produces 150 packed entries
-    When find_blocks_with_interactions runs
-    Then the overflow_flag indicates "interacting_tiles overflow"
-    And NeighborListState::rebuild reallocates the buffer to >= 150 * 1.5
+  Scenario: Probe rebuild grows interacting_tiles on a near-full build
+    Given the phase has not yet been CUDA-graph captured
+    And interacting_tiles_capacity = 100 with tile_pair_fill_threshold = 0.8
+    And a system that produces 90 packed entries
+    When the probe rebuild runs find_blocks_with_interactions
+    Then the tiles_high_water bit of neighbor_status is set
+    And no entry was dropped from the 90-entry build
+    And the probe reallocates interacting_tiles to ceil(100 * 1.5)
     And the construction is re-run from find_blocks_with_interactions
 
   @rq-e7839cee
-  Scenario: single_pair_atoms overflow grows the buffer and re-runs construction
-    Given single_pairs_capacity = 50
-    And a system that produces 80 single-pair entries
-    When find_blocks_with_interactions runs
-    Then the overflow_flag indicates "single_pair_atoms overflow"
-    And NeighborListState::rebuild reallocates single_pair_atoms to >= 2 * 80 * 1.5 u32 slots
+  Scenario: Probe rebuild grows single_pair_atoms on a near-full build
+    Given the phase has not yet been CUDA-graph captured
+    And single_pairs_capacity = 50 with tile_pair_fill_threshold = 0.8
+    And a system that produces 45 single-pair entries
+    When the probe rebuild runs find_blocks_with_interactions
+    Then the single_pairs_high_water bit of neighbor_status is set
+    And the probe reallocates single_pair_atoms to ceil(50 * 1.5) pairs
     And the construction is re-run from find_blocks_with_interactions
 
   @rq-8253d3c4
-  Scenario: interaction_count is reset at the start of every rebuild
+  Scenario: interaction_count and neighbor_status are reset at the start of every rebuild
     Given a prior rebuild left interaction_count = [50, 12]
+      and neighbor_status with the tiles_high_water bit set
     When NeighborListState::rebuild begins a new rebuild
-    Then interaction_count is reset to [0, 0] before
+    Then interaction_count is reset to [0, 0]
+      and neighbor_status is reset to 0 before
       find_blocks_with_interactions launches
+
+  @rq-b8504fa1
+  Scenario: A steady-state rebuild copies no count or status to the host
+    Given a CUDA-graph-captured phase past its pre-capture probe rebuild
+    And a batch boundary on which the displacement bit triggers a rebuild
+    When NeighborListState::rebuild runs the construction pipeline
+    Then no dtoh_sync_copy of interaction_count is issued
+    And no dtoh_sync_copy reads find_blocks_with_interactions output other
+      than the single combined neighbor_status word read by the batch loop
+
+  @rq-e1258ceb
+  Scenario: Downstream kernels launch over capacity and read the live count from the device
+    Given a build that produced interaction_count[0] = C tile entries
+      into a buffer of capacity interacting_tiles_capacity = K with C < K
+    When histogram_entries_by_iblock, the i-block prefix scan, and
+      scatter_entries_by_iblock run
+    Then each is launched with a grid sized by K (and n_blocks), not by C
+    And threads whose entry index is >= interaction_count[0] exit early
+    And iblock_offset[n_blocks] equals interaction_count[0] without any host
+      value being supplied
+
+  @rq-88175d6f
+  Scenario: High-water at a batch boundary grows geometrically and recaptures
+    Given a CUDA-graph-captured phase under a densifying barostat
+    And a batch-boundary build that sets the tiles_high_water bit without
+      setting any overflow bit
+    When the batch loop reads neighbor_status
+    Then interacting_tiles_capacity grows to ceil(capacity * tile_pair_growth_factor)
+    And a fresh rebuild populates the resized buffers
+    And pre_step reports reallocated = true
+    And the runner recaptures the phase graph
+
+  @rq-a5bd8157
+  Scenario: An overflow bit halts the run rather than dropping interactions
+    Given a batch-boundary build whose true count exceeds capacity so that an
+      entry would be dropped
+    When the batch loop reads neighbor_status and observes a tiles_overflow bit
+    Then pre_step returns Err(NeighborListError::PackedNeighborOverflow { buffer: "interacting_tiles" })
+    And the run halts without presenting forces from the incomplete list as final
 
   # --- Force kernel ---
 
@@ -1321,13 +1453,14 @@ Feature: Packed-Neighbour Pair-Force Architecture
       must be greater than 1.0
 
   @rq-ea8640f5
-  Scenario: Probe rebuild sizes capacity to the true interaction count
+  Scenario: Probe rebuild sizes capacity with headroom below the fill threshold
     Given a SPC water benchmark with 24,576 atoms
     When NeighborListState::new_cell_list constructs and the runner runs the
       pre-capture probe rebuild
     Then interacting_tiles_capacity is at least the count produced by that
-      rebuild
-    And interacting_tiles_capacity is at most that count times
+      rebuild divided by tile_pair_fill_threshold
+    And the tiles_high_water bit of neighbor_status is clear after the probe
+    And interacting_tiles_capacity does not exceed that lower bound times
       tile_pair_growth_factor
 
   @rq-8d7e376d
@@ -1349,10 +1482,11 @@ Feature: Packed-Neighbour Pair-Force Architecture
   @rq-8b6d0c41
   Scenario: A rebuild grows the buffers when the interaction count rises
     Given a phase whose density increases under a barostat
-    And a rebuild whose true entry count exceeds the current
-      interacting_tiles_capacity
-    When NeighborListState::rebuild runs
-    Then interacting_tiles is reallocated to required * tile_pair_growth_factor
+    And a build whose entry count first crosses
+      floor(interacting_tiles_capacity * tile_pair_fill_threshold)
+    When the batch loop reads the tiles_high_water bit of neighbor_status
+    Then interacting_tiles is reallocated to ceil(interacting_tiles_capacity * tile_pair_growth_factor)
+    And a fresh rebuild populates the resized buffer
     And the rebuild's pre_step outcome reports reallocated = true
 
   @rq-25f8dd1d

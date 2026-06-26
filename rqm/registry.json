@@ -255,13 +255,6 @@
     "title": "lan_ou_step on empty state is a no-op",
     "type": "scenario"
   },
-  "rq-0181787c": {
-    "decl": "Scenario: Build kernel signals overflow when an atom exceeds max_neighbors",
-    "file": "forces/neighbor-list",
-    "refs": [],
-    "title": "Build kernel signals overflow when an atom exceeds max_neighbors",
-    "type": "scenario"
-  },
   "rq-01d1bb68": {
     "decl": "Scenario: posq interleave preserves per-atom (x, y, z, charge) grouping",
     "file": "particle-state",
@@ -2853,7 +2846,12 @@
   "rq-169e1d84": {
     "decl": "- `find_blocks_with_interactions(sorted_blocks,",
     "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "find_blocks_with_interactions",
     "type": "api-item"
   },
@@ -3643,7 +3641,7 @@
     "type": "section"
   },
   "rq-1ca7df49": {
-    "decl": "Scenario: pre_step reports reallocation when a rebuild grows a buffer",
+    "decl": "Scenario: pre_step reports reallocation when a high-water build grows a buffer",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -3651,7 +3649,7 @@
         "kind": "code"
       }
     ],
-    "title": "pre_step reports reallocation when a rebuild grows a buffer",
+    "title": "pre_step reports reallocation when a high-water build grows a buffer",
     "type": "scenario"
   },
   "rq-1ca90a29": {
@@ -3703,7 +3701,12 @@
   "rq-1d366b88": {
     "decl": "- `RunStepOptions` — per-call options for `run_step`, bundling the four",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "RunStepOptions",
     "type": "api-item"
   },
@@ -4423,10 +4426,10 @@
     "type": "scenario"
   },
   "rq-2303ee2e": {
-    "decl": "Scenario: Per-cell sort yields ascending partner indices inside every cell",
+    "decl": "Scenario: Per-cell sort yields ascending particle indices inside every cell",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Per-cell sort yields ascending partner indices inside every cell",
+    "title": "Per-cell sort yields ascending particle indices inside every cell",
     "type": "scenario"
   },
   "rq-2315b501": {
@@ -5471,13 +5474,6 @@
     "title": "Construct with matching arrays and explicit unique IDs",
     "type": "scenario"
   },
-  "rq-2bc559ec": {
-    "decl": "Scenario: Each atom's neighbor list is emitted in cell-sweep order",
-    "file": "forces/neighbor-list",
-    "refs": [],
-    "title": "Each atom's neighbor list is emitted in cell-sweep order",
-    "type": "scenario"
-  },
   "rq-2be0d376": {
     "decl": "## Physical Constants Source",
     "file": "io/unit-system",
@@ -5747,6 +5743,22 @@
       }
     ],
     "title": "RdfBuilder",
+    "type": "api-item"
+  },
+  "rq-2dda3169": {
+    "decl": "- `NeighborListError` carries the variant",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListError",
     "type": "api-item"
   },
   "rq-2e028ba6": {
@@ -8381,7 +8393,7 @@
     "type": "scenario"
   },
   "rq-4896a257": {
-    "decl": "- `NeighborListState::rebuild` (existing) extends to call the",
+    "decl": "- `NeighborListState::rebuild` (existing) calls the construction",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
     "title": "NeighborListState",
@@ -11699,6 +11711,10 @@
         "kind": "code"
       },
       {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/runner.rs",
         "kind": "code"
       }
@@ -13343,10 +13359,10 @@
     "type": "scenario"
   },
   "rq-7646dd13": {
-    "decl": "Scenario: interacting_tiles overflow grows the buffer and re-runs construction",
+    "decl": "Scenario: Probe rebuild grows interacting_tiles on a near-full build",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "interacting_tiles overflow grows the buffer and re-runs construction",
+    "title": "Probe rebuild grows interacting_tiles on a near-full build",
     "type": "scenario"
   },
   "rq-765c96c5": {
@@ -14284,7 +14300,7 @@
     "type": "section"
   },
   "rq-7db97132": {
-    "decl": "- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
+    "decl": "- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<bool, NeighborListError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -14645,6 +14661,18 @@
     "title": "Rebuild without buffer reallocation does not invalidate the graph",
     "type": "scenario"
   },
+  "rq-8142fff7": {
+    "decl": "Scenario: An overflow bit makes pre_step halt with PackedNeighborOverflow",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An overflow bit makes pre_step halt with PackedNeighborOverflow",
+    "type": "scenario"
+  },
   "rq-81659783": {
     "decl": "## Feature API",
     "file": "forces/topology",
@@ -14732,10 +14760,10 @@
     "type": "scenario"
   },
   "rq-8253d3c4": {
-    "decl": "Scenario: interaction_count is reset at the start of every rebuild",
+    "decl": "Scenario: interaction_count and neighbor_status are reset at the start of every rebuild",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "interaction_count is reset at the start of every rebuild",
+    "title": "interaction_count and neighbor_status are reset at the start of every rebuild",
     "type": "scenario"
   },
   "rq-8259c9ca": {
@@ -15308,6 +15336,18 @@
     "title": "Spread produces zero charge density at a grid point with no particle support",
     "type": "scenario"
   },
+  "rq-88175d6f": {
+    "decl": "Scenario: High-water at a batch boundary grows geometrically and recaptures",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "High-water at a batch boundary grows geometrically and recaptures",
+    "type": "scenario"
+  },
   "rq-881bb997": {
     "decl": "Scenario: SD with a constraint slot but no projection support is rejected at config load",
     "file": "minimization/steepest-descent",
@@ -15342,7 +15382,7 @@
     "type": "scenario"
   },
   "rq-884b5cd6": {
-    "decl": "- `neighbor_displacement_check_flag(particle_buffers, reference_x, reference_y, reference_z, sim_box, threshold_sq, disp_rebuild_flag) -> Result<(), GpuError>`",
+    "decl": "- `neighbor_displacement_check_flag(particle_buffers, reference_x, reference_y, reference_z, sim_box, threshold_sq, neighbor_status) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -18197,18 +18237,6 @@
     "title": "VelocityVerletState with lossless=false accepts constraint hooks at runtime",
     "type": "scenario"
   },
-  "rq-a1262872": {
-    "decl": "- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>`",
-    "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "neighbor_list_build",
-    "type": "api-item"
-  },
   "rq-a16c37bd": {
     "decl": "Scenario: Log file header includes nhc_conserved when NHC is the thermostat",
     "file": "integration/nose-hoover-chain",
@@ -18458,6 +18486,18 @@
     "title": "Accept the lower boundary -L/2 along an axis (orthorhombic)",
     "type": "scenario"
   },
+  "rq-a39234ba": {
+    "decl": "Scenario: A steady-state rebuild copies no interaction count to the host",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A steady-state rebuild copies no interaction count to the host",
+    "type": "scenario"
+  },
   "rq-a3b6838f": {
     "decl": "Scenario: Reject non-positive tau",
     "file": "integration/c-rescale-barostat",
@@ -18674,6 +18714,18 @@
     "file": "forces/framework",
     "refs": [],
     "title": "combine_class_totals sums fast + slow into ParticleBuffers",
+    "type": "scenario"
+  },
+  "rq-a5bd8157": {
+    "decl": "Scenario: An overflow bit halts the run rather than dropping interactions",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An overflow bit halts the run rather than dropping interactions",
     "type": "scenario"
   },
   "rq-a5c86770": {
@@ -20039,7 +20091,7 @@
     "type": "scenario"
   },
   "rq-b1f33ea4": {
-    "decl": "Scenario: neighbor_list cell-list with explicit parameters is accepted",
+    "decl": "Scenario: neighbor_list cell-list with explicit r_skin is accepted",
     "file": "io/config-schema",
     "refs": [
       {
@@ -20047,7 +20099,7 @@
         "kind": "code"
       }
     ],
-    "title": "neighbor_list cell-list with explicit parameters is accepted",
+    "title": "neighbor_list cell-list with explicit r_skin is accepted",
     "type": "scenario"
   },
   "rq-b22e871e": {
@@ -20391,13 +20443,6 @@
     "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
-  "rq-b5289acc": {
-    "decl": "Scenario: Neighbour list is not globally partner-ID sorted across cells",
-    "file": "forces/neighbor-list",
-    "refs": [],
-    "title": "Neighbour list is not globally partner-ID sorted across cells",
-    "type": "scenario"
-  },
   "rq-b54d8111": {
     "decl": "Scenario: Lint reports filename-convention violations under the config stage",
     "file": "simulation-runner",
@@ -20716,6 +20761,18 @@
       }
     ],
     "title": "Frame Properties carries image:I:3 when include_images=true and include_velocities=false",
+    "type": "scenario"
+  },
+  "rq-b8504fa1": {
+    "decl": "Scenario: A steady-state rebuild copies no count or status to the host",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A steady-state rebuild copies no count or status to the host",
     "type": "scenario"
   },
   "rq-b850b5be": {
@@ -21868,7 +21925,7 @@
     "type": "section"
   },
   "rq-c49b2fe6": {
-    "decl": "- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>`",
+    "decl": "- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<bool, NeighborListError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -25058,6 +25115,13 @@
     "title": "Coulomb force decays toward zero just inside r_cut",
     "type": "scenario"
   },
+  "rq-e1258ceb": {
+    "decl": "Scenario: Downstream kernels launch over capacity and read the live count from the device",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Downstream kernels launch over capacity and read the live count from the device",
+    "type": "scenario"
+  },
   "rq-e12c2668": {
     "decl": "Scenario: Slot bind methods are invoked once each in canonical order",
     "file": "integration/jit-composed-post-force",
@@ -25714,10 +25778,10 @@
     "type": "scenario"
   },
   "rq-e643b070": {
-    "decl": "Scenario: neighbor_list cell-list mode omitting max_neighbors uses default 256",
+    "decl": "Scenario: neighbor_list cell-list mode rejects max_neighbors",
     "file": "io/config-schema",
     "refs": [],
-    "title": "neighbor_list cell-list mode omitting max_neighbors uses default 256",
+    "title": "neighbor_list cell-list mode rejects max_neighbors",
     "type": "scenario"
   },
   "rq-e6552df6": {
@@ -25811,10 +25875,10 @@
     "type": "scenario"
   },
   "rq-e7839cee": {
-    "decl": "Scenario: single_pair_atoms overflow grows the buffer and re-runs construction",
+    "decl": "Scenario: Probe rebuild grows single_pair_atoms on a near-full build",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "single_pair_atoms overflow grows the buffer and re-runs construction",
+    "title": "Probe rebuild grows single_pair_atoms on a near-full build",
     "type": "scenario"
   },
   "rq-e794b794": {
@@ -26220,7 +26284,7 @@
     "type": "scenario"
   },
   "rq-ea8640f5": {
-    "decl": "Scenario: Probe rebuild sizes capacity to the true interaction count",
+    "decl": "Scenario: Probe rebuild sizes capacity with headroom below the fill threshold",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -26228,7 +26292,7 @@
         "kind": "code"
       }
     ],
-    "title": "Probe rebuild sizes capacity to the true interaction count",
+    "title": "Probe rebuild sizes capacity with headroom below the fill threshold",
     "type": "scenario"
   },
   "rq-ea8ebebd": {
@@ -27906,6 +27970,18 @@
     "title": "BerendsenThermostat",
     "type": "api-item"
   },
+  "rq-f867ab96": {
+    "decl": "Scenario: A high-water bit forces a rebuild even when the displacement bit is clear",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A high-water bit forces a rebuild even when the displacement bit is clear",
+    "type": "scenario"
+  },
   "rq-f8a66553": {
     "decl": "Scenario: virial_factor[k] = G[k] · (1 - K² / (2 α²)) cell-by-cell",
     "file": "forces/spme",
@@ -28639,13 +28715,6 @@
     "refs": [],
     "title": "`rescale_positions`",
     "type": "section"
-  },
-  "rq-fedef74d": {
-    "decl": "Scenario: neighbor_list rejects zero max_neighbors",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "neighbor_list rejects zero max_neighbors",
-    "type": "scenario"
   },
   "rq-fee5b8e2": {
     "decl": "Scenario: compute_temperature uses k_B = 1 internally",

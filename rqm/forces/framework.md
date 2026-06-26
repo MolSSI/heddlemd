@@ -726,7 +726,7 @@ the additive identity. The rest of the pipeline runs normally.
   - `Timings(TimingsError)` — CUDA event recording failure.
   - `NeighborList(NeighborListError)` — surfaces failures from the
     cell-list pipeline (see `neighbor-list.md`), including the
-    `NeighborListOverflow` and `BoxTooSmallForCells` cases.
+    `PackedNeighborOverflow` and `BoxTooSmallForCells` cases.
   - `DuplicateLabel(&'static str)` — two slots constructed with the
     same `label()`. Reported from `ForceField::new`.
   - `DisplaceConflict { label: &'static str, by: Vec<&'static str> }`

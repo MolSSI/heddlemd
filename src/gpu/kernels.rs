@@ -846,7 +846,7 @@ pub fn spme_atom_sort(
         bin_atom_offsets,
         sort_scan_block_totals,
         m,
-        n,
+        PrefixScanSentinel::Host(n as u32),
     )?;
 
     // Stage 4: scatter atoms into their sorted slots using a per-bin
@@ -2054,13 +2054,25 @@ pub fn compute_cell_indices_and_histogram(
 //   4. writes the `cell_offsets[n_cells_total] = particle_count`
 //      sentinel.
 // Issues O(log(n_cells_total)) kernel launches.
+/// Source of the trailing sentinel slot `offsets[n]` written by the
+/// final phase of `prefix_scan_cell_counts`. The cell-list scan knows
+/// its grand total (`particle_count`) on the host; the i-block scan's
+/// total lives only in the device-resident `interaction_count`, so it
+/// is read on the device to keep a steady-state rebuild dtoh-free.
+///
+/// rq-67a09135
+pub enum PrefixScanSentinel<'a> {
+    Host(u32),
+    Device(&'a CudaSlice<u32>),
+}
+
 pub fn prefix_scan_cell_counts(
     kernels: &Kernels,
     cell_counts: &CudaSlice<u32>,
     cell_offsets: &mut CudaSlice<u32>,
     scan_block_totals: &mut [CudaSlice<u32>],
     n_cells_total: usize,
-    particle_count: usize,
+    sentinel: PrefixScanSentinel<'_>,
 ) -> Result<(), GpuError> {
     if n_cells_total == 0 {
         return Ok(());
@@ -2135,14 +2147,27 @@ pub fn prefix_scan_cell_counts(
     }
 
     // Phase 4: write the trailing cell_offsets[n_cells_total] sentinel.
-    {
-        let func = kernels.neighbor.prefix_scan_finalize_offsets.clone();
-        unsafe {
-            func.launch(
-                launch_config(1),
-                (&mut *cell_offsets, n_cells_total_u32, particle_count as u32),
-            )
-            .map_err(GpuError::from)?;
+    match sentinel {
+        PrefixScanSentinel::Host(total) => {
+            let func = kernels.neighbor.prefix_scan_finalize_offsets.clone();
+            unsafe {
+                func.launch(
+                    launch_config(1),
+                    (&mut *cell_offsets, n_cells_total_u32, total),
+                )
+                .map_err(GpuError::from)?;
+            }
+        }
+        // rq-67a09135
+        PrefixScanSentinel::Device(count) => {
+            let func = kernels.neighbor.prefix_scan_finalize_offsets_dev.clone();
+            unsafe {
+                func.launch(
+                    launch_config(1),
+                    (&mut *cell_offsets, n_cells_total_u32, count),
+                )
+                .map_err(GpuError::from)?;
+            }
         }
     }
     Ok(())
@@ -2309,7 +2334,6 @@ pub fn find_blocks_with_interactions(
     interacting_atoms: &mut CudaSlice<u32>,
     single_pair_atoms: &mut CudaSlice<u32>,
     interaction_count: &mut CudaSlice<u32>,
-    overflow_flag: &mut CudaSlice<u32>,
 ) -> Result<(), GpuError> {
     if n_blocks == 0 {
         return Ok(());
@@ -2338,7 +2362,41 @@ pub fn find_blocks_with_interactions(
                 &mut *interacting_atoms,
                 &mut *single_pair_atoms,
                 &mut *interaction_count,
-                &mut *overflow_flag,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-67a09135 rq-169e1d84
+/// Set bits 1-4 of `neighbor_status` (high-water / overflow) from the
+/// device-resident interaction counts. One thread; no host transfer.
+pub fn set_neighbor_status_bits(
+    kernels: &Kernels,
+    interaction_count: &CudaSlice<u32>,
+    tiles_capacity: u32,
+    single_pairs_capacity: u32,
+    tiles_high_water_mark: u32,
+    single_pairs_high_water_mark: u32,
+    neighbor_status: &mut CudaSlice<u32>,
+) -> Result<(), GpuError> {
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let func = kernels.neighbor.set_neighbor_status_bits.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                interaction_count,
+                tiles_capacity,
+                single_pairs_capacity,
+                tiles_high_water_mark,
+                single_pairs_high_water_mark,
+                &mut *neighbor_status,
             ),
         )
         .map_err(GpuError::from)?;

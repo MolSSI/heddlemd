@@ -176,7 +176,6 @@ constraints = [
 
 [neighbor_list]
 mode = "cell-list"
-max_neighbors = 256
 r_skin = 1.0e-10    # m  (defaults to 0.3 * cutoff when omitted)
 ```
 
@@ -856,25 +855,23 @@ for the algorithm.
 
 Fields accepted for `mode = "cell-list"`:
 
-- `max_neighbors: u64` — optional; defaults to `256`. Strictly
-  positive. Upper bound on the number of neighbours retained per
-  particle; a rebuild that finds more than this many neighbours for
-  some atom halts the simulation via
-  `RunnerError::ForceField(NeighborList(NeighborListOverflow))`. The
-  default suits typical liquid-density short-range simulations
-  (≤ ~200 neighbours per atom at cubic-LJ density and 2.5σ cutoff);
-  dense or long-cutoff systems must raise it.
 - `r_skin: f64` — skin distance in metres. Optional; defaults to
   `0.3 * cutoff` where `cutoff` is the maximum cutoff among
   `[[pair_interactions]]` entries. Strictly positive and finite.
 
-Fields accepted for `mode = "all-pairs"`: none. `max_neighbors` and
-`r_skin` are rejected as unknown fields in this mode.
+`max_neighbors` is **not** a valid field. The packed-neighbour
+pair-force architecture (see `forces/packed-neighbour-pair-force.md`)
+sizes its neighbour buffers to the actual interaction count plus a
+growth margin, so there is no per-particle neighbour cap to configure;
+supplying `max_neighbors` in the `[neighbor_list]` table is a load-time
+error.
+
+Fields accepted for `mode = "all-pairs"`: none. `r_skin` is rejected as
+an unknown field in this mode.
 
 Cross-validation:
 
 - `r_skin > 0` and finite.
-- `max_neighbors > 0`.
 - The simulation box's minimum perpendicular width satisfies
   `min_perpendicular_width >= 3 * (cutoff_max + r_skin)` where
   `cutoff_max` is the largest cutoff among `[[pair_interactions]]`
@@ -1177,8 +1174,8 @@ phase failures.
     present in the config, `None` otherwise. Mutually exclusive with
     `coulomb`.
   - `neighbor_list: NeighborListConfig` — defaults to
-    `NeighborListConfig::CellList { max_neighbors: 256, r_skin: 0.3 *
-    max_cutoff }` when the `[neighbor_list]` table is omitted from the
+    `NeighborListConfig::CellList { r_skin: 0.3 * max_cutoff }` when the
+    `[neighbor_list]` table is omitted from the
     config, where `max_cutoff` is the largest cutoff across
     `[[pair_interactions]]`, the `[coulomb]` table, and the `[spme]`
     table's `r_cut_real` (whichever are present).
@@ -1326,11 +1323,12 @@ phase failures.
   SPME real-space) to enumerate non-bonded pairs. Variants:
   - `AllPairs` — selected by `mode = "all-pairs"`. Carries no
     parameters; pair-force slots use the O(N²) kernel.
-  - `CellList { max_neighbors: u32, r_skin: f64 }` — selected by
-    `mode = "cell-list"` (and used as the default when the
-    `[neighbor_list]` table is omitted). `max_neighbors` is the
-    per-particle neighbor capacity; `r_skin` is the skin distance in
-    metres.
+  - `CellList { r_skin: f64 }` — selected by `mode = "cell-list"` (and
+    used as the default when the `[neighbor_list]` table is omitted).
+    `r_skin` is the skin distance in metres. There is no
+    `max_neighbors` field; the packed-neighbour buffers are sized to
+    the actual interaction count (see
+    `forces/packed-neighbour-pair-force.md`).
 
   See `forces/neighbor-list.md` for the runtime semantics of each
   variant.
@@ -2361,31 +2359,32 @@ Feature: TOML simulation config schema
     Given the Background config with no [neighbor_list] section
     When load_config is called
     Then it returns Ok(config)
-    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 256, r_skin: 3.0e-10 }
+    And config.neighbor_list matches NeighborListConfig::CellList { r_skin: 3.0e-10 }
 
   @rq-b1f33ea4
-  Scenario: neighbor_list cell-list with explicit parameters is accepted
-    Given the Background config plus
-      [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=2.0e-10
-    When load_config is called
-    Then it returns Ok(config)
-    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 128, r_skin: 2.0e-10 }
-
-  @rq-e643b070
-  Scenario: neighbor_list cell-list mode omitting max_neighbors uses default 256
+  Scenario: neighbor_list cell-list with explicit r_skin is accepted
     Given the Background config plus
       [neighbor_list] mode="cell-list" r_skin=2.0e-10
     When load_config is called
     Then it returns Ok(config)
-    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 256, r_skin: 2.0e-10 }
+    And config.neighbor_list matches NeighborListConfig::CellList { r_skin: 2.0e-10 }
+
+  @rq-e643b070
+  Scenario: neighbor_list cell-list mode rejects max_neighbors
+    Given the Background config plus
+      [neighbor_list] mode="cell-list" max_neighbors=256 r_skin=2.0e-10
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "neighbor_list"
+    And message mentions "max_neighbors"
 
   @rq-cde6e114
   Scenario: neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff
     Given the Background config plus
-      [neighbor_list] mode="cell-list" max_neighbors=128
+      [neighbor_list] mode="cell-list"
     When load_config is called
     Then it returns Ok(config)
-    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 128, r_skin: 3.0e-10 }
+    And config.neighbor_list matches NeighborListConfig::CellList { r_skin: 3.0e-10 }
 
   @rq-931f1ab8
   Scenario: neighbor_list all-pairs mode is accepted
@@ -2412,23 +2411,17 @@ Feature: TOML simulation config schema
     # The same rejection applies to every (mode, unknown-field) pair the
     # parameterised unit test enumerates. At minimum the test exercises
     #   (all-pairs, max_neighbors), (all-pairs, r_skin),
-    #   (cell-list, stencil="huge").
-
-  @rq-fedef74d
-  Scenario: neighbor_list rejects zero max_neighbors
-    Given the Background config plus [neighbor_list] mode="cell-list" max_neighbors=0 r_skin=1.0e-10
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.max_neighbors", reason: _ })
+    #   (cell-list, max_neighbors), (cell-list, stencil="huge").
 
   @rq-f7856bcc
   Scenario: neighbor_list rejects non-positive r_skin
-    Given the Background config plus [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=0.0
+    Given the Background config plus [neighbor_list] mode="cell-list" r_skin=0.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.r_skin", reason: _ })
 
   @rq-ec28cbfb
   Scenario: neighbor_list rejects non-finite r_skin
-    Given the Background config plus [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=inf
+    Given the Background config plus [neighbor_list] mode="cell-list" r_skin=inf
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.r_skin", reason: _ })
 

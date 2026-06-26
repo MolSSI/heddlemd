@@ -102,104 +102,149 @@ fn cell_list_state(gpu: &GpuContext, n: usize, sim_box: &SimulationBox) -> Neigh
     NeighborListState::new_cell_list(gpu, sim_box, n, 1.0, 256, 0.3).unwrap()
 }
 
-fn force_capacity_to_one(nl: &mut NeighborListState) {
-    nl.packed
+// Status-word bit layout (mirrors the private constants in
+// `src/forces/neighbor_list.rs`).
+const STATUS_DISPLACEMENT_TRIPPED: u32 = 1 << 0;
+const STATUS_TILES_HIGH_WATER: u32 = 1 << 1;
+const STATUS_TILES_OVERFLOW: u32 = 1 << 3;
+
+/// Overwrite the combined `neighbor_status` word on the device.
+fn set_status(device: &Arc<CudaDevice>, nl: &mut NeighborListState, value: u32) {
+    let status = &mut nl
+        .packed
         .as_mut()
         .expect("packed data present in CellList mode")
-        .interacting_tiles_capacity = 1;
+        .neighbor_status;
+    device.htod_sync_copy_into(&[value], status).unwrap();
 }
 
-fn set_disp_flag(device: &Arc<CudaDevice>, nl: &mut NeighborListState, value: u32) {
-    match &mut nl.mode {
-        NeighborListMode::CellList(cl) => {
-            device
-                .htod_sync_copy_into(&[value], &mut cl.disp_rebuild_flag)
-                .unwrap();
-        }
-        _ => panic!("test expects CellList mode"),
-    }
+/// Read the live `[tiles, single_pairs]` interaction counts off the
+/// device. The steady-state pipeline never does this; tests do it only
+/// to assert on the sizing the device-resident counts produced.
+fn read_counts(device: &Arc<CudaDevice>, nl: &NeighborListState) -> [u32; 2] {
+    let host = device
+        .dtoh_sync_copy(&nl.packed.as_ref().unwrap().interaction_count)
+        .unwrap();
+    [host[0], host[1]]
 }
 
 // rq-ea8640f5
 #[test]
-fn rebuild_sizes_capacity_to_an_on_order_n_value() {
+fn probe_rebuild_sizes_capacity_with_headroom_below_fill_threshold() {
     let gpu = init_device().unwrap();
     let (sb, buffers, n) = grid_system(&gpu, 8); // 512 atoms
     let mut nl = cell_list_state(&gpu, n, &sb);
     let mut timings = Timings::new(&gpu).unwrap();
 
+    // The first rebuild is the synchronous probe.
     nl.rebuild(&sb, &buffers, &mut timings).unwrap();
 
+    let count = read_counts(&gpu.device, &nl)[0] as u64;
     let packed = nl.packed.as_ref().unwrap();
-    let n_blocks = packed.n_blocks;
-    let count = packed.interacting_tiles_count;
-    let capacity = packed.interacting_tiles_capacity;
+    let capacity = packed.interacting_tiles_capacity as u64;
+    let fill = packed.tile_pair_fill_threshold;
+    let growth = packed.tile_pair_growth_factor;
     assert!(count > 0, "expected interactions");
-    // The probe rebuild sizes the capacity to the actual interaction
-    // count (with at most one growth_factor of headroom) or the O(N)
-    // seed — it is never pre-allocated to the all-pairs maximum unless
-    // the system genuinely needs it.
-    let seed = default_interacting_tiles_capacity(n_blocks) as u64;
-    let count_with_headroom = (count as f64 * packed.tile_pair_growth_factor).ceil() as u64;
-    let upper = seed.max(count_with_headroom);
+    // Capacity holds the build with headroom: the live count is at or
+    // below the high-water mark (capacity * fill_threshold), so the
+    // probe left the tiles_high_water bit clear.
     assert!(
-        (count as u64) <= capacity as u64 && (capacity as u64) <= upper,
-        "capacity {capacity} must lie in [{count}, {upper}] (count {count}, seed {seed})",
+        count <= (capacity as f64 * fill).floor() as u64,
+        "count {count} must be <= high-water mark of capacity {capacity}",
     );
+    // ...and the probe did not over-allocate beyond one growth step past
+    // that lower bound (or the O(N) seed for tiny systems). A small
+    // additive slack absorbs per-step ceiling rounding.
+    let seed = default_interacting_tiles_capacity(packed.n_blocks) as u64;
+    let upper = seed.max((count as f64 / fill * growth).ceil() as u64 + 2);
+    assert!(capacity <= upper, "capacity {capacity} exceeded headroom upper bound {upper}");
 }
 
-// rq-8b6d0c41
+// rq-1ca7df49 rq-88175d6f
 #[test]
-fn rebuild_that_overflows_capacity_reports_reallocation() {
+fn pre_step_grows_geometrically_on_high_water_and_reports_reallocation() {
     let gpu = init_device().unwrap();
     let (sb, buffers, n) = grid_system(&gpu, 8);
     let mut nl = cell_list_state(&gpu, n, &sb);
     let mut timings = Timings::new(&gpu).unwrap();
 
-    // Settle the list, then artificially shrink the capacity so the next
-    // rebuild's true count overflows it and the buffers must grow.
-    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
-    force_capacity_to_one(&mut nl);
+    // Probe rebuild sizes capacity; record it.
+    nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    let cap_before = nl.packed.as_ref().unwrap().interacting_tiles_capacity;
+    let growth = nl.packed.as_ref().unwrap().tile_pair_growth_factor;
 
-    let reallocated = nl.rebuild(&sb, &buffers, &mut timings).unwrap();
-    assert!(reallocated, "a rebuild that grew the buffers must report reallocation");
+    // Simulate the previous build having tripped the tiles high-water
+    // mark (build complete, nothing dropped).
+    set_status(&gpu.device, &mut nl, STATUS_TILES_HIGH_WATER);
+
+    let outcome = nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    assert!(outcome.rebuilt);
+    assert!(outcome.reallocated, "a high-water grow must report reallocation");
+    let cap_after = nl.packed.as_ref().unwrap().interacting_tiles_capacity;
+    assert_eq!(
+        cap_after,
+        (cap_before as f64 * growth).ceil() as u32,
+        "capacity must grow by exactly one geometric step",
+    );
+}
+
+// rq-f867ab96
+#[test]
+fn high_water_bit_forces_rebuild_even_when_displacement_clear() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 8);
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    // Only the high-water bit is set; the displacement bit is clear.
+    set_status(&gpu.device, &mut nl, STATUS_TILES_HIGH_WATER);
+
+    let outcome = nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    assert!(outcome.rebuilt, "high-water alone must trigger a rebuild");
+    assert!(outcome.reallocated);
+}
+
+// rq-8142fff7 rq-a5bd8157 rq-2dda3169
+#[test]
+fn overflow_bit_halts_with_packed_neighbor_overflow() {
+    use heddle_md::forces::NeighborListError;
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 8);
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    set_status(&gpu.device, &mut nl, STATUS_TILES_OVERFLOW);
+
+    let err = nl.pre_step(&sb, &buffers, &mut timings).unwrap_err();
+    match err {
+        NeighborListError::PackedNeighborOverflow { buffer } => {
+            assert_eq!(buffer, "interacting_tiles");
+        }
+        other => panic!("expected PackedNeighborOverflow, got {other:?}"),
+    }
 }
 
 // rq-75f86ce3
 #[test]
-fn rebuild_that_fits_reports_no_reallocation() {
+fn pre_step_that_reuses_buffers_reports_no_reallocation() {
     let gpu = init_device().unwrap();
     let (sb, buffers, n) = grid_system(&gpu, 8);
     let mut nl = cell_list_state(&gpu, n, &sb);
     let mut timings = Timings::new(&gpu).unwrap();
 
-    // First rebuild grows the seed to fit; the second reuses that
-    // capacity unchanged and reports no reallocation.
-    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
-    let reallocated = nl.rebuild(&sb, &buffers, &mut timings).unwrap();
-    assert!(!reallocated, "a rebuild that reuses the buffers must report no reallocation");
-}
-
-// rq-1ca7df49
-#[test]
-fn pre_step_reports_reallocation_when_rebuild_grows() {
-    let gpu = init_device().unwrap();
-    let (sb, buffers, n) = grid_system(&gpu, 8);
-    let mut nl = cell_list_state(&gpu, n, &sb);
-    let mut timings = Timings::new(&gpu).unwrap();
-
-    // Settle, shrink capacity, and trip the displacement flag so the
-    // next pre_step rebuilds and is forced to grow.
+    // Probe sizes capacity with headroom; force a displacement-only
+    // rebuild that fits the existing capacity.
     nl.pre_step(&sb, &buffers, &mut timings).unwrap();
-    force_capacity_to_one(&mut nl);
-    set_disp_flag(&gpu.device, &mut nl, 1);
+    set_status(&gpu.device, &mut nl, STATUS_DISPLACEMENT_TRIPPED);
 
     let outcome = nl.pre_step(&sb, &buffers, &mut timings).unwrap();
     assert!(outcome.rebuilt);
-    assert!(outcome.reallocated);
+    assert!(!outcome.reallocated, "a rebuild that reuses the buffers must not report reallocation");
 }
 
-// rq-623447db
+// rq-623447db rq-a39234ba
 #[test]
 fn pre_step_without_rebuild_reports_neither_flag() {
     let gpu = init_device().unwrap();
@@ -207,13 +252,39 @@ fn pre_step_without_rebuild_reports_neither_flag() {
     let mut nl = cell_list_state(&gpu, n, &sb);
     let mut timings = Timings::new(&gpu).unwrap();
 
-    // First pre_step rebuilds (needs_rebuild starts true) and sets the
-    // reference positions. With the particles unmoved, the second
-    // pre_step's displacement check sees zero motion and does not rebuild.
+    // First pre_step runs the probe rebuild and sets the reference
+    // positions. With the particles unmoved and the status word clean,
+    // the second pre_step's status read sees no trip and does not rebuild.
     let first = nl.pre_step(&sb, &buffers, &mut timings).unwrap();
     assert!(first.rebuilt);
 
     let second = nl.pre_step(&sb, &buffers, &mut timings).unwrap();
     assert!(!second.rebuilt);
     assert!(!second.reallocated);
+}
+
+// rq-8b6d0c41 rq-b8504fa1
+#[test]
+fn steady_state_rebuild_produces_a_correct_list_from_device_counts() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 8);
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    // Probe rebuild (synchronous sizing).
+    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+    let probe_count = read_counts(&gpu.device, &nl);
+
+    // A second, steady-state rebuild reads its counts only on the device
+    // (no host count is consulted to size launches); it must reproduce
+    // the same interaction counts and leave the high-water bit clear.
+    let reallocated = nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+    assert!(!reallocated);
+    let steady_count = read_counts(&gpu.device, &nl);
+    assert_eq!(probe_count, steady_count, "steady rebuild must reproduce the build");
+    let status = gpu
+        .device
+        .dtoh_sync_copy(&nl.packed.as_ref().unwrap().neighbor_status)
+        .unwrap();
+    assert_eq!(status[0], 0, "a build within capacity leaves the status word clean");
 }

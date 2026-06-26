@@ -75,24 +75,25 @@ fn write_references(
     }
 }
 
-/// Read back the device-side `disp_rebuild_flag` of a CellList NL.
+/// Read back bit 0 (the displacement-trip bit) of the combined
+/// `neighbor_status` word of a CellList NL.
 fn read_flag(device: &Arc<CudaDevice>, nl: &NeighborListState) -> u32 {
-    match &nl.mode {
-        NeighborListMode::CellList(cl) => {
-            let host: Vec<u32> = device.dtoh_sync_copy(&cl.disp_rebuild_flag).unwrap();
-            host[0]
+    match (&nl.mode, nl.packed.as_ref()) {
+        (NeighborListMode::CellList(_), Some(p)) => {
+            let host: Vec<u32> = device.dtoh_sync_copy(&p.neighbor_status).unwrap();
+            host[0] & 1
         }
         _ => panic!("test expects CellList mode"),
     }
 }
 
-/// Set the device-side `disp_rebuild_flag` directly (host-side
-/// initialiser for tests that need to assert it gets cleared by a
+/// Set the device-side `neighbor_status` word directly (host-side
+/// initialiser for tests that need to assert bit 0 gets cleared by a
 /// rebuild, etc.).
 fn set_flag(device: &Arc<CudaDevice>, nl: &mut NeighborListState, value: u32) {
-    match &mut nl.mode {
-        NeighborListMode::CellList(cl) => {
-            device.htod_sync_copy_into(&[value], &mut cl.disp_rebuild_flag).unwrap();
+    match (&mut nl.mode, nl.packed.as_mut()) {
+        (NeighborListMode::CellList(_), Some(p)) => {
+            device.htod_sync_copy_into(&[value], &mut p.neighbor_status).unwrap();
         }
         _ => panic!("test expects CellList mode"),
     }
