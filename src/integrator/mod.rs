@@ -280,157 +280,72 @@ pub trait Integrator: std::fmt::Debug + Send {
 
 }
 
-/// Walk an integrator's plan for one timestep.
+/// Per-call options for [`run_step`], bundling the four flags that
+/// select among plan-walk modes. Plain `Copy` data; a caller overrides
+/// individual fields against `Default`. See
+/// `rqm/integration/framework.md`.
+// rq-1d366b88
+#[derive(Debug, Clone, Copy)]
+pub struct RunStepOptions {
+    /// `true` runs the neighbour-list pre-step via `force_field.step(...)`
+    /// for each `ForceEval`; `false` calls
+    /// `force_field.step_no_neighbor_check(...)` (CUDA-graph capture
+    /// path). Default `true`.
+    pub run_neighbor_pre_step: bool,
+    /// `Some(i)` skips the integrator's `execute` for sub-step `i` (the
+    /// JIT-composed post-force per-particle kernel handles it). Default
+    /// `None`.
+    pub skip_substep_index: Option<usize>,
+    /// `true` (with a constraint slot passed) fires the constraint
+    /// hooks at the canonical sub-step boundaries. Default `false`.
+    pub install_constraint_hooks: bool,
+    /// `true` resolves every `ForceEval` to
+    /// `AggregateLevel::ForcesAndScalars`. Default `false`.
+    pub runner_needs_scalars: bool,
+}
+
+impl Default for RunStepOptions {
+    fn default() -> Self {
+        RunStepOptions {
+            run_neighbor_pre_step: true,
+            skip_substep_index: None,
+            install_constraint_hooks: false,
+            runner_needs_scalars: false,
+        }
+    }
+}
+
+/// Walk an integrator's plan for one timestep — the single plan-walk
+/// entry point.
 ///
-/// The runner uses this to execute integrator sub-steps and the
-/// force pipeline together, optionally weaving constraint-slot hook
-/// calls around any `Drift` or `KickDrift` sub-step and after the
-/// final velocity update.
+/// Executes the integrator's sub-steps and the force pipeline together,
+/// optionally weaving constraint-slot hook calls around any `Drift` or
+/// `KickDrift` sub-step and after the final velocity update. The
+/// per-step variations (graph-capture neighbour handling, composed
+/// post-force skip, scalar-prep, constraint hooks) are selected by
+/// `opts`; see [`RunStepOptions`].
 ///
-/// `install_constraint_hooks` must be `true` only when both
-/// `constraint.is_some()` and the integrator's
-/// `IntegratorKind::supports_constraints()` predicate would return
-/// `true`. When `false`, no constraint hooks fire regardless of the
-/// `constraint` argument.
+/// `opts.install_constraint_hooks` should be `true` only when both
+/// `constraint.is_some()` and the integrator's builder
+/// `supports_constraints(&params)` would return `true`; otherwise no
+/// hooks fire regardless of the `constraint` argument.
 #[allow(clippy::too_many_arguments)]
 pub fn run_step(
     integrator: &mut dyn Integrator,
     buffers: &mut ParticleBuffers,
     sim_box: &mut SimulationBox,
     force_field: &mut ForceField,
-    constraint: Option<&mut dyn Constraint>,
-    install_constraint_hooks: bool,
-    dt: Real,
-    timings: &mut Timings,
-    runner_needs_scalars: bool,
-) -> Result<(), StepError> {
-    run_step_inner(
-        integrator,
-        buffers,
-        sim_box,
-        force_field,
-        constraint,
-        install_constraint_hooks,
-        dt,
-        timings,
-        runner_needs_scalars,
-        true,
-        None,
-    )
-}
-
-/// Variant of `run_step` that skips the integrator's `execute` call
-/// at SubStep index `skip_substep_index`. Used when the
-/// JIT-composed post-force per-particle kernel is dispatched by the
-/// runner after `run_step` returns — the trailing per-particle
-/// SubStep is part of the composed kernel and must not run twice.
-#[allow(clippy::too_many_arguments)]
-pub fn run_step_with_skipped_substep(
-    integrator: &mut dyn Integrator,
-    buffers: &mut ParticleBuffers,
-    sim_box: &mut SimulationBox,
-    force_field: &mut ForceField,
-    constraint: Option<&mut dyn Constraint>,
-    install_constraint_hooks: bool,
-    dt: Real,
-    timings: &mut Timings,
-    runner_needs_scalars: bool,
-    skip_substep_index: usize,
-) -> Result<(), StepError> {
-    run_step_inner(
-        integrator,
-        buffers,
-        sim_box,
-        force_field,
-        constraint,
-        install_constraint_hooks,
-        dt,
-        timings,
-        runner_needs_scalars,
-        true,
-        Some(skip_substep_index),
-    )
-}
-
-/// As `run_step_with_skipped_substep`, but uses the
-/// `force_field.step_no_neighbor_check` variant inside every
-/// `ForceEval` SubStep. Used during CUDA graph capture, where the
-/// neighbor-list pre-step is host-side and runs at batch boundaries
-/// rather than inside the captured graph.
-#[allow(clippy::too_many_arguments)]
-pub fn run_step_with_skipped_substep_no_neighbor_check(
-    integrator: &mut dyn Integrator,
-    buffers: &mut ParticleBuffers,
-    sim_box: &mut SimulationBox,
-    force_field: &mut ForceField,
-    constraint: Option<&mut dyn Constraint>,
-    install_constraint_hooks: bool,
-    dt: Real,
-    timings: &mut Timings,
-    runner_needs_scalars: bool,
-    skip_substep_index: usize,
-) -> Result<(), StepError> {
-    run_step_inner(
-        integrator,
-        buffers,
-        sim_box,
-        force_field,
-        constraint,
-        install_constraint_hooks,
-        dt,
-        timings,
-        runner_needs_scalars,
-        false,
-        Some(skip_substep_index),
-    )
-}
-
-/// Per-step plan walker variant used by the CUDA graph capture path
-/// and the batched-replay loop. Identical to `run_step` except that
-/// every `force_field` call uses the `*_no_neighbor_check` variant —
-/// the runner runs `NeighborListState::pre_step` at batch boundaries
-/// instead of inside the captured kernel sequence. See
-/// `cuda-graphs.md`.
-pub fn run_step_no_neighbor_check(
-    integrator: &mut dyn Integrator,
-    buffers: &mut ParticleBuffers,
-    sim_box: &mut SimulationBox,
-    force_field: &mut ForceField,
-    constraint: Option<&mut dyn Constraint>,
-    install_constraint_hooks: bool,
-    dt: Real,
-    timings: &mut Timings,
-    runner_needs_scalars: bool,
-) -> Result<(), StepError> {
-    run_step_inner(
-        integrator,
-        buffers,
-        sim_box,
-        force_field,
-        constraint,
-        install_constraint_hooks,
-        dt,
-        timings,
-        runner_needs_scalars,
-        false,
-        None,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_step_inner(
-    integrator: &mut dyn Integrator,
-    buffers: &mut ParticleBuffers,
-    sim_box: &mut SimulationBox,
-    force_field: &mut ForceField,
     mut constraint: Option<&mut dyn Constraint>,
-    install_constraint_hooks: bool,
     dt: Real,
     timings: &mut Timings,
-    runner_needs_scalars: bool,
-    run_neighbor_pre_step: bool,
-    skip_substep_index: Option<usize>,
+    opts: RunStepOptions,
 ) -> Result<(), StepError> {
+    let RunStepOptions {
+        run_neighbor_pre_step,
+        skip_substep_index,
+        install_constraint_hooks,
+        runner_needs_scalars,
+    } = opts;
     let plan = integrator.plan(dt);
     let install = install_constraint_hooks && constraint.is_some();
     for (idx, sub) in plan.steps.iter().enumerate() {
@@ -516,30 +431,6 @@ pub fn resolve_aggregate_level(
     }
 }
 
-/// Convenience for tests and callers that don't need constraints.
-/// Always requests `ForcesAndScalars` so tests that read energy / virial
-/// after `run_step_no_constraint` see fresh values regardless of the
-/// integrator's per-step level preference.
-pub fn run_step_no_constraint(
-    integrator: &mut dyn Integrator,
-    buffers: &mut ParticleBuffers,
-    sim_box: &mut SimulationBox,
-    force_field: &mut ForceField,
-    dt: Real,
-    timings: &mut Timings,
-) -> Result<(), StepError> {
-    run_step(
-        integrator,
-        buffers,
-        sim_box,
-        force_field,
-        None,
-        false,
-        dt,
-        timings,
-        true,
-    )
-}
 
 // rq-0e26dde0 rq-1ac78590
 /// Extension trait offering a single-call `step()` convenience method
@@ -575,7 +466,16 @@ impl IntegratorStepExt for dyn Integrator + '_ {
         dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
-        run_step(self, buffers, sim_box, force_field, None, false, dt, timings, true)
+        run_step(
+            self,
+            buffers,
+            sim_box,
+            force_field,
+            None,
+            dt,
+            timings,
+            RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        )
     }
 }
 
@@ -590,7 +490,16 @@ impl<T: Integrator> IntegratorStepExt for T {
         dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
-        run_step(self, buffers, sim_box, force_field, None, false, dt, timings, true)
+        run_step(
+            self,
+            buffers,
+            sim_box,
+            force_field,
+            None,
+            dt,
+            timings,
+            RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        )
     }
 }
 
@@ -660,10 +569,13 @@ impl IntegratorStepWithConstraintExt for dyn ConstraintCapableIntegrator + '_ {
             sim_box,
             force_field,
             Some(constraint),
-            true,
             dt,
             timings,
-            true,
+            RunStepOptions {
+                install_constraint_hooks: true,
+                runner_needs_scalars: true,
+                ..Default::default()
+            },
         )
     }
 }
@@ -689,10 +601,13 @@ impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
             sim_box,
             force_field,
             Some(constraint),
-            true,
             dt,
             timings,
-            true,
+            RunStepOptions {
+                install_constraint_hooks: true,
+                runner_needs_scalars: true,
+                ..Default::default()
+            },
         )
     }
 }

@@ -102,10 +102,11 @@ minimum-image distance evaluation; none mutates the box.
 ## Convenience Trait Surface <!-- rq-0e26dde0 -->
 
 The runner walks an integrator's plan via the free function
-[`run_step`] in `src/integrator/mod.rs`, threading the runner-side
-`install_constraint_hooks` flag from
-`IntegratorBuilder::supports_constraints(&params)` explicitly. Tests
-and direct library consumers use a convenience layer instead. That
+[`run_step`] (see `integration/framework.md`'s *Feature API* for the
+full signature), passing a `RunStepOptions` whose
+`install_constraint_hooks` field it sets from
+`IntegratorBuilder::supports_constraints(&params)`. Tests and direct
+library consumers use a convenience layer instead. That
 layer is split into two traits so that the `&mut dyn Constraint`
 argument is reachable only from a type that has statically opted in to
 constraint-hook insertion:
@@ -114,14 +115,14 @@ constraint-hook insertion:
   for every type that implements `Integrator`. Its single method
   `step(...)` walks the integrator's plan without installing any
   constraint hooks. The method takes no `Constraint` argument and
-  the runner-side `install_constraint_hooks` flag is hard-wired to
-  `false`. Available on every `Integrator` (`velocity-verlet`,
+  calls `run_step` with `RunStepOptions { install_constraint_hooks:
+  false, .. }`. Available on every `Integrator` (`velocity-verlet`,
   `langevin-baoab`, `mtk-npt`, …).
 - **`IntegratorStepWithConstraintExt`** — a convenience trait whose
   blanket impl is bounded on `Self: ConstraintCapableIntegrator`. Its
   single method `step_with_constraint(..., &mut dyn Constraint, ...)`
-  walks the plan with `install_constraint_hooks = true`. Available
-  only on types that statically declare themselves
+  walks the plan with `RunStepOptions { install_constraint_hooks: true,
+  .. }`. Available only on types that statically declare themselves
   constraint-capable; calling it on a non-marker type is a compile
   error.
 
@@ -655,9 +656,11 @@ second receives an empty index set and contributes no slot.
   impl<T: Integrator + ?Sized> IntegratorStepExt for T { /* … */ }
   ```
 
-  `step` calls `run_step(self, …, install_constraint_hooks: false,
-  …)` with no `Constraint` slot. The runner uses the lower-level
-  `run_step` directly and does not depend on this trait.
+  `step` calls `run_step(self, …, constraint = None, …,
+  RunStepOptions { install_constraint_hooks: false,
+  runner_needs_scalars: true, ..Default::default() })`. The runner
+  uses the lower-level `run_step` directly and does not depend on this
+  trait.
 
 - `IntegratorStepWithConstraintExt` — convenience trait whose blanket <!-- rq-f71ff87f -->
   impl is bounded on `Self: ConstraintCapableIntegrator`. Drives a
@@ -686,8 +689,9 @@ second receives an empty index set and contributes no slot.
   `Err(reason)`, the method returns
   `StepError::IntegratorRejectsConstraint { reason }` without
   dispatching `plan()`, `execute()`, or any kernel. Otherwise it
-  calls `run_step(self, …, install_constraint_hooks: true,
-  Some(constraint), …)`.
+  calls `run_step(self, …, constraint = Some(constraint), …,
+  RunStepOptions { install_constraint_hooks: true,
+  runner_needs_scalars: true, ..Default::default() })`.
 
 - `StepError` — unified error type returned by `run_step` and both <!-- rq-52e52d7b -->
   convenience-trait methods. Defined in `src/integrator/mod.rs`.

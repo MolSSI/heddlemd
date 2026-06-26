@@ -258,14 +258,18 @@ sequence:
    ordinary `force_field.step(...)`. The sequence is:
    - `thermostat.apply_pre(buffers, dt, timings)` if a thermostat is
      active
-   - `run_step_with_skipped_substep(integrator, buffers, sim_box,
-     force_field, constraint, ..., dt, timings,
-     integrator.post_force_substep_index(dt).unwrap())`, where every
-     internal `force_field.step` call is replaced by
-     `force_field.step_no_neighbor_check`. The integrator's
-     post-force SubStep (the trailing `KickHalf` / `KickDrift` per
-     `Integrator::post_force_substep_index`) is skipped — the
-     composed kernel handles it.
+   - `run_step(integrator, buffers, sim_box, force_field, constraint,
+     dt, timings, RunStepOptions { run_neighbor_pre_step: false,
+     skip_substep_index: Some(integrator.post_force_substep_index(dt).unwrap()),
+     install_constraint_hooks, runner_needs_scalars: true })`. The
+     `run_neighbor_pre_step: false` flag routes every internal
+     `force_field.step` call to `force_field.step_no_neighbor_check`,
+     and `skip_substep_index` skips the integrator's post-force SubStep
+     (the trailing `KickHalf` / `KickDrift` per
+     `Integrator::post_force_substep_index`) — the composed kernel
+     handles it. (When no composed post-force kernel is active,
+     `skip_substep_index` is `None`.) See `integration/framework.md` for
+     `RunStepOptions`.
    - `thermostat.apply_post(buffers, dt, timings)` if a thermostat
      is active (scalar prep only — no per-particle rescale)
    - `barostat.apply(buffers, sim_box, dt, timings)` if a barostat

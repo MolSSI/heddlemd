@@ -2035,7 +2035,7 @@ fn phase_slots_graph_compatible(
 /// Captures the per-step kernel sequence for a phase into an
 /// executable CUDA graph. The sequence is:
 ///   1. `thermostat.apply_pre` (if any)
-///   2. `run_step_no_neighbor_check`
+///   2. `run_step` with `RunStepOptions { run_neighbor_pre_step: false, .. }`
 ///   3. `thermostat.apply_post` (if any)
 ///   4. `barostat.apply` (if any)
 ///
@@ -2167,29 +2167,36 @@ fn capture_phase_graph(
         let result = if let (Some(_), Some(skip_idx)) =
             (composed_post_force, post_force_substep_index)
         {
-            crate::integrator::run_step_with_skipped_substep_no_neighbor_check(
+            crate::integrator::run_step(
                 integrator,
                 buffers,
                 sim_box,
                 force_field,
                 constraint_arg,
-                supports_constraints,
                 dt,
                 timings,
-                true,
-                skip_idx,
+                crate::integrator::RunStepOptions {
+                    run_neighbor_pre_step: false,
+                    skip_substep_index: Some(skip_idx),
+                    install_constraint_hooks: supports_constraints,
+                    runner_needs_scalars: true,
+                },
             )
         } else {
-            crate::integrator::run_step_no_neighbor_check(
+            crate::integrator::run_step(
                 integrator,
                 buffers,
                 sim_box,
                 force_field,
                 constraint_arg,
-                supports_constraints,
                 dt,
                 timings,
-                true,
+                crate::integrator::RunStepOptions {
+                    run_neighbor_pre_step: false,
+                    install_constraint_hooks: supports_constraints,
+                    runner_needs_scalars: true,
+                    ..Default::default()
+                },
             )
         };
         if let Err(e) = result {
@@ -2291,17 +2298,20 @@ fn run_per_step_range(
             let log_due = phase.output.log_every > 0 && step % phase.output.log_every == 0;
             let runner_needs_scalars = trajectory_due || log_due || barostat.is_some();
             let result = if let Some(skip_idx) = post_force_substep_index {
-                crate::integrator::run_step_with_skipped_substep(
+                crate::integrator::run_step(
                     integrator.as_mut(),
                     &mut setup.buffers,
                     &mut setup.sim_box,
                     &mut setup.force_field,
                     constraint_arg,
-                    supports_constraints,
                     dt,
                     &mut *timings,
-                    runner_needs_scalars,
-                    skip_idx,
+                    crate::integrator::RunStepOptions {
+                        skip_substep_index: Some(skip_idx),
+                        install_constraint_hooks: supports_constraints,
+                        runner_needs_scalars,
+                        ..Default::default()
+                    },
                 )
             } else {
                 crate::integrator::run_step(
@@ -2310,10 +2320,13 @@ fn run_per_step_range(
                     &mut setup.sim_box,
                     &mut setup.force_field,
                     constraint_arg,
-                    supports_constraints,
                     dt,
                     &mut *timings,
-                    runner_needs_scalars,
+                    crate::integrator::RunStepOptions {
+                        install_constraint_hooks: supports_constraints,
+                        runner_needs_scalars,
+                        ..Default::default()
+                    },
                 )
             };
             result.map_err(|e| {

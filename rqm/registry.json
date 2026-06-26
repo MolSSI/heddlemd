@@ -3700,6 +3700,13 @@
     "title": "Log file header includes csvr_conserved when CSVR is the thermostat",
     "type": "scenario"
   },
+  "rq-1d366b88": {
+    "decl": "- `RunStepOptions` — per-call options for `run_step`, bundling the four",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "RunStepOptions",
+    "type": "api-item"
+  },
   "rq-1d618f18": {
     "decl": "## Reversal Protocol",
     "file": "pipeline-reversibility",
@@ -4974,6 +4981,13 @@
     "title": "JIT fragment behaviour",
     "type": "section"
   },
+  "rq-277dbeb2": {
+    "decl": "- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>`",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "run_step",
+    "type": "api-item"
+  },
   "rq-27b28332": {
     "decl": "Scenario: entry_point_args are generated from the slot's argument schema",
     "file": "forces/jit-composed-pair-force",
@@ -5621,6 +5635,13 @@
       }
     ],
     "title": "IntegratorError",
+    "type": "api-item"
+  },
+  "rq-2cd403d5": {
+    "decl": "- `resolve_aggregate_level(sub_step_level: Option<AggregateLevel>, runner_needs_scalars: bool) -> AggregateLevel`",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "resolve_aggregate_level",
     "type": "api-item"
   },
   "rq-2d107b4d": {
@@ -7869,6 +7890,13 @@
     "title": "plan(dt) is pure; it does not launch kernels or touch buffers",
     "type": "scenario"
   },
+  "rq-43025b6a": {
+    "decl": "Scenario: runner_needs_scalars forces ForcesAndScalars",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "runner_needs_scalars forces ForcesAndScalars",
+    "type": "scenario"
+  },
   "rq-432c52f5": {
     "decl": "Scenario: Triclinic boxes are SPC-ineligible regardless of bbox extent",
     "file": "forces/packed-neighbour-pair-force",
@@ -9565,6 +9593,13 @@
     ],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-5500596b": {
+    "decl": "Scenario: run_neighbor_pre_step = false uses the no-neighbor-check force path",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "run_neighbor_pre_step = false uses the no-neighbor-check force path",
+    "type": "scenario"
   },
   "rq-550aebeb": {
     "decl": "### Extra columns",
@@ -14859,6 +14894,13 @@
     "title": "apply_position_projection_only on empty state is a no-op",
     "type": "scenario"
   },
+  "rq-836404c9": {
+    "decl": "Scenario: run_step is the only plan-walk free function",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "run_step is the only plan-walk free function",
+    "type": "scenario"
+  },
   "rq-8373db52": {
     "decl": "Scenario: Reject unsupported Properties form",
     "file": "io/init-state-file",
@@ -16569,6 +16611,13 @@
       }
     ],
     "title": "Unknown attributes in the comment line are ignored",
+    "type": "scenario"
+  },
+  "rq-93c52ca4": {
+    "decl": "Scenario: RunStepOptions::default values",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "RunStepOptions::default values",
     "type": "scenario"
   },
   "rq-93ff6690": {
@@ -23096,6 +23145,13 @@
     "title": "Reject an entry missing `between`",
     "type": "scenario"
   },
+  "rq-d0240417": {
+    "decl": "Scenario: run_step with default options walks every sub-step via the neighbour-checked force path",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "run_step with default options walks every sub-step via the neighbour-checked force path",
+    "type": "scenario"
+  },
   "rq-d028bd1f": {
     "decl": "### Rust Launch Helpers",
     "file": "integration/nose-hoover-chain",
@@ -23753,6 +23809,13 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "No set_jit_composed_post_force_active trait method exists",
+    "type": "scenario"
+  },
+  "rq-d64bc1c6": {
+    "decl": "Scenario: skip_substep_index skips the integrator's execute for that sub-step",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "skip_substep_index skips the integrator's execute for that sub-step",
     "type": "scenario"
   },
   "rq-d65bcc90": {
@@ -27258,6 +27321,13 @@
       }
     ],
     "title": "Angle wings are canonicalised so atom_i < atom_k",
+    "type": "scenario"
+  },
+  "rq-f34598ae": {
+    "decl": "Scenario: install_constraint_hooks gates constraint-hook insertion",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "install_constraint_hooks gates constraint-hook insertion",
     "type": "scenario"
   },
   "rq-f34a4f43": {

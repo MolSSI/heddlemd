@@ -142,6 +142,18 @@ scalar-prep work. When the composed kernel is absent (no active
 integrator), the loop walks the plan in full and no composed
 launch fires.
 
+The plan-walk portion of this loop — the inner per-sub-step dispatch
+plus the constraint-hook insertion — is the free function `run_step`,
+parameterised by a `RunStepOptions` value (see *Feature API*). The
+runner builds one `RunStepOptions` per step to select among the
+variations the loop needs: `run_neighbor_pre_step` toggles the
+`force_field.step_no_neighbor_check` path used during CUDA-graph
+capture, `skip_substep_index` skips the SubStep the composed post-force
+kernel handles, `install_constraint_hooks` gates the hook insertion,
+and `runner_needs_scalars` forces the scalar-aggregating force level.
+`run_step` is the only plan walker; there are no per-combination
+wrapper functions.
+
 The runner calls `integrator.plan(dt)` once per timestep. `plan(dt)` is
 a pure function of `dt` and the integrator's static configuration; it
 returns the same `StepPlan` shape every call with the same `dt` (no
@@ -392,6 +404,46 @@ successfully.
     drift or analytic propagation). One: the standard symplectic
     pattern. More than one: predictor-corrector or future multi-step
     integrators.
+
+- `RunStepOptions` — per-call options for `run_step`, bundling the four <!-- rq-1d366b88 -->
+  flags that select among plan-walk modes. Plain `Copy` data; a caller
+  overrides individual fields against `Default`.
+
+  ```rust
+  #[derive(Debug, Clone, Copy)]
+  pub struct RunStepOptions {
+      pub run_neighbor_pre_step: bool,
+      pub skip_substep_index: Option<usize>,
+      pub install_constraint_hooks: bool,
+      pub runner_needs_scalars: bool,
+  }
+  ```
+
+  - `run_neighbor_pre_step` — `true` makes each `ForceEval` sub-step
+    call `force_field.step(...)` (which runs the neighbour-list
+    pre-step); `false` makes it call
+    `force_field.step_no_neighbor_check(...)`, used by the CUDA-graph
+    capture path where the neighbour pre-step runs at batch boundaries
+    (see `cuda-graphs.md`).
+  - `skip_substep_index` — `Some(i)` skips the integrator's `execute`
+    for sub-step `i`; the runner dispatches that sub-step's per-particle
+    work through the JIT-composed post-force kernel instead (see
+    `jit-composed-post-force.md`). `None` walks every sub-step.
+  - `install_constraint_hooks` — `true` (with a constraint slot passed
+    to `run_step`) fires the constraint hooks at the canonical sub-step
+    boundaries. Set from
+    `IntegratorBuilder::supports_constraints(&params)`; a constraint
+    slot may be passed with this `false` when the integrator does not
+    support hooks (see `constraint-framework.md`).
+  - `runner_needs_scalars` — `true` resolves every `ForceEval` to
+    `AggregateLevel::ForcesAndScalars` regardless of the sub-step's own
+    preference (see `resolve_aggregate_level`).
+
+  `RunStepOptions::default()` is
+  `{ run_neighbor_pre_step: true, skip_substep_index: None,
+  install_constraint_hooks: false, runner_needs_scalars: false }` — the
+  ordinary per-step path with no constraint hooks and the cheap force
+  level.
 
 - `Integrator` — object-safe trait implemented by every concrete <!-- rq-78f484d9 -->
   integrator. Owns the core time-stepping algorithm.
@@ -867,6 +919,37 @@ successfully.
     `execute` call for it; the integrator's `execute` must remain
     correct when called on its other SubSteps regardless of
     whether the composed-kernel path is active.
+
+- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>` <!-- rq-277dbeb2 -->
+  - The single free-function plan walker: realises the *Per-Step
+    Interface* for one timestep. Calls `integrator.plan(dt)`, then for
+    each sub-step dispatches `SubStep::ForceEval` to
+    `force_field.step{,_class}(...)` (or their `_no_neighbor_check`
+    variants when `opts.run_neighbor_pre_step == false`) and every
+    other sub-step to `integrator.execute(...)`, skipping the sub-step
+    at `opts.skip_substep_index` when set.
+  - When `opts.install_constraint_hooks` is `true` and `constraint` is
+    `Some`, fires `apply_before_drift` / `apply_after_drift` around each
+    Drift / KickDrift sub-step and `apply_after_kick` after a terminal
+    velocity update. When `constraint` is `None`, or
+    `install_constraint_hooks` is `false`, or the plan has no Drift /
+    KickDrift, the walk reduces to a straight plan walk.
+  - Each `ForceEval`'s aggregate level is
+    `resolve_aggregate_level(sub_step_level, opts.runner_needs_scalars)`.
+  - The runner builds a `RunStepOptions` per step for the ordinary,
+    graph-capture (`run_neighbor_pre_step: false`),
+    composed-post-force-skip (`skip_substep_index: Some(..)`), and
+    scalar-prep (`runner_needs_scalars: true`) combinations, in any
+    mix. The `IntegratorStepExt::step` and
+    `IntegratorStepWithConstraintExt::step_with_constraint` convenience
+    methods (see `constraint-framework.md`) call `run_step` with the
+    appropriate options.
+  - Returns `StepError` (see `constraint-framework.md`).
+
+- `resolve_aggregate_level(sub_step_level: Option<AggregateLevel>, runner_needs_scalars: bool) -> AggregateLevel` <!-- rq-2cd403d5 -->
+  - Returns `AggregateLevel::ForcesAndScalars` when `runner_needs_scalars`
+    is `true` or the sub-step itself requested scalars; otherwise returns
+    `sub_step_level.unwrap_or(AggregateLevel::ForcesOnly)`.
 
 - `Integrator::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-2e33e1b8 -->
   - Declares whether the integrator contributes a per-thread update
@@ -1383,5 +1466,56 @@ Feature: Pluggable integration framework
     Given a SubStep::ForceEval with level = Some(AggregateLevel::ForcesAndScalars)
     When runner.resolve_level(level) is called
     Then it returns AggregateLevel::ForcesAndScalars regardless of step counters
+
+  # --- run_step / RunStepOptions ---
+
+  @rq-93c52ca4
+  Scenario: RunStepOptions::default values
+    When RunStepOptions::default() is constructed
+    Then run_neighbor_pre_step is true
+    And skip_substep_index is None
+    And install_constraint_hooks is false
+    And runner_needs_scalars is false
+
+  @rq-d0240417
+  Scenario: run_step with default options walks every sub-step via the neighbour-checked force path
+    Given an integrator whose plan has three sub-steps including one ForceEval
+    When run_step is called with constraint = None and RunStepOptions::default()
+    Then integrator.execute is invoked once for every non-ForceEval sub-step
+    And the ForceEval dispatches force_field.step (the neighbour-checked variant), not step_no_neighbor_check
+
+  @rq-5500596b
+  Scenario: run_neighbor_pre_step = false uses the no-neighbor-check force path
+    Given an integrator with one ForceEval sub-step
+    When run_step is called with RunStepOptions { run_neighbor_pre_step: false, ..default }
+    Then the ForceEval dispatches force_field.step_no_neighbor_check, not force_field.step
+
+  @rq-d64bc1c6
+  Scenario: skip_substep_index skips the integrator's execute for that sub-step
+    Given an integrator whose plan has a trailing KickHalf at index k
+    When run_step is called with RunStepOptions { skip_substep_index: Some(k), ..default }
+    Then integrator.execute is not invoked for the sub-step at index k
+    And integrator.execute is invoked for every other non-ForceEval sub-step
+
+  @rq-f34598ae
+  Scenario: install_constraint_hooks gates constraint-hook insertion
+    Given a constraint slot and an integrator whose plan has a Drift sub-step
+    When run_step is called with Some(constraint) and RunStepOptions { install_constraint_hooks: true, ..default }
+    Then apply_before_drift and apply_after_drift fire around the Drift sub-step
+    When run_step is called with Some(constraint) and RunStepOptions { install_constraint_hooks: false, ..default }
+    Then no constraint hook fires
+
+  @rq-43025b6a
+  Scenario: runner_needs_scalars forces ForcesAndScalars
+    Given an integrator whose ForceEval sub-step requests level = Some(AggregateLevel::ForcesOnly)
+    When run_step is called with RunStepOptions { runner_needs_scalars: true, ..default }
+    Then the ForceEval is evaluated at AggregateLevel::ForcesAndScalars
+
+  @rq-836404c9
+  Scenario: run_step is the only plan-walk free function
+    Given the public API of src/integrator/mod.rs
+    Then the only free plan-walk function is run_step(.., opts: RunStepOptions)
+    And no run_step_no_neighbor_check / run_step_with_skipped_substep /
+      run_step_with_skipped_substep_no_neighbor_check / run_step_no_constraint functions exist
 
 ```

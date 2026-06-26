@@ -660,7 +660,7 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
 // =============================================================================
 
 use heddle_md::integrator::{
-    ConstraintError, run_step, run_step_no_constraint, StepPlan, SubStep,
+    ConstraintError, RunStepOptions, run_step, StepPlan, SubStep,
 };
 
 /// A configurable stub Integrator whose plan and execute() behaviour
@@ -789,8 +789,7 @@ fn empty_plan_walks_as_a_noop() {
         plan: StepPlan::empty(),
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(
-        &mut stub,
+    stub.step(
         &mut buffers,
         &mut sim_box,
         &mut ff,
@@ -822,8 +821,7 @@ fn plan_with_multiple_force_evals_dispatches_each() {
         },
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(
-        &mut stub,
+    stub.step(
         &mut buffers,
         &mut sim_box,
         &mut ff,
@@ -896,10 +894,13 @@ fn plan_with_one_drift_fires_before_after_drift() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        true,
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -935,10 +936,13 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        true,
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -980,10 +984,13 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        true,
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1012,10 +1019,13 @@ fn custom_substep_alone_fires_no_constraint_hooks() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        true,
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1048,10 +1058,13 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        false, // install_constraint_hooks == false
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: false,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1259,7 +1272,7 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
         },
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+    stub.step( &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_of = |name: &str| {
@@ -1317,7 +1330,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
         },
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+    stub.step( &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     assert!(
@@ -1375,7 +1388,7 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
         },
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+    stub.step( &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_of = |name: &str| {
