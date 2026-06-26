@@ -274,21 +274,6 @@ impl Builtins for dyn PotentialBuilder {
 
 crate::registry_builder_clone!(pub PotentialBuilderClone for PotentialBuilder);
 
-pub(crate) fn max_neighbors_from(cfg: &NeighborListConfig, particle_count: usize) -> u32 {
-    // The packed-neighbour pair-force pipeline (see
-    // `rqm/forces/packed-neighbour-pair-force.md`) sizes its entry
-    // list at runtime via overflow-driven growth, so no user-supplied
-    // per-atom cap exists for cell-list mode. Per-particle padded
-    // structures kept around for legacy callers fall back to a fixed
-    // default in cell-list mode and to the all-pairs upper bound in
-    // trivial mode.
-    match cfg {
-        NeighborListConfig::AllPairs => particle_count as u32,
-        NeighborListConfig::CellList { .. } => LEGACY_FALLBACK_MAX_NEIGHBORS,
-    }
-}
-
-pub(crate) const LEGACY_FALLBACK_MAX_NEIGHBORS: u32 = 1024;
 
 // rq-684a29f1
 #[derive(Debug)]
@@ -336,14 +321,6 @@ pub struct ForceField {
     /// `bind_pair_force_args` having pushed its parameters in canonical
     /// slot order.
     jit_slot_indices: Vec<usize>,
-    /// Maximum `max_neighbors` across the participating JIT pair-force
-    /// slots. The composed kernel reads only one `max_neighbors`
-    /// scalar at launch and uses it to compute the per-particle
-    /// `neighbor_list` row offset; every JIT pair-force slot in this
-    /// codebase resolves the same value from the shared
-    /// `NeighborListState`, but the field is cached here to avoid a
-    /// downcast at launch time.
-    jit_max_neighbors: u32,
     /// JIT-composed bonded module, built when at least one fast-class
     /// bonded slot is active. The per-step pipeline launches one
     /// entry point per slot from this module before the slot's
@@ -503,7 +480,6 @@ impl ForceField {
                         sim_box,
                         particle_count,
                         r_cut,
-                        LEGACY_FALLBACK_MAX_NEIGHBORS,
                         *r_skin as Real,
                     )?,
                 ),
@@ -561,14 +537,6 @@ impl ForceField {
                 jit_max_cutoff,
             )?)
         };
-        // All fast-class pair-force slots in this codebase resolve
-        // their `max_neighbors` from `NeighborListConfig` via
-        // `max_neighbors_from(neighbor_list_config, particle_count)`,
-        // which yields the same value for every slot. Re-derive it
-        // once for the composed-kernel launch arg.
-        let jit_max_neighbors: u32 =
-            max_neighbors_from(neighbor_list_config, particle_count);
-
         // JIT compose the fast-class bonded module.
         // See `rqm/forces/jit-composed-intramolecular.md`.
         let jit_composed_bonded = if jit_bonded_fragments.is_empty() {
@@ -637,7 +605,6 @@ impl ForceField {
             excluded_pair_atoms,
             excluded_pair_count,
             jit_slot_indices,
-            jit_max_neighbors,
             jit_composed_bonded,
             jit_bonded_slot_indices,
             jit_composed_angle,

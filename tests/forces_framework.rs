@@ -582,7 +582,6 @@ fn step_with_zero_slots_writes_zeros_to_forces() {
     assert!(downloaded.forces_y.iter().all(|&v| v == 0.0));
     assert!(downloaded.forces_z.iter().all(|&v| v == 0.0));
     assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
-    assert_eq!(stage_count(&report, "lj_pair_force"), 0);
     assert_eq!(stage_count(&report, "morse_bond_force"), 0);
 }
 
@@ -1933,10 +1932,5 @@ fn jit_composed_step_emits_one_pair_force_launch_and_zero_per_potential_launches
     assert_eq!(
         stage_count(&report, KernelStage::JIT_COMPOSED_PAIR_FORCE.name()),
         1
-    );
-    assert_eq!(stage_count(&report, KernelStage::LJ_PAIR_FORCE.name()), 0);
-    assert_eq!(
-        stage_count(&report, KernelStage::SPME_REAL_PAIR_FORCE.name()),
-        0
     );
 }

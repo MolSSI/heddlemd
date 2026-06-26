@@ -1,16 +1,11 @@
 // rq-a5a919df rq-d3a14184
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::CudaDevice;
 
-use crate::gpu::device::get_func;
-use crate::gpu::{
-    GpuContext, GpuError, LennardJonesParameterTable, ParticleBuffers, lj_pair_force,
-};
-use crate::kernels;
+use crate::gpu::{GpuContext, LennardJonesParameterTable, ParticleBuffers};
 use crate::pbc::SimulationBox;
-use crate::timings::{KernelStage, Timings};
+use crate::timings::Timings;
 
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
@@ -31,7 +26,6 @@ pub struct LennardJonesState {
     pub(crate) exclusions: DeviceExclusionList,
     pub(crate) particle_count: usize,
     pub(crate) max_cutoff: Real,
-    pub(crate) max_neighbors: u32,
     /// `true` when every configured pair-interaction has
     /// `r_switch == cutoff`, making the switch polynomial unreachable.
     /// Drives the fragment's evaluate body.
@@ -49,7 +43,6 @@ impl LennardJonesState {
         particle_count: usize,
         params: LennardJonesParameterTable,
         max_cutoff: Real,
-        max_neighbors: u32,
         exclusion_list: &ExclusionList,
         switch_degenerate: bool,
         uniform_cutoff: Option<Real>,
@@ -62,7 +55,6 @@ impl LennardJonesState {
             exclusions,
             particle_count,
             max_cutoff,
-            max_neighbors,
             switch_degenerate,
             uniform_cutoff,
         })
@@ -91,28 +83,12 @@ impl Potential for LennardJonesState {
         timings: &mut Timings,
         level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        let nl = cx
-            .neighbor_list
-            .expect("LennardJonesState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::LJ_PAIR_FORCE)?;
-        lj_pair_force(
-            buffers,
-            &mut output,
-            sim_box,
-            &self.params,
-            &self.exclusions.atom_excl_offsets,
-            &self.exclusions.atom_excl_partners,
-            &self.exclusions.atom_excl_lj_scales,
-            &nl.neighbor_list,
-            &nl.neighbor_counts,
-            self.max_neighbors,
-            level,
-        )?;
-        timings.kernel_stop(KernelStage::LJ_PAIR_FORCE)?;
-        Ok(())
+        // LennardJonesState is always a JIT pair-force participant
+        // (see `jit_participant`); the framework evaluates it through the
+        // composed packed pair-force kernel and skips this slot in the
+        // per-slot `compute` loop, so this method is never invoked.
+        let _ = (buffers, sim_box, &mut output, cx, &mut *timings, level);
+        unreachable!("LennardJonesState is JIT-composed; compute() is never invoked")
     }
 
     fn jit_participant(&self) -> Option<JitParticipant<'_>> {
@@ -199,7 +175,6 @@ impl PotentialBuilder for LennardJonesBuilder {
             .iter()
             .map(|p| p.cutoff as Real)
             .fold(0.0, Real::max);
-        let max_neighbors = super::max_neighbors_from(cx.neighbor_list_config, cx.particle_count);
         // Inspect the configured pair interactions to decide the
         // fragment's cutoff structure and whether the LJ switching
         // function is degenerate (every entry has r_switch == cutoff).
@@ -222,7 +197,6 @@ impl PotentialBuilder for LennardJonesBuilder {
             cx.particle_count,
             params,
             max_cutoff,
-            max_neighbors,
             cx.exclusion_list,
             switch_degenerate,
             uniform_cutoff,
@@ -356,27 +330,6 @@ struct LjPairFunctor {{
         entry_point_args: schema.entry_point_args(),
         functor_init_source: schema.functor_init_source(),
         cutoff,
-    }
-}
-
-// rq-2093594f rq-78d9fd1c
-#[derive(Debug, Clone)]
-pub struct LjKernels {
-    pub pair_force_f: CudaFunction,
-    pub pair_force_fev: CudaFunction,
-}
-
-impl LjKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::PAIR_FORCE),
-            "pair_force",
-            &["lj_pair_force_f", "lj_pair_force_fev"],
-        )?;
-        Ok(LjKernels {
-            pair_force_f: get_func(device, "pair_force", "lj_pair_force_f")?,
-            pair_force_fev: get_func(device, "pair_force", "lj_pair_force_fev")?,
-        })
     }
 }
 

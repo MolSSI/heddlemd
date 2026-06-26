@@ -880,38 +880,21 @@ fn timings_new_allocates_event_pairs() {
 fn kernel_start_stop_and_finalize_records_one_sample() {
     let gpu = init_device().unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let state = ParticleState::new(
-        vec![0.0, 1.0e-10],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![1.0; 2],
-        vec![0.0; 2],
-        vec![0u32; 2],
-        None,
-            None,
-    )
-    .unwrap();
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut slot_out = heddle_md::gpu::SlotOutputBuffers::new(&gpu.device, 2).unwrap();
-    let params = single_type_lj_table(&gpu.device, 1.0e-10, 1.0, 1.0e-9);
-    let sim_box = SimulationBox::new(&gpu.device, 1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
-    timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
-    lj_pair_force_no_excl(
-        &buffers,
-        &mut slot_out,
-        &sim_box,
-        &params,
-        heddle_md::forces::AggregateLevel::ForcesOnly,
-    ).unwrap();
-    timings.kernel_stop(KernelStage::LJ_PAIR_FORCE).unwrap();
+    // Any real device work between start/stop exercises the CUDA-event
+    // timing path; a sizeable memset is the simplest queueable kernel.
+    let mut buf = gpu.device.alloc_zeros::<u32>(1 << 18).unwrap();
+    timings
+        .kernel_start(KernelStage::CLASS_ACCUMULATOR_MEMSET)
+        .unwrap();
+    gpu.device.memset_zeros(&mut buf).unwrap();
+    timings
+        .kernel_stop(KernelStage::CLASS_ACCUMULATOR_MEMSET)
+        .unwrap();
     let report = timings.finalize().unwrap();
     let entry = report
         .stages
         .iter()
-        .find(|s| s.name == "lj_pair_force")
+        .find(|s| s.name == "class_accumulator_memset")
         .unwrap();
     assert_eq!(entry.count, 1);
 }
@@ -921,40 +904,21 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
 fn repeated_kernel_starts_stops_accumulate() {
     let gpu = init_device().unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let state = ParticleState::new(
-        vec![0.0, 1.0e-10],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![1.0; 2],
-        vec![0.0; 2],
-        vec![0u32; 2],
-        None,
-            None,
-    )
-    .unwrap();
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut slot_out = heddle_md::gpu::SlotOutputBuffers::new(&gpu.device, 2).unwrap();
-    let params = single_type_lj_table(&gpu.device, 1.0e-10, 1.0, 1.0e-9);
-    let sim_box = SimulationBox::new(&gpu.device, 1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
+    let mut buf = gpu.device.alloc_zeros::<u32>(1 << 18).unwrap();
     for _ in 0..10 {
-        timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
-        lj_pair_force_no_excl(
-            &buffers,
-            &mut slot_out,
-            &sim_box,
-            &params,
-            heddle_md::forces::AggregateLevel::ForcesOnly,
-        ).unwrap();
-        timings.kernel_stop(KernelStage::LJ_PAIR_FORCE).unwrap();
+        timings
+            .kernel_start(KernelStage::CLASS_ACCUMULATOR_MEMSET)
+            .unwrap();
+        gpu.device.memset_zeros(&mut buf).unwrap();
+        timings
+            .kernel_stop(KernelStage::CLASS_ACCUMULATOR_MEMSET)
+            .unwrap();
     }
     let report = timings.finalize().unwrap();
     let entry = report
         .stages
         .iter()
-        .find(|s| s.name == "lj_pair_force")
+        .find(|s| s.name == "class_accumulator_memset")
         .unwrap();
     assert_eq!(entry.count, 10);
     assert!(entry.total_ns > 0);

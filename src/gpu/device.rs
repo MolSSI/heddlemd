@@ -35,9 +35,6 @@ pub(crate) fn get_func(
 pub struct Kernels {
     pub fill: crate::gpu::fill::FillKernels,
     pub integrate: crate::integrator::velocity_verlet::IntegrateKernels,
-    pub lj: crate::forces::lj::LjKernels,
-    pub coulomb: crate::forces::coulomb::CoulombKernels,
-    pub spme_real: crate::forces::spme::SpmeRealKernels,
     pub spme_recip: crate::forces::spme::SpmeRecipKernels,
     pub langevin: crate::integrator::langevin_baoab::LangevinKernels,
     pub morse: crate::forces::morse::MorseKernels,
@@ -60,9 +57,6 @@ impl Kernels {
         Ok(Kernels {
             fill: crate::gpu::fill::FillKernels::load(device)?,
             integrate: crate::integrator::velocity_verlet::IntegrateKernels::load(device)?,
-            lj: crate::forces::lj::LjKernels::load(device)?,
-            coulomb: crate::forces::coulomb::CoulombKernels::load(device)?,
-            spme_real: crate::forces::spme::SpmeRealKernels::load(device)?,
             spme_recip: crate::forces::spme::SpmeRecipKernels::load(device)?,
             langevin: crate::integrator::langevin_baoab::LangevinKernels::load(device)?,
             morse: crate::forces::morse::MorseKernels::load(device)?,

@@ -550,7 +550,6 @@ fn spread_pipeline_does_not_launch_neighbor_list_kernels() {
     for forbidden in [
         KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED.name(),
         KernelStage::COPY_POSITIONS_INTO_REFERENCE.name(),
-        KernelStage::NEIGHBOR_LIST_BUILD.name(),
     ] {
         assert!(
             !report.stages.iter().any(|s| s.name == forbidden),

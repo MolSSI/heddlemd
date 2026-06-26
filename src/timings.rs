@@ -32,10 +32,6 @@ impl KernelStage {
     pub const VV_KICK_DRIFT_LOSSLESS: KernelStage =
         KernelStage::new("vv_kick_drift_lossless");
     pub const VV_KICK_LOSSLESS: KernelStage = KernelStage::new("vv_kick_lossless");
-    pub const LJ_PAIR_FORCE: KernelStage = KernelStage::new("lj_pair_force");
-    pub const COULOMB_PAIR_FORCE: KernelStage = KernelStage::new("coulomb_pair_force");
-    pub const SPME_REAL_PAIR_FORCE: KernelStage =
-        KernelStage::new("spme_real_pair_force");
     /// rq-9f309378
     pub const JIT_COMPOSED_PAIR_FORCE: KernelStage =
         KernelStage::new("jit_composed_pair_force");
@@ -116,7 +112,6 @@ impl KernelStage {
         KernelStage::new("class_accumulator_memset");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
         KernelStage::new("neighbor_displacement_check_flag");
-    pub const NEIGHBOR_LIST_BUILD: KernelStage = KernelStage::new("neighbor_list_build");
     pub const COPY_POSITIONS_INTO_REFERENCE: KernelStage =
         KernelStage::new("copy_positions_into_reference");
     pub const SCATTER_POSITIONS_TO_TILE_ORDER: KernelStage =
@@ -132,12 +127,8 @@ impl KernelStage {
         Self::LANGEVIN_OU_STEP,
         Self::NEIGHBOR_DISPLACEMENT_SQUARED,
         Self::COPY_POSITIONS_INTO_REFERENCE,
-        Self::NEIGHBOR_LIST_BUILD,
         Self::CLASS_ACCUMULATOR_MEMSET,
         Self::SCATTER_POSITIONS_TO_TILE_ORDER,
-        Self::LJ_PAIR_FORCE,
-        Self::COULOMB_PAIR_FORCE,
-        Self::SPME_REAL_PAIR_FORCE,
         Self::JIT_COMPOSED_PAIR_FORCE,
         Self::FINALIZE_PACKED_FORCES,
         Self::JIT_COMPOSED_BONDED_FORCE,

@@ -99,7 +99,7 @@ fn grid_system(gpu: &GpuContext, side: usize) -> (SimulationBox, ParticleBuffers
 }
 
 fn cell_list_state(gpu: &GpuContext, n: usize, sim_box: &SimulationBox) -> NeighborListState {
-    NeighborListState::new_cell_list(gpu, sim_box, n, 1.0, 256, 0.3).unwrap()
+    NeighborListState::new_cell_list(gpu, sim_box, n, 1.0, 0.3).unwrap()
 }
 
 // Status-word bit layout (mirrors the private constants in

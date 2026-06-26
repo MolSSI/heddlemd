@@ -524,9 +524,6 @@ pub struct Config {
 fn default_spline_order() -> u32 {
     4
 }
-fn default_max_neighbors() -> u32 {
-    256
-}
 fn default_trajectory_every() -> u64 {
     100
 }

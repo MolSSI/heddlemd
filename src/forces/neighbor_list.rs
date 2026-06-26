@@ -9,7 +9,7 @@ use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     compute_cell_indices_and_histogram, copy_positions_into_reference,
-    neighbor_displacement_check_flag, neighbor_list_build, prefix_scan_cell_counts,
+    neighbor_displacement_check_flag, prefix_scan_cell_counts,
     scatter_atoms_into_cells, sort_cells_by_particle_id,
 };
 use crate::kernels;
@@ -189,9 +189,6 @@ pub struct NeighborListState {
     pub device: Arc<CudaDevice>,
     pub kernels: Arc<Kernels>,
     pub particle_count: usize,
-    pub max_neighbors: u32,
-    pub neighbor_list: CudaSlice<u32>,
-    pub neighbor_counts: CudaSlice<u32>,
     pub mode: NeighborListMode,
     /// Packed-neighbour data populated in `CellList` and `Trivial`
     /// modes; `None` for `CellListOnly` (SPME bin-only mode).
@@ -462,7 +459,6 @@ impl NeighborListState {
         sim_box: &SimulationBox,
         particle_count: usize,
         r_cut: Real,
-        max_neighbors: u32,
         r_skin: Real,
     ) -> Result<Self, NeighborListError> {
         let device = gpu.device.clone();
@@ -473,7 +469,6 @@ impl NeighborListState {
         // max_disp > r_skin * 0.5 = 0 unless the system is fully
         // stationary). Negative is malformed.
         debug_assert!(r_skin >= 0.0);
-        debug_assert!(max_neighbors > 0);
         let r_search = r_cut + r_skin;
         let r_search_sq = r_search * r_search;
         let n_cells = compute_cell_layout(sim_box, r_search)?;
@@ -496,13 +491,6 @@ impl NeighborListState {
             .map_err(GpuError::from)?;
         let cell_offsets = device
             .alloc_zeros::<u32>(n_cells_total + 1)
-            .map_err(GpuError::from)?;
-        let nl_len = particle_count * max_neighbors as usize;
-        let neighbor_list = device
-            .alloc_zeros::<u32>(nl_len.max(1))
-            .map_err(GpuError::from)?;
-        let neighbor_counts = device
-            .alloc_zeros::<u32>(particle_count.max(1))
             .map_err(GpuError::from)?;
         let reference_positions_x = device
             .alloc_zeros::<Real>(particle_count.max(1))
@@ -532,9 +520,6 @@ impl NeighborListState {
             device,
             kernels,
             particle_count,
-            max_neighbors,
-            neighbor_list,
-            neighbor_counts,
             packed: Some(packed),
             mode: NeighborListMode::CellList(CellListData {
                 n_cells,
@@ -611,9 +596,6 @@ impl NeighborListState {
             .alloc_zeros::<u32>(n_cells_total + 1)
             .map_err(GpuError::from)?;
 
-        // Neighbor-list-only buffers are zero-length in bin-only mode.
-        let neighbor_list = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
-        let neighbor_counts = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
         let reference_positions_x = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
         let reference_positions_y = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
         let reference_positions_z = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
@@ -623,9 +605,6 @@ impl NeighborListState {
             device,
             kernels,
             particle_count,
-            max_neighbors: 0,
-            neighbor_list,
-            neighbor_counts,
             packed: None,
             mode: NeighborListMode::CellListOnly(CellListData {
                 n_cells,
@@ -660,31 +639,6 @@ impl NeighborListState {
     ) -> Result<Self, NeighborListError> {
         let device = gpu.device.clone();
         let kernels = gpu.kernels.clone();
-        let max_neighbors = particle_count as u32;
-        let nl_len = particle_count * particle_count;
-        let nl_host: Vec<u32> = if nl_len == 0 {
-            Vec::new()
-        } else {
-            let mut v = Vec::with_capacity(nl_len);
-            for _ in 0..particle_count {
-                for k in 0..particle_count {
-                    v.push(k as u32);
-                }
-            }
-            v
-        };
-        let counts_host: Vec<u32> = vec![particle_count as u32; particle_count];
-
-        let neighbor_list = if nl_host.is_empty() {
-            device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
-        } else {
-            device.htod_sync_copy(&nl_host).map_err(GpuError::from)?
-        };
-        let neighbor_counts = if counts_host.is_empty() {
-            device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
-        } else {
-            device.htod_sync_copy(&counts_host).map_err(GpuError::from)?
-        };
 
         let packed = if particle_count == 0 {
             None
@@ -793,9 +747,6 @@ impl NeighborListState {
             device,
             kernels,
             particle_count,
-            max_neighbors,
-            neighbor_list,
-            neighbor_counts,
             packed,
             mode: NeighborListMode::Trivial,
             rebuild_generation: 0,
@@ -1471,7 +1422,6 @@ fn map_timings_err(e: crate::timings::TimingsError) -> NeighborListError {
 #[derive(Debug, Clone)]
 pub struct NeighborKernels {
     pub neighbor_displacement_check_flag: CudaFunction,
-    pub neighbor_list_build: CudaFunction,
     pub copy_positions_into_reference: CudaFunction,
     pub compute_cell_indices_and_histogram: CudaFunction,
     pub prefix_scan_local_blocks: CudaFunction,
@@ -1499,7 +1449,6 @@ impl NeighborKernels {
             "neighbor",
             &[
                 "neighbor_displacement_check_flag",
-                "neighbor_list_build",
                 "copy_positions_into_reference",
                 "compute_cell_indices_and_histogram",
                 "prefix_scan_local_blocks",
@@ -1524,7 +1473,6 @@ impl NeighborKernels {
                 "neighbor",
                 "neighbor_displacement_check_flag",
             )?,
-            neighbor_list_build: get_func(device, "neighbor", "neighbor_list_build")?,
             copy_positions_into_reference: get_func(
                 device,
                 "neighbor",

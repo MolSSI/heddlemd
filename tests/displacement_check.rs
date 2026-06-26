@@ -52,7 +52,7 @@ fn buffers_at(
 /// `r_skin = 0.3`. The cell layout supports 7 cells per axis at box
 /// side 10. `max_neighbors` is unused by the displacement kernel.
 fn cell_list_state(gpu: &GpuContext, n: usize, sim_box: &SimulationBox) -> NeighborListState {
-    NeighborListState::new_cell_list(gpu, sim_box, n, 1.0, 256, 0.3).unwrap()
+    NeighborListState::new_cell_list(gpu, sim_box, n, 1.0, 0.3).unwrap()
 }
 
 /// Copy the supplied host-side reference positions into the CellList's

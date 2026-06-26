@@ -50,12 +50,10 @@ unmodified Lennard-Jones force and energy.
 
 The kernel topology, sweep loop, warp-tree reduction, exclusion-scale
 lookup, and per-particle output write all follow the common
-warp-per-particle pattern specified in `pair-force-kernel.md`. The
-LJ-specific contribution at each `(i, k)` pair is computed as follows.
-
-For lane `lane` of the warp handling particle `i` at sweep step `s`,
-when `k = s * 32 + lane` satisfies `k < neighbor_counts[i]` and
-`j = neighbor_list[i * max_neighbors + k]` is not equal to `i`:
+warp-per-particle pattern specified in `pair-force-kernel.md`, evaluated
+over the packed neighbour list of `packed-neighbour-pair-force.md`. The
+LJ-specific contribution is computed once per interacting `(i, j)` pair
+the packed list yields, where `j` is a neighbour atom distinct from `i`:
 
 1. Resolve the per-pair-type parameter slot:
 
@@ -318,75 +316,24 @@ than opposites.
   - When `n_types == 0` (no particle types declared), all four slices
     have length zero.
 
-### CUDA Kernels <!-- rq-4ddab3c7 -->
+### Force evaluation <!-- rq-4ddab3c7 -->
 
-`kernels/pair_force.cu` declares two `extern "C"` kernels (forces-only
-and forces + energy + virial) that share the warp-per-particle pattern
-documented in `pair-force-kernel.md`.
-
-#### `lj_pair_force_f`, `lj_pair_force_fev` <!-- rq-7b13d9cf -->
-
-```c
-extern "C" __global__ void lj_pair_force_f(
-    const float4 *posq,
-    const unsigned int *type_indices,
-    unsigned int max_neighbors,
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    unsigned int n_types,
-    const float *type_sigma,
-    const float *type_epsilon,
-    const float *type_cutoff,
-    const float *type_switch,
-    const unsigned int *atom_excl_offsets,
-    const unsigned int *atom_excl_partners,
-    const float *atom_excl_lj_scales,
-    const unsigned int *neighbor_list,
-    const unsigned int *neighbor_counts,
-    float *slot_force_x,
-    float *slot_force_y,
-    float *slot_force_z,
-    unsigned int n);
-
-extern "C" __global__ void lj_pair_force_fev(
-    const float4 *posq,
-    const unsigned int *type_indices,
-    unsigned int max_neighbors,
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    unsigned int n_types,
-    const float *type_sigma,
-    const float *type_epsilon,
-    const float *type_cutoff,
-    const float *type_switch,
-    const unsigned int *atom_excl_offsets,
-    const unsigned int *atom_excl_partners,
-    const float *atom_excl_lj_scales,
-    const unsigned int *neighbor_list,
-    const unsigned int *neighbor_counts,
-    float *slot_force_x,
-    float *slot_force_y,
-    float *slot_force_z,
-    float *slot_energy,
-    float *slot_virial,
-    unsigned int n);
-```
-
-The LJ kernels read positions from `posq[i].xyz` and ignore
-`posq[i].w`. Charges enter the LJ functional form only via the
-σ/ε parameter table; they are not consulted directly.
-
-`lj_pair_force_f` writes only the three per-particle force-component
-slot outputs; `lj_pair_force_fev` writes the three force components
-plus the per-particle potential-energy share and scalar-virial share.
-Both variants share the same warp-per-particle launch geometry,
-per-pair-type parameter lookup, displacement and minimum-image, cutoff
-test, CHARMM-style C¹ switching function over `[r_switch, r_cut]`,
-exclusion-list scaling, and warp-tree reduction defined in
-`pair-force-kernel.md` and the *Algorithm* section above.
-
-`neighbor_list` and `neighbor_counts` are owned by the shared
-`NeighborListState` on `ForceField` (see `neighbor-list.md` and
-`framework.md`). The framework keeps the list current via its
-`pre_step` invocation before any slot's `compute` runs.
+The Lennard-Jones functor is composed into the JIT-composed packed
+pair-force kernel `heddle_jit_composed_pair_force_{f,fev}` (see
+`jit-composed-pair-force.md`), which evaluates every active fast-class
+pair-force slot in a single warp-per-particle pass over the packed
+neighbour list (`packed-neighbour-pair-force.md`). The functor reads
+positions from `posq[i].xyz` and ignores `posq[i].w`; charges enter the
+LJ form only via the σ/ε parameter table. The `_f` variant writes the
+per-particle net force; the `_fev` variant additionally writes the
+potential-energy and scalar-virial shares. The per-pair-type parameter
+lookup, minimum-image displacement, cutoff test, CHARMM-style C¹
+switching over `[r_switch, r_cut]`, exclusion-list scaling, and the
+fixed-point accumulation are as defined in the *Algorithm* section above
+and in `packed-neighbour-pair-force.md`. The packed neighbour list is
+owned by the shared `NeighborListState` on `ForceField` (see
+`neighbor-list.md` and `framework.md`) and kept current by the
+framework's `pre_step` before each force evaluation.
 
 ### Exclusion scaling <!-- inline-edit --> <!-- rq-dddcbf07 -->
 
@@ -418,87 +365,22 @@ each other. Empty lists are represented by `atom_excl_offsets` of
 length `N + 1` filled with zeros and zero-length partner / scale
 buffers; the kernel handles this case without a separate code path.
 
-### PTX Module Loading <!-- rq-78d9fd1c -->
-
-`init_device()` loads the compiled `kernels/pair_force.cu` PTX as module
-`"pair_force"` and captures both the `lj_pair_force_f` and
-`lj_pair_force_fev` functions into the `Kernels` handle (see
-`build-pipeline.md`).
-
-### Rust Launcher <!-- rq-d6beaed7 -->
-
-A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
-
-- `lj_pair_force(particle_buffers: &ParticleBuffers, output: &mut SlotOutputView<'_>, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>, max_neighbors: u32, level: AggregateLevel) -> Result<(), GpuError>` <!-- rq-d3a14184 -->
-  - Selects the kernel variant based on `level`:
-    `AggregateLevel::ForcesOnly` dispatches to `lj_pair_force_f` and
-    writes only the three force-component slot output rows;
-    `AggregateLevel::ForcesAndScalars` dispatches to `lj_pair_force_fev`
-    and additionally writes the energy and virial slot output rows.
-  - Launches with the warp-per-particle geometry documented in
-    `pair-force-kernel.md`: `block_dim = (256, 1, 1)`,
-    `grid_dim = (ceil(n / 8), 1, 1)`.
-  - When `particle_buffers.particle_count() == 0`, returns `Ok(())`
-    without launching a kernel.
-  - Returns the underlying `GpuError` if the kernel launch fails.
-  - Invokes the kernel through the `lj_pair_force_f` or
-    `lj_pair_force_fev` field of the `Kernels` handle reached from its
-    arguments; it performs no string-keyed kernel lookup of its own (see
-    `build-pipeline.md`).
-
-  The `DeviceExclusionList` argument is a host-side handle holding the
-  four device buffers `atom_excl_offsets`, `atom_excl_partners`,
-  `atom_excl_lj_scales`, and `atom_excl_coul_scales`. It is constructed
-  from the host-side `ExclusionList` (see `topology.md`) once at force-field
-  construction time and shared between the LJ and Coulomb slots; each
-  slot consumes the scale array appropriate to itself. An empty exclusion
-  list is represented by a `DeviceExclusionList` whose offsets buffer has
-  length `N + 1` filled with zeros and whose partner / scale buffers have
-  length zero.
-
-  The launcher trusts the caller for shape consistency: in debug builds
-  it asserts `output.force_x.len() == particle_buffers.particle_count()`
-  (and similarly for `force_y`, `force_z`, and — under
-  `ForcesAndScalars` — `energy` and `virial`),
-  `neighbor_list.len() == particle_buffers.particle_count() *
-  max_neighbors as usize`,
-  `neighbor_counts.len() == particle_buffers.particle_count()`,
-  `exclusions.particle_count() == particle_buffers.particle_count()`,
-  and `params.sigma.len() == params.epsilon.len() == params.cutoff.len()
-  == params.switch.len() == params.n_types as usize *
-  params.n_types as usize`. Release builds skip the asserts for parity
-  with the other kernel launchers. The launcher does not validate the
-  σ/ε/cutoff/r_switch entries themselves and does not check any cutoff
-  against `sim_box.min_perpendicular_width() / 2` (that gating happens
-  in the neighbor list; see `forces/neighbor-list.md`).
-
-## Launch Configuration <!-- rq-4fd872f5 -->
-
-- Block size: 256 threads (8 warps × 32 lanes) for both variants.
-- Grid size: `ceil(n / 8)` blocks in the x dimension.
-- Shared memory: zero bytes.
-- Stream: the default stream carried by `ParticleBuffers.device`.
-
-Both numbers match the common pair-force pattern (`pair-force-kernel.md`).
-
-## Practical Bounds <!-- rq-4a902e65 -->
-
-- `n` is `u32` on the device side. Particle counts up to `u32::MAX` are
-  representable.
-- When the shared `NeighborListState` is in `Trivial` mode, work is
-  O(N²) and `max_neighbors == N`; intended for systems of at most a few
-  thousand particles.
-- When the shared list is in `CellList` mode, work is O(N · avg_neighbors).
-  `max_neighbors` is a user-supplied bound (typically 64–256).
+The `DeviceExclusionList` is a host-side handle holding the four device
+buffers `atom_excl_offsets`, `atom_excl_partners`, `atom_excl_lj_scales`,
+and `atom_excl_coul_scales`. It is constructed from the host-side
+`ExclusionList` (see `topology.md`) once at force-field construction time
+and shared between the LJ and Coulomb functors; each consumes the scale
+array appropriate to itself. An empty exclusion list is represented by a
+`DeviceExclusionList` whose offsets buffer has length `N + 1` filled with
+zeros and whose partner / scale buffers have length zero.
 
 ## Slot Integration <!-- rq-a5a919df -->
 
 `LennardJonesState` implements the `Potential` trait declared in
 `framework.md` with `label() == "lennard_jones"`. It is a single struct
 carrying the `LennardJonesParameterTable` and the `DeviceExclusionList`.
-It does not own a neighbor list: the framework's shared
-`NeighborListState` is passed in through `ForceFieldContext` at each
-`compute` call.
+It does not own a neighbor list; the framework's shared
+`NeighborListState` is reached through `ForceFieldContext`.
 
 The slot's `Potential` methods:
 
@@ -506,14 +388,12 @@ The slot's `Potential` methods:
   largest cutoff across the slot's pair-interaction configuration,
   captured at construction time as a plain `f32` field. The trait call
   requires no device download.
-- `compute(buffers, sim_box, output, cx, timings, level)` invokes the
-  `lj_pair_force` launcher (defined above), forwarding `output`,
-  `level`, the shared `NeighborListState`'s `neighbor_list` and
-  `neighbor_counts`, and `max_neighbors`. The launcher selects the
-  `_f` or `_fev` kernel variant based on `level` and writes directly
-  into the `SlotOutputView` slices, bracketed by the `LjPairForce`
-  `KernelStage` labels. The framework has already called `pre_step` on
-  the shared neighbor list before this method runs.
+- `jit_participant` returns `Some(JitParticipant::PairForce(self))`, so
+  the slot contributes the Lennard-Jones functor (see *JIT fragment
+  behaviour* above) to the composed packed pair-force kernel rather than
+  launching a kernel of its own. The framework evaluates the composed
+  kernel over the shared packed neighbour list, which it keeps current
+  via `pre_step` before each force evaluation.
 
 ## Out of Scope <!-- rq-9d7966f4 -->
 
