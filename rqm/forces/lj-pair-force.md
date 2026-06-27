@@ -16,10 +16,13 @@ real neighbours; per-particle contributions accumulate via
 not launch its own per-potential kernel.
 
 This file specifies the Lennard-Jones functional form (with optional
-inner-switching radius), the per-pair-type parameter tables the slot
-exposes (`type_sigma`, `type_epsilon`, `type_cutoff`, `type_switch`,
-`type_indices`), and the per-pair `evaluate(r², i, j) -> (factor,
-energy, virial)` contract its fragment implements. The kernel
+inner-switching radius) and the per-pair-type parameter tables the slot
+exposes (`type_sigma`, `type_epsilon`, `type_cutoff`, `type_switch`).
+The per-atom `type_indices` buffer is a framework-common argument the
+composed kernel loads once per atom (see `jit-composed-pair-force.md`),
+not a slot-bound table; the fragment receives the indices as the
+`i_type` / `j_type` parameters of its per-pair `evaluate` and
+`cutoff_squared` contract. The kernel
 topology, launch configuration, neighbour-list contract, and
 reproducibility mechanism are specified in
 `packed-neighbour-pair-force.md` and not restated here.
@@ -29,12 +32,16 @@ cell-list mode and O(N²) when it is in trivial mode (every particle's
 list contains every particle). The kernel is the same in both cases;
 only the contents and size of the shared list differ.
 
-The kernel reads the per-particle `type_indices` buffer (see
-`particle-state.md`) and the per-pair-type parameter arrays, applies
-the `ExclusionList` (see `topology.md`) per-pair scaling, and adds
-into the `SlotOutputView` (a view onto the slot's class accumulator)
-handed to it through `Potential::compute` — no per-pair intermediate
-buffer is materialised on the device.
+The per-atom particle-type indices reach the functor as the `i_type`
+and `j_type` parameters that the composed kernel's outer loop loads
+once per atom from the `type_indices` buffer (see
+`particle-state.md`) and threads into every `evaluate`; the functor
+indexes its per-pair-type parameter arrays from those registers rather
+than re-loading `type_indices` per pair (see
+`jit-composed-pair-force.md`). The functor applies the `ExclusionList`
+(see `topology.md`) per-pair scaling and adds into the slot's class
+accumulator — no per-pair intermediate buffer is materialised on the
+device.
 
 This file specifies `LennardJonesParameterTable` (the device-resident
 per-pair-type parameter table) and the per-pair fragment functor that
@@ -56,17 +63,22 @@ over the packed neighbour list of `packed-neighbour-pair-force.md`. The
 LJ-specific contribution is computed once per interacting `(i, j)` pair
 the packed list yields, where `j` is a neighbour atom distinct from `i`:
 
-1. Resolve the per-pair-type parameter slot:
+1. Resolve the per-pair-type parameter slot from the per-atom type
+   indices supplied by the composed kernel (`i_type`, `j_type`):
 
    ```
-   ti = type_indices[i]
-   tj = type_indices[j]
-   p  = ti * n_types + tj
+   p  = i_type * n_types + j_type
    sigma   = type_sigma[p]
    epsilon = type_epsilon[p]
    cutoff  = type_cutoff[p]
    switch  = type_switch[p]
    ```
+
+   The functor performs no `type_indices` load of its own; `i_type`
+   and `j_type` are loaded once per atom by the outer loop (see
+   `jit-composed-pair-force.md`). The `type_sigma` / `type_epsilon`
+   / `type_cutoff` / `type_switch` tables remain the slot's own
+   per-pair-type parameters and are indexed by `p`.
 
 2. Compute the displacement `(dx, dy, dz) = positions[i] - positions[j]`
    and apply the triclinic minimum-image convention using the six lattice
@@ -171,18 +183,23 @@ functor that the JIT-composed pair-force kernel (see
 neighbour list yields. The functor specialises the per-pair recipe of
 *Algorithm* in three ways:
 
-1. **Shared `(inv_r, r, qi, qj)` inputs.** The fragment's
+1. **Shared per-pair and per-atom inputs.** The fragment's
    `evaluate` signature is
    `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj,
+   unsigned int i_type, unsigned int j_type,
    unsigned int i, unsigned int j, Real &factor, Real &energy,
-   Real &virial)`. `inv_r = rsqrtf(r²)`, `r = r² · inv_r`,
-   `qi = posq[i].w`, and `qj = posq[j].w` are computed once per
-   pair by the composer's outer loop and threaded into every
-   active fragment. The LJ fragment does not compute `1.0 / r2`;
-   it derives `inv_r2 = inv_r · inv_r` from `inv_r` directly. It
-   ignores `qi` and `qj` (the Lennard-Jones functional form does
-   not depend on charges; the parameters come from the per-pair-
-   type `type_sigma` and `type_epsilon` arrays instead).
+   Real &virial)`. `inv_r = rsqrtf(r²)` and `r = r² · inv_r` are
+   computed once per pair; `qi` / `qj` (charges) and `i_type` /
+   `j_type` (per-atom particle-type indices) are loaded once per
+   atom by the composer's outer loop and threaded into every active
+   fragment. The LJ fragment does not compute `1.0 / r2`; it
+   derives `inv_r2 = inv_r · inv_r` from `inv_r` directly. It
+   **ignores `qi` / `qj`** (the Lennard-Jones form does not depend
+   on charges) and **uses `i_type` / `j_type`** to index its
+   per-pair-type `type_sigma` / `type_epsilon` arrays
+   (`p = i_type · n_types + j_type`), so it performs no per-pair
+   `type_indices` load of its own. It sets `consumes_type_index =
+   true` so the composer emits the per-atom type-index load.
 
 2. **Compile-time elision of the degenerate switch.** At fragment
    construction the builder inspects the
@@ -206,16 +223,17 @@ neighbour list yields. The functor specialises the per-pair recipe of
    - When every `cutoff[p]` for `p ∈ [0, n_types²)` equals the
      same value `c`, the fragment reports
      `cutoff: CutoffHandling::Uniform(c)`. The composer omits the
-     per-fragment `r² <= cutoff_squared(i, j)` guard when
+     per-fragment cutoff guard when
      `c² == HEDDLE_JIT_MAX_CUTOFF_SQUARED`; otherwise it emits a
      single `if (r² <= c²)` guard with `c²` as a JIT-compile-time
      constant.
    - When at least two `cutoff[p]` entries differ, the fragment
      reports `cutoff: CutoffHandling::PerPair` and the composer
      emits the runtime
-     `if (r² <= functor.cutoff_squared(i, j))` guard. The
-     functor's `cutoff_squared(i, j)` indexes
-     `type_cutoff[slot(i, j)]` and squares it.
+     `if (r² <= functor.cutoff_squared(i_type, j_type, i, j))`
+     guard. The functor's `cutoff_squared` indexes
+     `type_cutoff[i_type · n_types + j_type]` from the per-atom
+     type indices and squares it — no per-pair `type_indices` load.
 
    `evaluate` is invoked unconditionally for every pair the outer
    loop visits; the outer max-cutoff mask described in
@@ -851,7 +869,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: LJ JIT fragment uses the composer-supplied inv_r and r
     Given a ForceField with at least one [[pair_interactions]] entry and the JIT-composed kernel active
     And the composed kernel source captured for inspection
-    Then the LJ fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    Then the LJ fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
     And the LJ fragment body does not contain `1.0 / r2`, `1.0f / r2`, `R(1.0) / r2`, or any other expression that computes inv_r2 from r2
 
   @rq-6060a744
@@ -890,4 +908,26 @@ Feature: Lennard-Jones O(N²) pair force kernel
     When ForceField::step(...) is called
     Then the per-particle force on particle 0 equals the closed-form LJ force at r=1.5 within 1e-5 relative tolerance
     And two runs of the same configuration produce byte-identical per-particle forces
+
+  @rq-08f7531f
+  Scenario: The LJ fragment declares it consumes the per-atom type index
+    When LennardJonesBuilder::pair_force_fragment(cx) is called
+    Then the returned PairForceFragment has consumes_type_index = true
+
+  @rq-62a18360
+  Scenario: The LJ functor reads the per-atom type indices instead of loading type_indices per pair
+    Given a config with a lennard_jones slot and n_types >= 2
+    When LennardJonesBuilder::pair_force_fragment(cx) is called
+    And the composed kernel source is captured for inspection
+    Then the LJ functor body resolves its parameter slot as i_type * n_types + j_type
+    And the LJ functor body contains no load from a type_indices buffer
+    And the lennard_jones slot's bind_pair_force_args binds no type-index buffer
+
+  @rq-21201692
+  Scenario: Amortized type indices reproduce the per-pair-lookup forces with mixed types
+    Given a config with a lennard_jones slot whose particles span two types with distinct sigma/epsilon
+    And the JIT-composed kernel active
+    When ForceField::step(...) is called
+    Then the per-particle forces equal those computed with explicit type_indices[i] / type_indices[j] lookups within f32 round-off
+    And two runs on the same GPU produce byte-identical per-particle forces
 ```

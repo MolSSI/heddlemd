@@ -898,6 +898,9 @@ impl ForceField {
             // call. See `rqm/forces/packed-neighbour-pair-force.md`
             // *Single-Periodic-Copy Fast Path*.
             launch_builder.push_device_buffer(&buffers.posq);
+            // Per-atom type index: a composer common arg the outer loop
+            // loads once per atom (see jit-composed-pair-force.md). rq-c2b26c0c
+            launch_builder.push_device_buffer(&buffers.type_indices);
             launch_builder.push_device_buffer(&packed.tile_sorted_posq);
             launch_builder.push_device_buffer(&packed.block_centre);
             launch_builder.push_device_buffer(&packed.block_bbox);
@@ -948,6 +951,7 @@ impl ForceField {
                 if packed.single_pairs_capacity > 0 {
                     let mut single_pair_builder = ForceLaunchBuilder::new();
                     single_pair_builder.push_device_buffer(&buffers.posq);
+                    single_pair_builder.push_device_buffer(&buffers.type_indices); // rq-c2b26c0c
                     single_pair_builder.push_device_buffer(&packed.single_pair_atoms);
                     single_pair_builder.push_device_buffer(&packed.interaction_count);
                     single_pair_builder.push_device_buffer(sim_box.lattice_device());
@@ -980,6 +984,7 @@ impl ForceField {
                 // Common args for the correction entry point (order
                 // must match emit_correction_entry_point).
                 correction_builder.push_device_buffer(&buffers.posq);
+                correction_builder.push_device_buffer(&buffers.type_indices); // rq-c2b26c0c
                 correction_builder.push_device_buffer(&self.excluded_pair_atoms);
                 correction_builder.push_scalar(self.excluded_pair_count);
                 correction_builder.push_device_buffer(sim_box.lattice_device());

@@ -288,8 +288,8 @@ impl PairForcePotential for StubPotential {
         let functor_source = format!(
             r#"
 struct {n} {{
-    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const {{ return R(0.0); }}
-    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int,
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const {{ return R(0.0); }}
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
                                      Real &factor, Real &energy, Real &virial) const {{
         factor = R(0.0); energy = R(0.0); virial = R(0.0);
     }}
@@ -305,6 +305,7 @@ struct {n} {{
             entry_point_args: String::new(),
             functor_init_source: String::new(),
             cutoff: CutoffHandling::PerPair,
+            consumes_type_index: false,
         }
     }
 
@@ -527,6 +528,173 @@ fn step_lennardjones_only_writes_nonzero_forces() {
     assert!((downloaded.forces_x[0] + downloaded.forces_x[1]).abs() < 1e-5);
     assert!(stage_count(&report, "jit_composed_pair_force") >= 1);
     assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
+}
+
+// Two particle types (O, H) with distinct per-pair-type LJ parameters,
+// so the kernel must use the per-atom type indices to pick the right
+// (cross) parameter slot.
+fn oh_types() -> Vec<ParticleTypeConfig> {
+    vec![
+        ParticleTypeConfig { name: "O".to_string(), mass: 1.0, charge: 0.0 },
+        ParticleTypeConfig { name: "H".to_string(), mass: 1.0, charge: 0.0 },
+    ]
+}
+
+fn lj_pair(a: &str, b: &str, sigma: f64, epsilon: f64) -> PairInteractionConfig {
+    PairInteractionConfig {
+        between: (a.to_string(), b.to_string()),
+        cutoff: 5.0,
+        r_switch: 5.0,
+        potential: PairPotentialParams::LennardJones { sigma, epsilon },
+    }
+}
+
+// Distinct O-O, O-H, H-H parameters; the O-H (cross) term is what a
+// type-[0,1] pair probes.
+fn oh_pair_configs() -> Vec<PairInteractionConfig> {
+    vec![
+        lj_pair("O", "O", 1.0, 1.0),
+        lj_pair("O", "H", 1.3, 2.0),
+        lj_pair("H", "H", 0.8, 0.5),
+    ]
+}
+
+fn lj_mixed_type_force_field(gpu: &GpuContext, n: usize) -> ForceField {
+    ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        gpu,
+        n,
+        &box_10(gpu),
+        &oh_types(),
+        &oh_pair_configs(),
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap()
+}
+
+// An O atom (type 0) and an H atom (type 1) on the x-axis at 1.5.
+fn oh_pair_state() -> ParticleState {
+    ParticleState::new(
+        vec![0.0 as Real, 1.5],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![1.0 as Real, 1.0],
+        vec![0.0 as Real, 0.0],
+        vec![0u32, 1u32],
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+// rq-21201692
+#[test]
+fn lj_mixed_types_use_cross_term_parameters() {
+    let gpu = init_device().unwrap();
+    let state = oh_pair_state();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut ff = lj_mixed_type_force_field(&gpu, 2);
+    step_and_finalize(
+        &mut ff,
+        &mut buffers,
+        &box_10(&gpu),
+        &gpu,
+        AggregateLevel::ForcesAndScalars,
+    );
+    let mut downloaded = state.clone();
+    downloaded.download_from(&buffers).unwrap();
+
+    // Closed-form LJ force on atom 0 using the O-H cross parameters.
+    // The kernel resolves the slot from the per-atom type indices
+    // [0, 1]; if it instead used the O-O term the magnitude would differ.
+    let r = 1.5 as Real;
+    let sigma = 1.3 as Real;
+    let eps = 2.0 as Real;
+    let inv_r2 = (1.0 as Real) / (r * r);
+    let sr2 = sigma * sigma * inv_r2;
+    let sr6 = sr2 * sr2 * sr2;
+    let sr12 = sr6 * sr6;
+    let factor = (24.0 as Real) * eps * inv_r2 * ((2.0 as Real) * sr12 - sr6);
+    let dx = (0.0 as Real) - r; // x0 - x1
+    let expected_fx0 = factor * dx;
+
+    let rel = (downloaded.forces_x[0] - expected_fx0).abs() / expected_fx0.abs();
+    assert!(
+        rel < 1e-4,
+        "force {} != cross-term closed form {} (rel {})",
+        downloaded.forces_x[0], expected_fx0, rel
+    );
+    // Newton's third law across the pair.
+    assert!((downloaded.forces_x[0] + downloaded.forces_x[1]).abs() < 1e-4 * expected_fx0.abs());
+}
+
+// rq-73cd4ad9
+#[test]
+fn amortized_type_indices_are_bit_exact_run_to_run() {
+    let gpu = init_device().unwrap();
+    // A multi-type system large enough to exercise the packed pass and
+    // the diagonal-shuffle type rotation.
+    let n = 8;
+    let pos: Vec<Real> = (0..n).map(|i| i as Real * 1.3).collect();
+    let types: Vec<u32> = (0..n).map(|i| (i % 2) as u32).collect();
+    let state = ParticleState::new(
+        pos,
+        vec![0.0 as Real; n],
+        vec![0.0 as Real; n],
+        vec![0.0 as Real; n],
+        vec![0.0 as Real; n],
+        vec![0.0 as Real; n],
+        vec![1.0 as Real; n],
+        vec![0.0 as Real; n],
+        types,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let run = || {
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut ff = lj_mixed_type_force_field(&gpu, n);
+        step_and_finalize(
+            &mut ff,
+            &mut buffers,
+            &box_10(&gpu),
+            &gpu,
+            AggregateLevel::ForcesAndScalars,
+        );
+        let mut downloaded = state.clone();
+        downloaded.download_from(&buffers).unwrap();
+        downloaded
+    };
+
+    let a = run();
+    let b = run();
+    for i in 0..n {
+        for (label, va, vb) in [
+            ("x", a.forces_x[i], b.forces_x[i]),
+            ("y", a.forces_y[i], b.forces_y[i]),
+            ("z", a.forces_z[i], b.forces_z[i]),
+        ] {
+            assert_eq!(
+                va.to_bits(),
+                vb.to_bits(),
+                "force {label} on atom {i} not byte-identical across runs"
+            );
+        }
+    }
+    // Sanity: the mixed-type system produced real forces.
+    assert!(a.forces_x.iter().any(|f| f.abs() > 0.0));
 }
 
 // rq-df3a50f6
@@ -1274,8 +1442,8 @@ impl PairForcePotential for CutoffInspectingPotential {
             functor_struct_name: "CutoffInspectorFunctor",
             functor_source: r#"
 struct CutoffInspectorFunctor {
-    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const { return R(0.0); }
-    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int,
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const { return R(0.0); }
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
                                      Real &factor, Real &energy, Real &virial) const {
         factor = R(0.0); energy = R(0.0); virial = R(0.0);
     }
@@ -1286,6 +1454,7 @@ struct CutoffInspectorFunctor {
             entry_point_args: String::new(),
             functor_init_source: String::new(),
             cutoff: CutoffHandling::PerPair,
+            consumes_type_index: false,
         }
     }
 

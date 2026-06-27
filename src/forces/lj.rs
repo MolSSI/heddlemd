@@ -103,7 +103,7 @@ impl PairForcePotential for LennardJonesState {
 
     fn bind_pair_force_args(
         &self,
-        ctx: &PairForceBindContext<'_>,
+        _ctx: &PairForceBindContext<'_>,
         builder: &mut ForceLaunchBuilder,
     ) {
         // Each push is validated against `lj_arg_schema()` — the same
@@ -112,7 +112,10 @@ impl PairForcePotential for LennardJonesState {
         // name, kind, or element type from the kernel signature.
         let schema = lj_arg_schema();
         let mut b = KernelArgBinder::new(&schema, LABEL, builder);
-        b.buffer("lj_type_indices", &ctx.buffers.type_indices);
+        // The per-atom type index is a composer common argument loaded
+        // once per atom by the outer loop; the fragment receives it as
+        // i_type / j_type and binds no type-index buffer of its own.
+        // rq-08f7531f rq-62a18360
         b.scalar_u32("lj_n_types", self.params.n_types as u32);
         b.buffer("lj_type_sigma", &self.params.sigma);
         b.buffer("lj_type_epsilon", &self.params.epsilon);
@@ -140,7 +143,6 @@ fn lj_arg_schema() -> KernelArgSchema {
     KernelArgSchema::pair_force(
         LABEL,
         vec![
-            KernelArg::new("lj_type_indices", ConstPtrU32, "type_indices"),
             KernelArg::new("lj_n_types", ScalarU32, "n_types"),
             KernelArg::new("lj_type_sigma", ConstPtrReal, "type_sigma"),
             KernelArg::new("lj_type_epsilon", ConstPtrReal, "type_epsilon"),
@@ -232,7 +234,7 @@ pub fn lj_pair_force_fragment(
         // functor still carries the pointers (so the slot's
         // bind_pair_force_args is identical to the with-switch
         // case).
-        r#"        unsigned int p = slot(i, j);
+        r#"        unsigned int p = slot(i_type, j_type);
         Real sigma = type_sigma[p];
         Real epsilon = type_epsilon[p];
         Real inv_r2 = inv_r * inv_r;
@@ -245,7 +247,7 @@ pub fn lj_pair_force_fragment(
         virial = factor * r2;
 "#
     } else {
-        r#"        unsigned int p = slot(i, j);
+        r#"        unsigned int p = slot(i_type, j_type);
         Real sigma = type_sigma[p];
         Real epsilon = type_epsilon[p];
         Real cutoff = type_cutoff[p];
@@ -275,7 +277,6 @@ pub fn lj_pair_force_fragment(
     let functor_source = format!(
         r#"
 struct LjPairFunctor {{
-    const unsigned int *type_indices;
     unsigned int n_types;
     const Real *type_sigma;
     const Real *type_epsilon;
@@ -285,21 +286,25 @@ struct LjPairFunctor {{
     const unsigned int *excl_partners;
     const Real *excl_scales;
 
-    __device__ inline unsigned int slot(unsigned int i, unsigned int j) const {{
-        unsigned int ti = type_indices[i];
-        unsigned int tj = type_indices[j];
+    // The per-pair-type slot is resolved from the per-atom type indices
+    // the composer's outer loop supplies (i_type / j_type), so the
+    // functor performs no per-pair type-index load. rq-62a18360
+    __device__ inline unsigned int slot(unsigned int ti, unsigned int tj) const {{
         return ti * n_types + tj;
     }}
 
-    __device__ inline Real cutoff_squared(unsigned int i, unsigned int j) const {{
-        Real c = type_cutoff[slot(i, j)];
+    __device__ inline Real cutoff_squared(
+        unsigned int i_type, unsigned int j_type,
+        unsigned int /*i*/, unsigned int /*j*/) const {{
+        Real c = type_cutoff[slot(i_type, j_type)];
         return c * c;
     }}
 
     __device__ inline void evaluate(
         Real r2, Real inv_r, Real r,
         Real /*qi*/, Real /*qj*/,
-        unsigned int i, unsigned int j,
+        unsigned int i_type, unsigned int j_type,
+        unsigned int /*i*/, unsigned int /*j*/,
         Real &factor, Real &energy, Real &virial) const
     {{
 {eval_body}    }}
@@ -330,6 +335,9 @@ struct LjPairFunctor {{
         entry_point_args: schema.entry_point_args(),
         functor_init_source: schema.functor_init_source(),
         cutoff,
+        // rq-08f7531f — LJ resolves its per-type-pair tables from the
+        // per-atom type indices, so the composer must load them.
+        consumes_type_index: true,
     }
 }
 
@@ -339,12 +347,11 @@ mod tests {
     use crate::forces::{KernelArgType, KernelArg, KernelArgBinder, KernelArgSchema,
         ForceLaunchBuilder};
 
-    // The exact CUDA strings the slot hand-maintained before the schema
-    // refactor. The generated output MUST equal these byte-for-byte so
-    // the composed JIT kernel source — and therefore the bit-wise
-    // reproducible result — is unchanged.
-    const LEGACY_ENTRY_POINT_ARGS: &str = r#"    const unsigned int *lj_type_indices,
-    unsigned int lj_n_types,
+    // The exact CUDA strings the slot's schema generates. The per-atom
+    // `type_indices` is a composer common argument (loaded once per atom
+    // by the outer loop and passed to the functor as i_type / j_type),
+    // so it is NOT among the slot's own bound parameters here. rq-62a18360
+    const LEGACY_ENTRY_POINT_ARGS: &str = r#"    unsigned int lj_n_types,
     const Real *lj_type_sigma,
     const Real *lj_type_epsilon,
     const Real *lj_type_cutoff,
@@ -354,8 +361,7 @@ mod tests {
     const Real *lj_excl_scales,
 "#;
 
-    const LEGACY_FUNCTOR_INIT_SOURCE: &str = r#"    composite.functor_lennard_jones.type_indices = lj_type_indices;
-    composite.functor_lennard_jones.n_types = lj_n_types;
+    const LEGACY_FUNCTOR_INIT_SOURCE: &str = r#"    composite.functor_lennard_jones.n_types = lj_n_types;
     composite.functor_lennard_jones.type_sigma = lj_type_sigma;
     composite.functor_lennard_jones.type_epsilon = lj_type_epsilon;
     composite.functor_lennard_jones.type_cutoff = lj_type_cutoff;
@@ -375,6 +381,47 @@ mod tests {
         assert_eq!(
             lj_arg_schema().functor_init_source(),
             LEGACY_FUNCTOR_INIT_SOURCE
+        );
+    }
+
+    // rq-08f7531f
+    #[test]
+    fn lj_fragment_declares_consumes_type_index() {
+        for switch_degenerate in [false, true] {
+            for uniform in [Some(1.0 as Real), None] {
+                let frag = lj_pair_force_fragment(switch_degenerate, uniform);
+                assert!(
+                    frag.consumes_type_index,
+                    "LJ must consume the per-atom type index"
+                );
+            }
+        }
+    }
+
+    // rq-62a18360
+    #[test]
+    fn lj_functor_uses_per_atom_types_and_loads_no_type_indices() {
+        let frag = lj_pair_force_fragment(false, Some(1.0 as Real));
+        // The parameter slot is resolved from the per-atom type indices.
+        assert!(
+            frag.functor_source.contains("slot(i_type, j_type)"),
+            "LJ functor must resolve its slot from i_type / j_type"
+        );
+        // The functor performs no per-pair type_indices load of its own,
+        // and binds no type-index buffer (it is a composer common arg).
+        assert!(
+            !frag.functor_source.contains("type_indices"),
+            "LJ functor must not reference a type_indices buffer"
+        );
+        assert!(
+            !frag.entry_point_args.contains("type_indices"),
+            "LJ slot must bind no type-index buffer"
+        );
+        assert!(
+            !lj_arg_schema()
+                .entry_point_args()
+                .contains("type_indices"),
+            "LJ arg schema must not declare a type-index buffer"
         );
     }
 

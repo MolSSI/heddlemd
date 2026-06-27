@@ -772,10 +772,11 @@ The per-slot `PairForceFragment` source contract is documented in
 `rqm/forces/jit-composed-pair-force.md`: each fragment provides
 `functor_struct`, `functor_source`, `entry_point_args`,
 `functor_init_source`, and a `cutoff: CutoffHandling`
-declaration. The functor's interface is `cutoff_squared(i, j) ->
-Real`, `evaluate(r2, inv_r, r, i, j, factor, energy, virial)`,
-and `exclusion_scale(i, j) -> Real`. The composer emits two
-per-pair evaluators:
+declaration. The functor's interface is
+`cutoff_squared(i_type, j_type, i, j) -> Real`,
+`evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, factor,
+energy, virial)`, and `exclusion_scale(i, j) -> Real`. The composer
+emits two per-pair evaluators:
 
 - `heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r, i,
   j, factor, energy, virial)` — sums each fragment's

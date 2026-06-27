@@ -69,21 +69,32 @@ identifying metadata. The snippet:
        // only for fragments whose cutoff is declared
        // CutoffHandling::PerPair; Uniform fragments never have
        // this function called from the composed kernel (the outer
-       // loop's max-cutoff mask covers them).
-       __device__ inline Real cutoff_squared(unsigned int i, unsigned int j) const;
+       // loop's max-cutoff mask covers them). It receives the same
+       // per-atom `i_type` / `j_type` indices as `evaluate`, so a
+       // per-type-pair cutoff is indexed from registers rather than
+       // re-loading `type_indices` per pair.
+       __device__ inline Real cutoff_squared(
+           unsigned int i_type, unsigned int j_type,
+           unsigned int i, unsigned int j) const;
 
        // Per-pair functional form. Writes the three pair outputs.
        // `r2`, `inv_r = 1/r`, and `r` are computed once per pair
        // by the outer loop and threaded into every fragment's
-       // evaluate so they share work across fragments. `qi` and
-       // `qj` are the per-pair charges, extracted from the outer
-       // loop's `posq_i.w` and `posq_j.w` loads so that fragments
-       // needing charges (SPME-real, truncated Coulomb) don't
-       // re-load them from device memory and fragments that don't
-       // (Lennard-Jones) simply ignore them.
+       // evaluate so they share work across fragments. `qi` / `qj`
+       // (per-pair charges, from `posq_i.w` / `posq_j.w`) and
+       // `i_type` / `j_type` (per-atom particle-type indices, from
+       // the framework `type_indices` buffer) are per-atom scalars
+       // the outer loop loads once per atom and threads into every
+       // fragment, so a fragment that needs them does not re-load
+       // per-atom data inside the inner loop, and a fragment that
+       // does not simply ignores them. SPME-real and truncated
+       // Coulomb read `qi` / `qj`; Lennard-Jones reads `i_type` /
+       // `j_type` to index its per-type-pair tables and ignores the
+       // charges.
        __device__ inline void evaluate(
            Real r2, Real inv_r, Real r,
            Real qi, Real qj,
+           unsigned int i_type, unsigned int j_type,
            unsigned int i, unsigned int j,
            Real &factor, Real &energy, Real &virial) const;
 
@@ -285,6 +296,19 @@ The lane:
    recomputing `1/r²`, `sqrt(1/r²)`, `1/r` from `r²`, or
    re-loading the charges from a separate `charges` array.
    `rsqrtf` is the hardware reciprocal-square-root intrinsic.
+
+   When at least one active fragment declares
+   `consumes_type_index` (see *Feature API*), the outer loop also
+   loads each atom's particle-type index from the common
+   `type_indices` buffer **once per atom** — `i_type` for the
+   warp's i-atom and `j_type` for the j-atom — and carries `j_type`
+   in the shuffled j-side state alongside `posq_j`, exactly as the
+   j charge is carried. `i_type` and `j_type` are then threaded into
+   every fragment's `evaluate` so a consuming fragment indexes its
+   per-type-pair tables from these registers instead of re-loading
+   `type_indices[i]` / `type_indices[j]` per pair. When no active
+   fragment consumes the type index the per-atom load and shuffle
+   are elided and `i_type` / `j_type` are passed as `0`.
 3. Computes the max-cutoff mask once:
    ```
    mask = (r² <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0)
@@ -300,23 +324,23 @@ The lane:
    `factor = 0`, `energy = 0`, `virial = 0`.
 5. For each active fragment, in canonical slot order:
    - The functor's
-     `evaluate(r², inv_r, r, qi, qj, i, j, …)` produces its
-     `(factor_slot, energy_slot, virial_slot)`. `evaluate` is
-     called unconditionally for every pair; out-of-cutoff
-     contributions are zeroed by the mask at step 7.
+     `evaluate(r², inv_r, r, qi, qj, i_type, j_type, i, j, …)`
+     produces its `(factor_slot, energy_slot, virial_slot)`.
+     `evaluate` is called unconditionally for every pair;
+     out-of-cutoff contributions are zeroed by the mask at step 7.
    - When the fragment's cutoff handling
      (`CutoffHandling`, see *Feature API*) is
      `CutoffHandling::Uniform(c)` and `c² ==
      HEDDLE_JIT_MAX_CUTOFF_SQUARED`, the composer omits the
-     per-fragment `r² <= cutoff_squared(i, j)` guard entirely —
+     per-fragment cutoff guard entirely —
      the outer max-cutoff mask covers it. When the handling is
      `CutoffHandling::Uniform(c)` and `c² <
      HEDDLE_JIT_MAX_CUTOFF_SQUARED`, the composer emits the
      guard once as `if (r² <= c²)` with `c²` as a JIT-compile-time
      constant (no per-pair load). When the handling is
      `CutoffHandling::PerPair`, the composer emits
-     `if (r² <= functor.cutoff_squared(i, j))` and only adds the
-     fragment's contribution when the test passes.
+     `if (r² <= functor.cutoff_squared(i_type, j_type, i, j))` and
+     only adds the fragment's contribution when the test passes.
    - The packed-neighbour pass and the single-pair pass add
      `(factor_slot, energy_slot · 0.5, virial_slot · 0.5)`
      directly to the pair accumulator. They never call
@@ -573,11 +597,14 @@ The framework owns the builder, initialises it with the common
 arguments documented in
 `packed-neighbour-pair-force.md` *JIT Composer Integration*
 (`positions_*`, `tile_sorted_positions_*`, `sorted_particle_ids`,
-exclusion-tile arrays, `interacting_tiles`, `interacting_atoms`,
-`interaction_count`, `lattice`, per-class fixed-point accumulator
-slices, `n`), invokes `bind_pair_force_args` on each participating
-slot in canonical order, and dispatches the final argument list to
-the composed-kernel launch.
+the per-atom `type_indices`, exclusion-tile arrays,
+`interacting_tiles`, `interacting_atoms`, `interaction_count`,
+`lattice`, per-class fixed-point accumulator slices, `n`), invokes
+`bind_pair_force_args` on each participating slot in canonical order,
+and dispatches the final argument list to the composed-kernel launch.
+`type_indices` is a common argument so the outer loop can load each
+atom's type once; a fragment that needs it sets `consumes_type_index`
+rather than binding the buffer itself.
 
 The framework's call site is one of:
 - `heddle_jit_composed_pair_force_f` when the framework's force
@@ -654,6 +681,7 @@ standalone case.
       pub entry_point_args: String,
       pub functor_init_source: String,
       pub cutoff: CutoffHandling,
+      pub consumes_type_index: bool,
   }
   ```
 
@@ -675,11 +703,20 @@ standalone case.
   - `cutoff` declares the fragment's per-pair cutoff structure for
     the composer's cutoff-collapse optimisation; see
     `CutoffHandling` below.
+  - `consumes_type_index` declares that the fragment's `evaluate`
+    reads the per-atom `i_type` / `j_type` parameters (Lennard-Jones
+    sets it `true`; charge-only fragments leave it `false`). The
+    composer ORs this flag across active fragments: if any sets it,
+    the outer loop emits the per-atom `type_indices` load and j-side
+    shuffle and passes the live indices; if none do, the load is
+    elided and `i_type` / `j_type` are `0`. The `evaluate` signature
+    is uniform regardless, so a fragment never sees a different
+    parameter list.
 
 - `CutoffHandling` — declares whether a fragment uses one cutoff <!-- rq-cuthand --> <!-- rq-37c40c51 -->
   for every pair (and what that cutoff is) or a per-pair cutoff.
   The composer uses this to decide whether to emit a per-fragment
-  `r² <= cutoff_squared(i, j)` guard in the inner loop, and to
+  `r² <= cutoff_squared(...)` guard in the inner loop, and to
   compute the global `HEDDLE_JIT_MAX_CUTOFF_SQUARED` constant.
 
   ```rust
@@ -697,9 +734,10 @@ standalone case.
     covers it. When `c² < HEDDLE_JIT_MAX_CUTOFF_SQUARED` the
     composer emits a single `if (r² <= c²)` guard with `c²` as a
     JIT-compile-time constant — no per-pair load.
-  - `PerPair` — the fragment's `cutoff_squared(i, j)` may vary per
-    pair. The composer emits `if (r² <= functor.cutoff_squared(i,
-    j))` in the inner loop and the fragment evaluates only when
+  - `PerPair` — the fragment's `cutoff_squared(i_type, j_type, i,
+    j)` may vary per pair. The composer emits
+    `if (r² <= functor.cutoff_squared(i_type, j_type, i, j))` in the
+    inner loop and the fragment evaluates only when
     the test passes. The composer uses the fragment's
     `max_cutoff()` (reported by its `Potential::max_cutoff()`) to
     contribute to `HEDDLE_JIT_MAX_CUTOFF_SQUARED`.
@@ -1250,7 +1288,7 @@ Feature: JIT-composed pair-force kernel
     And the composed kernel source captured for inspection
     Then the inner loop computes inv_r = rsqrtf(r2) and r = r2 * inv_r exactly once per pair
     And the inner loop extracts qi = posq_i.w and qj = posq_j.w exactly once per pair
-    And every fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    And every fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
     And no fragment's evaluate body contains a call to Real_sqrt(r2) or computes 1.0 / r2
     And no fragment's evaluate body reads from a per-fragment `charges` array (charges flow through qi/qj only)
 
@@ -1276,7 +1314,7 @@ Feature: JIT-composed pair-force kernel
   Scenario: A Uniform-cutoff fragment whose c² equals HEDDLE_JIT_MAX_CUTOFF_SQUARED has its per-fragment guard omitted
     Given a ForceField with one fragment whose builder reports CutoffHandling::Uniform(c) with c² == max_cutoff² across all active fragments
     And the composed kernel source captured for inspection
-    Then the composed source does not contain a call to that fragment's `cutoff_squared(i, j)`
+    Then the composed source does not contain a call to that fragment's `cutoff_squared(...)`
     And the composed source does not contain an `if (r2 <= …)` guard around that fragment's evaluate
 
   @rq-e8699851
@@ -1285,13 +1323,13 @@ Feature: JIT-composed pair-force kernel
     And the composed kernel source captured for inspection
     Then HEDDLE_JIT_MAX_CUTOFF_SQUARED equals 1.5² (= 2.25) at JIT compile time
     And the inner loop guards F1's evaluate with `if (r2 <= 1.0)` as a literal compile-time constant
-    And the inner loop does not call F1's `cutoff_squared(i, j)` at runtime
+    And the inner loop does not call F1's `cutoff_squared(...)` at runtime
 
   @rq-b3b12764
   Scenario: A PerPair-cutoff fragment has its runtime cutoff_squared guard emitted
     Given a fragment F with CutoffHandling::PerPair (e.g., LJ with mixed type_cutoff entries)
     And the composed kernel source captured for inspection
-    Then the inner loop guards F's evaluate with `if (r2 <= functor.cutoff_squared(i, j))` and F's `cutoff_squared` is invoked at runtime
+    Then the inner loop guards F's evaluate with `if (r2 <= functor.cutoff_squared(i_type, j_type, i, j))` and F's `cutoff_squared` is invoked at runtime
 
   @rq-118a47d5
   Scenario: LJ with a uniform type_cutoff table reports CutoffHandling::Uniform
@@ -1506,4 +1544,42 @@ Feature: JIT-composed pair-force kernel
     Then it documents PACKED_MIN_BLOCKS_PER_SM with its value and its effect on per-thread register count and SM occupancy
     And it documents the BLOCK_SIZE and WARPS_PER_BLOCK block-shape constants
     And it states that these constants are fixed at build time and not exposed through the TOML configuration
+
+  # --- Per-atom type-index amortization ---
+
+  @rq-b125bd5c
+  Scenario: The evaluate signature carries per-atom i_type and j_type
+    Given a ForceField with at least one fast-class pair-force slot
+    When the framework's pre-compile composed source is captured for inspection
+    Then every functor's evaluate signature takes unsigned int i_type and unsigned int j_type alongside qi and qj
+    And the composed kernel calls evaluate with the same i_type / j_type for every fragment in a pair
+
+  @rq-b10f28d7
+  Scenario: A consuming fragment makes the outer loop load the type index once per atom
+    Given a config whose active slots include lennard_jones (consumes_type_index = true)
+    When the framework's pre-compile composed source is captured for inspection
+    Then the outer loop loads type_indices for the i-atom and j-atom outside the 32-iteration inner loop
+    And the j-side type index is carried through the diagonal shuffle alongside the j position
+    And no functor's evaluate body loads from type_indices
+
+  @rq-61fa8b93
+  Scenario: The type-index load is elided when no fragment consumes it
+    Given a config whose only fast-class pair-force slot is spme_real (consumes_type_index = false)
+    When the framework's pre-compile composed source is captured for inspection
+    Then the outer loop emits no load from type_indices
+    And i_type and j_type are passed to evaluate as 0
+
+  @rq-c2b26c0c
+  Scenario: type_indices is a composer common argument, not a per-fragment binding
+    Given a ForceField with a lennard_jones slot
+    When the composed-kernel argument list is inspected
+    Then type_indices appears once among the framework common arguments
+    And the lennard_jones slot's bind_pair_force_args does not bind a type-index buffer
+
+  @rq-73cd4ad9
+  Scenario: Amortized type-index loads preserve per-particle forces bit-for-bit
+    Given a ForceField with a lennard_jones slot and multiple particle types
+    When force_field.step(...) is run twice on the same GPU with byte-identical inputs
+    Then the two runs produce byte-identical per-particle forces
+    And the forces match a reference computed with per-pair type_indices[i] / type_indices[j] lookups
 ```

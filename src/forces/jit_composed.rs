@@ -143,6 +143,13 @@ pub struct PairForceFragment {
     /// compile-time-constant guard when `Uniform(c)` is strictly
     /// less; emit the runtime guard when `PerPair`).
     pub cutoff: CutoffHandling,
+    /// Whether this fragment's `evaluate` / `cutoff_squared` read the
+    /// per-atom `i_type` / `j_type` parameters. The composer ORs this
+    /// across active fragments: if any sets it, the outer loop emits
+    /// the per-atom `type_indices` load and j-side shuffle and passes
+    /// the live indices; if none do, the load is elided and
+    /// `i_type` / `j_type` are `0`. rq-b10f28d7 rq-61fa8b93
+    pub consumes_type_index: bool,
 }
 
 /// Context passed to every active fast-class pair-force slot's
@@ -1159,7 +1166,7 @@ fn compose_source(
     s.push_str("__device__ static inline void heddle_jit_eval_pair_sum(\n");
     s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
     s.push_str(
-        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i, unsigned int j,\n",
+        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j,\n",
     );
     s.push_str("    Real &factor, Real &energy, Real &virial)\n");
     s.push_str("{\n");
@@ -1168,7 +1175,7 @@ fn compose_source(
         let field = functor_field_name(f.label);
         let body = format!(
             "Real s_factor, s_energy, s_virial;\n            \
-             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i, j, s_factor, s_energy, s_virial);\n            \
+             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy, s_virial);\n            \
              factor += s_factor;\n            \
              if (WriteEv) {{ energy += s_energy; virial += s_virial; }}",
             f = field
@@ -1195,7 +1202,7 @@ fn compose_source(
             // fragment's evaluate.
             CutoffHandling::PerPair => {
                 s.push_str(&format!(
-                    "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i, j);\n        \
+                    "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i_type, j_type, i, j);\n        \
                      if (r2 <= cut2) {{\n            {body}\n        }}\n    }}\n",
                     f = field,
                     body = body,
@@ -1216,7 +1223,7 @@ fn compose_source(
     s.push_str("__device__ static inline void heddle_jit_eval_pair_correction(\n");
     s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
     s.push_str(
-        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i, unsigned int j,\n",
+        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j,\n",
     );
     s.push_str("    Real &factor, Real &energy, Real &virial)\n");
     s.push_str("{\n");
@@ -1225,7 +1232,7 @@ fn compose_source(
         let field = functor_field_name(f.label);
         let body = format!(
             "Real s_factor, s_energy, s_virial;\n            \
-             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i, j, s_factor, s_energy, s_virial);\n            \
+             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy, s_virial);\n            \
              Real correction_scale = composite.{f}.exclusion_scale(i, j) - R(1.0);\n            \
              factor += s_factor * correction_scale;\n            \
              if (WriteEv) {{ energy += s_energy * correction_scale; virial += s_virial * correction_scale; }}",
@@ -1246,7 +1253,7 @@ fn compose_source(
             }
             CutoffHandling::PerPair => {
                 s.push_str(&format!(
-                    "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i, j);\n        \
+                    "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i_type, j_type, i, j);\n        \
                      if (r2 <= cut2) {{\n            {body}\n        }}\n    }}\n",
                     f = field,
                     body = body,
@@ -1275,6 +1282,29 @@ fn compose_source(
     emit_single_pair_entry_point(&mut s, fragments, F_SINGLE_ENTRY, false);
     emit_single_pair_entry_point(&mut s, fragments, FEV_SINGLE_ENTRY, true);
 
+    // Resolve the per-atom type-index load markers left in the loop
+    // templates. The per-atom `type_indices` buffer is always a common
+    // kernel argument, but the dereference is only emitted when at
+    // least one active fragment consumes the index — otherwise the
+    // markers expand to nothing and `i_type` / `j_type` stay 0.
+    // rq-b10f28d7 rq-61fa8b93
+    let any_consumes_type_index = fragments.iter().any(|f| f.consumes_type_index);
+    let (itype_load, jtype_load, jtype_shuffle, perpair_load) = if any_consumes_type_index {
+        (
+            "i_type = i_valid ? type_indices[i_atom_id] : 0u;",
+            "j_type = j_valid ? type_indices[j_atom_id] : 0u;",
+            "j_type = __shfl_sync(0xFFFFFFFFu, j_type, src_lane);",
+            "i_type = type_indices[atom_i]; j_type = type_indices[atom_j];",
+        )
+    } else {
+        ("", "", "", "")
+    };
+    let s = s
+        .replace("/*HEDDLE_JIT_ITYPE_LOAD*/", itype_load)
+        .replace("/*HEDDLE_JIT_JTYPE_LOAD*/", jtype_load)
+        .replace("/*HEDDLE_JIT_JTYPE_SHUFFLE*/", jtype_shuffle)
+        .replace("/*HEDDLE_JIT_TYPE_LOAD_PERPAIR*/", perpair_load);
+
     s
 }
 
@@ -1292,6 +1322,7 @@ fn emit_correction_entry_point(
     s.push_str(entry_name);
     s.push_str("(\n");
     s.push_str("    const Real4 *posq,\n");
+    s.push_str("    const unsigned int *type_indices,\n");
     s.push_str("    const unsigned int *excluded_pair_atoms,\n");
     s.push_str("    unsigned int excluded_pair_count,\n");
     s.push_str("    const Real *lattice,\n");
@@ -1314,6 +1345,7 @@ fn emit_correction_entry_point(
     s.push_str(">(\n");
     s.push_str("        composite, excluded_pair_atoms, excluded_pair_count,\n");
     s.push_str("        posq,\n");
+    s.push_str("        type_indices,\n");
     s.push_str("        lattice,\n");
     s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
     s.push_str("        fast_energy_fp, fast_virial_fp,\n");
@@ -1335,6 +1367,7 @@ fn emit_single_pair_entry_point(
     s.push_str(entry_name);
     s.push_str("(\n");
     s.push_str("    const Real4 *posq,\n");
+    s.push_str("    const unsigned int *type_indices,\n");
     s.push_str("    const unsigned int *single_pair_atoms,\n");
     s.push_str("    const unsigned int *interaction_count_ptr,\n");
     s.push_str("    const Real *lattice,\n");
@@ -1357,6 +1390,7 @@ fn emit_single_pair_entry_point(
     s.push_str(">(\n");
     s.push_str("        composite, single_pair_atoms, interaction_count_ptr,\n");
     s.push_str("        posq,\n");
+    s.push_str("        type_indices,\n");
     s.push_str("        lattice,\n");
     s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
     s.push_str("        fast_energy_fp, fast_virial_fp,\n");
@@ -1383,6 +1417,7 @@ fn emit_entry_point(
     s.push_str(entry_name);
     s.push_str("(\n");
     s.push_str("    const Real4 *posq,\n");
+    s.push_str("    const unsigned int *type_indices,\n");
     s.push_str("    const Real4 *tile_sorted_posq,\n");
     s.push_str("    const Real *block_centre,\n");
     s.push_str("    const Real *block_bbox,\n");
@@ -1410,6 +1445,7 @@ fn emit_entry_point(
     s.push_str(">(\n");
     s.push_str("        composite, iblock_offset, n_iblocks,\n");
     s.push_str("        posq,\n");
+    s.push_str("        type_indices,\n");
     s.push_str("        tile_sorted_posq,\n");
     s.push_str("        block_centre,\n");
     s.push_str("        block_bbox,\n");
@@ -1597,6 +1633,7 @@ __device__ static inline void heddle_jit_outer_loop(
     const unsigned int *iblock_offset,
     unsigned int n_iblocks,
     const Real4 *posq,
+    const unsigned int *type_indices,
     const Real4 *tile_sorted_posq,
     const Real *block_centre,
     const Real *block_bbox,
@@ -1683,6 +1720,11 @@ __device__ static inline void heddle_jit_outer_loop(
                                   lx, ly, lz, xy, xz, yz);
   }
   Real qi   = pq_i_load.w;
+  // Per-atom particle-type index for the i-atom, loaded once per atom
+  // (amortized across all of this lane's pairs). Stays 0u when no
+  // active fragment consumes the type index. rq-b10f28d7 rq-61fa8b93
+  unsigned int i_type = 0u;
+  /*HEDDLE_JIT_ITYPE_LOAD*/
 
   // Per-warp register accumulator persists across every entry this
   // warp processes — this is the register-staging optimization that
@@ -1719,6 +1761,11 @@ __device__ static inline void heddle_jit_outer_loop(
                                     lx, ly, lz, xy, xz, yz);
     }
     Real qj   = pq_j_load.w;
+    // Per-atom particle-type index for the j-atom, loaded once per
+    // atom and rotated with the j-side state through the diagonal
+    // shuffle below. rq-b10f28d7
+    unsigned int j_type = 0u;
+    /*HEDDLE_JIT_JTYPE_LOAD*/
 
     // Self-block detection. For self-block entries, the j-atoms ARE
     // the i-block's atoms in the same lane order. Newton's 3rd via
@@ -1767,6 +1814,7 @@ __device__ static inline void heddle_jit_outer_loop(
         Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
         heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r,
                                            qi, qj,
+                                           i_type, j_type,
                                            i_atom_id, j_atom_id,
                                            factor, energy, virial);
         factor *= cutoff_mask;
@@ -1802,6 +1850,7 @@ __device__ static inline void heddle_jit_outer_loop(
       qj   = __shfl_sync(0xFFFFFFFFu, qj,   src_lane);
       j_atom_id = __shfl_sync(0xFFFFFFFFu, j_atom_id, src_lane);
       j_valid = j_atom_id < n;
+      /*HEDDLE_JIT_JTYPE_SHUFFLE*/
       j_fx = __shfl_sync(0xFFFFFFFFu, j_fx, src_lane);
       j_fy = __shfl_sync(0xFFFFFFFFu, j_fy, src_lane);
       j_fz = __shfl_sync(0xFFFFFFFFu, j_fz, src_lane);
@@ -1886,6 +1935,7 @@ __device__ static inline void heddle_jit_correction_loop(
     const unsigned int *excluded_pair_atoms,
     unsigned int excluded_pair_count,
     const Real4 *posq,
+    const unsigned int *type_indices,
     const Real *lattice,
     unsigned long long *fast_force_x_fp,
     unsigned long long *fast_force_y_fp,
@@ -1907,6 +1957,12 @@ __device__ static inline void heddle_jit_correction_loop(
   Real4 pq_j = posq[atom_j];
   Real qi = pq_i.w;
   Real qj = pq_j.w;
+  // Per-atom particle-type indices for this sparse pair. One thread
+  // per pair, so the indices are loaded directly (no amortization).
+  // rq-b10f28d7 rq-61fa8b93
+  unsigned int i_type = 0u;
+  unsigned int j_type = 0u;
+  /*HEDDLE_JIT_TYPE_LOAD_PERPAIR*/
 
   Real dx = pq_i.x - pq_j.x;
   Real dy = pq_i.y - pq_j.y;
@@ -1924,7 +1980,7 @@ __device__ static inline void heddle_jit_correction_loop(
 
   Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
   heddle_jit_eval_pair_correction<WriteEv>(
-      composite, r2, inv_r, r, qi, qj, atom_i, atom_j, factor, energy, virial);
+      composite, r2, inv_r, r, qi, qj, i_type, j_type, atom_i, atom_j, factor, energy, virial);
   factor *= cutoff_mask;
   if (WriteEv) {
     energy *= cutoff_mask;
@@ -1975,6 +2031,7 @@ __device__ static inline void heddle_jit_single_pair_loop(
     const unsigned int *single_pair_atoms,
     const unsigned int *interaction_count_ptr,
     const Real4 *posq,
+    const unsigned int *type_indices,
     const Real *lattice,
     unsigned long long *fast_force_x_fp,
     unsigned long long *fast_force_y_fp,
@@ -2002,6 +2059,12 @@ __device__ static inline void heddle_jit_single_pair_loop(
   Real4 pq_j = posq[atom_j];
   Real qi = pq_i.w;
   Real qj = pq_j.w;
+  // Per-atom particle-type indices for this sparse pair. One thread
+  // per pair, so the indices are loaded directly (no amortization).
+  // rq-b10f28d7 rq-61fa8b93
+  unsigned int i_type = 0u;
+  unsigned int j_type = 0u;
+  /*HEDDLE_JIT_TYPE_LOAD_PERPAIR*/
 
   Real dx = pq_i.x - pq_j.x;
   Real dy = pq_i.y - pq_j.y;
@@ -2015,7 +2078,7 @@ __device__ static inline void heddle_jit_single_pair_loop(
 
   Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
   heddle_jit_eval_pair_sum<WriteEv>(
-      composite, r2, inv_r, r, qi, qj, atom_i, atom_j, factor, energy, virial);
+      composite, r2, inv_r, r, qi, qj, i_type, j_type, atom_i, atom_j, factor, energy, virial);
   factor *= cutoff_mask;
   if (WriteEv) {
     energy *= cutoff_mask;
@@ -2618,5 +2681,111 @@ mod launch_bounds_tests {
             lower.contains("build time") && lower.contains("not"),
             "book page must state the constants are build-time and not TOML-exposed"
         );
+    }
+}
+
+#[cfg(test)]
+mod type_index_amortization_tests {
+    use super::*;
+
+    // Minimal inspectable fragment. `consumes` drives whether the
+    // composer emits the per-atom type-index load. The functor body
+    // reads no per-atom data (so any `type_indices[...]` in the composed
+    // source must come from the outer loop, not the functor).
+    fn frag(label: &'static str, consumes: bool) -> PairForceFragment {
+        let name: &'static str = Box::leak(format!("TF_{label}").into_boxed_str());
+        let functor_source = format!(
+            r#"
+struct {n} {{
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const {{ return R(0.0); }}
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
+                                     Real &factor, Real &energy, Real &virial) const {{
+        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+    }}
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
+}};
+"#,
+            n = name
+        );
+        PairForceFragment {
+            label,
+            functor_struct_name: name,
+            functor_source,
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+            cutoff: CutoffHandling::Uniform(1.0 as Real),
+            consumes_type_index: consumes,
+        }
+    }
+
+    // rq-b125bd5c
+    #[test]
+    fn evaluate_signature_carries_per_atom_types() {
+        let src = compose_source(&[frag("a", true)], 1.0 as Real);
+        // The shared evaluator helpers take i_type / j_type alongside qi / qj.
+        assert!(src.contains(
+            "Real qi, Real qj, unsigned int i_type, unsigned int j_type, \
+             unsigned int i, unsigned int j,"
+        ));
+        // The per-fragment evaluate call threads the same i_type / j_type.
+        assert!(src.contains(".evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j,"));
+    }
+
+    // rq-b10f28d7
+    #[test]
+    fn consuming_fragment_loads_type_index_once_per_atom() {
+        let src = compose_source(&[frag("a", true)], 1.0 as Real);
+        // Outer loop loads both atoms' type index from the common buffer.
+        assert!(src.contains("type_indices[i_atom_id]"));
+        assert!(src.contains("type_indices[j_atom_id]"));
+        // The j-side index is rotated through the diagonal shuffle.
+        assert!(src.contains("__shfl_sync(0xFFFFFFFFu, j_type, src_lane)"));
+        // All injection markers are resolved.
+        for marker in [
+            "/*HEDDLE_JIT_ITYPE_LOAD*/",
+            "/*HEDDLE_JIT_JTYPE_LOAD*/",
+            "/*HEDDLE_JIT_JTYPE_SHUFFLE*/",
+            "/*HEDDLE_JIT_TYPE_LOAD_PERPAIR*/",
+        ] {
+            assert!(!src.contains(marker), "unresolved marker {marker}");
+        }
+    }
+
+    // rq-61fa8b93
+    #[test]
+    fn type_index_load_elided_when_unconsumed() {
+        let src = compose_source(&[frag("a", false)], 1.0 as Real);
+        // No dereference of type_indices anywhere when no fragment consumes it.
+        assert!(
+            !src.contains("type_indices["),
+            "type-index load must be elided when unconsumed"
+        );
+        // i_type / j_type are still declared and default to 0.
+        assert!(src.contains("unsigned int i_type = 0u;"));
+        assert!(src.contains("unsigned int j_type = 0u;"));
+        // Markers are still resolved (to nothing).
+        assert!(!src.contains("/*HEDDLE_JIT_ITYPE_LOAD*/"));
+        assert!(!src.contains("/*HEDDLE_JIT_TYPE_LOAD_PERPAIR*/"));
+    }
+
+    // rq-c2b26c0c
+    #[test]
+    fn type_indices_is_a_common_argument() {
+        // Present in the entry-point signatures whether or not a
+        // fragment consumes it (it is a framework common argument).
+        let consuming = compose_source(&[frag("a", true)], 1.0 as Real);
+        let inert = compose_source(&[frag("a", false)], 1.0 as Real);
+        let n_consuming = consuming.matches("const unsigned int *type_indices,").count();
+        let n_inert = inert.matches("const unsigned int *type_indices,").count();
+        // Six entry-point signatures (packed / correction / single-pair,
+        // each _f and _fev) plus their three loop-function signatures all
+        // declare the common arg.
+        assert!(
+            n_consuming >= 6,
+            "type_indices must be a common arg on every pair-force entry point"
+        );
+        // It is a common argument regardless of whether a fragment
+        // consumes it — the count does not depend on consumption.
+        assert_eq!(n_consuming, n_inert);
     }
 }

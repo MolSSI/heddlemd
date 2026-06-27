@@ -1125,6 +1125,18 @@
     "title": "Slot-firing order under the composite matches registration order",
     "type": "scenario"
   },
+  "rq-08f7531f": {
+    "decl": "Scenario: The LJ fragment declares it consumes the per-atom type index",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The LJ fragment declares it consumes the per-atom type index",
+    "type": "scenario"
+  },
   "rq-090b70bb": {
     "decl": "## Comparison Procedure",
     "file": "pipeline-reversibility",
@@ -4281,6 +4293,18 @@
     "refs": [],
     "title": "Neighbour List",
     "type": "section"
+  },
+  "rq-21201692": {
+    "decl": "Scenario: Amortized type indices reproduce the per-pair-lookup forces with mixed types",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Amortized type indices reproduce the per-pair-lookup forces with mixed types",
+    "type": "scenario"
   },
   "rq-214639c9": {
     "decl": "Scenario: from_config populates r_switch from the parsed PairInteractionConfig",
@@ -11245,6 +11269,18 @@
     "title": "Post-Force Per-Particle Fragment",
     "type": "section"
   },
+  "rq-61fa8b93": {
+    "decl": "Scenario: The type-index load is elided when no fragment consumes it",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The type-index load is elided when no fragment consumes it",
+    "type": "scenario"
+  },
   "rq-6211a82f": {
     "decl": "Scenario: Kernels is composed of per-subsystem sub-structs",
     "file": "build-pipeline",
@@ -11303,6 +11339,18 @@
     "refs": [],
     "title": "Example",
     "type": "section"
+  },
+  "rq-62a18360": {
+    "decl": "Scenario: The LJ functor reads the per-atom type indices instead of loading type_indices per pair",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The LJ functor reads the per-atom type indices instead of loading type_indices per pair",
+    "type": "scenario"
   },
   "rq-62ad70f8": {
     "decl": "Scenario: Construct with collision_rate = 0 (NVE-equivalent)",
@@ -13062,6 +13110,18 @@
     "refs": [],
     "title": "PTX Module Loading",
     "type": "section"
+  },
+  "rq-73cd4ad9": {
+    "decl": "Scenario: Amortized type-index loads preserve per-particle forces bit-for-bit",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Amortized type-index loads preserve per-particle forces bit-for-bit",
+    "type": "scenario"
   },
   "rq-73efd4be": {
     "decl": "Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs",
@@ -20051,6 +20111,18 @@
     "title": "SD halves the step on rejected iteration and restores positions",
     "type": "scenario"
   },
+  "rq-b10f28d7": {
+    "decl": "Scenario: A consuming fragment makes the outer loop load the type index once per atom",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A consuming fragment makes the outer loop load the type index once per atom",
+    "type": "scenario"
+  },
   "rq-b1148667": {
     "decl": "- `SpmeReciprocalState` — implements `Potential` with",
     "file": "forces/spme",
@@ -20068,6 +20140,18 @@
     "file": "precision",
     "refs": [],
     "title": "Bit-exact pipeline reproducibility under f64",
+    "type": "scenario"
+  },
+  "rq-b125bd5c": {
+    "decl": "Scenario: The evaluate signature carries per-atom i_type and j_type",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The evaluate signature carries per-atom i_type and j_type",
     "type": "scenario"
   },
   "rq-b13eba96": {
@@ -21849,6 +21933,22 @@
       }
     ],
     "title": "Construct an empty state",
+    "type": "scenario"
+  },
+  "rq-c2b26c0c": {
+    "decl": "Scenario: type_indices is a composer common argument, not a per-fragment binding",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "type_indices is a composer common argument, not a per-fragment binding",
     "type": "scenario"
   },
   "rq-c2bc2592": {

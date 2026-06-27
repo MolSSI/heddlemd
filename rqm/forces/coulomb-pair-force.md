@@ -268,10 +268,13 @@ framework's `pre_step` before each force evaluation.
   - `functor_struct_name: "CoulombPairFunctor"` and the CUDA functor
     source. The functor's evaluation entry point is
     `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj,
+    unsigned int i_type, unsigned int j_type,
     unsigned int i, unsigned int j, Real &factor, Real &energy,
     Real &virial)`; it computes `inv_r2 = inv_r · inv_r` and
     `qq = qi · qj` from the composer-supplied scalars (it does not
-    recompute `1.0 / r2`).
+    recompute `1.0 / r2`) and ignores `i_type` / `j_type` (Coulomb
+    has no per-type parameters, so it leaves `consumes_type_index`
+    `false`).
   - `cutoff: CutoffHandling::Uniform(cutoff)` — the composer applies a
     single `r² <= cutoff²` guard (or relies on the outer max-cutoff
     mask) for this fragment.

@@ -160,6 +160,7 @@ implementation specifics:
 1. **Shared `(inv_r, r, qi, qj)` inputs.** The fragment's
    `evaluate` signature is
    `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj,
+   unsigned int i_type, unsigned int j_type,
    unsigned int i, unsigned int j, Real &factor, Real &energy,
    Real &virial)`. `inv_r = rsqrtf(r²)`, `r = r² · inv_r`,
    `qi = posq[i].w`, and `qj = posq[j].w` are computed once per
@@ -168,7 +169,9 @@ implementation specifics:
    `Real_sqrt(r2)`, `1.0 / r2`, or `1.0 / inv_r`; it does not
    read from a per-fragment `charges` array; it consumes the
    composer-supplied scalars directly and derives
-   `inv_r2 = inv_r · inv_r` and `qq = qi · qj` from them.
+   `inv_r2 = inv_r · inv_r` and `qq = qi · qj` from them. It
+   ignores `i_type` / `j_type` (SPME-real has no per-type
+   parameters) and leaves `consumes_type_index` `false`.
 
 2. **Hastings polynomial for `erfc` in single precision.** Under
    the f32 precision feature (the default), the fragment computes
@@ -196,7 +199,7 @@ implementation specifics:
 3. **CutoffHandling::Uniform.** The fragment reports
    `cutoff: CutoffHandling::Uniform(r_cut_real)` to the composer.
    The composer omits the per-fragment
-   `r² <= cutoff_squared(i, j)` guard for this fragment (the
+   `r² <= cutoff_squared(...)` guard for this fragment (the
    outer max-cutoff mask described in
    `jit-composed-pair-force.md` covers it). `evaluate` is invoked
    unconditionally for every pair the outer loop visits; the
@@ -1417,7 +1420,7 @@ Feature: Smooth particle-mesh Ewald (SPME)
   Scenario: SPME-real JIT fragment uses the composer-supplied inv_r and r
     Given a ForceField with [spme] configured and the JIT-composed kernel active
     And the composed kernel source captured for inspection
-    Then the SPME-real fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    Then the SPME-real fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
     And the SPME-real fragment body does not contain any of: `Real_sqrt(`, `sqrt(r2)`, `sqrtf(r2)`, `1.0 / r2`, `1.0 / inv_r`
 
   @rq-2a1f2043

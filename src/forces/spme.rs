@@ -723,13 +723,15 @@ struct SpmeRealPairFunctor {
     const unsigned int *excl_partners;
     const Real *excl_scales;
 
-    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const {
+    __device__ inline Real cutoff_squared(
+        unsigned int, unsigned int, unsigned int, unsigned int) const {
         return r_cut_real * r_cut_real;
     }
 
     __device__ inline void evaluate(
         Real r2, Real inv_r, Real r,
         Real qi, Real qj,
+        unsigned int /*i_type*/, unsigned int /*j_type*/,
         unsigned int i, unsigned int j,
         Real &factor, Real &energy, Real &virial) const
     {
@@ -774,6 +776,8 @@ struct SpmeRealPairFunctor {
         entry_point_args: schema.entry_point_args(),
         functor_init_source: schema.functor_init_source(),
         cutoff: CutoffHandling::Uniform(r_cut_real),
+        // SPME-real has no per-type parameters; it ignores i_type / j_type.
+        consumes_type_index: false,
     }
 }
 
