@@ -4951,6 +4951,18 @@
     "title": "Neighbor list applies minimum-image PBC",
     "type": "scenario"
   },
+  "rq-261b5b46": {
+    "decl": "Scenario: A steepest-descent minimization with a SETTLE slot converges",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A steepest-descent minimization with a SETTLE slot converges",
+    "type": "scenario"
+  },
   "rq-261fde88": {
     "decl": "Scenario: minimum_image of a displacement that requires b-tilt cancellation",
     "file": "simulation-box",
@@ -5286,6 +5298,18 @@
     "file": "forces/jit-composed-pair-force",
     "refs": [],
     "title": "Two ForceFields constructed from the same config produce byte-identical composed PTX",
+    "type": "scenario"
+  },
+  "rq-28cc7d41": {
+    "decl": "Scenario: settle_positions guards a near-degenerate instantaneous geometry",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions guards a near-degenerate instantaneous geometry",
     "type": "scenario"
   },
   "rq-28ceccdf": {
@@ -6300,6 +6324,18 @@
     "refs": [],
     "title": "Sources of Constraint Topology",
     "type": "section"
+  },
+  "rq-3163a55d": {
+    "decl": "Scenario: M-K reset reaches the same configuration as a converged minimal-displacement solve",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "M-K reset reaches the same configuration as a converged minimal-displacement solve",
+    "type": "scenario"
   },
   "rq-318cd47d": {
     "decl": "Scenario: log_every = 0 is accepted (disables log output)",
@@ -13813,6 +13849,18 @@
     "title": "Zero particles is a no-op",
     "type": "scenario"
   },
+  "rq-76abf8d7": {
+    "decl": "Scenario: settle_positions restores exact rigidity in a single evaluation",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions restores exact rigidity in a single evaluation",
+    "type": "scenario"
+  },
   "rq-76cb9922": {
     "decl": "## Determinism Guarantees",
     "file": "forces/framework",
@@ -18298,6 +18346,18 @@
     ],
     "title": "Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List",
     "type": "file"
+  },
+  "rq-9e22adb3": {
+    "decl": "Scenario: settle_positions_no_velocity is a no-op for an already-rigid molecule",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions_no_velocity is a no-op for an already-rigid molecule",
+    "type": "scenario"
   },
   "rq-9e2e9d4e": {
     "decl": "- `SimulationBox::rescale_isotropic(&mut self, factor: f32) ->",
@@ -28834,11 +28894,11 @@
     "type": "section"
   },
   "rq-fa14a87f": {
-    "decl": "### Convergence and determinism",
+    "decl": "### Exactness and determinism",
     "file": "integration/settle",
     "level": 3,
     "refs": [],
-    "title": "Convergence and determinism",
+    "title": "Exactness and determinism",
     "type": "section"
   },
   "rq-fa17b283": {

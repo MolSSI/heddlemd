@@ -1,28 +1,31 @@
 # Feature: SETTLE Constraint Algorithm <!-- rq-83321065 -->
 
-SETTLE is the constraint algorithm for a symmetric three-atom rigid water
-molecule (Miyamoto & Kollman, J. Comput. Chem. 13(8):952–962, 1992). It
-holds the three intramolecular distances (O–H1, O–H2, H1–H2) rigid at
-every timestep, specialised to the three water constraints and solved with
-the per-group working set resident in registers (one thread per molecule,
-no shared-memory staging). The velocity reset is the analytical SETTLE
-step — the relative velocity along every bond is driven to zero by a single
-direct solve of the 3×3 bond-impulse system, with no iteration. The
-position reset is the minimal-displacement projection of the unconstrained
-positions back onto the rigid manifold (the same energy-conserving
-projection SHAKE performs, here restricted to the three water constraints).
+SETTLE is the analytical constraint algorithm of Miyamoto & Kollman
+(J. Comput. Chem. 13(8):952–962, 1992) for a symmetric three-atom rigid water
+molecule. It holds the three intramolecular distances (O–H1, O–H2, H1–H2)
+rigid at every timestep, specialised to the three water constraints and
+solved with the per-group working set resident in registers (one thread per
+molecule, no shared-memory staging). Both per-step resets are closed-form and
+non-iterative: the position reset is the Miyamoto-Kollman rigid-body rotation
+of the canonical triangle onto the unconstrained positions, oriented by the
+pre-drift reference frame; the velocity reset drives the relative velocity
+along every bond to zero by a single direct solve of the 3×3 bond-impulse
+system.
 
 A `SettleConstraintsState` implements the `Constraint` trait (see
 `integration/constraint-framework.md`). Its `apply_before_drift` hook
-snapshots the pre-drift positions used as the projection's
-constraint-gradient reference frame; its `apply_after_drift` hook performs
-the position reset of the unconstrained post-drift positions, updates the
-half-step velocities to be consistent with the position correction, and
-writes the position-level half of the per-atom constraint-virial
-contribution; its `apply_after_kick` hook performs the analytical velocity
-reset and accumulates the velocity-level half of the constraint-virial
-contribution; its `apply_position_projection_only` hook performs a
-position-only reset used by the minimizer.
+snapshots the pre-drift positions that supply the rotation's reference frame;
+its `apply_after_drift` hook performs the M-K position reset of the
+unconstrained post-drift positions, updates the half-step velocities to be
+consistent with the position correction, and writes the position-level half
+of the per-atom constraint-virial contribution; its `apply_after_kick` hook
+performs the analytical velocity reset and accumulates the velocity-level
+half of the constraint-virial contribution; its
+`apply_position_projection_only` hook performs a position-only reset used by
+the minimizer. The minimizer hook does not use the M-K rotation — it has no
+pre-drift reference frame, and a rigid snap is not a descent-compatible
+retraction — so it instead performs the minimal-displacement projection onto
+the rigid manifold (see *Algorithm* step 4).
 
 This algorithm handles exactly one cluster shape: a symmetric rigid water
 group of three atoms — one apex atom (the oxygen) and two equivalent
@@ -66,40 +69,56 @@ geometry `(ra, rb, rc)`:
 
 1. `apply_before_drift` invokes `settle_snapshot`, which copies every atom of
    every group from `positions_*` into per-group snapshot buffers
-   `snapshot_*`. The snapshot is the on-manifold (pre-drift) reference whose
-   bond vectors provide the constraint-gradient directions for the
-   projection that follows the drift, so the constraint forces act along the
-   pre-drift bonds (energy-conserving, as in SHAKE).
+   `snapshot_*`. The snapshot is the on-manifold (pre-drift) configuration
+   that defines the reference orientation frame for the M-K rotation that
+   follows the drift; orienting the reset by the pre-drift frame is what makes
+   the constraint forces act along the pre-drift bonds (energy-conserving).
 
-2. `apply_after_drift` invokes `settle_positions`, which projects the
-   unconstrained post-drift positions back onto the rigid manifold by the
-   minimal displacement along the snapshot bond directions:
+2. `apply_after_drift` invokes `settle_positions`, which resets the
+   unconstrained post-drift positions to the exact rigid configuration by the
+   analytical Miyamoto-Kollman rotation. The pre-drift snapshot supplies the
+   reference orientation; the reset computes, in closed form, the rigid
+   placement of the canonical triangle that has the centre of mass of the
+   unconstrained positions and is reached from them by per-atom displacements
+   directed along the reference (snapshot) bonds — the configuration
+   constrained dynamics reaches, evaluated directly rather than by iteration:
 
    ```text
-   r_i  ← positions[a_i]            for i in {O, H1, H2}   (unconstrained post-drift)
-   r_i⁰ ← snapshot[a_i]                                    (pre-drift, on manifold)
-   Bring the hydrogens into the oxygen's lattice image (both r and r⁰).
-   for each constraint k in [(O,H1), (O,H2), (H1,H2)]:
-       g_k ← r_i⁰ − r_j⁰                                   # pre-drift gradient direction
-   target distances from the canonical geometry: d_OH² = rc² + (ra+rb)²,
-       d_HH² = (2·rc)²
-   Deterministic Gauss-Seidel sweep over the three constraints in the fixed
-   order above (≤ 32 sweeps; converges in 1–3 for thermal steps): for each k
-   with |σ_k| = ||r_i − r_j|² − d_k²| above SETTLE_TOL² (= 3.57e-6 a₀²),
-       λ_k ← σ_k / (2 · (r_i − r_j)·g_k · (1/m_i + 1/m_j))
-       r_i ← r_i − λ_k g_k / m_i ;  r_j ← r_j + λ_k g_k / m_j
+   A1,B1,C1 ← positions[group atoms]   (unconstrained post-drift; A=O, B=H1, C=H2)
+   A0,B0,C0 ← snapshot[group atoms]    (pre-drift, on the constraint manifold)
+   Bring B1,C1 into A1's lattice image and B0,C0 into A0's image (minimum image).
+   com ← (m_O·A1 + m_H·B1 + m_H·C1) / M          # constrained COM = unconstrained COM
+
+   # Reference orthonormal frame (X', Y', Z') from the snapshot triangle about
+   # its mass-weighted COM, oriented so the canonical atoms sit at
+   # O=(0,ra,0), H1=(−rc,−rb,0), H2=(rc,−rb,0) in this frame.
+   Build (X', Y', Z') from A0,B0,C0.
+
+   # Express the COM-relative unconstrained positions in the primed frame and
+   # solve, in closed form, for the three rotation angles — ψ and φ about the
+   # in-plane axes (tilting the rigid plane onto the displaced positions) and
+   # θ about Z' (the in-plane rotation that conserves the molecule's
+   # orientation about its normal). See Miyamoto & Kollman 1992, Eqs. A1–A15;
+   # the GROMACS `csettle` formulation is the numerically-stable reference.
+
+   A3,B3,C3 ← canonical triangle rotated by (ψ, φ, θ), transformed back to the
+              lab frame, and translated to com.
    ```
 
-   The projection preserves the group's mass-weighted centre of mass and
-   restores all three intramolecular distances to within `SETTLE_TOL²`. After
-   the sweep, the half-step velocity of every atom is updated by
-   `v_i ← v_i + (r_i^constrained − r_i^unconstrained) / dt`, the constrained
+   Every `sqrt`/`asin`/`acos` argument in the closed form is clamped to its
+   valid domain (`≥ 0`, or `[−1, 1]`) so that f32 round-off near a planar or
+   extreme instantaneous geometry cannot produce a `NaN`; no iterative
+   fall-back is used. The reset preserves the group's mass-weighted centre of
+   mass exactly and restores all three intramolecular distances to f32
+   round-off in a single evaluation — there is no iteration and no convergence
+   tolerance. After the reset, the half-step velocity of every atom is updated
+   by `v_i ← v_i + (r_i^constrained − r_i^unconstrained) / dt`, the constrained
    positions are written back to `positions_*` in the same lattice image the
    atom occupied before the call, and the per-atom position-level
    constraint-virial contribution is written into
    `constraint_virial[base + i]` as
    `(m_i / dt²) · ((r_i^constrained − r_i^unconstrained) · r_i^COM)`, where
-   `r_i^COM = r_i^constrained − r^COM_group`.
+   `r_i^COM = r_i^constrained − com`.
 
 3. `apply_after_kick` invokes `settle_velocities`, which projects the
    post-kick velocities onto the velocity manifold of the constrained
@@ -133,27 +152,55 @@ geometry `(ra, rb, rc)`:
    the virial accumulation is skipped.
 
 4. `apply_position_projection_only` invokes `settle_positions_no_velocity`,
-   used by the minimizer after each trial position update. It runs the same
-   minimal-displacement projection as `settle_positions`, with two
-   differences: the constraint-gradient directions are evaluated at the
-   *current* (off-manifold) positions rather than a snapshot (minimization
-   has no pre-drift frame), and velocities and the constraint-virial buffer
-   are not modified. The projection is bit-exact identity for a molecule that
-   already satisfies its constraints (the `σ` gate skips every constraint),
-   which is what lets the steepest-descent line search make progress: the
-   retraction of a small downhill step stays a small downhill step.
+   used by the minimizer after each trial position update. The M-K rotation is
+   an integration-time operation — it needs a pre-drift reference frame, which
+   minimization does not provide, and a snap-to-rigid is not a
+   descent-compatible retraction for a line search. This hook therefore
+   performs the minimal-displacement projection onto the rigid manifold: a
+   deterministic, bounded Gauss-Seidel sweep of the three water constraints
+   with the constraint-gradient directions evaluated at the current
+   (off-manifold) positions.
 
-### Convergence and determinism <!-- rq-fa14a87f -->
+   ```text
+   r_i ← positions[a_i]   for i in {O, H1, H2}
+   Bring the hydrogens into the oxygen's lattice image (minimum image).
+   for each constraint k in [(O,H1), (O,H2), (H1,H2)]:
+       g_k ← r_i − r_j                                    # current gradient direction
+   targets from the canonical geometry: d_OH² = rc² + (ra+rb)², d_HH² = (2·rc)²
+   Gauss-Seidel sweep over the three constraints in the fixed order above
+   (≤ 32 sweeps; converges in 1–3): for each k with
+   |σ_k| = ||r_i − r_j|² − d_k²| above SETTLE_TOL² (= 3.57e-6 a₀²),
+       λ_k ← σ_k / (2 · (r_i − r_j)·g_k · (1/m_i + 1/m_j))
+       r_i ← r_i − λ_k g_k / m_i ;  r_j ← r_j + λ_k g_k / m_j
+   ```
 
-The velocity reset is a single direct 3×3 solve — non-iterative and exact to
-f32 round-off. The position projection is a deterministic Gauss-Seidel sweep
-bounded at 32 iterations; for thermal MD step sizes the inner displacement is
-small relative to the bond lengths and it converges in 1–3 sweeps, the same
-scale as SHAKE. Every per-group computation walks the three constraints in
-the fixed order `(O–H1, O–H2, H1–H2)` and depends only on the group's data
-and no thread-scheduling decision, so two runs on the same GPU with identical
-inputs produce byte-identical `positions_*`, `velocities_*`, and
-`constraint_virial` after every hook (see *Reproducibility*).
+   It modifies neither velocities nor the constraint-virial buffer, and is
+   bit-exact identity for a molecule that already satisfies its constraints
+   (the `σ` gate skips every constraint) — which is what lets the
+   steepest-descent line search make progress: the retraction of a small
+   downhill step stays a small downhill step.
+
+### Exactness and determinism <!-- rq-fa14a87f -->
+
+The MD position reset and the velocity reset are both closed-form and
+non-iterative: the position reset is the M-K rotation (a fixed sequence of
+arithmetic, with `sqrt`/`asin`/`acos` arguments clamped to their valid
+domains), and the velocity reset is a single direct 3×3 solve. Both restore
+their respective constraints to f32 round-off in one evaluation — no
+convergence loop and no tolerance parameter. The minimizer's position-only
+projection is the one iterative path: a deterministic Gauss-Seidel sweep
+bounded at 32 iterations that converges in 1–3 sweeps for the small per-step
+displacements of steepest descent.
+
+Every per-group computation depends only on the group's data and no
+thread-scheduling decision (the velocity solve and the minimizer projection
+walk the three constraints in the fixed order `(O–H1, O–H2, H1–H2)`), so two
+runs on the same GPU with identical inputs produce byte-identical
+`positions_*`, `velocities_*`, and `constraint_virial` after every hook (see
+*Reproducibility*). The M-K reset is not equivalent bit-for-bit to a
+SHAKE-style minimal projection of the same inputs — it is a different f32
+arithmetic path — but it reaches the same constrained configuration to f32
+round-off.
 
 ## Per-Step Kernel Sequence <!-- rq-0fe74db3 -->
 
@@ -207,8 +254,9 @@ arithmetic sequence over its own data, run by one thread, on the device's
 default stream with all kernel launches in a single fixed order. Two
 independent runs on the same GPU with identical inputs produce byte-identical
 `positions_*`, `velocities_*`, and `constraint_virial` after every hook. The
-kernels use `nvcc`'s default FMA contraction; the guarantee is GPU-vs-GPU on
-the same hardware, not GPU-vs-CPU (see `docs/architecture.md`).
+kernels use `nvcc`'s default FMA contraction and its `sqrt` / inverse-trig
+implementations; the guarantee is GPU-vs-GPU on the same hardware, not
+GPU-vs-CPU (see `docs/architecture.md`).
 
 Group order in the device-side group buffers matches `groups` in the
 host-side `ConstraintList`, which is sorted by each group's minimum particle
@@ -624,6 +672,38 @@ Feature: SETTLE rigid-water constraints
     Then every constraint distance is within 1.0e-13 m of its target
     And the half-step velocity update remains finite for every atom
 
+  # --- M-K closed-form exactness ---
+
+  @rq-76abf8d7
+  Scenario: settle_positions restores exact rigidity in a single evaluation
+    Given a constructed SettleConstraintsState with one SPC/E water group
+    And unconstrained post-drift positions that break every constraint by ~1.0e-2 a_0
+    When apply_after_drift is called once with dt = 2.0e-15 s
+    Then each constraint distance equals its canonical target to within 1.0e-6 relative
+      (the closed-form rotation, not an iterative tolerance)
+    And the mass-weighted centre of mass equals the unconstrained centre of mass to
+      within f32 round-off
+
+  @rq-3163a55d
+  Scenario: M-K reset reaches the same configuration as a converged minimal-displacement solve
+    Given one SPC/E water group, a pre-drift snapshot, and unconstrained post-drift
+      positions that break every constraint by ~1.0e-2 a_0
+    And the constrained positions C_settle produced by apply_after_drift
+    And the constrained positions C_ref produced by a fully-converged Gauss-Seidel
+      minimal-displacement projection of the same unconstrained positions using the
+      same snapshot bond directions
+    Then C_settle and C_ref agree to within 1.0e-4 a_0 relative for every atom
+
+  @rq-28cc7d41
+  Scenario: settle_positions guards a near-degenerate instantaneous geometry
+    Given one SPC/E water group whose pre-drift snapshot is rigid
+    And unconstrained post-drift positions that are nearly collinear (the three atoms
+      within 1.0e-3 a_0 of a line) after a large drift
+    When apply_after_drift is called with dt = 2.0e-15 s
+    Then every output position is finite (no NaN or infinity from a clamped
+      sqrt/asin/acos argument)
+    And every constraint distance equals its canonical target to within 1.0e-4 a_0 relative
+
   # --- Velocity reset (SETTLE velocity) ---
 
   @rq-9dd716cf
@@ -690,6 +770,24 @@ Feature: SETTLE rigid-water constraints
     Then every constraint distance is within 1.0e-13 m of its target
     And velocities on the device are unchanged byte-for-byte from before the call
     And constraint_virial on the device is unchanged byte-for-byte from before the call
+
+  @rq-9e22adb3
+  Scenario: settle_positions_no_velocity is a no-op for an already-rigid molecule
+    Given a constructed SettleConstraintsState with one SPC/E water group whose current
+      positions exactly satisfy the canonical geometry
+    When apply_position_projection_only is called
+    Then positions on the device are byte-identical to before the call
+    (this is the property the steepest-descent line search relies on: the projection of
+     an already-converged trial step does not perturb the geometry)
+
+  @rq-261b5b46
+  Scenario: A steepest-descent minimization with a SETTLE slot converges
+    Given a runner configured with a [[minimization]] phase and a SETTLE constraint slot
+      over a small rigid-water system started from a near-equilibrium lattice
+    When the minimization phase runs
+    Then it converges within its iteration budget (the line search does not collapse to a
+      zero step)
+    And every constraint distance is within 1.0e-4 a_0 relative of its target afterwards
 
   # --- Reproducibility ---
 

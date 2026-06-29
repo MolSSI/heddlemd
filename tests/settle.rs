@@ -10,6 +10,7 @@ use heddle_md::forces::{
 };
 use heddle_md::gpu::{ParticleBuffers, init_device};
 use heddle_md::integrator::settle::{SettleConstraintsState, SettleError};
+use heddle_md::integrator::shake::ShakeConstraintsState;
 use heddle_md::integrator::{Constraint, ConstraintRegistry};
 use heddle_md::io::config::NamedSlotConfig;
 use heddle_md::pbc::SimulationBox;
@@ -859,4 +860,265 @@ fn registry_with_builtins_registers_settle_and_shake() {
     assert!(registry.lookup("shake").is_some(), "shake not registered");
     let b = registry.lookup("settle").unwrap();
     assert_eq!(b.kind_name(), "settle");
+}
+
+// =====================================================================
+// Miyamoto-Kollman closed-form position reset
+// =====================================================================
+
+fn shake_spce_type() -> NamedSlotConfig {
+    NamedSlotConfig::from_params_str(
+        "SPCE",
+        "shake",
+        &format!(
+            "atoms = 3\nconstraints = [\n  {{ i = 0, j = 1, d = {} }},\n  {{ i = 0, j = 2, d = {} }},\n  {{ i = 1, j = 2, d = {} }},\n]\n",
+            R_OH as f64, R_OH as f64, R_HH as f64,
+        ),
+    )
+}
+
+fn shake_list_1() -> ConstraintList {
+    ConstraintList {
+        groups: vec![ConstraintGroup {
+            atom_offset: 0,
+            atom_count: 3,
+            constraint_offset: 0,
+            constraint_count: 3,
+            constraint_type_index: 0,
+        }],
+        group_atoms: vec![0, 1, 2],
+        group_constraints: vec![
+            GroupConstraint { local_i: 0, local_j: 1, r0: R_OH },
+            GroupConstraint { local_i: 0, local_j: 2, r0: R_OH },
+            GroupConstraint { local_i: 1, local_j: 2, r0: R_HH },
+        ],
+        particle_count: 3,
+    }
+}
+
+// rq-76abf8d7
+#[test]
+fn settle_positions_restores_exact_rigidity_single_pass() {
+    let gpu = init_device().unwrap();
+    let (mut slot, mut buffers, sim_box, mut timings, _state) = make_slot_and_buffers(&gpu, 1);
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    // Break every constraint by ~1e-2 a_0 with an arbitrary per-atom kick.
+    let (mut px, mut py, mut pz) = buffers.download_positions().unwrap();
+    let kick = [(0.011, -0.007, 0.004), (-0.009, 0.012, -0.006), (0.006, -0.010, 0.013)];
+    for (i, (dx, dy, dz)) in kick.iter().enumerate() {
+        px[i] += dx;
+        py[i] += dy;
+        pz[i] += dz;
+    }
+    buffers.upload_positions(&px, &py, &pz).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    let (px, py, pz) = buffers.download_positions().unwrap();
+    // The closed-form rotation restores rigidity far tighter than the
+    // iterative tolerance (1e-4); a single pass reaches f32 round-off.
+    let d_oh1 = dist(px[0], py[0], pz[0], px[1], py[1], pz[1]);
+    let d_oh2 = dist(px[0], py[0], pz[0], px[2], py[2], pz[2]);
+    let d_hh = dist(px[1], py[1], pz[1], px[2], py[2], pz[2]);
+    let tol = 1.0e-5;
+    assert!(((d_oh1 - R_OH) / R_OH).abs() < tol, "O-H1 {d_oh1} vs {R_OH}");
+    assert!(((d_oh2 - R_OH) / R_OH).abs() < tol, "O-H2 {d_oh2} vs {R_OH}");
+    assert!(((d_hh - R_HH) / R_HH).abs() < tol, "H-H {d_hh} vs {R_HH}");
+}
+
+// rq-3163a55d
+#[test]
+fn mk_reset_agrees_with_converged_shake_projection() {
+    let gpu = init_device().unwrap();
+    let state = water_state(1, 10.0);
+    let sim_box = big_box(&gpu);
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    // SETTLE (M-K) and SHAKE (converged minimal-displacement) over the same
+    // water, same snapshot, same unconstrained perturbation.
+    let mut settle = SettleConstraintsState::new(
+        gpu.device.clone(), &sequential_settle_list(1), &state.masses, &[spce_type()],
+    ).unwrap();
+    let mut shake = ShakeConstraintsState::new(
+        gpu.device.clone(), &shake_list_1(), &state.masses, &[shake_spce_type()],
+    ).unwrap();
+
+    let mut bs = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut bh = ParticleBuffers::new(&gpu, &state).unwrap();
+    settle.apply_before_drift(&mut bs, &sim_box, PROD_DT, &mut timings).unwrap();
+    shake.apply_before_drift(&mut bh, &sim_box, PROD_DT, &mut timings).unwrap();
+
+    // Identical unconstrained perturbation (~1e-2 a_0) applied to both.
+    let kick = [(0.012, -0.008, 0.005), (-0.007, 0.011, -0.006), (0.004, -0.009, 0.010)];
+    for b in [&mut bs, &mut bh] {
+        let (mut px, mut py, mut pz) = b.download_positions().unwrap();
+        for (i, (dx, dy, dz)) in kick.iter().enumerate() {
+            px[i] += dx;
+            py[i] += dy;
+            pz[i] += dz;
+        }
+        b.upload_positions(&px, &py, &pz).unwrap();
+    }
+    settle.apply_after_drift(&mut bs, &sim_box, PROD_DT, &mut timings).unwrap();
+    shake.apply_after_drift(&mut bh, &sim_box, PROD_DT, &mut timings).unwrap();
+
+    let (sx, sy, sz) = bs.download_positions().unwrap();
+    let (hx, hy, hz) = bh.download_positions().unwrap();
+    // The two algorithms reach the same constrained configuration; they differ
+    // only at the order of the small per-step orientation correction.
+    let tol = 1.0e-3;
+    for i in 0..3 {
+        let d = dist(sx[i], sy[i], sz[i], hx[i], hy[i], hz[i]);
+        assert!(d < tol, "atom {i}: M-K vs SHAKE differ by {d} a_0");
+    }
+}
+
+// rq-28cc7d41
+#[test]
+fn settle_positions_guards_near_degenerate_geometry() {
+    let gpu = init_device().unwrap();
+    let (mut slot, mut buffers, sim_box, mut timings, _state) = make_slot_and_buffers(&gpu, 1);
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    // Drive the oxygen far out of the molecular plane (>> ra ≈ 0.12 a_0), so
+    // sinphi = za1d/ra would exceed 1 without clamping, and squash the two
+    // hydrogens toward the symmetry axis (near-collinear unconstrained input).
+    let (mut px, mut py, mut pz) = buffers.download_positions().unwrap();
+    pz[0] += 0.8;             // O far out of plane
+    px[1] = px[0]; py[1] = py[0] + 0.05;
+    px[2] = px[0]; py[2] = py[0] - 0.05;
+    buffers.upload_positions(&px, &py, &pz).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    let (px, py, pz) = buffers.download_positions().unwrap();
+    for i in 0..3 {
+        assert!(px[i].is_finite() && py[i].is_finite() && pz[i].is_finite(),
+            "atom {i} produced a non-finite coordinate");
+    }
+    // Still a rigid water afterwards (clamped, not NaN).
+    assert_rigid(&px, &py, &pz, 0, "near-degenerate input");
+}
+
+// rq-9e22adb3
+#[test]
+fn settle_positions_no_velocity_is_noop_for_rigid_molecule() {
+    let gpu = init_device().unwrap();
+    let (mut slot, mut buffers, sim_box, mut timings, _state) = make_slot_and_buffers(&gpu, 1);
+    // The water_state geometry already satisfies the canonical constraints
+    // exactly, so the projection must leave positions byte-identical.
+    let (bx, by, bz) = buffers.download_positions().unwrap();
+    slot.apply_position_projection_only(&mut buffers, &sim_box, &mut timings).unwrap();
+    let (ax, ay, az) = buffers.download_positions().unwrap();
+    assert_eq!(bx, ax, "x positions perturbed by projection of a rigid molecule");
+    assert_eq!(by, ay, "y positions perturbed");
+    assert_eq!(bz, az, "z positions perturbed");
+}
+
+// rq-261b5b46 — End-to-end: steepest-descent minimization with a SETTLE
+// constraint slot converges (the line search does not collapse to a zero
+// step, the regression that the identity-for-rigid projection prevents).
+#[test]
+fn sd_minimization_with_settle_converges() {
+    use std::fs;
+    let gpu = init_device().unwrap();
+    let _ = gpu; // ensure a GPU is present for this end-to-end run
+    let dir = std::env::temp_dir().join(format!("heddlemd-settle-min-{}", std::process::id()));
+    if dir.exists() {
+        let _ = fs::remove_dir_all(&dir);
+    }
+    fs::create_dir_all(&dir).unwrap();
+
+    // Two rigid SPC/E waters with their oxygens 3.0 Å apart (repulsive O–O
+    // LJ → a real force to minimize). Each water is at the exact canonical
+    // geometry, so every trial-step projection starts from a rigid molecule.
+    let init = "6\n\
+        Lattice=\"5.0e-9 0 0 0 5.0e-9 0 0 0 5.0e-9\" Properties=species:S:1:pos:R:3\n\
+        O  -1.500000000e-10 0.000000000e0 0.000000000e0\n\
+        H  -0.500000000e-10 0.000000000e0 0.000000000e0\n\
+        H  -1.833800000e-10 9.426400000e-11 0.000000000e0\n\
+        O   1.500000000e-10 0.000000000e0 0.000000000e0\n\
+        H   2.500000000e-10 0.000000000e0 0.000000000e0\n\
+        H   1.166200000e-10 9.426400000e-11 0.000000000e0\n";
+    fs::write(dir.join("water.in.xyz"), init).unwrap();
+    fs::write(
+        dir.join("water.in.topology"),
+        "[constraints]\n0 1 2 SPCE\n3 4 5 SPCE\n",
+    )
+    .unwrap();
+
+    let cfg = r#"schema_version = 1
+units = "si"
+init = "water.in.xyz"
+topology = "water.in.topology"
+
+[simulation]
+seed = 1
+temperature = 0.0
+
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+initial_step = 1.0e-13
+max_step = 1.0e-11
+force_tolerance = 1.0e-11
+energy_tolerance = 1.0e-6
+max_iterations = 500
+
+[minimization.output]
+minlog_every = 1
+trajectory_every = 0
+
+[[particle_types]]
+name = "O"
+mass = 2.6566e-26
+charge = 0.0
+
+[[particle_types]]
+name = "H"
+mass = 1.6735e-27
+charge = 0.0
+
+[[pair_interactions]]
+between = ["O", "O"]
+potential = "lennard-jones"
+sigma = 3.166e-10
+epsilon = 1.080e-21
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[pair_interactions]]
+between = ["H", "H"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[pair_interactions]]
+between = ["H", "O"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[constraint_types]]
+name = "SPCE"
+kind = "settle"
+d_OH = 1.0e-10
+d_HH = 1.633e-10
+
+[neighbor_list]
+mode = "all-pairs"
+"#;
+    let cfg_path = dir.join("water.in.toml");
+    fs::write(&cfg_path, cfg).unwrap();
+
+    let summary = match heddle_md::runner::run_simulation(&cfg_path) {
+        Ok(s) => s,
+        Err(e) => panic!("run_simulation failed (line search likely collapsed): {e:?}"),
+    };
+    assert_eq!(summary.phases.len(), 1);
+    let ps = &summary.phases[0];
+    assert_eq!(ps.kind, "minimization");
+    assert!(ps.n_steps > 0 && ps.n_steps <= 500, "iters = {}", ps.n_steps);
+    assert!(ps.convergence.is_some(), "minimization did not converge");
 }
