@@ -61,7 +61,7 @@ The four hook positions are:
 | `apply_before_drift`              | Immediately before every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                                |
 | `apply_after_drift`               | Immediately after every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
 | `apply_after_kick`                | Once per timestep, after the final sub-step in the plan, iff that sub-step is a `SubStep::KickHalf` or `SubStep::KickDrift` | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.                     |
-| `apply_position_projection_only`  | After each trial position update inside an energy-minimization phase (see `rqm/minimization/steepest-descent.md`) | Projects positions back onto the constraint manifold without modifying velocities or virials. Does not consume `dt`. |
+| `apply_position_projection_only`  | After each trial position update inside an energy-minimization phase (see `rqm/minimization/steepest-descent.md`) | Applies a minimal-displacement, descent-compatible projection (a retraction) that moves the current positions back onto the constraint manifold without modifying velocities or virials. Does not consume `dt`. |
 
 The first three hooks fire only during the integrator's plan walk in
 MD phases. The fourth hook fires only during minimization phases and
@@ -393,8 +393,18 @@ second receives an empty index set and contributes no slot.
           timings: &mut Timings,
       ) -> Result<(), ConstraintError>;
 
-      /// Project positions back onto the constraint manifold without
-      /// modifying velocities, virials, or any other buffer.
+      /// Apply a minimal-displacement, descent-compatible projection
+      /// (a retraction) that moves the current positions back onto the
+      /// constraint manifold without modifying velocities, virials, or
+      /// any other buffer. Pure function of the current
+      /// `buffers.positions_*` and the slot's own constraint data: it
+      /// relies on no `apply_before_drift` snapshot and keeps no mutable
+      /// state across calls. Must be a bit-exact identity when the input
+      /// already satisfies every constraint to tolerance, and the
+      /// per-atom displacement it applies must be bounded by the
+      /// constraint residual (so the move shrinks continuously to zero
+      /// as the residual does). An algorithm may use a different
+      /// internal method here than on its MD `apply_after_drift` path.
       /// Driven by the minimization runner (see
       /// `rqm/minimization/steepest-descent.md`); never called from the
       /// integration plan walk.
@@ -430,10 +440,38 @@ second receives an empty index set and contributes no slot.
     `buffers.positions_*`. It does not touch `buffers.velocities_*`,
     `buffers.virials`, `buffers.forces_*`, or `sim_box`, and it does
     not consume `dt` (minimization has no physical time scale). It
-    is permitted to read and write slot-private scratch buffers. The
-    runner invokes it after each trial position update inside the
-    SD loop (see `rqm/minimization/steepest-descent.md`'s *Algorithm*
-    step 2); the integrator plan walk never calls it.
+    is permitted to read and write slot-private scratch buffers as
+    transient compute scratch within a single call, but it carries no
+    state between calls and reads no buffer populated by an earlier
+    hook: the projection is a pure function of the current positions
+    and the slot's constraint data. In particular it does not rely on
+    the `apply_before_drift` snapshot, which is meaningful only on the
+    MD path. This statelessness is what lets the minimizer's
+    snapshot/restore line-search roll a rejected trial step back
+    cleanly. The projection is a retraction onto the constraint
+    manifold, with three load-bearing properties:
+    - **Identity on the manifold.** When the input positions already
+      satisfy every owned constraint to tolerance, the call leaves
+      `buffers.positions_*` byte-identical. It does not re-derive a
+      global configuration that perturbs an already-satisfied group.
+    - **Residual-bounded displacement.** The per-atom displacement the
+      call applies is bounded by the constraint residual of the input,
+      so the move shrinks continuously to zero as the residual does.
+      An input perturbed off the manifold by `ε` moves by `O(ε)`, not
+      by a step whose size is independent of how far off-manifold the
+      input was. This is what keeps the projected energy a descent
+      direction and prevents the SD line search from collapsing.
+    - **Idempotence.** Projecting an already-projected configuration is
+      a no-op to tolerance: a second consecutive call leaves the
+      positions on the manifold and applies no further displacement.
+    An algorithm whose MD `apply_after_drift` path re-derives state in
+    a way that would violate these properties (for example a global
+    re-orientation that is not minimal-displacement) must implement a
+    distinct minimal-displacement method for this hook rather than
+    reusing its MD path. The runner invokes it after each trial
+    position update inside the SD loop (see
+    `rqm/minimization/steepest-descent.md`'s *Algorithm* step 2); the
+    integrator plan walk never calls it.
 
 - `ConstraintGroup` — `Debug, Clone, Copy`. Fields: `atom_offset: u32`, <!-- rq-0faddd62 -->
   `atom_count: u32`, `constraint_offset: u32`, `constraint_count: u32`,
@@ -510,13 +548,19 @@ second receives an empty index set and contributes no slot.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
 
-      /// `true` iff the algorithm implements
-      /// `Constraint::apply_position_projection_only` non-trivially
-      /// (i.e., can participate in minimization phases). The default
-      /// returns `true`. Algorithms that cannot project positions
-      /// without a paired velocity / virial update override this to
-      /// return `false`; configs that pair such an algorithm with a
-      /// `[[minimization]]` phase are rejected at config load via
+      /// `true` iff the algorithm provides an
+      /// `apply_position_projection_only` that satisfies the retraction
+      /// contract documented on that hook — a stateless,
+      /// minimal-displacement projection that is a bit-exact identity
+      /// on the manifold and whose per-atom displacement is bounded by
+      /// the constraint residual — and can therefore participate in
+      /// minimization phases. The default returns `true`. An algorithm
+      /// that cannot offer such a projection (for example one that can
+      /// only correct positions jointly with a velocity / virial
+      /// update, or whose only position correction is a non-minimal
+      /// global re-derivation) overrides this to return `false`;
+      /// configs that pair such an algorithm with a `[[minimization]]`
+      /// phase are rejected at config load via
       /// `Config::validate_constraint_compatibility`.
       fn supports_position_projection_only(
           &self,
@@ -990,6 +1034,39 @@ Feature: Constraint slot framework
     Then positions_x, positions_y, positions_z lie on the constraint manifold (every constraint distance equals its r0 within relative tolerance 1e-6)
     And velocities_x, velocities_y, velocities_z are byte-identical to the snapshot
     And virials and forces_x, forces_y, forces_z are byte-identical to their snapshots
+
+  # Framework-level obligations every constraint slot that reports
+  # supports_position_projection_only() == true must satisfy. Each
+  # registered such builder is exercised against the three scenarios
+  # below.
+
+  @rq-7d63f689
+  Scenario: apply_position_projection_only is a bit-exact identity on the manifold
+    Given a constraint slot whose builder reports supports_position_projection_only(&params) == true
+    And a ParticleBuffers whose positions already satisfy every owned constraint to tolerance (each constraint distance equals its r0 within relative tolerance 1e-7)
+    And a byte snapshot of positions_x, positions_y, positions_z
+    When constraint.apply_position_projection_only(&mut buffers, &sim_box, &mut timings) is called
+    Then positions_x, positions_y, positions_z are byte-identical to the snapshot
+
+  @rq-78f1f153
+  Scenario: apply_position_projection_only displacement is residual-bounded and idempotent
+    Given a constraint slot whose builder reports supports_position_projection_only(&params) == true
+    And an on-manifold reference configuration
+    And a ParticleBuffers whose positions are the reference perturbed by a displacement of magnitude epsilon (small relative to every r0)
+    When constraint.apply_position_projection_only(&mut buffers, &sim_box, &mut timings) is called
+    Then positions_x, positions_y, positions_z lie on the constraint manifold within relative tolerance 1e-6
+    And the maximum per-atom displacement from the perturbed input is O(epsilon) (bounded by a slot-independent constant times epsilon, not by a constraint-scale step)
+    When apply_position_projection_only is called a second consecutive time
+    Then the maximum per-atom displacement applied by the second call is within tolerance 1e-7 of zero
+
+  @rq-a861d13f
+  Scenario: steepest-descent minimization with a constraint slot converges without line-search collapse
+    Given a [[minimization]] steepest-descent phase paired with a constraint slot whose builder reports supports_position_projection_only(&params) == true
+    And an initial configuration that is on the constraint manifold but not at a force minimum
+    When the minimization runner executes until its convergence criterion is met or its step cap is reached
+    Then the run reaches its convergence criterion before the step cap
+    And no minimization step is rejected for failing to decrease the energy on account of the projection (the line search does not collapse to a zero-length step)
+    And every reported configuration lies on the constraint manifold within relative tolerance 1e-6
 
   @rq-833d83a9
   Scenario: apply_position_projection_only on empty state is a no-op

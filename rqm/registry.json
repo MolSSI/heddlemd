@@ -14184,6 +14184,18 @@
     "title": "Switching-function degenerate case <!-- inline -->",
     "type": "section"
   },
+  "rq-78f1f153": {
+    "decl": "Scenario: apply_position_projection_only displacement is residual-bounded and idempotent",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "apply_position_projection_only displacement is residual-bounded and idempotent",
+    "type": "scenario"
+  },
   "rq-78f484d9": {
     "decl": "- `Integrator` — object-safe trait implemented by every concrete",
     "file": "integration/framework",
@@ -14719,6 +14731,18 @@
     ],
     "title": "vv_kick_drift_lossless",
     "type": "api-item"
+  },
+  "rq-7d63f689": {
+    "decl": "Scenario: apply_position_projection_only is a bit-exact identity on the manifold",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "apply_position_projection_only is a bit-exact identity on the manifold",
+    "type": "scenario"
   },
   "rq-7d831804": {
     "decl": "Scenario: Temperature uses k_B = 1 and N_thermal_dof as divisor",
@@ -19533,6 +19557,18 @@
     "file": "forces/framework",
     "refs": [],
     "title": "ForceField owns ten per-class accumulator buffers each of length particle_count",
+    "type": "scenario"
+  },
+  "rq-a861d13f": {
+    "decl": "Scenario: steepest-descent minimization with a constraint slot converges without line-search collapse",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "steepest-descent minimization with a constraint slot converges without line-search collapse",
     "type": "scenario"
   },
   "rq-a8971153": {
