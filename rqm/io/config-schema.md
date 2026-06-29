@@ -255,9 +255,12 @@ storing it on the returned `Config`. The corresponding atomic-unit
 dimension for each named SI unit is fixed (length → Bohr,
 mass → electron mass, time → atomic time, energy → Hartree,
 temperature → `E_h / k_B`, pressure → `E_h / a_0^3`,
-charge → elementary charge, velocity → `a_0 / (hbar / E_h)`); the
-mapping is enumerated in `unit-system.md`. Fields are validated on
-their post-conversion (atomic-unit) values, but the same positivity
+charge → elementary charge, velocity → `a_0 / (hbar / E_h)`). Each
+unit-bearing field carries its dimension on its type (a dimensioned
+newtype), and the loader's single `Convert` pass rescales the whole
+`Config`; open-shaped slot `params` are converted by the matching
+builder. See `unit-system.md` for the mechanism. Fields are validated
+on their post-conversion (atomic-unit) values, but the same positivity
 and ordering invariants hold regardless of the chosen unit system.
 
 #### Top level <!-- rq-4c42a952 -->

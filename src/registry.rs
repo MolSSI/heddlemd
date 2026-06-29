@@ -14,6 +14,59 @@ use std::fmt;
 // rq-0f6b7b7a
 pub trait KindedBuilder {
     fn kind_name(&self) -> &'static str;
+
+    /// Rescale this kind's open-shaped `params` table from the user's
+    /// unit system to atomic units, in place. The default is a no-op
+    /// (appropriate for a kind with no unit-bearing params); builders
+    /// with unit-bearing params override it, conventionally via
+    /// [`convert_params_in_place`] applied to their typed parameter
+    /// struct (which derives `Convert`). See `rqm/io/unit-system.md`.
+    fn convert_params(
+        &self,
+        _units: crate::units::UnitSystem,
+        _params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        Ok(())
+    }
+}
+
+/// Deserialise `params` into the typed parameter struct `P` (which
+/// derives `Convert`), rescale it from the user's unit system to atomic
+/// units, and write the converted values back into `params`. Existing
+/// keys are overwritten by their converted values; any key not modelled
+/// by `P` is preserved. A `params` table that does not deserialise into
+/// `P` is left untouched and returns `Ok(())`, deferring the typed error
+/// to the builder's `validate_params`. rq-0f6b7b7a
+pub fn convert_params_in_place<P>(
+    units: crate::units::UnitSystem,
+    params: &mut toml::Value,
+) -> Result<(), crate::io::config::ConfigError>
+where
+    P: serde::de::DeserializeOwned + serde::Serialize + crate::units::Convert,
+{
+    use crate::units::Convert;
+    let mut typed: P = match params.clone().try_into() {
+        Ok(p) => p,
+        Err(_) => return Ok(()),
+    };
+    typed.from_user(units);
+    let converted = toml::Value::try_from(&typed).map_err(|e| {
+        crate::io::config::ConfigError::Parse {
+            path: "constraint/slot params".to_string(),
+            message: e.to_string(),
+        }
+    })?;
+    // Overwrite only the keys the user actually wrote: a field omitted
+    // from the input (filled by a serde default) must stay absent so the
+    // builder's own default applies, matching the field-table behaviour.
+    if let (Some(dst), Some(src)) = (params.as_table_mut(), converted.as_table()) {
+        for (k, v) in src {
+            if dst.contains_key(k) {
+                dst.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Per-trait built-in roster. Implemented once per builder trait object

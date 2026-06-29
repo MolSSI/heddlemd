@@ -124,11 +124,28 @@ the per-subsystem framework files and are not part of this framework.
   - `Debug` — derived; available when `B: Debug`.
 
 - `KindedBuilder` — the keyed-lookup capability a named-selection builder <!-- rq-0f6b7b7a -->
-  trait carries.
+  trait carries, plus ownership of its kind's unit conversion.
 
   ```rust
   pub trait KindedBuilder {
       fn kind_name(&self) -> &'static str;
+
+      /// Rescale this kind's open-shaped `params` table from the user's
+      /// unit system to atomic units, in place. The implementation
+      /// deserialises `params` into the builder's typed parameter
+      /// struct (which derives `Convert`; see `io/unit-system.md`),
+      /// applies `Convert::from_user`, and serialises the converted
+      /// values back into `params`. A non-numeric value at a
+      /// unit-bearing field surfaces the typed deserialisation error.
+      /// Default: a no-op, appropriate only for a kind with no
+      /// unit-bearing params.
+      fn convert_params(
+          &self,
+          _units: UnitSystem,
+          _params: &mut toml::Value,
+      ) -> Result<(), ConfigError> {
+          Ok(())
+      }
   }
   ```
 
@@ -136,7 +153,12 @@ the per-subsystem framework files and are not part of this framework.
   `ThermostatBuilder`, `BarostatBuilder`, `ConstraintBuilder`,
   `MinimizerBuilder`, `AnalysisBuilder`) carry `KindedBuilder` as a
   supertrait. `PotentialBuilder` does not, which is what withholds `lookup`
-  from `PotentialRegistry`.
+  from `PotentialRegistry`; pair/bonded potential params are typed
+  `Config` fields converted by the loader's single `Convert` pass rather
+  than per-builder. Because `convert_params` is co-located with the
+  builder that owns the kind's schema and is generated from the typed
+  params struct's dimensioned fields, a built-in kind cannot be
+  registered without its params conversion being defined.
 
 - `Builtins` — the per-trait built-in roster. <!-- rq-c00689e6 -->
 
@@ -268,6 +290,22 @@ Feature: Registry framework
     Given an IntegratorRegistry::with_builtins() containing a built-in of kind "velocity-verlet"
     When a custom builder of kind "velocity-verlet" is registered
     Then lookup("velocity-verlet") returns the built-in builder
+
+  # --- Builder-owned unit conversion (KindedBuilder::convert_params) ---
+
+  @rq-b99f0a0d
+  Scenario: A kinded builder converts its own unit-bearing params
+    Given the registered "csvr" thermostat builder
+    And an SI params table { temperature = 300.0, tau = 1.0e-13, seed = 11 }
+    When builder.convert_params(UnitSystem::Si, &mut params) is called
+    Then temperature and tau are rescaled to atomic units and seed is unchanged
+    And the call returns Ok(())
+
+  @rq-cce99aac
+  Scenario: convert_params default is a no-op for a kind with no unit-bearing params
+    Given a builder whose kind declares no unit-bearing params (e.g. "velocity-verlet")
+    When convert_params(UnitSystem::Si, &mut params) is called
+    Then params is unchanged and the call returns Ok(())
 
   # --- Compositional activation (potentials) ---
 

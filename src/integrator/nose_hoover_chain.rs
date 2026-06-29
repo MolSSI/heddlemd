@@ -18,11 +18,11 @@ use super::{Thermostat, ThermostatBuilder, ThermostatError};
 use crate::precision::Real;
 
 // rq-1f87880c
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct NoseHooverChainParams {
-    pub temperature: f64,
-    pub tau: f64,
+    pub temperature: crate::units::Temperature,
+    pub tau: crate::units::Time,
     #[serde(default = "default_chain_length")]
     pub chain_length: u32,
     #[serde(default = "default_yoshida_order")]
@@ -394,7 +394,15 @@ use crate::registry::KindedBuilder;
 impl KindedBuilder for NoseHooverChainBuilder {
     fn kind_name(&self) -> &'static str {
         "nose-hoover-chain"
-    }}
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<NoseHooverChainParams>(units, params)
+    }
+}
 
 impl ThermostatBuilder for NoseHooverChainBuilder {
     fn graph_compatible(&self, _params: &toml::Value) -> bool {
@@ -408,8 +416,8 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
 
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite_positive("thermostat.temperature", p.temperature)?;
-        require_finite_positive("thermostat.tau", p.tau)?;
+        require_finite_positive("thermostat.temperature", p.temperature.0)?;
+        require_finite_positive("thermostat.tau", p.tau.0)?;
         if p.chain_length < 1 {
             return Err(invalid(
                 "thermostat.chain_length",
@@ -445,8 +453,8 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
             gpu,
             particle_count,
             n_constraints,
-            p.temperature,
-            p.tau,
+            p.temperature.0,
+            p.tau.0,
             p.chain_length,
             p.yoshida_order,
             p.n_resp,

@@ -17,13 +17,13 @@ use super::{Barostat, BarostatBuilder, BarostatError};
 use crate::precision::Real;
 
 // rq-1f87880c
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct CRescaleBarostatParams {
-    pub pressure: f64,
-    pub temperature: f64,
-    pub tau: f64,
-    pub compressibility: f64,
+    pub pressure: crate::units::Pressure,
+    pub temperature: crate::units::Temperature,
+    pub tau: crate::units::Time,
+    pub compressibility: crate::units::InversePressure,
     pub seed: u64,
 }
 
@@ -311,15 +311,23 @@ use crate::registry::KindedBuilder;
 impl KindedBuilder for CRescaleBarostatBuilder {
     fn kind_name(&self) -> &'static str {
         "c-rescale"
-    }}
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<CRescaleBarostatParams>(units, params)
+    }
+}
 
 impl BarostatBuilder for CRescaleBarostatBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite("barostat.pressure", p.pressure)?;
-        require_finite_positive("barostat.temperature", p.temperature)?;
-        require_finite_positive("barostat.tau", p.tau)?;
-        require_finite_positive("barostat.compressibility", p.compressibility)?;
+        require_finite("barostat.pressure", p.pressure.0)?;
+        require_finite_positive("barostat.temperature", p.temperature.0)?;
+        require_finite_positive("barostat.tau", p.tau.0)?;
+        require_finite_positive("barostat.compressibility", p.compressibility.0)?;
         Ok(())
     }
 
@@ -336,10 +344,10 @@ impl BarostatBuilder for CRescaleBarostatBuilder {
         let state = CRescaleBarostat::new(
             gpu,
             particle_count,
-            p.pressure,
-            p.temperature,
-            p.tau,
-            p.compressibility,
+            p.pressure.0,
+            p.temperature.0,
+            p.tau.0,
+            p.compressibility.0,
             p.seed,
         )?;
         Ok(Box::new(state))

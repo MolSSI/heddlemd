@@ -27,15 +27,15 @@ use crate::precision::Real;
 pub const SETTLE_ATOMS: usize = 3;
 
 // rq-55f60603 rq-eecd4961
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct SettleParams {
     /// Apex (oxygen)–hydrogen bond length, atomic units after config load.
     #[serde(rename = "d_OH")]
-    pub d_oh: f64,
+    pub d_oh: crate::units::Length,
     /// Hydrogen–hydrogen distance, atomic units after config load.
     #[serde(rename = "d_HH")]
-    pub d_hh: f64,
+    pub d_hh: crate::units::Length,
 }
 
 fn deserialize_params(params: &toml::Value) -> Result<SettleParams, ConfigError> {
@@ -46,26 +46,26 @@ fn deserialize_params(params: &toml::Value) -> Result<SettleParams, ConfigError>
 }
 
 fn validate_settle_params(name: &str, p: &SettleParams) -> Result<(), ConfigError> {
-    if !p.d_oh.is_finite() || p.d_oh <= 0.0 {
+    if !p.d_oh.0.is_finite() || p.d_oh.0 <= 0.0 {
         return Err(ConfigError::SettleParamsMalformed {
             name: name.to_string(),
-            reason: format!("d_OH must be strictly positive and finite, got {}", p.d_oh),
+            reason: format!("d_OH must be strictly positive and finite, got {}", p.d_oh.0),
         });
     }
-    if !p.d_hh.is_finite() || p.d_hh <= 0.0 {
+    if !p.d_hh.0.is_finite() || p.d_hh.0 <= 0.0 {
         return Err(ConfigError::SettleParamsMalformed {
             name: name.to_string(),
-            reason: format!("d_HH must be strictly positive and finite, got {}", p.d_hh),
+            reason: format!("d_HH must be strictly positive and finite, got {}", p.d_hh.0),
         });
     }
     // The apex height h = sqrt(d_OH² − (d_HH/2)²) must be real and
     // positive (the three atoms are not collinear).
-    if p.d_hh >= 2.0 * p.d_oh {
+    if p.d_hh.0 >= 2.0 * p.d_oh.0 {
         return Err(ConfigError::SettleParamsMalformed {
             name: name.to_string(),
             reason: format!(
                 "d_HH must be less than 2 * d_OH (got d_HH = {}, d_OH = {}); the geometry would be collinear",
-                p.d_hh, p.d_oh
+                p.d_hh.0, p.d_oh.0
             ),
         });
     }
@@ -230,7 +230,7 @@ impl SettleConstraintsState {
                 });
             }
 
-            let geom = canonical_geometry(params.d_oh, params.d_hh, m_o as f64, m_h1 as f64);
+            let geom = canonical_geometry(params.d_oh.0, params.d_hh.0, m_o as f64, m_h1 as f64);
 
             let atom_offset = group_atoms_host.len() as u32;
             group_atoms_host.extend_from_slice(atoms);
@@ -474,6 +474,13 @@ impl KindedBuilder for SettleBuilder {
     fn kind_name(&self) -> &'static str {
         "settle"
     }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<SettleParams>(units, params)
+    }
 }
 
 impl ConstraintBuilder for SettleBuilder {
@@ -498,8 +505,8 @@ impl ConstraintBuilder for SettleBuilder {
             kind: "settle".to_string(),
             reason: e.to_string(),
         })?;
-        let d_oh = p.d_oh as Real;
-        let d_hh = p.d_hh as Real;
+        let d_oh = p.d_oh.0 as Real;
+        let d_hh = p.d_hh.0 as Real;
         Ok(vec![
             GroupConstraint { local_i: 0, local_j: 1, r0: d_oh },
             GroupConstraint { local_i: 0, local_j: 2, r0: d_oh },

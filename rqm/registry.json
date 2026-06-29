@@ -1522,6 +1522,13 @@
     "title": "Pair inside r_switch sees the unmodified Lennard-Jones force",
     "type": "scenario"
   },
+  "rq-0c591e24": {
+    "decl": "- `Config::from_user` is the single recursive `Convert` pass the loader",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Config",
+    "type": "api-item"
+  },
   "rq-0c717392": {
     "decl": "- `Exclusion` — `Debug, Clone, Copy`. Fields: `atom_i: u32`,",
     "file": "forces/topology",
@@ -1874,6 +1881,10 @@
     "decl": "- `KindedBuilder` — the keyed-lookup capability a named-selection builder",
     "file": "registry-framework",
     "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
       {
         "file": "src/registry.rs",
         "kind": "code"
@@ -10286,6 +10297,18 @@
     "title": "step() evaluates every class and produces the total in ParticleBuffers",
     "type": "scenario"
   },
+  "rq-57fede98": {
+    "decl": "Scenario: Every registered kinded builder converts a representative SI params block",
+    "file": "io/unit-system",
+    "refs": [
+      {
+        "file": "tests/unit_conversion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Every registered kinded builder converts a representative SI params block",
+    "type": "scenario"
+  },
   "rq-580fe6f7": {
     "decl": "### Lossless mode: compensated summation",
     "file": "integration/velocity-verlet",
@@ -16582,18 +16605,6 @@
     "title": "Temperature of a zero-DOF system is zero",
     "type": "scenario"
   },
-  "rq-8f5ebdc1": {
-    "decl": "- `convert_slot_params(system: UnitSystem, kind: &str, params: &mut toml::Value)`",
-    "file": "io/unit-system",
-    "refs": [
-      {
-        "file": "src/units/mod.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "convert_slot_params",
-    "type": "api-item"
-  },
   "rq-8f665dd0": {
     "decl": "Scenario: Reject log_path = timings_path",
     "file": "io/config-schema",
@@ -16647,6 +16658,18 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "LennardJonesState reports its max cutoff to the framework",
+    "type": "scenario"
+  },
+  "rq-901a8f7c": {
+    "decl": "Scenario: A registered builder converts its own slot params to atomic units",
+    "file": "io/unit-system",
+    "refs": [
+      {
+        "file": "tests/unit_conversion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A registered builder converts its own slot params to atomic units",
     "type": "scenario"
   },
   "rq-901c006f": {
@@ -17232,6 +17255,13 @@
     ],
     "title": "Triclinic shape is preserved under apply",
     "type": "scenario"
+  },
+  "rq-94e7affd": {
+    "decl": "- `Convert` — trait for applying the I/O-boundary rescaling to a value",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Convert",
+    "type": "api-item"
   },
   "rq-94f9228c": {
     "decl": "Scenario: SI-mode trajectory frame converts the lattice to metres",
@@ -18751,6 +18781,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-a0d557f5": {
+    "decl": "Scenario: Slot params round-trip equivalently between SI and atomic descriptions",
+    "file": "io/unit-system",
+    "refs": [
+      {
+        "file": "tests/unit_conversion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Slot params round-trip equivalently between SI and atomic descriptions",
+    "type": "scenario"
   },
   "rq-a0ddb391": {
     "decl": "### Builder",
@@ -20279,15 +20321,15 @@
     "type": "scenario"
   },
   "rq-aeee8e44": {
-    "decl": "Scenario: Slot kind unknown to the unit module passes through unchanged",
+    "decl": "Scenario: Slot kind with no registered builder passes through unchanged",
     "file": "io/unit-system",
     "refs": [
       {
-        "file": "src/units/mod.rs",
+        "file": "tests/unit_conversion.rs",
         "kind": "code"
       }
     ],
-    "title": "Slot kind unknown to the unit module passes through unchanged",
+    "title": "Slot kind with no registered builder passes through unchanged",
     "type": "scenario"
   },
   "rq-aef9888b": {
@@ -20971,6 +21013,18 @@
     "title": "Construct an integrator with particle_count = 0",
     "type": "scenario"
   },
+  "rq-b45b09f9": {
+    "decl": "Scenario: The Convert derive recurses into nested struct and Vec fields",
+    "file": "io/unit-system",
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The Convert derive recurses into nested struct and Vec fields",
+    "type": "scenario"
+  },
   "rq-b47589c9": {
     "decl": "### `Thermostat` trait overrides",
     "file": "integration/nose-hoover-chain",
@@ -21512,6 +21566,18 @@
       }
     ],
     "title": "SettleConstraintsState::new rejects a group with the wrong atom count",
+    "type": "scenario"
+  },
+  "rq-b99f0a0d": {
+    "decl": "Scenario: A kinded builder converts its own unit-bearing params",
+    "file": "registry-framework",
+    "refs": [
+      {
+        "file": "tests/unit_conversion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A kinded builder converts its own unit-bearing params",
     "type": "scenario"
   },
   "rq-b9a4e3de": {
@@ -22079,11 +22145,16 @@
     "type": "section"
   },
   "rq-bf5df23e": {
-    "decl": "### Per-slot field-to-dimension mapping",
+    "decl": "### Dimensioned Types and the Convert Trait",
     "file": "io/unit-system",
     "level": 3,
-    "refs": [],
-    "title": "Per-slot field-to-dimension mapping",
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Dimensioned Types and the Convert Trait",
     "type": "section"
   },
   "rq-bf62f645": {
@@ -23333,6 +23404,13 @@
     "title": "A custom analysis builder composes with the built-ins",
     "type": "scenario"
   },
+  "rq-ca197f1c": {
+    "decl": "- `#[derive(Convert)]` — procedural macro that implements `Convert`",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "- `#[derive(Convert)]` — procedural macro that implements `Convert`",
+    "type": "api-item"
+  },
   "rq-ca356c08": {
     "decl": "Scenario: [thermostat] section absent yields config.phases[0].thermostat = None",
     "file": "io/config-schema",
@@ -23580,6 +23658,18 @@
     ],
     "title": "Empty state",
     "type": "section"
+  },
+  "rq-cce99aac": {
+    "decl": "Scenario: convert_params default is a no-op for a kind with no unit-bearing params",
+    "file": "registry-framework",
+    "refs": [
+      {
+        "file": "tests/unit_conversion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "convert_params default is a no-op for a kind with no unit-bearing params",
+    "type": "scenario"
   },
   "rq-ccf4dc3f": {
     "decl": "Scenario: Builder returning Ok(None) is skipped without erroring",
@@ -25176,6 +25266,14 @@
     ],
     "title": "philox_normal returns the standard-normal Box-Muller cos branch",
     "type": "scenario"
+  },
+  "rq-db1a6094": {
+    "decl": "### Builder-Owned Slot-Parameter Conversion",
+    "file": "io/unit-system",
+    "level": 3,
+    "refs": [],
+    "title": "Builder-Owned Slot-Parameter Conversion",
+    "type": "section"
   },
   "rq-db2253db": {
     "decl": "Scenario: Potential::frequency_class default returns Fast",
@@ -27244,18 +27342,6 @@
     "refs": [],
     "title": "write_cursors is reset to zero before each rebuild",
     "type": "scenario"
-  },
-  "rq-ecb8aa60": {
-    "decl": "- `slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimension)]>`",
-    "file": "io/unit-system",
-    "refs": [
-      {
-        "file": "src/units/mod.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "slot_kind_field_dims",
-    "type": "api-item"
   },
   "rq-ecc1241f": {
     "decl": "Scenario: inv_r, r, qi, qj are computed once per pair and threaded into every fragment's evaluate",

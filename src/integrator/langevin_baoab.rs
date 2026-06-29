@@ -21,11 +21,11 @@ use crate::precision::Real;
 // rq-1f87880c — typed parameter struct for the "langevin-baoab"
 // builder, deserialised from the `[integrator]` section's
 // `SlotConfig::params`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct LangevinBaoabParams {
-    pub friction: f64,
-    pub temperature: f64,
+    pub friction: crate::units::InverseTime,
+    pub temperature: crate::units::Temperature,
     pub seed: u64,
 }
 
@@ -192,13 +192,21 @@ use crate::registry::KindedBuilder;
 impl KindedBuilder for LangevinBaoabBuilder {
     fn kind_name(&self) -> &'static str {
         "langevin-baoab"
-    }}
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<LangevinBaoabParams>(units, params)
+    }
+}
 
 impl IntegratorBuilder for LangevinBaoabBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite_positive("integrator.friction", p.friction)?;
-        require_finite_positive("integrator.temperature", p.temperature)?;
+        require_finite_positive("integrator.friction", p.friction.0)?;
+        require_finite_positive("integrator.temperature", p.temperature.0)?;
         Ok(())
     }
 
@@ -221,8 +229,8 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
             .alloc_zeros::<u64>(1)
             .map_err(|e| IntegratorError::Gpu(GpuError::from(e)))?;
         Ok(Box::new(LangevinBaoabState {
-            friction: p.friction,
-            temperature: p.temperature,
+            friction: p.friction.0,
+            temperature: p.temperature.0,
             seed: p.seed,
             draw_counter: 0,
             draw_counter_device,

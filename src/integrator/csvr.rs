@@ -15,11 +15,11 @@ use super::{Thermostat, ThermostatBuilder, ThermostatError};
 use crate::precision::Real;
 
 // rq-1f87880c
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct CsvrParams {
-    pub temperature: f64,
-    pub tau: f64,
+    pub temperature: crate::units::Temperature,
+    pub tau: crate::units::Time,
     pub seed: u64,
 }
 
@@ -281,13 +281,21 @@ use crate::registry::KindedBuilder;
 impl KindedBuilder for CsvrBuilder {
     fn kind_name(&self) -> &'static str {
         "csvr"
-    }}
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        crate::registry::convert_params_in_place::<CsvrParams>(units, params)
+    }
+}
 
 impl ThermostatBuilder for CsvrBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite_positive("thermostat.temperature", p.temperature)?;
-        require_finite_positive("thermostat.tau", p.tau)?;
+        require_finite_positive("thermostat.temperature", p.temperature.0)?;
+        require_finite_positive("thermostat.tau", p.tau.0)?;
         Ok(())
     }
 
@@ -301,7 +309,7 @@ impl ThermostatBuilder for CsvrBuilder {
         let p = deserialize_params(params)
             .map_err(|_| ThermostatError::UnknownKind("csvr (malformed params)".into()))?;
         let state =
-            CsvrThermostat::new(gpu, particle_count, n_constraints, p.temperature, p.tau, p.seed)?;
+            CsvrThermostat::new(gpu, particle_count, n_constraints, p.temperature.0, p.tau.0, p.seed)?;
         Ok(Box::new(state))
     }
 }

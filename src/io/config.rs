@@ -770,9 +770,55 @@ pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
     };
 
     let base_dir = path.parent().unwrap_or(Path::new("."));
-    let config = build_config(raw_config, path, base_dir, units);
+    let mut config = build_config(raw_config, path, base_dir, units);
+    // Open-shaped slot params are converted to atomic units by the owning
+    // builder's `convert_params`. The built-in registries supply those
+    // builders; an unknown kind is left untouched and rejected later by
+    // `validate_against`. rq-0f6b7b7a
+    convert_all_slot_params(&mut config)?;
     config.validate()?;
     Ok(config)
+}
+
+// rq-0f6b7b7a — drive each open-shaped slot's unit conversion through the
+// builder that owns its kind's schema (see `KindedBuilder::convert_params`).
+fn convert_all_slot_params(config: &mut Config) -> Result<(), ConfigError> {
+    use crate::registry::{KindedBuilder, Registry};
+    let units = config.units;
+    let registries = crate::Registries::with_builtins();
+
+    fn conv<B: KindedBuilder + ?Sized>(
+        reg: &Registry<B>,
+        units: UnitSystem,
+        kind: &str,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        match reg.lookup(kind) {
+            Some(b) => b.convert_params(units, params),
+            None => Ok(()),
+        }
+    }
+
+    for phase in &mut config.phases {
+        match phase {
+            PhaseKind::Md(p) => {
+                conv(&registries.integrators, units, &p.integrator.kind, &mut p.integrator.params)?;
+                if let Some(t) = &mut p.thermostat {
+                    conv(&registries.thermostats, units, &t.kind, &mut t.params)?;
+                }
+                if let Some(b) = &mut p.barostat {
+                    conv(&registries.barostats, units, &b.kind, &mut b.params)?;
+                }
+            }
+            PhaseKind::Minimization(m) => {
+                conv(&registries.minimizers, units, &m.algorithm.kind, &mut m.algorithm.params)?;
+            }
+        }
+    }
+    for ct in &mut config.constraint_types {
+        conv(&registries.constraint_types, units, &ct.kind, &mut ct.params)?;
+    }
+    Ok(())
 }
 
 // Translate a `serde_path_to_error::Error<toml::de::Error>` into the
@@ -935,7 +981,7 @@ fn build_config(
     base_dir: &Path,
     units: UnitSystem,
 ) -> Config {
-    use crate::units::{convert_slot_params, Dimension};
+    use crate::units::Dimension;
     let to_au_length = |v: f64| units.from_user(Dimension::Length, v);
     let to_au_inv_length = |v: f64| units.from_user(Dimension::InverseLength, v);
     let to_au_mass = |v: f64| units.from_user(Dimension::Mass, v);
@@ -1011,11 +1057,12 @@ fn build_config(
         })
         .collect();
 
-    // Constraint types: open-shaped params, rescale in place by kind.
-    let mut constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
-    for ct in &mut constraint_types {
-        convert_slot_params(units, &ct.kind, &mut ct.params);
-    }
+    // Open-shaped slot params (constraint types here; integrator /
+    // thermostat / barostat / minimizer below) are carried through in the
+    // user's unit system and converted to atomic units by the owning
+    // builder's `convert_params` in the post-build pass
+    // (`convert_all_slot_params`), so no conversion happens here.
+    let constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
 
     let coulomb: Option<CoulombConfig> = raw.coulomb.map(|r| {
         let cutoff = to_au_length(r.cutoff);
@@ -1153,16 +1200,9 @@ fn build_config(
                             }),
                     },
                 };
-                let mut integrator = p.integrator;
-                convert_slot_params(units, &integrator.kind, &mut integrator.params);
-                let thermostat = p.thermostat.map(|mut t| {
-                    convert_slot_params(units, &t.kind, &mut t.params);
-                    t
-                });
-                let barostat = p.barostat.map(|mut b| {
-                    convert_slot_params(units, &b.kind, &mut b.params);
-                    b
-                });
+                let integrator = p.integrator;
+                let thermostat = p.thermostat;
+                let barostat = p.barostat;
                 PhaseKind::Md(PhaseConfig {
                     name,
                     n_steps: p.n_steps,
@@ -1215,8 +1255,7 @@ fn build_config(
                             }),
                     },
                 };
-                let mut algorithm = m.algorithm;
-                convert_slot_params(units, &algorithm.kind, &mut algorithm.params);
+                let algorithm = m.algorithm;
                 PhaseKind::Minimization(MinimizationConfig {
                     name,
                     algorithm,

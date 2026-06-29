@@ -18,13 +18,13 @@ use serde::Deserialize;
 use crate::precision::Real;
 
 // rq-1f87880c — typed parameter struct for the "mtk-npt" builder.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct MtkNptParams {
-    pub temperature: f64,
-    pub pressure: f64,
-    pub tau_t: f64,
-    pub tau_p: f64,
+    pub temperature: crate::units::Temperature,
+    pub pressure: crate::units::Pressure,
+    pub tau_t: crate::units::Time,
+    pub tau_p: crate::units::Time,
     #[serde(default = "default_chain_length")]
     pub chain_length: u32,
     #[serde(default = "default_yoshida_order")]
@@ -527,7 +527,15 @@ use crate::registry::KindedBuilder;
 impl KindedBuilder for MtkNptBuilder {
     fn kind_name(&self) -> &'static str {
         "mtk-npt"
-    }}
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<MtkNptParams>(units, params)
+    }
+}
 
 impl IntegratorBuilder for MtkNptBuilder {
     fn graph_compatible(&self, _params: &toml::Value) -> bool {
@@ -540,10 +548,10 @@ impl IntegratorBuilder for MtkNptBuilder {
 
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite_positive("integrator.temperature", p.temperature)?;
-        require_finite("integrator.pressure", p.pressure)?;
-        require_finite_positive("integrator.tau_t", p.tau_t)?;
-        require_finite_positive("integrator.tau_p", p.tau_p)?;
+        require_finite_positive("integrator.temperature", p.temperature.0)?;
+        require_finite("integrator.pressure", p.pressure.0)?;
+        require_finite_positive("integrator.tau_t", p.tau_t.0)?;
+        require_finite_positive("integrator.tau_p", p.tau_p.0)?;
         if p.chain_length < 1 {
             return Err(invalid(
                 "integrator.chain_length",
@@ -581,10 +589,10 @@ impl IntegratorBuilder for MtkNptBuilder {
             gpu,
             particle_count,
             n_constraints,
-            p.temperature,
-            p.pressure,
-            p.tau_t,
-            p.tau_p,
+            p.temperature.0,
+            p.pressure.0,
+            p.tau_t.0,
+            p.tau_p.0,
             p.chain_length,
             p.yoshida_order,
             p.n_resp,

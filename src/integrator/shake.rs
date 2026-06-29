@@ -25,16 +25,16 @@ pub const MAX_GROUP_ATOMS: u32 = 8;
 pub const MAX_GROUP_CONSTRAINTS: u32 = 12;
 
 // rq-f17b858f rq-811ba2a0
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct ShakeConstraintSpec {
     pub i: u32,
     pub j: u32,
-    pub d: f64,
+    pub d: crate::units::Length,
 }
 
 // rq-55f60603
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct ShakeParams {
     pub atoms: u32,
@@ -97,12 +97,12 @@ fn validate_shake_params(name: &str, p: &ShakeParams) -> Result<(), ConfigError>
                 reason: format!("constraint atoms must differ (i = j = {})", c.i),
             });
         }
-        if !c.d.is_finite() || c.d <= 0.0 {
+        if !c.d.0.is_finite() || c.d.0 <= 0.0 {
             return Err(ConfigError::ShakeParamsMalformed {
                 name: name.to_string(),
                 reason: format!(
                     "target distance must be strictly positive and finite, got {}",
-                    c.d
+                    c.d.0
                 ),
             });
         }
@@ -301,7 +301,7 @@ impl ShakeConstraintsState {
             for c in &params.constraints {
                 group_constraints_local_i_host.push(c.i as u8);
                 group_constraints_local_j_host.push(c.j as u8);
-                let d = c.d as Real;
+                let d = c.d.0 as Real;
                 group_constraints_r2_host.push(d * d);
             }
 
@@ -568,7 +568,15 @@ use crate::registry::KindedBuilder;
 impl KindedBuilder for ShakeBuilder {
     fn kind_name(&self) -> &'static str {
         "shake"
-    }}
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<ShakeParams>(units, params)
+    }
+}
 
 impl ConstraintBuilder for ShakeBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
@@ -598,7 +606,7 @@ impl ConstraintBuilder for ShakeBuilder {
             .map(|c| GroupConstraint {
                 local_i: c.i as u8,
                 local_j: c.j as u8,
-                r0: c.d as Real,
+                r0: c.d.0 as Real,
             })
             .collect())
     }

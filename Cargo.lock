@@ -45,12 +45,22 @@ name = "heddle-md"
 version = "0.1.0"
 dependencies = [
  "cudarc",
+ "heddle-md-derive",
  "rand",
  "rand_chacha",
  "serde",
  "serde_path_to_error",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "heddle-md-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

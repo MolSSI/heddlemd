@@ -16,12 +16,12 @@ use super::{Barostat, BarostatBuilder, BarostatError};
 use crate::precision::Real;
 
 // rq-1f87880c
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct BerendsenBarostatParams {
-    pub pressure: f64,
-    pub tau: f64,
-    pub compressibility: f64,
+    pub pressure: crate::units::Pressure,
+    pub tau: crate::units::Time,
+    pub compressibility: crate::units::InversePressure,
 }
 
 fn deserialize_params(params: &toml::Value) -> Result<BerendsenBarostatParams, ConfigError> {
@@ -234,14 +234,22 @@ use crate::registry::KindedBuilder;
 impl KindedBuilder for BerendsenBarostatBuilder {
     fn kind_name(&self) -> &'static str {
         "berendsen"
-    }}
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<BerendsenBarostatParams>(units, params)
+    }
+}
 
 impl BarostatBuilder for BerendsenBarostatBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite("barostat.pressure", p.pressure)?;
-        require_finite_positive("barostat.tau", p.tau)?;
-        require_finite_positive("barostat.compressibility", p.compressibility)?;
+        require_finite("barostat.pressure", p.pressure.0)?;
+        require_finite_positive("barostat.tau", p.tau.0)?;
+        require_finite_positive("barostat.compressibility", p.compressibility.0)?;
         Ok(())
     }
 
@@ -258,9 +266,9 @@ impl BarostatBuilder for BerendsenBarostatBuilder {
         let state = BerendsenBarostat::new(
             gpu,
             particle_count,
-            p.pressure,
-            p.tau,
-            p.compressibility,
+            p.pressure.0,
+            p.tau.0,
+            p.compressibility.0,
         )?;
         Ok(Box::new(state))
     }

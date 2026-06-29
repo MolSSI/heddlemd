@@ -16,11 +16,11 @@ use super::{Thermostat, ThermostatBuilder, ThermostatError};
 use crate::precision::Real;
 
 // rq-1f87880c
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct AndersenParams {
-    pub temperature: f64,
-    pub collision_rate: f64,
+    pub temperature: crate::units::Temperature,
+    pub collision_rate: crate::units::InverseTime,
     pub seed: u64,
 }
 
@@ -320,7 +320,15 @@ use crate::registry::KindedBuilder;
 impl KindedBuilder for AndersenBuilder {
     fn kind_name(&self) -> &'static str {
         "andersen"
-    }}
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<AndersenParams>(units, params)
+    }
+}
 
 impl ThermostatBuilder for AndersenBuilder {
     fn graph_compatible(&self, _params: &toml::Value) -> bool {
@@ -332,8 +340,8 @@ impl ThermostatBuilder for AndersenBuilder {
 
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite_positive("thermostat.temperature", p.temperature)?;
-        require_finite_non_negative("thermostat.collision_rate", p.collision_rate)?;
+        require_finite_positive("thermostat.temperature", p.temperature.0)?;
+        require_finite_non_negative("thermostat.collision_rate", p.collision_rate.0)?;
         Ok(())
     }
 
@@ -349,8 +357,8 @@ impl ThermostatBuilder for AndersenBuilder {
         let state = AndersenThermostat::new(
             gpu,
             particle_count,
-            p.temperature,
-            p.collision_rate,
+            p.temperature.0,
+            p.collision_rate.0,
             p.seed,
         )?;
         Ok(Box::new(state))
