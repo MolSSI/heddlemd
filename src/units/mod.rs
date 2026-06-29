@@ -192,6 +192,12 @@ pub fn slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimen
         // array of tables) and therefore declares an empty top-level
         // field set here.
         "shake" => Some(&[]),
+        // rq-eecd4961 — SETTLE's two water distances are plain
+        // top-level length fields, converted by the table-driven path.
+        "settle" => Some(&[
+            ("d_OH", Length),
+            ("d_HH", Length),
+        ]),
 
         // Minimizers
         "steepest-descent" => Some(&[
@@ -363,6 +369,25 @@ mod tests {
         assert!((t - expected_t).abs() < 1e-12);
         assert!((tau - expected_tau).abs() < 1e-3); // tau is ~4e3
         assert_eq!(seed, 11);
+    }
+
+    // rq-eecd4961 — SETTLE's d_OH / d_HH must be rescaled SI->atomic so
+    // the kernels (which work in Bohr) see Bohr targets, not metres.
+    #[test]
+    fn convert_slot_params_rescales_si_settle_distances() {
+        let mut params: toml::Value =
+            toml::from_str("d_OH = 1.0e-10\nd_HH = 1.633e-10\n").unwrap();
+        convert_slot_params(UnitSystem::Si, "settle", &mut params);
+        let bohr = 5.29177210903e-11;
+        let d_oh = params["d_OH"].as_float().unwrap();
+        let d_hh = params["d_HH"].as_float().unwrap();
+        assert!((d_oh - 1.0e-10 / bohr).abs() < 1e-6, "d_OH = {d_oh}");
+        assert!((d_hh - 1.633e-10 / bohr).abs() < 1e-6, "d_HH = {d_hh}");
+        // Atomic-units input is left unchanged.
+        let mut atomic: toml::Value =
+            toml::from_str("d_OH = 1.889726\nd_HH = 3.085926\n").unwrap();
+        convert_slot_params(UnitSystem::Atomic, "settle", &mut atomic);
+        assert_eq!(atomic["d_OH"].as_float().unwrap(), 1.889726);
     }
 
     #[test]

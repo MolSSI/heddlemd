@@ -12,11 +12,12 @@ callers invoke an integrator with a constraint slot is split so that
 only constraint-capable integrators expose it; see *Convenience Trait
 Surface* below.
 
-The default registry exposes one constraint algorithm:
+The default registry exposes two constraint algorithms:
 
-| `kind` value | Implementation                                                                                         | File       |
-| ------------ | ------------------------------------------------------------------------------------------------------ | ---------- |
-| `shake`      | iterative SHAKE position projection + iterative RATTLE velocity projection on arbitrary rigid groups (compile-time caps `MAX_GROUP_ATOMS = 8`, `MAX_GROUP_CONSTRAINTS = 12`) | `shake.md` |
+| `kind` value | Implementation                                                                                         | File        |
+| ------------ | ------------------------------------------------------------------------------------------------------ | ----------- |
+| `settle`     | analytical (non-iterative) SETTLE position + velocity reset for symmetric three-atom rigid water (Miyamoto-Kollman 1992) | `settle.md` |
+| `shake`      | iterative SHAKE position projection + iterative RATTLE velocity projection on arbitrary rigid groups (compile-time caps `MAX_GROUP_ATOMS = 8`, `MAX_GROUP_CONSTRAINTS = 12`) | `shake.md`  |
 
 The slot is selectable in any simulation whose declared integrator
 returns `IntegratorBuilder::supports_constraints(&params) == true`. In the default
@@ -222,7 +223,9 @@ The atoms of group `g` are
 order within a group is the order in which atoms appear in the
 `[constraints]` row that declared the group; the named constraint
 type's `[[constraint_types]]` entry references atoms by their position
-in this order via its `constraints` table. The constraint-row order
+in this order through its per-kind constraint specification (the
+`constraints` table for `shake`; the canonical water pattern derived
+from `d_OH`/`d_HH` for `settle`). The constraint-row order
 is preserved verbatim so that algorithms can rely on it; the per-group
 sort within `groups` (see *Group Ordering* below) is separate.
 
@@ -473,7 +476,7 @@ second receives an empty index set and contributes no slot.
   (each `[[constraint_types]]` entry names its `kind`), so the generic
   `new`, `register`, `lookup(kind)`, `Clone`, and `Default` apply.
   `with_builtins()` pre-populates the builders for every `kind` in the
-  table above; in v1 this is the single `shake` builder. The topology
+  table above — the `settle` and `shake` builders. The topology
   parser uses `lookup` to call `expected_atom_count(&params)` per
   constraint-type entry; the runner uses it to drive `validate_params`
   and `validate_group_shape` at config-validation time. Construction
@@ -789,13 +792,15 @@ algorithm individually guarantees:
 
 ## Out of Scope <!-- rq-acb86c9b -->
 
-- Concrete constraint algorithms other than SHAKE. Analytical SETTLE
-  (Miyamoto-Kollman) for three-atom rigid water and M-SHAKE for
-  rigid clusters above the SHAKE per-group caps are the targets of
-  follow-up constraint features and share this framework's data
-  layout, trait, and dispatch. LINCS-class global constraint solvers
-  require a different layout and are not anticipated by this
-  framework.
+- Concrete constraint algorithms beyond the two in the default
+  registry. The default registry exposes analytical SETTLE
+  (`settle.md`, for symmetric three-atom rigid water) and iterative
+  SHAKE/RATTLE (`shake.md`, for arbitrary rigid groups within the
+  per-group caps). M-SHAKE for rigid clusters above the SHAKE caps is
+  the target of a follow-up constraint feature and shares this
+  framework's data layout, trait, and dispatch. LINCS-class global
+  constraint solvers require a different layout and are not anticipated
+  by this framework.
 - Composing constraints with `velocity-verlet { lossless: true }`,
   with `langevin-baoab`, or with `mtk-npt`. Each is rejected at
   config load via the

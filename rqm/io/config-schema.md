@@ -752,9 +752,9 @@ algorithm's builder to consume:
 - `name: String` — unique identifier within the `[[constraint_types]]`
   array. Empty strings are rejected. Case-sensitive.
 - `kind: String` — selects the algorithm that processes any group
-  declared with this type. The currently registered value is
-  `"shake"` (see `integration/shake.md`). Future values
-  (`"settle"`, `"m-shake"`, `"lincs"`, ...) are added by registering
+  declared with this type. The registered values are `"settle"` (see
+  `integration/settle.md`) and `"shake"` (see `integration/shake.md`).
+  Further values (`"m-shake"`, `"lincs"`, ...) are added by registering
   additional `ConstraintBuilder`s.
 
 Per-kind parameter fields are validated by the matching
@@ -771,6 +771,18 @@ Per-kind parameter fields are validated by the matching
     `(min(i, j), max(i, j))` must be unique across constraints; `i`
     and `j` must differ.
   - `d` is the target distance in metres. Finite and strictly positive.
+
+For `kind = "settle"` (documented in `integration/settle.md`), the type
+declares a symmetric three-atom rigid water shape:
+
+- `d_OH: f64` — apex (oxygen)–hydrogen bond length in metres. Required.
+  Finite and strictly positive.
+- `d_HH: f64` — hydrogen–hydrogen distance in metres. Required. Finite,
+  strictly positive, and strictly less than `2 · d_OH`.
+
+A `[constraints]` row referencing a `"settle"` type lists exactly three
+atoms in canonical order (oxygen, then the two hydrogens); the parser
+synthesises the three water constraints from `d_OH`/`d_HH`.
 
 Names must be unique within the array. Unknown parameter fields for
 the chosen `kind` are rejected by the matching builder's

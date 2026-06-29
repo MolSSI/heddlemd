@@ -43,6 +43,14 @@
     "title": "check_min_perpendicular_width returns Ok at exact equality",
     "type": "scenario"
   },
+  "rq-0063f0ce": {
+    "decl": "### Builder",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Builder",
+    "type": "section"
+  },
   "rq-0069339b": {
     "decl": "Scenario: A custom-kind integrator with an empty Registries fails with UnknownKind",
     "file": "simulation-runner",
@@ -90,6 +98,14 @@
     ],
     "title": "Reject Lattice with the wrong number of components",
     "type": "scenario"
+  },
+  "rq-0098a282": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-0099ef65": {
     "decl": "Scenario: Single-step lossless round trip restores observables bit-exactly",
@@ -1659,6 +1675,18 @@
     "title": "Feature: Berendsen Weak-Coupling Barostat",
     "type": "file"
   },
+  "rq-0d91d811": {
+    "decl": "Scenario: A settle [constraints] row expands into three canonical water constraints",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A settle [constraints] row expands into three canonical water constraints",
+    "type": "scenario"
+  },
   "rq-0da87ca1": {
     "decl": "## Feature API",
     "file": "forces/framework",
@@ -1927,6 +1955,14 @@
     "title": "[barostat] kind = \"berendsen\" with all required fields accepted",
     "type": "scenario"
   },
+  "rq-0fe74db3": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
+  },
   "rq-0ffccee0": {
     "decl": "Scenario: Allocate device buffers and perform initial upload",
     "file": "particle-state",
@@ -1989,6 +2025,18 @@
       }
     ],
     "title": "SI-mode dt and simulation temperature are converted to atomic",
+    "type": "scenario"
+  },
+  "rq-102b4b02": {
+    "decl": "Scenario: A full velocity-Verlet timestep with one rigid SPC/E group preserves all three",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A full velocity-Verlet timestep with one rigid SPC/E group preserves all three",
     "type": "scenario"
   },
   "rq-102e58cf": {
@@ -3913,6 +3961,18 @@
       }
     ],
     "title": "Reject when positions_y has the wrong length",
+    "type": "scenario"
+  },
+  "rq-1ea7342a": {
+    "decl": "Scenario: A settle [constraints] row with the wrong atom count is rejected by the parser",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A settle [constraints] row with the wrong atom count is rejected by the parser",
     "type": "scenario"
   },
   "rq-1eaff437": {
@@ -6968,6 +7028,18 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-38d09177": {
+    "decl": "Scenario: settle_velocities preserves the centre-of-mass velocity",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_velocities preserves the centre-of-mass velocity",
+    "type": "scenario"
+  },
   "rq-38d5e7a8": {
     "decl": "## Schema",
     "file": "minimization/steepest-descent",
@@ -7330,6 +7402,18 @@
       }
     ],
     "title": "Velocity generation row is absent when init supplies velocities",
+    "type": "scenario"
+  },
+  "rq-3bd5ee23": {
+    "decl": "Scenario: settle_positions updates half-step velocities consistently with the position correction",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions updates half-step velocities consistently with the position correction",
     "type": "scenario"
   },
   "rq-3bf899d0": {
@@ -8637,6 +8721,14 @@
     "title": "Helper Functions in the JIT-Composed Source",
     "type": "section"
   },
+  "rq-49fe5f2e": {
+    "decl": "## Per-Group Storage",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Group Storage",
+    "type": "section"
+  },
   "rq-4a0c5f2e": {
     "decl": "- `PhaseKind` — runtime-level discriminated union over the unified",
     "file": "minimization/steepest-descent",
@@ -8779,6 +8871,14 @@
     ],
     "title": "Box too small for cell-list rejected before forces are constructed",
     "type": "scenario"
+  },
+  "rq-4b4fa0d3": {
+    "decl": "### PTX Module Loading",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
   },
   "rq-4b63564b": {
     "decl": "Scenario: NaN displacement propagates to NaN output",
@@ -9399,6 +9499,13 @@
     "title": "Sub-step Execution",
     "type": "section"
   },
+  "rq-52204841": {
+    "decl": "- `SettleParams` — typed deserialiser for the `[[constraint_types]]` entry",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SettleParams",
+    "type": "api-item"
+  },
   "rq-5269221c": {
     "decl": "Scenario: wrap_position is idempotent for a triclinic box",
     "file": "simulation-box",
@@ -9779,6 +9886,14 @@
     "title": "ForceFieldContext",
     "type": "api-item"
   },
+  "rq-55a683b8": {
+    "decl": "### Types",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-55d441ee": {
     "decl": "Scenario: Two runs with identical (call, level) sequences are byte-identical",
     "file": "forces/framework",
@@ -9790,6 +9905,10 @@
     "decl": "- `ShakeParams` — typed deserialiser for the `[[constraint_types]]`",
     "file": "integration/shake",
     "refs": [
+      {
+        "file": "src/integrator/settle.rs",
+        "kind": "code"
+      },
       {
         "file": "src/integrator/shake.rs",
         "kind": "code"
@@ -9931,6 +10050,18 @@
       }
     ],
     "title": "log_every > n_steps writes only the step-0 row",
+    "type": "scenario"
+  },
+  "rq-56aeb344": {
+    "decl": "Scenario: SettleConstraintsState::new rejects a group with unequal hydrogen masses",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SettleConstraintsState::new rejects a group with unequal hydrogen masses",
     "type": "scenario"
   },
   "rq-56c8a238": {
@@ -10086,6 +10217,19 @@
     ],
     "title": "No GPU available",
     "type": "scenario"
+  },
+  "rq-57db9db2": {
+    "decl": "## Canonical Geometry",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Canonical Geometry",
+    "type": "section"
   },
   "rq-57f8de41": {
     "decl": "Scenario: Malformed TOML",
@@ -11042,6 +11186,18 @@
     "title": "AngleForceFragment",
     "type": "api-item"
   },
+  "rq-603bd03b": {
+    "decl": "Scenario: settle_positions restores constraint distances after a small per-atom kick",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions restores constraint distances after a small per-atom kick",
+    "type": "scenario"
+  },
   "rq-60433fcd": {
     "decl": "Scenario: Lint reports a topology-load failure under the topology stage",
     "file": "simulation-runner",
@@ -11447,6 +11603,18 @@
     "title": "Unknown constraint type name is rejected",
     "type": "scenario"
   },
+  "rq-63926477": {
+    "decl": "Scenario: The settle builder reports graph compatibility",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The settle builder reports graph compatibility",
+    "type": "scenario"
+  },
   "rq-63d694e9": {
     "decl": "- `run_md_phase(setup: &mut SimulationSetup, phase: &PhaseConfig, phase_index: usize) -> Result<PhaseSummary, RunnerError>`",
     "file": "simulation-runner",
@@ -11557,6 +11725,13 @@
     ],
     "title": "units field explicitly set to \"si\"",
     "type": "scenario"
+  },
+  "rq-64ddcf84": {
+    "decl": "- `SettleError` — error type returned by `SettleConstraintsState::new`.",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SettleError",
+    "type": "api-item"
   },
   "rq-64e90d53": {
     "decl": "Scenario: Atomic-mode round-trip is the identity for every column",
@@ -12280,6 +12455,18 @@
     "title": "CoulombParameters",
     "type": "api-item"
   },
+  "rq-6bef53e7": {
+    "decl": "Scenario: SettleConstraintsState::new with an empty constraint list succeeds and is a no-op",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SettleConstraintsState::new with an empty constraint list succeeds and is a no-op",
+    "type": "scenario"
+  },
   "rq-6bf3709c": {
     "decl": "Scenario: Two independent rebuilds with identical positions produce identical lists",
     "file": "forces/neighbor-list",
@@ -12565,6 +12752,18 @@
     "title": "Andersen fragment is self-contained for Philox draw",
     "type": "scenario"
   },
+  "rq-6de1f8d5": {
+    "decl": "Scenario: A settle group adds implicit exclusions for every intra-group pair",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A settle group adds implicit exclusions for every intra-group pair",
+    "type": "scenario"
+  },
   "rq-6dfec7f4": {
     "decl": "# conventions are encoded by position (for SHAKE-constrained rigid waters, the first",
     "file": "forces/topology",
@@ -12846,6 +13045,14 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-6ff885f2": {
+    "decl": "## Out of Scope",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-70442b56": {
     "decl": "Scenario: Two runs of apply_influence on identical inputs are byte-identical",
     "file": "forces/spme",
@@ -12900,6 +13107,38 @@
     ],
     "title": "Per-phase [phase.output] defaults derive from <root> and phase name",
     "type": "scenario"
+  },
+  "rq-70901353": {
+    "decl": "- `SettleBuilder` — implements `ConstraintBuilder` (see",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SettleBuilder",
+    "type": "api-item"
+  },
+  "rq-709c8eb5": {
+    "decl": "## Algorithm",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/settle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Algorithm",
+    "type": "section"
   },
   "rq-70a46202": {
     "decl": "Scenario: Construct CsvrThermostat for a SETTLE'd water system",
@@ -13096,6 +13335,14 @@
     "title": "Construct with particle_count = 1 (N_f = 1)",
     "type": "scenario"
   },
+  "rq-73497463": {
+    "decl": "## Reproducibility",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
+  },
   "rq-7369ded0": {
     "decl": "Scenario: Per-block SPC predicate is true when every axis margin exceeds MAX_CUTOFF",
     "file": "forces/packed-neighbour-pair-force",
@@ -13110,6 +13357,18 @@
     "refs": [],
     "title": "PTX Module Loading",
     "type": "section"
+  },
+  "rq-73c1173f": {
+    "decl": "Scenario: SettleConstraintsState::new rejects a non-positive d_OH",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SettleConstraintsState::new rejects a non-positive d_OH",
+    "type": "scenario"
   },
   "rq-73cd4ad9": {
     "decl": "Scenario: Amortized type-index loads preserve per-particle forces bit-for-bit",
@@ -14843,6 +15102,13 @@
     "title": "Different seeds produce different velocities",
     "type": "scenario"
   },
+  "rq-81b3bcaf": {
+    "decl": "- `SettleConstraintsState` — implements the `Constraint` trait. Fields",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SettleConstraintsState",
+    "type": "api-item"
+  },
   "rq-81cc2f2b": {
     "decl": "## Feature API",
     "file": "forces/jit-composed-pair-force",
@@ -15040,6 +15306,13 @@
     "refs": [],
     "title": "Bonded-only ForceField builds no neighbor list",
     "type": "scenario"
+  },
+  "rq-83321065": {
+    "decl": "# Feature: SETTLE Constraint Algorithm",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "Feature: SETTLE Constraint Algorithm",
+    "type": "file"
   },
   "rq-833d83a9": {
     "decl": "Scenario: apply_position_projection_only on empty state is a no-op",
@@ -16122,6 +16395,14 @@
     "title": "Test Fixture",
     "type": "section"
   },
+  "rq-8e075e86": {
+    "decl": "## Feature API",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-8e239d36": {
     "decl": "### Momentum subtraction",
     "file": "simulation-runner",
@@ -16798,6 +17079,14 @@
     "title": "RunStepOptions::default values",
     "type": "scenario"
   },
+  "rq-93f8e094": {
+    "decl": "## Constraint Virial",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Constraint Virial",
+    "type": "section"
+  },
   "rq-93ff6690": {
     "decl": "- `ArgKind` — whether a parameter is bound from a buffer or pushed as",
     "file": "forces/jit-composed-pair-force",
@@ -16984,6 +17273,18 @@
     "title": "MtkNpt builder owns both its thermostat and its barostat",
     "type": "scenario"
   },
+  "rq-95be04ff": {
+    "decl": "Scenario: settle_positions writes a non-zero position-level constraint virial",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions writes a non-zero position-level constraint virial",
+    "type": "scenario"
+  },
   "rq-95c2f543": {
     "decl": "Scenario: Exclusion scaling applies uniformly to force, energy, and virial",
     "file": "forces/lj-pair-force",
@@ -17015,6 +17316,18 @@
       }
     ],
     "title": "Implicit pairing defaults to the last phase of the simulation config",
+    "type": "scenario"
+  },
+  "rq-9638eee5": {
+    "decl": "Scenario: settle_positions converges at production-scale dt with thermal-amplitude displacements",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions converges at production-scale dt with thermal-amplitude displacements",
     "type": "scenario"
   },
   "rq-964b59fd": {
@@ -17238,6 +17551,18 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-9883ee42": {
+    "decl": "Scenario: settle_virial_scatter additively writes per-atom virial into particle_virials",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_virial_scatter additively writes per-atom virial into particle_virials",
+    "type": "scenario"
+  },
   "rq-98ac1915": {
     "decl": "Scenario: check_min_perpendicular_width with non-positive threshold always returns Ok",
     "file": "simulation-box",
@@ -17315,6 +17640,14 @@
     ],
     "title": "[integrator] section parses into a SlotConfig",
     "type": "scenario"
+  },
+  "rq-993f8c4c": {
+    "decl": "## Empty State",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
   },
   "rq-996edcaf": {
     "decl": "- `spme_spread_fixed_point`: one warp per sorted slot, block size 256",
@@ -17899,6 +18232,18 @@
     "title": "Sections may appear in any order",
     "type": "scenario"
   },
+  "rq-9dd716cf": {
+    "decl": "Scenario: settle_velocities zeroes the constraint-distance time-derivative",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_velocities zeroes the constraint-distance time-derivative",
+    "type": "scenario"
+  },
   "rq-9dd82f60": {
     "decl": "## Gherkin Scenarios",
     "file": "analysis/rdf",
@@ -18096,6 +18441,18 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-9f211910": {
+    "decl": "Scenario: SettleConstraintsState::new computes the canonical geometry from masses and distances",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SettleConstraintsState::new computes the canonical geometry from masses and distances",
+    "type": "scenario"
   },
   "rq-9f2de58c": {
     "decl": "Scenario: Construct MorseBondedState",
@@ -19086,6 +19443,30 @@
       }
     ],
     "title": "ShakeConstraintsState::new rejects a duplicate constraint pair",
+    "type": "scenario"
+  },
+  "rq-a8a99082": {
+    "decl": "Scenario: SettleConstraintsState::new with a single SPC/E water group succeeds",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SettleConstraintsState::new with a single SPC/E water group succeeds",
+    "type": "scenario"
+  },
+  "rq-a8d63610": {
+    "decl": "Scenario: settle_virial_scatter handles two disjoint groups",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_virial_scatter handles two disjoint groups",
     "type": "scenario"
   },
   "rq-a8da1cf0": {
@@ -20407,6 +20788,18 @@
     "title": "RNG",
     "type": "section"
   },
+  "rq-b317db56": {
+    "decl": "Scenario: settle_velocities accumulates a velocity-level constraint virial when dt > 0",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_velocities accumulates a velocity-level constraint virial when dt > 0",
+    "type": "scenario"
+  },
   "rq-b33243ff": {
     "decl": "## Parameters",
     "file": "forces/harmonic-angle",
@@ -20893,6 +21286,18 @@
     "title": "SPME-real always reports CutoffHandling::Uniform",
     "type": "scenario"
   },
+  "rq-b7ed6d52": {
+    "decl": "Scenario: settle_velocities skips the velocity-level virial accumulation when dt <= 0",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_velocities skips the velocity-level virial accumulation when dt <= 0",
+    "type": "scenario"
+  },
   "rq-b8070abb": {
     "decl": "### Constructor",
     "file": "simulation-box",
@@ -21037,6 +21442,18 @@
     "title": ".minlog header line",
     "type": "scenario"
   },
+  "rq-b98dcdd2": {
+    "decl": "Scenario: SettleConstraintsState::new rejects a group with the wrong atom count",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SettleConstraintsState::new rejects a group with the wrong atom count",
+    "type": "scenario"
+  },
   "rq-b9a4e3de": {
     "decl": "Scenario: Non-finite check precedes non-positive check on a diagonal",
     "file": "simulation-box",
@@ -21122,6 +21539,18 @@
       }
     ],
     "title": "SD caps step at max_step",
+    "type": "scenario"
+  },
+  "rq-bab6638a": {
+    "decl": "Scenario: settle_positions_no_velocity restores constraint distances from off-manifold positions",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions_no_velocity restores constraint distances from off-manifold positions",
     "type": "scenario"
   },
   "rq-bac7d92d": {
@@ -21775,6 +22204,18 @@
     "title": "excluded_pair_atoms preserves canonical ExclusionList order",
     "type": "scenario"
   },
+  "rq-c129167f": {
+    "decl": "Scenario: A run with no Constraint slot active leaves constraint distances drifting",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A run with no Constraint slot active leaves constraint distances drifting",
+    "type": "scenario"
+  },
   "rq-c1308495": {
     "decl": "## Lattice Convention",
     "file": "simulation-box",
@@ -22285,6 +22726,18 @@
     "title": "`Lattice`",
     "type": "section"
   },
+  "rq-c5898418": {
+    "decl": "Scenario: The settle builder supports position-only projection",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The settle builder supports position-only projection",
+    "type": "scenario"
+  },
   "rq-c5b42daa": {
     "decl": "Scenario: Missing seed rejected",
     "file": "integration/andersen",
@@ -22652,6 +23105,18 @@
     "title": "log_column_names",
     "type": "api-item"
   },
+  "rq-c90e3e46": {
+    "decl": "Scenario: Two independent runs of apply_after_kick produce byte-identical state",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two independent runs of apply_after_kick produce byte-identical state",
+    "type": "scenario"
+  },
   "rq-c90f4105": {
     "decl": "Scenario: step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
     "file": "forces/jit-composed-intramolecular",
@@ -22988,6 +23453,18 @@
     "refs": [],
     "title": "Chain sub-step",
     "type": "section"
+  },
+  "rq-cc3f19a3": {
+    "decl": "Scenario: Two independent runs of apply_after_drift produce byte-identical state",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two independent runs of apply_after_drift produce byte-identical state",
+    "type": "scenario"
   },
   "rq-cc4e9821": {
     "decl": "Scenario: Accept a lattice with negative tilts",
@@ -23667,6 +24144,18 @@
     "title": "Source Fragment",
     "type": "section"
   },
+  "rq-d2976a76": {
+    "decl": "Scenario: SettleConstraintsState::new rejects a degenerate (collinear) geometry",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SettleConstraintsState::new rejects a degenerate (collinear) geometry",
+    "type": "scenario"
+  },
   "rq-d29872e4": {
     "decl": "## Final summary",
     "file": "simulation-runner",
@@ -24013,6 +24502,18 @@
     ],
     "title": "MinimizerRegistry",
     "type": "api-item"
+  },
+  "rq-d5b31775": {
+    "decl": "Scenario: settle_positions restores constraint distances after a small uniform translation",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions restores constraint distances after a small uniform translation",
+    "type": "scenario"
   },
   "rq-d5e451eb": {
     "decl": "Scenario: Rebuild that grows a packed-neighbour buffer triggers re-capture",
@@ -26531,6 +27032,14 @@
     "title": "__device__",
     "type": "api-item"
   },
+  "rq-eb01c35e": {
+    "decl": "## Parameters",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
+  },
   "rq-eb0bc993": {
     "decl": "## Parameters",
     "file": "integration/andersen",
@@ -26575,6 +27084,18 @@
       }
     ],
     "title": "Reject non-positive temperature",
+    "type": "scenario"
+  },
+  "rq-eba5c2ff": {
+    "decl": "Scenario: settle_positions handles a water group straddling a periodic boundary",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "settle_positions handles a water group straddling a periodic boundary",
     "type": "scenario"
   },
   "rq-ebfa6e1f": {
@@ -26947,7 +27468,16 @@
     "decl": "## Parameters",
     "file": "integration/shake",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/settle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Parameters",
     "type": "section"
   },
@@ -27723,6 +28253,18 @@
     "title": "RunSummary reflects what was actually written",
     "type": "scenario"
   },
+  "rq-f4acb881": {
+    "decl": "Scenario: ConstraintRegistry::with_builtins registers the settle builder",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ConstraintRegistry::with_builtins registers the settle builder",
+    "type": "scenario"
+  },
   "rq-f4ebf12a": {
     "decl": "Scenario: Download reflects device-side changes pushed by an interim re-upload",
     "file": "particle-state",
@@ -27966,6 +28508,14 @@
     ],
     "title": "SimulationBox",
     "type": "api-item"
+  },
+  "rq-f7521c63": {
+    "decl": "### CUDA Kernels",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
   },
   "rq-f76b6cde": {
     "decl": "Scenario: Render multiple type names from indices",
@@ -28281,6 +28831,14 @@
     "level": 3,
     "refs": [],
     "title": "PTX Module Loading",
+    "type": "section"
+  },
+  "rq-fa14a87f": {
+    "decl": "### Convergence and determinism",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Convergence and determinism",
     "type": "section"
   },
   "rq-fa17b283": {

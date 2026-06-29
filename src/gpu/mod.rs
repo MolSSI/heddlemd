@@ -41,6 +41,8 @@ pub use kernels::{
     rescale_velocities_device_factor,
     constraint_virial_scatter, increment_u64_device, rattle_velocities, scatter_atoms_into_cells,
     scatter_positions_to_tile_order,
+    settle_positions, settle_positions_no_velocity, settle_snapshot, settle_velocities,
+    settle_virial_scatter,
     shake_positions, shake_positions_no_velocity, shake_snapshot,
     sort_cells_by_particle_id,
     spme_atom_sort, spme_compute_bin_key,

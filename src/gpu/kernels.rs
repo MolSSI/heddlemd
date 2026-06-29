@@ -2591,3 +2591,222 @@ pub fn rattle_velocities(
     }
     Ok(())
 }
+
+// rq-709c8eb5 — snapshot pre-drift positions into the SETTLE slot's
+// per-group snapshot arrays. One thread per water group.
+pub fn settle_snapshot(
+    particle_buffers: &ParticleBuffers,
+    group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    snapshot_x: &mut CudaSlice<Real>,
+    snapshot_y: &mut CudaSlice<Real>,
+    snapshot_z: &mut CudaSlice<Real>,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle.settle_snapshot.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.posq,
+                group_atoms,
+                group_atom_offset,
+                group_atom_count,
+                snapshot_x,
+                snapshot_y,
+                snapshot_z,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — SETTLE position reset. One thread per water group; no
+// shared-memory staging (the per-group working set fits in registers).
+pub fn settle_positions(
+    particle_buffers: &mut ParticleBuffers,
+    snapshot_x: &CudaSlice<Real>,
+    snapshot_y: &CudaSlice<Real>,
+    snapshot_z: &CudaSlice<Real>,
+    group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_ra: &CudaSlice<Real>,
+    group_rb: &CudaSlice<Real>,
+    group_rc: &CudaSlice<Real>,
+    group_m_o: &CudaSlice<Real>,
+    group_m_h: &CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    dt: Real,
+    constraint_virial: &mut CudaSlice<Real>,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle.settle_positions.clone();
+    let cfg = launch_config(n_u32);
+    let lattice = sim_box.lattice_device();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.posq,
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                snapshot_x,
+                snapshot_y,
+                snapshot_z,
+                group_atoms,
+                group_atom_offset,
+                group_atom_count,
+                group_ra,
+                group_rb,
+                group_rc,
+                group_m_o,
+                group_m_h,
+                lattice,
+                dt,
+                &mut *constraint_virial,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — SETTLE velocity reset. One thread per water group.
+pub fn settle_velocities(
+    particle_buffers: &mut ParticleBuffers,
+    group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_m_o: &CudaSlice<Real>,
+    group_m_h: &CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    dt: Real,
+    constraint_virial: &mut CudaSlice<Real>,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle.settle_velocities.clone();
+    let cfg = launch_config(n_u32);
+    let lattice = sim_box.lattice_device();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.posq,
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                group_atoms,
+                group_atom_offset,
+                group_atom_count,
+                group_m_o,
+                group_m_h,
+                lattice,
+                dt,
+                &mut *constraint_virial,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — scatter per-atom-of-group constraint virial into the
+// global per-particle virial array. One thread per atom slot.
+pub fn settle_virial_scatter(
+    particle_buffers: &mut ParticleBuffers,
+    constraint_virial: &CudaSlice<Real>,
+    group_atoms: &CudaSlice<u32>,
+    n_atom_slots: usize,
+) -> Result<(), GpuError> {
+    if n_atom_slots == 0 {
+        return Ok(());
+    }
+    let n_atom_slots_u32 = n_atom_slots as u32;
+    let func = particle_buffers
+        .kernels
+        .settle
+        .settle_virial_scatter
+        .clone();
+    let cfg = launch_config(n_atom_slots_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                constraint_virial,
+                group_atoms,
+                &mut particle_buffers.virials,
+                n_atom_slots_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — position-only SETTLE reset for the minimizer. One thread
+// per water group; touches positions only.
+pub fn settle_positions_no_velocity(
+    particle_buffers: &mut ParticleBuffers,
+    group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_ra: &CudaSlice<Real>,
+    group_rb: &CudaSlice<Real>,
+    group_rc: &CudaSlice<Real>,
+    group_m_o: &CudaSlice<Real>,
+    group_m_h: &CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers
+        .kernels
+        .settle
+        .settle_positions_no_velocity
+        .clone();
+    let cfg = launch_config(n_u32);
+    let lattice = sim_box.lattice_device();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.posq,
+                group_atoms,
+                group_atom_offset,
+                group_atom_count,
+                group_ra,
+                group_rb,
+                group_rc,
+                group_m_o,
+                group_m_h,
+                lattice,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}

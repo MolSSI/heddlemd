@@ -106,6 +106,8 @@ pub enum ConfigError {
     IncompatibleConstraint { integrator: String, phase: String },
     #[error("constraint type `{name}` is malformed: {reason}")]
     ShakeParamsMalformed { name: String, reason: String },
+    #[error("settle constraint type `{name}` is malformed: {reason}")]
+    SettleParamsMalformed { name: String, reason: String },
     #[error("[{slot}] section's `kind = \"{kind}\"` does not match any registered builder")]
     UnknownKind { slot: &'static str, kind: String },
     #[error("unknown `units` value `{got}`: expected one of `si`, `atomic`")]
@@ -1331,6 +1333,12 @@ impl Config {
                 // sees the params, not the entry's name).
                 ConfigError::ShakeParamsMalformed { name: _, reason } => {
                     ConfigError::ShakeParamsMalformed {
+                        name: ct.name.clone(),
+                        reason,
+                    }
+                }
+                ConfigError::SettleParamsMalformed { name: _, reason } => {
+                    ConfigError::SettleParamsMalformed {
                         name: ct.name.clone(),
                         reason,
                     }

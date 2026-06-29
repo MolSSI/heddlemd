@@ -204,7 +204,10 @@ pub type ConstraintRegistry = Registry<dyn ConstraintBuilder>;
 
 impl Builtins for dyn ConstraintBuilder {
     fn builtins() -> Vec<Box<dyn ConstraintBuilder>> {
-        vec![Box::new(crate::integrator::shake::ShakeBuilder)]
+        vec![
+            Box::new(crate::integrator::settle::SettleBuilder),
+            Box::new(crate::integrator::shake::ShakeBuilder),
+        ]
     }
 }
 
