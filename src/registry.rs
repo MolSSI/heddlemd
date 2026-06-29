@@ -44,7 +44,6 @@ pub fn convert_params_in_place<P>(
 where
     P: serde::de::DeserializeOwned + serde::Serialize + crate::units::Convert,
 {
-    use crate::units::Convert;
     let mut typed: P = match params.clone().try_into() {
         Ok(p) => p,
         Err(_) => return Ok(()),

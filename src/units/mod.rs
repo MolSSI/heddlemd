@@ -147,7 +147,7 @@ pub trait Convert {
 macro_rules! dimensioned_scalars {
     ($($name:ident => $dim:ident),* $(,)?) => {
         $(
-            #[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+            #[derive(Clone, Copy, Debug, PartialEq, Default, serde::Deserialize, serde::Serialize)]
             #[serde(transparent)]
             pub struct $name(pub f64);
 
