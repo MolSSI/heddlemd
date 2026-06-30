@@ -5,13 +5,9 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice};
-use heddle_md::forces::{DeviceExclusionList, ExclusionList, NeighborListState};
-use heddle_md::gpu::{
-    GpuContext, GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
-    reduce_pair_forces,
-};
-use heddle_md::pbc::SimulationBox;
+use cudarc::driver::CudaDevice;
+use heddle_md::forces::{DeviceExclusionList, Exclusion, ExclusionList};
+use heddle_md::gpu::LennardJonesParameterTable;
 use heddle_md::precision::Real;
 
 /// Build a `DeviceExclusionList` representing zero exclusions on `n`
@@ -20,6 +16,62 @@ use heddle_md::precision::Real;
 pub fn empty_exclusions(device: &Arc<CudaDevice>, n: usize) -> DeviceExclusionList {
     let host = ExclusionList::empty(n);
     DeviceExclusionList::from_host(device, &host).expect("empty exclusion buffers")
+}
+
+/// Build a host-side `ExclusionList` over `n` particles holding the
+/// given symmetric `(i, j, scale_lj, scale_coul)` entries. The
+/// per-atom offset / partner / scale arrays are populated for both
+/// directions of every entry.
+pub fn host_exclusions_from_entries(
+    n: usize,
+    entries: &[(u32, u32, Real, Real)],
+) -> ExclusionList {
+    let exclusion_entries: Vec<Exclusion> = entries
+        .iter()
+        .map(|&(i, j, lj, coul)| Exclusion {
+            atom_i: i,
+            atom_j: j,
+            scale_lj: lj,
+            scale_coul: coul,
+        })
+        .collect();
+    let mut per_atom: Vec<Vec<(u32, Real, Real)>> = vec![Vec::new(); n];
+    for &(i, j, lj, coul) in entries {
+        per_atom[i as usize].push((j, lj, coul));
+        per_atom[j as usize].push((i, lj, coul));
+    }
+    let mut atom_excl_offsets = Vec::with_capacity(n + 1);
+    let mut atom_excl_partners = Vec::new();
+    let mut atom_excl_lj_scales = Vec::new();
+    let mut atom_excl_coul_scales = Vec::new();
+    atom_excl_offsets.push(0u32);
+    for partners in &per_atom {
+        for &(partner, lj, coul) in partners {
+            atom_excl_partners.push(partner);
+            atom_excl_lj_scales.push(lj);
+            atom_excl_coul_scales.push(coul);
+        }
+        atom_excl_offsets.push(atom_excl_partners.len() as u32);
+    }
+    ExclusionList {
+        entries: exclusion_entries,
+        atom_excl_offsets,
+        atom_excl_partners,
+        atom_excl_lj_scales,
+        atom_excl_coul_scales,
+        particle_count: n,
+    }
+}
+
+/// Build a `DeviceExclusionList` from the given symmetric entries. Each
+/// tuple is `(atom_i, atom_j, scale_lj, scale_coul)`.
+pub fn exclusions_from_entries(
+    device: &Arc<CudaDevice>,
+    n: usize,
+    entries: &[(u32, u32, Real, Real)],
+) -> DeviceExclusionList {
+    let host = host_exclusions_from_entries(n, entries);
+    DeviceExclusionList::from_host(device, &host).expect("upload exclusion buffers")
 }
 
 /// Build a `LennardJonesParameterTable` for a single-type system using one
@@ -56,62 +108,12 @@ pub fn single_type_lj_table_with_switch(
     }
 }
 
-/// Build a trivial-mode neighbor list (every particle's list = [0..N)).
-/// Used by tests that exercise the LJ kernel directly without going through
-/// the ForceField pipeline.
-pub fn trivial_neighbor_list(
-    gpu: &GpuContext,
-    sim_box: &SimulationBox,
-    particle_count: usize,
-) -> NeighborListState {
-    NeighborListState::new_trivial(gpu, sim_box, particle_count)
-        .expect("trivial neighbor list")
-}
-
-/// Wrapper around `lj_pair_force` that constructs an empty exclusion list
-/// and a trivial neighbor list on the fly. Kernel-correctness tests use
-/// this to exercise the kernel without standing up a full ForceField.
-pub fn lj_pair_force_no_excl(
-    particle_buffers: &ParticleBuffers,
-    pair: &mut PairBuffer,
-    sim_box: &SimulationBox,
-    params: &LennardJonesParameterTable,
-) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
-    let gpu = GpuContext {
-        device: particle_buffers.device.clone(),
-        kernels: particle_buffers.kernels.clone(),
-    };
-    let excl = empty_exclusions(&gpu.device, n);
-    let nl = trivial_neighbor_list(&gpu, sim_box, n);
-    lj_pair_force(
-        particle_buffers,
-        pair,
-        sim_box,
-        params,
-        &excl.atom_excl_offsets,
-        &excl.atom_excl_partners,
-        &excl.atom_excl_lj_scales,
-        &nl.neighbor_list,
-        &nl.neighbor_counts,
-    )
-}
-
-/// Backward-compatible wrapper that calls the new parameterised
-/// `reduce_pair_forces` launcher against `particle_buffers.forces_*`,
-/// `potential_energies`, and `virials`.
-pub fn reduce_pair_forces_into_buffers(
-    pair: &PairBuffer,
-    counts: &CudaSlice<u32>,
-    particle_buffers: &mut ParticleBuffers,
-) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
-    let mut vx = particle_buffers.forces_x.slice_mut(..);
-    let mut vy = particle_buffers.forces_y.slice_mut(..);
-    let mut vz = particle_buffers.forces_z.slice_mut(..);
-    let mut ve = particle_buffers.potential_energies.slice_mut(..);
-    let mut vw = particle_buffers.virials.slice_mut(..);
-    reduce_pair_forces(pair, counts, &mut vx, &mut vy, &mut vz, n)?;
-    heddle_md::gpu::reduce_pair_energy_virial(pair, counts, &mut ve, &mut vw, n)
+/// Allocates fresh slot-output buffers sized for `n` particles. The
+/// individual CudaSlice fields are zero-initialised.
+pub fn alloc_slot_output(
+    device: &Arc<CudaDevice>,
+    n: usize,
+) -> heddle_md::gpu::SlotOutputBuffers {
+    heddle_md::gpu::SlotOutputBuffers::new(device, n).expect("alloc_slot_output")
 }
 

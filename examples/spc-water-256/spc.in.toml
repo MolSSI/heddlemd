@@ -85,5 +85,6 @@ theta_0 = 1.910611931  # rad  (109.47°)
 
 [neighbor_list]
 mode = "cell-list"
-max_neighbors = 64
-r_skin = 5.0e-11
+r_skin = 5.0e-11            # 0.5 Å — the box constraint
+                            # `3 · (cutoff + r_skin) ≤ perpendicular_width`
+                            # caps r_skin at this geometry; see README.

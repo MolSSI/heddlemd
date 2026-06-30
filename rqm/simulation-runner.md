@@ -3,7 +3,7 @@
 The simulation runner is the command-line entry point that turns a TOML
 configuration file into a complete simulation. It reads the config and the
 referenced initial-state file, allocates the GPU pipeline described by
-`build-pipeline.md`, `particle-state.md`, `pair-reduction.md`,
+`build-pipeline.md`, `particle-state.md`, `pair-force-kernel.md`,
 `lj-pair-force.md`, and the integrator slots in `integration/`, drives the
 timestep loop for `simulation.n_steps` iterations, and writes snapshots
 and diagnostics at the declared cadences using `trajectory-output.md` and
@@ -408,7 +408,14 @@ the simulation box.
     columns are **phase-local** (the phase always starts at step 0,
     time 0.0).
 
-17. **Phase timestep loop.** For each step `s` in `1 ..= P.n_steps`:
+17. **Phase timestep loop.** The runner takes one of two shapes
+    depending on whether the phase is eligible for CUDA graph mode
+    (see `cuda-graphs.md` for the activation policy).
+
+    **Per-step launch loop (graph-ineligible phases or
+    `[simulation].cuda_graphs_disable = true`).** For each step `s`
+    in `1 ..= P.n_steps`:
+
     a. If `thermostat.is_some()`,
        `thermostat.apply_pre(&mut buffers, P.dt, &mut timings)`.
     b. `integrator.step(&mut buffers, &mut sim_box, &mut force_field,
@@ -417,6 +424,17 @@ the simulation box.
        `thermostat.apply_post(&mut buffers, P.dt, &mut timings)`.
     d. If `barostat.is_some()`,
        `barostat.apply(&mut buffers, &mut sim_box, P.dt, &mut timings)`.
+
+    The force evaluation inside `integrator.step` (step b) runs at
+    `AggregateLevel::ForcesAndScalars` — computing the total potential
+    energy and virial — only when the step produces a log row
+    (`P.output.log_every > 0` and `s % P.output.log_every == 0`) or a
+    barostat is active; otherwise it runs at
+    `AggregateLevel::ForcesOnly`. A trajectory frame carries positions
+    and velocities, and the thermostat reduces kinetic energy from
+    velocities independently, so neither requires force-kernel scalars.
+    The CUDA graph path selects between its forces-only and
+    forces+scalars graphs on the same condition (see `cuda-graphs.md`).
 
     The loop variable `s` is local to the phase and gates trajectory
     and log writes below; it is not passed to any slot.
@@ -432,7 +450,43 @@ the simulation box.
        and call `write_row(s, s as f64 * P.dt, ke, t, &extras)`.
     g. Possibly emit a progress line (see *Progress reporting*).
 
-    The `dt` value passed to integrator launches is `P.dt as f32`.
+    `force_field.step` invokes `NeighborListState::pre_step` once per
+    call, so the displacement check fires on every physical step.
+
+    **Batched graph-replay loop (eligible phases).** The runner
+    captures a `GraphLoop` once at phase start as described in
+    `cuda-graphs.md`'s *Capture Lifecycle*. The captured iteration
+    is physical step 1. The remaining `P.n_steps - 1` steps run as
+    a sequence of batches whose size is
+
+    ```
+    batch = min(P.graph_batch_size, remaining, next_log, next_traj)
+    ```
+
+    where `next_log` / `next_traj` are the steps until the next log
+    / trajectory cadence boundary. Each batch invokes
+    `graph_loop.launch(stream)` exactly `batch` times in sequence.
+
+    At each batch boundary the runner runs `nl.pre_step`
+    (displacement check + optional rebuild) and then, if the new
+    step index aligns with a log or trajectory cadence, calls
+    `sim_box.flush_from_device()`, drains any per-slot
+    `flush_pending_injection`, and performs the output write as
+    above. When `nl.pre_step` reports that a rebuild reallocated a
+    packed-neighbour buffer, the runner re-captures the phase
+    `GraphLoop` before the next batch (see `cuda-graphs.md`'s
+    *Neighbor-List Pre-Step Decomposition*); stream capture records
+    without executing, so the re-capture consumes no physical step. If
+    the re-capture itself fails, the remaining steps run on the
+    per-step launch loop.
+
+    `force_field.step_no_neighbor_check` is the variant used inside
+    the captured graph and inside the batched-replay code path; it
+    is identical to `force_field.step` except that it does not call
+    `NeighborListState::pre_step`.
+
+    The `dt` value passed to integrator launches is `P.dt as f32`
+    in both loop shapes.
 
 18. **Flush and close per-phase writers.** Call `flush()` on the
     open trajectory and log writers and drop them. Writers' `Drop`

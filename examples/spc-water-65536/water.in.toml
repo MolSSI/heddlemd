@@ -1,0 +1,163 @@
+schema_version = 1
+init = "water.in.xyz"
+topology = "water.in.topology"
+
+[simulation]
+seed = 1
+temperature = 298.15        # K, initial Maxwell-Boltzmann sampling target
+
+# --- Phase 1: SD energy minimization ---
+# Relax the lattice initial state along the negative energy gradient
+# before NVT begins. Random orientations on a fixed cubic lattice
+# produce occasional close H-H contacts whose initial forces are
+# several orders of magnitude above thermal — left unrelaxed, the
+# first NVT timestep would either explode or require an absurdly
+# small dt to integrate stably. SETTLE projects every trial position
+# back onto the rigid SPC/E manifold before the trial energy is
+# evaluated. Velocities (sampled above) and the box are unchanged
+# by this phase.
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+# Goal here is "non-pathological starting geometry for NVT", not a
+# true energy minimum: relax the lattice's H-H close contacts so the
+# first integration step takes a stable 2 fs leap. Force and energy
+# tolerances are correspondingly relaxed from the strict defaults.
+force_tolerance = 1.0e-9    # N — a few × thermal force per atom; stops
+                            # us spending iterations chasing the
+                            # vanishing tail of the gradient
+energy_tolerance = 1.0e-5   # relative; same rationale
+max_iterations = 500        # plenty for the relaxed tolerances above;
+                            # a hard error if exceeded
+
+[minimization.output]
+minlog_every = 10           # ~50 rows; concise descent curve
+trajectory_every = 0
+
+# --- Phase 2: NVT equilibration ---
+# Stochastic NVT (CSVR thermostat) at constant box. Lets orientations
+# randomise and local structure relax from the minimized lattice
+# state before the barostat is turned on. No trajectory written
+# during equilibration; only a log row every 200 fs to monitor T.
+# Step count scaled down ~10x from the 8192-molecule example because
+# each step costs ~8x more on a system 8x as large.
+[[phase]]
+name = "equil"
+n_steps = 250               # 250 × 2 fs = 500 fs NVT thermalisation
+dt = 2.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.thermostat]
+kind = "csvr"
+temperature = 298.15
+tau = 1.0e-13               # 100 fs coupling time
+seed = 11                   # independent of every other stochastic-slot seed
+
+[phase.output]
+trajectory_every = 0
+log_every = 50              # 1 log row per 100 fs (6 rows over 500 fs)
+
+# --- Phase 3: NPT production ---
+# CSVR thermostat + c-rescale barostat. Samples the canonical NPT
+# distribution exactly. Step count scaled down ~8x from the
+# 8192-molecule example because each step costs ~8x more on a system
+# 8x as large.
+[[phase]]
+name = "prod"
+n_steps = 125               # 125 × 2 fs = 250 fs NPT
+dt = 2.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.thermostat]
+kind = "csvr"
+temperature = 298.15
+tau = 1.0e-13
+seed = 12                   # distinct from the equilibration phase's seed
+
+[phase.barostat]
+kind = "c-rescale"
+pressure = 1.01325e5        # 1 atm (Pa)
+temperature = 298.15        # K (noise-term temperature; matches thermostat)
+tau = 1.0e-12               # 1 ps coupling time (~10× the thermostat's)
+compressibility = 4.5e-10   # 1/Pa, liquid water
+seed = 13
+
+[phase.output]
+trajectory_every = 0
+include_velocities = false
+include_images = false
+log_every = 25              # 1 log row per 50 fs (6 rows over 250 fs)
+
+# --- Global fields below apply to every phase ---
+
+[[particle_types]]
+name = "O"
+mass = 2.6566e-26           # kg (oxygen-16)
+charge = -1.3585e-19        # C (SPC/E: −0.8476 e)
+
+[[particle_types]]
+name = "H"
+mass = 1.6735e-27           # kg (hydrogen-1)
+charge = 6.7925e-20         # C (SPC/E: +0.4238 e)
+
+# LJ on the O–O pair only; H–H and O–H carry a negligible epsilon to
+# satisfy the loader's "every unordered pair declared" rule without
+# contributing meaningfully to the forces.
+[[pair_interactions]]
+between = ["O", "O"]
+potential = "lennard-jones"
+sigma = 3.166e-10           # m (SPC/E)
+epsilon = 1.080e-21         # J ≈ 78.2 K · k_B (SPC/E)
+cutoff = 1.0e-9             # m (10 Å, standard for SPME real-space cutoff)
+r_switch = 1.0e-9           # m (== cutoff: hard cutoff degenerate case)
+
+[[pair_interactions]]
+between = ["H", "H"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[pair_interactions]]
+between = ["H", "O"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+# SPME electrostatics: real-space cutoff matches the LJ cutoff so the
+# same neighbor list serves both, plus reciprocal-space pipeline with a
+# ~1 Å FFT grid spacing. Box is 12.8 × 12.8 × 25.6 nm; grid is doubled
+# in each direction relative to the 8192-molecule example to preserve
+# the same ~1.33 Å/cell density. Both 96 and 192 are small-prime-
+# factored (2^5·3 and 2^6·3) for cuFFT.
+[spme]
+alpha = 3.5e9               # 1/m  (≈ 3.5 / r_cut_real)
+r_cut_real = 1.0e-9         # m
+grid = [96, 96, 192]        # one grid point per ~1.33 Å (small-prime-factored for cuFFT)
+spline_order = 4            # default
+
+# Rigid SPC/E geometry via SHAKE.
+[[constraint_types]]
+name = "SPCE"
+kind = "shake"
+atoms = 3
+constraints = [
+    { i = 0, j = 1, d = 1.0e-10 },   # O–H1  (m)
+    { i = 0, j = 2, d = 1.0e-10 },   # O–H2  (m)
+    { i = 1, j = 2, d = 1.633e-10 }, # H1–H2 (m), = 2·r_oh·sin(θ_HOH/2), θ_HOH = 109.47°
+]
+
+[neighbor_list]
+mode = "cell-list"
+r_skin = 3.0e-10            # 3 Å (= 0.3 · r_cut, typical MD value)

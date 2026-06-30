@@ -1,6 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use heddle_md::gpu::{ParticleBuffers, init_device, lan_drift_half, lan_ou_step};
+
+fn counter_device(gpu: &heddle_md::gpu::GpuContext, value: u64) -> cudarc::driver::CudaSlice<u64> {
+    use cudarc::driver::CudaSlice;
+    let mut buf: CudaSlice<u64> = gpu.device.alloc_zeros::<u64>(1).unwrap();
+    gpu.device.htod_sync_copy_into(&[value], &mut buf).unwrap();
+    buf
+}
 use heddle_md::integrator::IntegratorStepExt;
 use heddle_md::integrator::{LangevinBaoabBuilder, IntegratorBuilder, IntegratorRegistry};
 use heddle_md::io::SlotConfig;
@@ -113,7 +120,7 @@ fn construct_langevin_with_zero_particles() {
 #[test]
 fn lan_drift_half_advances_positions_by_v_half_dt() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = one_particle_state();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
@@ -129,7 +136,7 @@ fn lan_drift_half_advances_positions_by_v_half_dt() {
 #[test]
 fn lan_drift_half_leaves_other_arrays_unchanged() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
@@ -147,7 +154,7 @@ fn lan_drift_half_leaves_other_arrays_unchanged() {
 #[test]
 fn lan_drift_half_on_empty_is_noop() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
         vec![0.0; 0],
@@ -163,7 +170,7 @@ fn lan_drift_half_on_empty_is_noop() {
 #[test]
 fn lan_drift_half_with_dt_zero_leaves_positions_unchanged() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.0).unwrap();
@@ -180,7 +187,8 @@ fn lan_ou_step_with_alpha_one_kt_zero_is_identity() {
     let gpu = init_device().unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers, 1, 1, 1.0, 0.0).unwrap();
+    let mut counter = counter_device(&gpu, 1);
+    lan_ou_step(&mut buffers, &mut counter, 1, 1.0, 0.0).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert_eq!(downloaded.velocities_x, state.velocities_x);
@@ -200,7 +208,8 @@ fn lan_ou_step_on_empty_is_noop() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers, 1, 1, 0.5, 1.0).unwrap();
+    let mut counter = counter_device(&gpu, 1);
+    lan_ou_step(&mut buffers, &mut counter, 1, 0.5, 1.0).unwrap();
 }
 
 // rq-9922b639
@@ -210,8 +219,10 @@ fn two_identical_lan_ou_calls_byte_identical() {
     let state = n_particle_state(64);
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers_a, 42, 7, 0.5, 1.0e-21).unwrap();
-    lan_ou_step(&mut buffers_b, 42, 7, 0.5, 1.0e-21).unwrap();
+    let mut ca = counter_device(&gpu, 7);
+    let mut cb = counter_device(&gpu, 7);
+    lan_ou_step(&mut buffers_a, &mut ca, 42, 0.5, 1.0e-21).unwrap();
+    lan_ou_step(&mut buffers_b, &mut cb, 42, 0.5, 1.0e-21).unwrap();
     let mut state_a = state.clone();
     let mut state_b = state.clone();
     state_a.download_from(&buffers_a).unwrap();
@@ -233,8 +244,10 @@ fn different_seeds_produce_different_velocities() {
     let state = n_particle_state(64);
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers_a, 1, 1, 0.5, 1.0).unwrap();
-    lan_ou_step(&mut buffers_b, 2, 1, 0.5, 1.0).unwrap();
+    let mut ca = counter_device(&gpu, 1);
+    let mut cb = counter_device(&gpu, 1);
+    lan_ou_step(&mut buffers_a, &mut ca, 1, 0.5, 1.0).unwrap();
+    lan_ou_step(&mut buffers_b, &mut cb, 2, 0.5, 1.0).unwrap();
     let mut state_a = state.clone();
     let mut state_b = state.clone();
     state_a.download_from(&buffers_a).unwrap();
@@ -255,8 +268,10 @@ fn different_step_indices_produce_different_velocities() {
     let state = n_particle_state(64);
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers_a, 1, 1, 0.5, 1.0).unwrap();
-    lan_ou_step(&mut buffers_b, 1, 2, 0.5, 1.0).unwrap();
+    let mut ca = counter_device(&gpu, 1);
+    let mut cb = counter_device(&gpu, 2);
+    lan_ou_step(&mut buffers_a, &mut ca, 1, 0.5, 1.0).unwrap();
+    lan_ou_step(&mut buffers_b, &mut cb, 1, 0.5, 1.0).unwrap();
     let mut state_a = state.clone();
     let mut state_b = state.clone();
     state_a.download_from(&buffers_a).unwrap();
@@ -294,7 +309,8 @@ fn ou_variance_scales_with_predicted_factor() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers, 42, 1, alpha, kt).unwrap();
+    let mut counter = counter_device(&gpu, 1);
+    lan_ou_step(&mut buffers, &mut counter, 42, alpha, kt).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     let expected_var = (1.0 - alpha as f64 * alpha as f64) * kt as f64 / mass as f64;
@@ -318,7 +334,7 @@ fn step_launches_all_six_expected_kernel_calls() {
     let gpu = init_device().unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = SimulationBox::new(1.0e9, 1.0e9, 1.0e9, 0.0, 0.0, 0.0).unwrap();
+    let mut sim_box = SimulationBox::new(&gpu.device, 1.0e9, 1.0e9, 1.0e9, 0.0, 0.0, 0.0).unwrap();
     let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
@@ -376,7 +392,7 @@ fn langevin_step_on_empty_is_noop() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = SimulationBox::new(1.0e9, 1.0e9, 1.0e9, 0.0, 0.0, 0.0).unwrap();
+    let mut sim_box = SimulationBox::new(&gpu.device, 1.0e9, 1.0e9, 1.0e9, 0.0, 0.0, 0.0).unwrap();
     let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         0,
         &sim_box,
@@ -623,7 +639,7 @@ mode = "all-pairs"
 #[test]
 fn lan_drift_half_wraps_across_plus_l_half() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = heddle_md::state::ParticleState::new(
         vec![4.95],
         vec![0.0],
@@ -650,7 +666,7 @@ fn lan_drift_half_wraps_across_plus_l_half() {
 #[test]
 fn lan_drift_half_preserves_image_flags_when_no_wrap() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = heddle_md::state::ParticleState::new(
         vec![0.0],
         vec![0.0],

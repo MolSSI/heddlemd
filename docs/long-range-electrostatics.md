@@ -249,7 +249,7 @@ infrastructure. The kernel reads per-particle charges from
 `ParticleBuffers`, computes the screened force, applies the Coulomb
 exclusion scale from the shared `DeviceExclusionList`, and writes to its
 own pair buffer at deterministic offsets. Reduction is the same
-`reduce_pair_forces` kernel that LJ and truncated Coulomb use.
+`lj_pair_force_*` family of kernels that LJ and truncated Coulomb use.
 
 The real-space cutoff `r_cut_real` is independent of (and typically
 shorter than) the cutoffs of other short-range potentials. The neighbor

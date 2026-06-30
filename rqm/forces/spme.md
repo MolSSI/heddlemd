@@ -33,16 +33,26 @@ SPME contributes two `Potential` slots to the `ForceField`:
 - `SpmeRealSpaceState` — a pair-force slot using `erfc(α · r) / r`
   screening over the shared neighbor list. Structurally similar to the
   truncated Coulomb slot (`coulomb-pair-force.md`); differs only in the
-  functional form of the pair force.
+  functional form of the pair force. The slot exposes a CUDA source
+  fragment via `SpmeRealBuilder::pair_force_fragment` for participation
+  in the JIT-composed pair-force kernel (see
+  `jit-composed-pair-force.md`); when LJ is also configured, both
+  fragments are composed into one composed pair-force kernel that
+  walks the packed neighbour list once (see
+  `packed-neighbour-pair-force.md`) and accumulates both
+  contributions in registers. The slot is a JIT participant
+  (`jit_participant` returns `Some(JitParticipant::PairForce(self))`)
+  and launches no pair-force kernel of its own.
 - `SpmeReciprocalState` — owns the FFT grid buffers, the cuFFT plan, the
   precomputed influence function, and a dedicated bin-only cell-list
-  used by the spread and gather kernels.
+  used by the spread and gather kernels. Unaffected by displacement;
+  the reciprocal-space pipeline always runs separately.
 
-Both slots share the per-particle `charges` buffer on `ParticleBuffers`
-(see `particle-state.md`) and the shared `DeviceExclusionList` (see
-`topology.md`). The two slots are constructed together when `[spme]` is
-present in the config; they share the parsed `alpha` and per-particle
-charges but are otherwise independent.
+Both slots draw their per-particle charges from `posq.w` on
+`ParticleBuffers` (see `particle-state.md`) and share the
+`DeviceExclusionList` (see `topology.md`). The two slots are
+constructed together when `[spme]` is present in the config; they
+share the parsed `alpha` but are otherwise independent.
 
 The `[spme]` and `[coulomb]` tables are mutually exclusive in the config
 (see `io/config-schema.md`).
@@ -74,24 +84,28 @@ required when the table is present.
 The real-space slot is structurally analogous to `coulomb-pair-force.md`
 but evaluates `erfc(α · r) / r` instead of `1/r`. The slot uses the
 shared `NeighborListState` owned by `ForceField`, the per-particle
-`charges` buffer, and the shared `DeviceExclusionList`'s
-`atom_excl_coul_scales` array.
+charges carried in `posq.w` on `ParticleBuffers`, and the shared
+`DeviceExclusionList`'s `atom_excl_coul_scales` array.
 
 ### Algorithm <!-- rq-39b05bc9 -->
 
-For each ordered `(i, k)` with `0 <= i < N` and `0 <= k <
-neighbor_counts[i]`:
+The composed pair-force kernel's topology, sweep loop, warp-tree
+reduction, and per-particle output write follow the common
+warp-per-particle pattern specified in `pair-force-kernel.md`, walking
+the packed neighbour list (see `packed-neighbour-pair-force.md`). The
+real-space-SPME contribution at each `(i, j)` pair the kernel visits is
+computed as follows.
 
-1. The pair-buffer slot is `slot = i * max_neighbors + k`.
-2. Read `j = neighbor_list[slot]`. If `i == j` or
-   `k >= neighbor_counts[i]`, write `0.0_f32` to all five pair-buffer
-   slots and stop.
-3. Compute the displacement `(dx, dy, dz) = positions[i] − positions[j]`
-   and apply the triclinic minimum-image algorithm of `simulation-box.md`.
-4. Compute `r² = dx² + dy² + dz²`. If `r² > r_cut_real²`, write zeros to
-   all five slots and stop.
-5. Read `q_i = charges[i]`, `q_j = charges[j]`.
-6. Compute the screened Coulomb factor and energy:
+For a pair `(i, j)` with `j` not equal to `i`:
+
+1. Load `posq[i]` and `posq[j]` (each as one 16-byte `Real4`
+   coalesced load). Compute the displacement
+   `(dx, dy, dz) = posq[i].xyz − posq[j].xyz` and apply the
+   triclinic minimum-image algorithm of `simulation-box.md`.
+2. Compute `r² = dx² + dy² + dz²`. If `r² > r_cut_real²`, the pair
+   contributes nothing; the lane skips to its next assigned neighbour.
+3. Read `q_i = posq[i].w`, `q_j = posq[j].w`.
+4. Compute the screened Coulomb factor and energy:
 
    ```text
    inv_r2  = 1.0f / r2
@@ -107,117 +121,266 @@ neighbor_counts[i]`:
    ```
 
    `factor · r_ij` is the screened-Coulomb force on particle `i` due to
-   `j`. The derivative form combines the `1/r²` decay of `erfc(αr)/r` with
-   the Gaussian term from `d(erfc)/dr = −(2α/√π) · exp(−α²r²)`.
+   `j`. The derivative form combines the `1/r²` decay of `erfc(αr)/r`
+   with the Gaussian term from `d(erfc)/dr = −(2α/√π) · exp(−α²r²)`.
 
-7. Apply the per-pair Coulomb exclusion scale (see `topology.md`):
+5. Apply the per-pair Coulomb exclusion scale (see `topology.md`):
    `scale = exclusion_scale(i, j, atom_excl_offsets, atom_excl_partners,
-   atom_excl_coul_scales)`. Multiply `factor`, `energy`, and the scalar
-   virial `w = factor · r²` by `scale`.
-8. Write the final values to the pair buffer using the half-sum
-   convention:
+   atom_excl_coul_scales)`. Multiply `factor` and `energy` by `scale`,
+   and compute the scalar virial `w = factor · r²`.
+6. The functor returns `(factor, energy, w)`; the composed kernel adds
+   `(factor * dx, factor * dy, factor * dz)` to the warp lane's
+   `(p_x, p_y, p_z)` register accumulators. On a `ForcesAndScalars`
+   evaluation it additionally adds `energy * 0.5f` to `p_e` and
+   `w * 0.5f` to `p_w`. The `0.5` factor distributes each unordered
+   pair's energy and virial across the two ordered contributions
+   `(i, j)` and `(j, i)`.
 
-   ```text
-   pair_forces_x[slot] = factor * dx
-   pair_forces_y[slot] = factor * dy
-   pair_forces_z[slot] = factor * dz
-   pair_energies[slot] = 0.5 * energy
-   pair_virials[slot]  = 0.5 * w
-   ```
+After every lane has processed every assigned neighbour, the warp-tree
+butterfly reduction collapses the 32 lane accumulators to lane 0, which
+adds the particle's net force (and, on a `ForcesAndScalars` evaluation,
+energy/virial) into its class accumulator via a read-modify-write at
+the per-particle slot of the `SlotOutputView` it received. See
+`pair-force-kernel.md` for the topology and reduction details, and
+`framework.md`'s *Class Output Accumulators* for the accumulator
+layout.
 
 The real-space slot does not apply a switching function. The `erfc`
 factor decays rapidly enough that a hard cutoff is acceptable when
 `α · r_cut_real >= 3.5` (the loader does not enforce this; it is a
 user-tuning concern documented in `io/config-schema.md`).
 
-### Real-space CUDA kernel <!-- rq-9a512ed1 -->
+### JIT fragment behaviour <!-- rq-27525d3c -->
 
-`kernels/spme_real.cu` declares one `extern "C"` kernel:
+When `SpmeRealBuilder::pair_force_fragment(cx)` participates in the
+JIT-composed pair-force kernel (see `jit-composed-pair-force.md`),
+the fragment realises the *Algorithm* per-pair recipe with three
+implementation specifics:
 
-```c
-extern "C" __global__ void spme_real_pair_force(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
-    float *pair_forces_x,
-    float *pair_forces_y,
-    float *pair_forces_z,
-    float *pair_energies,
-    float *pair_virials,
-    unsigned int max_neighbors,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float k_coulomb,
-    float alpha,
-    float r_cut_real,
-    const unsigned int *atom_excl_offsets,
-    const unsigned int *atom_excl_partners,
-    const float *atom_excl_coul_scales,
-    const unsigned int *neighbor_list,
-    const unsigned int *neighbor_counts,
-    unsigned int n);
-```
+1. **Shared `(inv_r, r, qi, qj)` inputs.** The fragment's
+   `evaluate` signature is
+   `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj,
+   unsigned int i_type, unsigned int j_type,
+   unsigned int i, unsigned int j, Real &factor, Real &energy,
+   Real &virial)`. `inv_r = rsqrtf(r²)`, `r = r² · inv_r`,
+   `qi = posq[i].w`, and `qj = posq[j].w` are computed once per
+   pair by the composer's outer loop and threaded into every
+   active fragment. The SPME-real fragment does not call
+   `Real_sqrt(r2)`, `1.0 / r2`, or `1.0 / inv_r`; it does not
+   read from a per-fragment `charges` array; it consumes the
+   composer-supplied scalars directly and derives
+   `inv_r2 = inv_r · inv_r` and `qq = qi · qj` from them. It
+   ignores `i_type` / `j_type` (SPME-real has no per-type
+   parameters) and leaves `consumes_type_index` `false`.
 
-Launch configuration: `(grid_x, grid_y, 1) = (ceil(max_neighbors/16),
-ceil(n/16), 1)` blocks of `(16, 16, 1) = 256` threads, matching the LJ
-and truncated-Coulomb kernels.
+2. **Hastings polynomial for `erfc` in single precision.** Under
+   the f32 precision feature (the default), the fragment computes
+   `erfc(α · r)` inline via the 5-coefficient
+   Abramowitz–Stegun (1964) polynomial:
+
+   ```text
+   t           = 1.0 / (1.0 + 0.3275911 · α · r)
+   erfcAlphaR  = (0.254829592
+                 + (-0.284496736
+                    + (1.421413741
+                       + (-1.453152027
+                          + 1.061405429 · t) · t) · t) · t)
+                · t · expf(-(α · r)²)
+   ```
+
+   The polynomial has a maximum error of 1.5 × 10⁻⁷ over all real
+   `α · r`, which is below `f32` round-off and adequate for the
+   simulation's force/energy targets. Under the `--features f64`
+   build the fragment calls `Real_erfc(α · r)` (the precision-shim
+   dispatch to hardware `erfc`) instead, because the polynomial's
+   error floor is well above `f64` round-off and would inject
+   bias into double-precision runs.
+
+3. **CutoffHandling::Uniform.** The fragment reports
+   `cutoff: CutoffHandling::Uniform(r_cut_real)` to the composer.
+   The composer omits the per-fragment
+   `r² <= cutoff_squared(...)` guard for this fragment (the
+   outer max-cutoff mask described in
+   `jit-composed-pair-force.md` covers it). `evaluate` is invoked
+   unconditionally for every pair the outer loop visits; the
+   outer mask zeroes the contribution for `r² >
+   HEDDLE_JIT_MAX_CUTOFF_SQUARED`. The fragment is safe to call at
+   any positive `r²` because every intermediate (`α · r`,
+   `expf(-(α · r)²)`, the polynomial in `t`) is well-defined and
+   finite for any non-negative `r`.
 
 ### Real-space reproducibility <!-- rq-cf6116b8 -->
 
-Same as the truncated Coulomb pair force: each pair-buffer slot is written
-by exactly one thread; no atomics; reduction is the existing
-`reduce_pair_forces` kernel in deterministic slot order.
+Same as the truncated Coulomb pair force: the per-particle output is
+the deterministic warp-tree sum of its per-pair contributions,
+accumulated in the fixed lane-strided order specified by
+`pair-force-kernel.md`. Identical runs on the same GPU with identical
+inputs produce byte-identical `slot_force_*` outputs.
 
 ## Reciprocal-space pipeline <!-- rq-9ca00d25 -->
 
 The reciprocal-space slot owns:
 
-- A dedicated `NeighborListState` configured in cell-list-only mode with
-  `n_cells_per_direction = grid` (see *Bin Structure* below and
-  `neighbor-list.md` for the construction path). This service produces a
-  sorted particle-ID list with the FFT grid's resolution.
-- Real-valued grid buffers `rho: [f32; M]` (charge density) and
+- A fixed-point charge-density grid `rho_fixed: CudaSlice<i64>` of
+  length `M`. Each cell holds the per-particle contributions
+  `q_i · w_a · w_b · w_c` accumulated via `atomicAdd<i64>` and
+  represented as the fixed-point integer
+  `(i64)(value × 2^32)`. The grid is zeroed before each step's
+  spread and converted to f32 `rho` by `spme_spread_finish` after
+  the spread completes. The fixed-point representation makes the
+  per-step accumulation exactly associative across threads (integer
+  atomicAdd is associative), so two runs on the same GPU with
+  byte-identical inputs produce a byte-identical `rho_fixed`
+  regardless of atomic-completion order.
+
+- Real-valued grid buffers `rho: [f32; M]` (charge density,
+  populated by `spme_spread_finish` from `rho_fixed`) and
   `V: [f32; M]` (smoothed potential) where `M = n_a · n_b · n_c`.
 - A complex-valued grid `rho_hat: [c32; M_complex]` where
   `M_complex = n_a · n_b · (n_c/2 + 1)`. cuFFT stores real-to-complex
   output in Hermitian symmetry format.
-- A precomputed influence function `influence_G: [f32; M_complex]`
-  rebuilt whenever the simulation box's `generation` counter changes.
-- Per-axis B-spline correction factor arrays
-  `b_factors_a: [f32; n_a]`, `b_factors_b: [f32; n_b]`,
-  `b_factors_c: [f32; n_c]` precomputed once at slot construction.
+- A device-resident influence function `influence_G: CudaSlice<f32>` of
+  length `M_complex`, rebuilt whenever the simulation box's `generation`
+  counter changes.
+- A device-resident virial-factor table
+  `virial_factor: CudaSlice<f32>` of length `M_complex` holding the
+  per-cell multiplier `G[k] · (1 - K² / (2 α²))` read by
+  `spme_recip_apply_influence` to compute the per-thread virial
+  contribution it feeds into the per-block reduction. Rebuilt
+  alongside `influence_G` on the same box-generation trigger.
+- Per-axis B-spline correction factor arrays held as device buffers
+  `b_factors_a: CudaSlice<f32>`, `b_factors_b: CudaSlice<f32>`, and
+  `b_factors_c: CudaSlice<f32>` of length `n_a`, `n_b`, and `n_c`
+  respectively. Populated once at slot construction from the host-side
+  Cox-de Boor recursion and never re-uploaded; they depend only on
+  `(grid, spline_order)`, not on the simulation box.
+- A device-resident single-element scalar
+  `w_per_particle_virial: CudaSlice<f32>` holding the per-particle
+  reciprocal-virial share `W_recip / N` written by
+  `spme_recip_reduce_partials` and read by `spme_force_gather`.
+- A device-resident scratch buffer
+  `virial_partials: CudaSlice<f32>` of length
+  `ceil(M_complex / 256)` (the number of 256-thread blocks that
+  cover the complex grid). Each block of `spme_recip_apply_influence`
+  reduces its assigned slice of the complex grid into a single
+  partial sum and writes it to its slot of `virial_partials`.
+  `spme_recip_reduce_partials` then sums these partials into
+  `w_per_particle_virial`. The two-stage shape avoids materialising
+  a length-`M_complex` per-cell virial buffer in global memory.
 - A cuFFT plan handle for the `(n_a, n_b, n_c)` R2C / C2R transforms.
-  Both plans are bound to the slot's `recip_stream` via `cufftSetStream`
-  at construction and are never rebound.
-- A dedicated CUDA stream `recip_stream` on which the four reciprocal
-  kernels execute concurrently with the default stream's work for the
-  same timestep.
-- Two CUDA events `default_ready_event` and `recip_ready_event` used to
-  synchronize `recip_stream` with the device's default stream at the
-  entry and exit of the reciprocal pipeline (see *Launch configuration*).
-- A host-side scratch `Vec<f32>` of length `M_complex` for the
-  `virial_per_cell` dtoh that runs at the start of `reduce()`.
+  Both plans are bound to the device's default `CudaStream` via
+  `cufftSetStream` at construction and are never rebound.
+- A device-resident `workspace: CudaSlice<u8>` buffer of size
+  `max(cufftGetSize(forward_plan), cufftGetSize(inverse_plan))`,
+  allocated at slot construction. Both cuFFT plans run with
+  `cufftSetAutoAllocation(plan, 0)` and have their work-area pointer
+  bound to this buffer via `cufftSetWorkArea(plan, workspace)` at
+  construction. The two plans share the buffer because their
+  executions are strictly serialised on the default stream.
 
-### Bin structure <!-- rq-618bc65e -->
+- The atom spatial pre-sort scratch (see *Atom spatial pre-sort* for
+  the per-rebuild pipeline that consumes these):
+  - `atom_bin_key: CudaSlice<u32>` of length `N`. Entry `i` holds
+    the SPME primary bin index `g_a · n_b · n_c + g_b · n_c + g_c`
+    of atom `i`.
+  - `bin_atom_counts: CudaSlice<u32>` of length `M`. Per-bin atom
+    histogram, zeroed before each sort.
+  - `bin_atom_offsets: CudaSlice<u32>` of length `M + 1`. Exclusive
+    prefix scan of `bin_atom_counts`; bin `b` occupies sorted-index
+    positions `[bin_atom_offsets[b], bin_atom_offsets[b + 1])`.
+  - `bin_atom_cursor: CudaSlice<u32>` of length `M`. Per-bin atomic
+    cursor used during the scatter stage; zeroed before each sort.
+  - `sorted_atom_index: CudaSlice<u32>` of length `N`. The result
+    of the sort: `sorted_atom_index[t] = i` means the atom processed
+    at sorted slot `t` was originally atom `i`. Consumed by
+    `spme_spread_fixed_point` and `spme_force_gather` to walk atoms
+    in spatial-bin order. Initialised at slot construction to the
+    identity permutation `sorted_atom_index[t] = t`, so the first
+    `compute()` call works even before the first sort runs.
+  - `sort_scan_block_totals: Vec<CudaSlice<u32>>` — the multi-level
+    scan-stack buffers consumed by the shared
+    `prefix_scan_cell_counts` family (see `neighbor-list.md`) when
+    it operates on a histogram of length `M`.
+- `cached_neighbor_list_generation: u64`. The neighbour-list rebuild
+  generation observed at the last sort. The slot re-runs the sort
+  pipeline when the framework reports a generation strictly greater
+  than this value (see *Atom spatial pre-sort* for the trigger
+  protocol).
 
-The spread and gather kernels both walk a bin structure with one bin per
-FFT grid cell. The slot constructs this via
-`NeighborListState::new_cell_list_only` (see `neighbor-list.md`): a
-cell-list-mode state with explicit `n_cells_per_direction = grid` that
-runs only the cell-index, prefix-scan, scatter, and in-cell sort stages
-(no neighbor-list build, no displacement check). The state's
-`sorted_particle_ids` and `cell_offsets` buffers carry the bin structure
-the spread and gather kernels read.
+### Atom spatial pre-sort <!-- rq-06f1edf2 -->
 
-The slot's `pre_step` rebuilds the bin structure every step
-unconditionally (no skin tolerance): particles cross FFT-grid cell
-boundaries on every reasonable timestep and the spread kernel must see
-the latest binning.
+The reciprocal-space slot walks atoms in spatial-bin order during
+spread and gather. Sorting concentrates each warp's atomic writes
+(spread) and grid reads (gather) on neighbouring grid cells, so the
+hot grid cells stay in L1/L2 across consecutive warps.
 
-### Charge spreading <!-- rq-037dd2f3 -->
+The sorted order is materialised as a permutation
+`sorted_atom_index: CudaSlice<u32>` of length `N`. Each entry
+`sorted_atom_index[t] = i` names the original atom index `i` to be
+processed at sorted slot `t`. Spread and gather kernels read this
+permutation with their block-id and use `i` to address
+`posq[i]` (whose `.xyz` carries the position and `.w` the
+charge), and (for gather) the per-particle slot-output cells
+`slot_force_*[i]` / `slot_energy[i]` / `slot_virial[i]`.
 
-The spread kernel computes the charge density `rho[g]` for each grid
-point `g = (g_a, g_b, g_c)`:
+**Trigger protocol.** The sort runs at the start of every
+`SpmeReciprocalState::compute()` call where the framework's
+neighbour-list rebuild generation is strictly greater than the
+slot's `cached_neighbor_list_generation`. The slot updates
+`cached_neighbor_list_generation` to the current value when the
+sort completes. The first `compute()` call after slot construction
+sees a generation > 0 (every neighbour-list build advances the
+counter, including the initial build), so the first sort always
+fires.
+
+**Sort algorithm.** A count-sort over the SPME primary-bin key:
+
+1. `spme_compute_bin_key` — one thread per atom. Reads particle
+   `i`'s wrapped position, computes the primary bin
+   `(g_a, g_b, g_c)` via the same `spread_per_particle_setup`
+   helper the spread kernel uses, and writes
+   `atom_bin_key[i] = (g_a · n_b + g_b) · n_c + g_c`. Atomically
+   increments `bin_atom_counts[atom_bin_key[i]]` (each atom emits
+   exactly one `+1`, so the final per-bin count is independent of
+   atomic-completion order).
+
+2. `prefix_scan_cell_counts` (the family in `neighbor-list.md`) —
+   produces `bin_atom_offsets` of length `M + 1` from
+   `bin_atom_counts` of length `M`.
+
+3. `scatter_atoms_into_cells` (reused from `neighbor-list.md`) — one
+   thread per atom. Thread `i` reads `b = atom_bin_key[i]`, computes
+   `t = bin_atom_offsets[b] + atomicAdd(&bin_atom_cursor[b], 1)`,
+   and writes `sorted_atom_index[t] = i`. The atomic-completion
+   order of cursor increments within a bin is non-deterministic,
+   so the in-bin order of `sorted_atom_index` is non-deterministic
+   on a single sort run.
+
+   **In-bin determinism.** A follow-up canonicalising pass
+   (`sort_cells_by_particle_id`, reused from `neighbor-list.md`,
+   one thread per bin) sorts each bin's `sorted_atom_index` slice
+   in strictly ascending atom-index order. After this pass, two runs
+   with byte-identical inputs produce a byte-identical
+   `sorted_atom_index` regardless of the non-deterministic scatter
+   order.
+
+**Determinism.** Combined with the i64 atomic-add associativity of
+the spread (see *Reproducibility*), the canonicalised
+`sorted_atom_index` guarantees byte-identical `rho_fixed` and
+`slot_force_*` across runs on the same GPU regardless of warp /
+atomic completion order.
+
+**Per-step state reset.** `bin_atom_counts` and `bin_atom_cursor`
+accumulate via `atomicAdd` inside the bin-key and scatter kernels,
+so they are zeroed via `memset_zeros` at the start of every sort.
+`atom_bin_key`, `bin_atom_offsets`, `sorted_atom_index`, and the
+scan-stack buffers are overwritten every entry, so they need no
+explicit reset.
+
+### Charge spreading <!-- rq-382a6e66 -->
+
+The charge density on the FFT grid is the same quantity for every
+implementation:
 
 ```text
 rho[g] = Σ_i q_i · M_p(s_a_i · n_a - g_a) · M_p(s_b_i · n_b - g_b) · M_p(s_c_i · n_c - g_c)
@@ -225,30 +388,106 @@ rho[g] = Σ_i q_i · M_p(s_a_i · n_a - g_a) · M_p(s_b_i · n_b - g_b) · M_p(s
 
 where `s_i = (s_a_i, s_b_i, s_c_i)` are particle `i`'s fractional
 coordinates (computed via `SimulationBox::fractional_coords` on the
-wrapped position) and `M_p` is the 1D cardinal B-spline of order `p`.
-The sum runs over every particle whose support intersects `g`, i.e. every
-particle whose primary bin lies within the box of `p × p × p` bins
-centred on `g`.
+wrapped position), `M_p` is the 1D cardinal B-spline of order `p`, and
+the sum runs over every particle whose support intersects `g` —
+equivalently, every particle whose primary bin lies within the box of
+`p × p × p` bins centred on `g`.
 
-**Iteration direction.** The kernel uses **one thread per grid point**.
-Each thread:
+The slot computes this via a two-stage **fixed-point atomic-add**
+pipeline that runs every step. Both stages execute on the default
+stream and are deterministic under the same-GPU run-to-run contract.
 
-1. Computes its own grid coordinate `(g_a, g_b, g_c)` from the
-   thread/block index.
-2. Iterates `(d_a, d_b, d_c) ∈ {−⌈p/2⌉ + 1, …, ⌊p/2⌋}³` (a box of
-   `p³` neighbouring bins, wrapping modulo `n_d` per direction).
-3. For each visited bin, walks the sorted particle IDs in
-   `sorted_particle_ids[cell_offsets[c] .. cell_offsets[c+1]]` in
-   ascending particle-index order.
-4. For each particle `i` in the bin, computes the 1D B-spline weights
-   `w_a = M_p(s_a_i · n_a − g_a)`, similarly for `b` and `c`, multiplies
-   them, multiplies by `q_i`, and accumulates into a per-thread `rho`
-   register.
-5. Writes the final accumulator to `rho[grid_index(g)]`.
+The fixed-point representation maps a real value `v` to the integer
+`v_fixed = (i64)(v × 2^32)`. With charges bounded by O(1 e) and 
+B-spline weights bounded by 1, a single contribution maps to a value
+of magnitude at most a few × 10⁹, and the worst-case accumulated cell
+sum stays well under `i64::MAX ≈ 9.2 × 10¹⁸`. Integer atomic addition
+on i64 is exactly associative on the same GPU regardless of
+atomic-completion order, so the accumulated fixed-point grid is
+byte-identical across runs with byte-identical inputs.
 
-Each grid point is written by exactly one thread; no atomics are used.
-The accumulator is summed in (bin-iteration, particle-iteration) order,
-which is fixed across runs given identical positions on the same GPU.
+The two stages:
+
+1. **Per-step state reset.** `rho_fixed` is zeroed via the device's
+   `memset_zeros` before the spread launches. The reset and every
+   later kernel run on the same default stream, so the per-stream
+   ordering supplies the read-after-write guarantee with no explicit
+   synchronisation.
+
+2. **Per-z-slice fixed-point scatter.** `spme_spread_fixed_point`
+   runs `p` threads per atom — one thread per z-slice of the
+   particle's `p × p × p` spline-support cube — with 256 threads
+   per block and grid `ceil(N · p / 256)`. Thread `gid =
+   blockIdx.x · 256 + threadIdx.x` handles z-slice
+   `iz = gid mod p` of sorted-slot `atom_slot = gid / p`. Each
+   thread is independent: no `__shfl_sync` broadcasts, no
+   `__syncwarp`, no per-warp coordination.
+
+   The `p`-threads-per-atom mapping (rather than one thread sweeping
+   the full `p³` cube) is deliberate: it parallelises the `atomicAdd`
+   traffic — the kernel's dominant cost — across `p` threads. The
+   per-thread `wa[0..p)` / `wb[0..p)` evaluation is hoisted out of the
+   `(d_a, d_b)` loop, so the only redundancy is that the `p` z-slice
+   threads of one atom each evaluate those `a`/`b`-axis weights.
+   Collapsing to one thread per atom would remove that redundancy but
+   serialise all `p³` atomics through a single thread — a measured net
+   loss at production grid sizes — so the per-slice mapping is kept.
+   The kernel is emitted by the order-specialized NVRTC compilation (see
+   *Compile-time spline-order specialization*), so its `(d_a, d_b)` loop
+   unrolls and `wa` / `wb` are register-resident.
+
+   For its assigned atom, the thread reads `i =
+   sorted_atom_index[atom_slot]`, then reads particle `i`'s charge
+   `q_i`. **Charge-zero skip:** if `q_i == 0`, the thread returns
+   immediately. Otherwise the thread reads `i`'s wrapped position,
+   computes the fractional coordinates `(s_a, s_b, s_c)`, the
+   primary bin `(g_a, g_b, g_c)`, the fractional offsets
+   `(t_a, t_b, t_c)`, the per-axis 1D B-spline weights `wa[0..p)`
+   and `wb[0..p)`, and the single z-slice weight
+   `wc_iz = M_p(iz + t_c)`. It then iterates the
+   `p · p` cells in this z-slice:
+
+   ```
+   gc = (g_c + n_c - iz) mod n_c
+   dz = q_i · wc_iz
+   for d_a in [0, p):
+     ga = (g_a + n_a - d_a) mod n_a
+     dz_da = dz · wa[d_a]
+     for d_b in [0, p):
+       v = dz_da · wb[d_b]
+       v_fixed = (i64) rintf(v · 2^32)
+       if v_fixed != 0:
+         gb = (g_b + n_b - d_b) mod n_b
+         g  = (ga · n_b + gb) · n_c + gc
+         atomicAdd(&rho_fixed[g], v_fixed)
+   ```
+
+   **Zero-skip guard.** The `v_fixed != 0` check elides the atomic
+   add for contributions whose round-to-nearest fixed-point value
+   is zero. At the edges of the spline support (where the per-axis
+   B-spline weight goes to zero) a meaningful fraction of the
+   `p^3` contributions per atom round to zero in `i64` fixed-point
+   and contribute nothing. The skip is bit-exact: zero is the
+   additive identity in the integer accumulator.
+
+   Round-to-nearest in the f32 → i64 conversion (CUDA's
+   `__float2ll_rn` or `rintf` + cast) keeps the per-contribution
+   rounding direction deterministic. The atomic-completion order of
+   the remaining (non-skipped) adds is non-deterministic, but `i64`
+   addition is associative, so the final `rho_fixed` is
+   byte-identical across runs with byte-identical inputs.
+
+3. **Fixed-point → f32 conversion.** `spme_spread_finish` runs one
+   thread per grid cell with block size 256 and grid `ceil(M / 256)`.
+   Thread `c` reads `rho_fixed[c]` and writes
+   `rho[c] = (f32) rho_fixed[c] × FIXED_POINT_SCALE_INV` where
+   `FIXED_POINT_SCALE_INV = 1.0f / (float)(1ULL << 32)`. Each cell is
+   written by exactly one thread; no atomics, no inter-thread
+   communication.
+
+When `particle_count == 0`, the spread kernel launch is skipped, the
+fixed-point grid stays at its post-`memset_zeros` zero state, and
+`spme_spread_finish` produces an all-zero `rho`.
 
 The grid index uses the standard row-major mapping
 `grid_index(g_a, g_b, g_c) = (g_a · n_b + g_b) · n_c + g_c`.
@@ -270,47 +509,138 @@ entries; the kernel reads this directly without rearrangement.
 
 ### Influence function <!-- rq-e7b74f7a -->
 
-The precomputed influence function for grid index
+The precomputed influence function for complex grid index
 `k = (k_a, k_b, k_c)` (with `k_c < n_c/2 + 1`) is
 
 ```text
-m_a = (k_a < n_a / 2) ? k_a : k_a − n_a
-m_b = (k_b < n_b / 2) ? k_b : k_b − n_b
-m_c = (k_c < n_c / 2) ? k_c : k_c − n_c    # always k_c since k_c < n_c/2 + 1
+m_a = (k_a ≤ n_a / 2) ? k_a : k_a − n_a
+m_b = (k_b ≤ n_b / 2) ? k_b : k_b − n_b
+m_c = (k_c ≤ n_c / 2) ? k_c : k_c − n_c    # always k_c since k_c < n_c/2 + 1
 
 K = 2π · (m_a · b_a + m_b · b_b + m_c · b_c)
 K2 = |K|²
 
-G[k] = (4π / K²) · exp(−K² / (4 α²))
+G[k] = (k_C / V_box) · (4π / K²) · exp(−K² / (4 α²))
        · b_factors_a[k_a] · b_factors_b[k_b] · b_factors_c[k_c]
+
+virial_factor[k] = G[k] · (1 − K² / (2 α²))
 ```
 
 where `b_a`, `b_b`, `b_c` are the rows of the reciprocal lattice matrix
-`H^(-T)` (computed once from the simulation box) and the `b_factors_*`
-are the SPME B-spline correction terms:
+`H^(-T)` (derived from the current simulation box), `V_box = lx · ly · lz`
+is the box volume, `k_C` is the Coulomb prefactor (1 in atomic units),
+and the `b_factors_*` are the SPME B-spline correction terms:
 
 ```text
 b_factors_d[k] = |Σ_{j=0..p-1} M_p(j + 1) · exp(2π i · k · j / n_d)|⁻²
 ```
 
-The `k = (0, 0, 0)` slot is set to zero, implementing tinfoil boundary
-conditions and removing the (unphysical) infinite background-charge
-contribution.
+For odd spline orders the modulus `|Σ …|²` is (near-)zero at certain grid
+indices, where its reciprocal would diverge. Each such modulus (below a
+`1e-7` threshold) is replaced by the average of its two periodic
+neighbours before inversion (Essmann et al. 1995); even orders have no
+near-zero moduli, so the pass leaves them unchanged. This makes every
+accepted order `4`–`8` produce a finite, well-conditioned `b_factors_*`.
 
-`influence_G` is rebuilt whenever the slot observes a different
-`sim_box.generation()` from the value captured at last rebuild (the same
-box-generation tracking pattern as `NeighborListState`). When the box has
-not changed, the precomputed values are reused.
+The `k = (0, 0, 0)` slot is set to zero in both `influence_G` and
+`virial_factor`, implementing tinfoil boundary conditions and removing
+the (unphysical) infinite background-charge contribution.
 
 `b_factors_*` are independent of the box and depend only on the grid
-dimensions and spline order; they are computed once at slot construction
-and never rebuilt.
+dimensions and spline order; they are computed once on the host at slot
+construction via the Cox-de Boor B-spline recursion, the neighbour-average
+fix above, and inversion, uploaded to the slot's device buffers, and
+never rebuilt.
 
-### Influence-function multiply and inverse FFT <!-- rq-95385a9d -->
+`influence_G` and `virial_factor` are populated on device by a
+`spme_recip_compute_influence` kernel that runs on `recip_stream`. The
+kernel takes the box lattice as a **device pointer**
+(`sim_box.lattice_device()`, length 6: `lx, ly, lz, xy, xz, yz`) — not
+as scalar launch arguments — so that a captured launch reads whatever
+the buffer holds at replay time rather than the values frozen into the
+graph at capture. It also takes the precomputed device-resident
+`b_factors_*` buffers, the grid dimensions, and `α`. One thread per
+complex grid cell evaluates the formulae above; threads do not
+communicate. All inner arithmetic uses `Real` — the same f32 width as
+the stored `influence_G` / `virial_factor` buffers — including the
+reciprocal-lattice inversion, the K-vector dot product, the exponential
+(`Real_exp` = `expf`), and the B-spline-correction product. `K²` is a
+sum of squares with no catastrophic cancellation for physical boxes, so
+single precision is accurate to the stored width; f64 internals would
+only refine rounding the `Real` store immediately discards. The f32 form
+is also markedly faster on hardware where double-precision throughput is
+a small fraction of single (consumer GPUs are commonly ≈ 1:64), which
+matters because the kernel evaluates one `exp` over `M_complex ≈ 10⁶`
+cells each time it runs. Determinism is unaffected: one thread per cell,
+no inter-thread communication, no atomics, so two runs on the same GPU
+produce byte-identical buffers.
 
-A per-cell multiply kernel applies `V_hat[k] = G[k] · rho_hat[k]` for
-every `k`, including writing zero for `k = (0, 0, 0)`. One thread per
-complex grid cell; no atomics.
+`spme_recip_compute_influence` runs:
+
+1. **At slot construction**, after the `b_factors_*` buffers have been
+   uploaded, to populate `influence_G` and `virial_factor` for the
+   initial box.
+2. **At the start of every `SpmeReciprocalState::compute()` call**,
+   unconditionally, before the bin-list pre-step and before the
+   recip-stream's wait for the default stream. The launch reads the box
+   lattice from the persistent device buffer `sim_box.lattice_device()`
+   — a buffer allocated once and mutated in place by barostats — so the
+   recompute always reflects the box as it stands on device when the
+   recip pipeline runs.
+
+Recomputing on every call (rather than gating the launch on a host-side
+box-generation counter) is what makes the influence correct under CUDA
+graphs. The launch is an ordinary kernel reading a device pointer, so it
+is recorded into the captured per-step graph and **replays every step**,
+reading the live device lattice that the barostat's captured box-update
+kernel writes earlier in the same step. A host-side generation check
+could not serve this role: graph capture evaluates the host branch once,
+at capture time, before that step's barostat has advanced the box, so a
+gated launch would be skipped and never recorded into the graph — leaving
+the reciprocal forces on a stale influence function for the whole
+replayed batch. The per-cell arithmetic is f32 and memory-bound, so the
+unconditional recompute is affordable even in NVT, where it reproduces
+byte-identical buffers every step.
+
+The cadence is therefore uniform: the influence function tracks the box
+on every step, on both the per-step launch path and the captured
+graph-replay path. Under NPT it follows the barostat's per-step box
+updates; under NVT it recomputes identical buffers each step.
+
+The strict default-stream ordering (the influence recompute is dispatched
+before any later reciprocal kernel on the same stream; see *Launch
+configuration*) ensures that downstream consumers see the updated buffers
+before reading them.
+
+### Influence-function multiply, virial partial reduction, and inverse FFT <!-- rq-95385a9d -->
+
+`spme_recip_apply_influence` is a fused per-cell kernel that, in one
+pass over the complex grid, both produces the smoothed reciprocal
+potential `V_hat` and accumulates the per-cell virial contribution
+into a small per-block partial-sums buffer.
+
+Per thread (one thread per complex cell, `k = (k_a, k_b, k_c)`):
+
+1. Read `rho_hat[k]`, `influence_G[k]`, `virial_factor[k]`.
+2. Compute `V_hat[k] = influence_G[k] · rho_hat[k]`, including a
+   write of zero for `k = (0, 0, 0)` (the `k = 0` slots of both
+   `influence_G` and `virial_factor` are pre-zeroed by
+   `spme_recip_compute_influence`).
+3. Compute the per-thread virial contribution
+   `v_t = virial_factor[k] · |rho_hat[k]|²` (zero at `k = 0`).
+4. Hold `v_t` in a per-thread register accumulator and participate
+   in the block-level deterministic shared-memory pairwise tree
+   that reduces all 256 lane contributions to a single block partial.
+5. Lane 0 of each block writes the block partial to
+   `virial_partials[block_id]`.
+
+The kernel uses one 256-thread block per `ceil(M_complex / 256)`
+blocks of the complex grid and reads / writes only `rho_hat`,
+`influence_G`, `virial_factor`, `V_hat`, and `virial_partials`. No
+atomics, no inter-block synchronisation. The block partial-sum tree
+shape depends only on the fixed block size (256), so two runs on
+the same GPU produce byte-identical `V_hat` and byte-identical
+`virial_partials`.
 
 A cuFFT C2R plan transforms `V_hat` back into `V`:
 
@@ -332,26 +662,91 @@ F_i_recip = −q_i · ∇_r ( Σ_g V[g] · M_p(s_a · n_a − g_a)
                                   · M_p(s_c · n_c − g_c) )
 ```
 
-Operationally: one thread per particle. Each thread:
+Operationally: one thread per sorted slot. Each thread reads its
+sorted-slot index `t = blockIdx.x · blockDim.x + threadIdx.x`,
+resolves the original atom index `i = sorted_atom_index[t]`, and
+then:
 
 1. Reads particle `i`'s wrapped position and computes the fractional
    coordinates `(s_a, s_b, s_c)`.
-2. Determines its primary bin and iterates the `p × p × p` neighbouring
-   bins of grid points (wrapping modulo `n_d`).
-3. For each grid point `g` in the support, computes the 1D B-spline
-   weights `w_a, w_b, w_c` and the corresponding 1D derivatives
-   `dw_a, dw_b, dw_c`.
+2. Evaluates the per-axis 1D B-spline weights and derivatives once per
+   axis into small arrays — `w_a[0..p)`, `dw_a[0..p)`, and likewise for
+   the `b` and `c` axes (`p` evaluations per axis) — together with the
+   wrapped grid index for each axis offset. These are hoisted out of the
+   `p³` sweep; evaluating them per grid point instead would recompute the
+   `b`-axis terms `p` times and the `c`-axis terms `p²` times (each
+   B-spline evaluation is an O(p²) Cox-de Boor recursion).
+3. Sweeps the `p × p × p` neighbouring grid points (wrapping modulo
+   `n_d`); for each grid point `g` it reads `V[g]` and indexes the
+   precomputed per-axis weights `(w_a[d_a], w_b[d_b], w_c[d_c])` and
+   derivatives `(dw_a[d_a], dw_b[d_b], dw_c[d_c])`.
 4. Accumulates per-particle force components from the gradient
    contribution `V[g] · (dw_a · w_b · w_c, w_a · dw_b · w_c, w_a · w_b · dw_c)`
    scaled by `−q_i · n_d` (the chain-rule factor for the fractional-to-
    grid map).
 5. Accumulates the per-particle reciprocal energy
    `0.5 · q_i · Σ_g V[g] · w_a · w_b · w_c`.
+6. Writes the per-particle force and energy contributions to
+   `slot_force_*[i]`, `slot_energy[i]`, and (after the
+   deterministic virial reduction) `slot_virial[i]` — the output
+   addresses are by the *original* atom index `i`, not the sorted
+   slot `t`, so the slot-output layout remains in canonical
+   particle-index order regardless of how the sort permutes the
+   processing order.
 
 Each particle is written by exactly one thread; no atomics, no race
 conditions. Summation order over the `p³` grid points within a particle
 is fixed in `(d_a, d_b, d_c)` lexicographic order, so the contribution
-ordering is deterministic.
+ordering is deterministic. The kernel is emitted by the order-specialized
+NVRTC compilation (see *Compile-time spline-order specialization*), so
+the `p³` loop unrolls and the per-axis weight and derivative arrays are
+register-resident rather than spilled to local memory.
+
+Consecutive sorted slots address atoms with nearby primary bins, so
+the grid reads from `V[g]` across consecutive threads cluster on
+neighbouring cache lines.
+
+### Compile-time spline-order specialization <!-- rq-94bfcb7e -->
+
+The charge-spread (`spme_spread_fixed_point`) and force-gather
+(`spme_force_gather`) kernels, together with the B-spline weight helpers
+they call (`bspline_weight`, `bspline_weight_and_deriv`), are produced by
+an NVRTC compilation specialized to the run's `spline_order`. The slot
+compiles this module once, in `SpmeReciprocalState::new`, with
+`spline_order` supplied as the preprocessor constant `PME_ORDER`
+(`--define-macro=PME_ORDER=<order>`), the precision define matching the
+build (`HEDDLE_REAL_F64` under the f64 feature), and
+`--gpu-architecture=compute_<cc>` detected from the device. This is the
+same NVRTC path the composed pair-force kernel uses (see
+`jit-composed-pair-force.md` for the device-detection and precision
+conventions), though the spread and gather are standalone kernels rather
+than composed fragments. The translation unit is self-contained: it
+carries an inlined precision / PBC preamble rather than including the
+project `.cuh` headers.
+
+Because `PME_ORDER` is a compile-time constant, the spread's `p · p` and
+the gather's `p³` support loops fully unroll and the per-axis B-spline
+weight and derivative arrays are held in registers, with **no
+local-memory stack frame**. The per-contribution arithmetic is identical
+to the generic order-`p` form — the same charge·weight product order in
+the spread, the same lexicographic `(d_a, d_b, d_c)` accumulation in the
+gather — so `rho_fixed`, `slot_force_*`, `slot_energy`, and `slot_virial`
+are bit-identical to that form and the determinism guarantees (i64 spread
+associativity, fixed gather summation order; see *Reproducibility*) hold
+unchanged.
+
+The compiled module and the two `CudaFunction` handles are owned by the
+slot for the lifetime of the run. Compilation happens at construction,
+before any CUDA-graph capture, so the handles are stable device entry
+points that record and replay like any other captured kernel. A failure
+to compile the module surfaces as `SpmeError::KernelCompilation`.
+
+The remaining reciprocal-space kernels — influence recompute, the fused
+apply-influence, spread-finish, and the atom spatial pre-sort pipeline —
+carry no order-dependent support loop and are loaded from the
+build-time-compiled PTX module. Accepted `spline_order` values are `4`–`8`
+(the loader rejects others before construction), and the order is fixed
+for the run, so the module is compiled exactly once per run.
 
 ### Reciprocal-space virial <!-- rq-ce4590c1 -->
 
@@ -359,30 +754,45 @@ The reciprocal-space slot computes the scalar virial trace from the
 reciprocal grid:
 
 ```text
-W_recip = (k_C / 2) · Σ_{k ≠ 0} G[k] · |rho_hat[k]|² · (1 − K² / (2 α²))
+W_recip = 0.5 · Σ_{k ≠ 0} virial_factor[k] · |rho_hat[k]|²
 ```
 
-The contribution per complex-grid cell is computed by the same kernel
-that does the influence-function multiply (or a separate kernel that
-runs alongside; the implementation is free to fuse or split). The cell
-values are summed into a single scalar `W_recip` by host-side
-accumulation of the `virial_per_cell` buffer: at the start of
-`SpmeReciprocalState::reduce()`, the default stream issues
-`cudaStreamWaitEvent(default_stream, recip_ready_event)` so the
-subsequent `dtoh_sync_copy_into(virial_per_cell, host_scratch)` sees
-finalized values, the host walks the scratch in `0..M_complex` order
-and accumulates into an `f64`, and the result is scaled to
-`W_recip / N`. The host `f64` accumulation order is fixed across runs;
-the scalar is therefore byte-identical on the same hardware.
+where `virial_factor[k] = G[k] · (1 − K² / (2 α²))` is precomputed in
+the device-resident `virial_factor` buffer alongside `influence_G` (see
+*Influence function*). The Coulomb prefactor `k_C` and the `(4π/K²)`
+Greens-function term are already folded into `G[k]`; the `0.5` outside
+the sum is the Ewald half-sum convention.
 
-The scalar is distributed per particle by equal division: each particle
-receives `W_recip / N` in its `virials[i]` slot. Summing `virials` over
+The per-cell contributions `virial_factor[k] · |rho_hat[k]|²` are
+folded into the per-block partial sums in
+`virial_partials` directly inside the fused
+`spme_recip_apply_influence` kernel; no length-`M_complex` per-cell
+virial buffer is materialised in global memory (see
+*Influence-function multiply, virial partial reduction, and inverse
+FFT* above). The scalar `W_recip / N` is computed on device by the
+`spme_recip_reduce_partials` kernel, dispatched on the default
+stream immediately after the influence-multiply pass. A single
+256-thread block sums `virial_partials[0 .. num_blocks − 1]` with
+a strided per-thread accumulator followed by a deterministic
+left-to-right pairwise tree in shared memory (the same shape as
+`barostat::virial_sum_reduce` and
+`nose_hoover::kinetic_energy_reduce`). Lane 0 of the block
+multiplies the reduced sum by `0.5 / N` and writes the result to
+the device-resident single-element scalar `w_per_particle_virial`.
+Two runs on the same GPU with byte-identical inputs produce a
+byte-identical `w_per_particle_virial[0]`.
+
+The scalar is distributed per particle by equal division inside
+`spme_force_gather`: each particle reads `w_per_particle_virial[0]`
+once and writes it to its own `virials[i]` slot. Summing `virials` over
 all particles yields the system total `W_recip`. The per-particle
 attribution has no individual physical meaning; the convention exists
 only so the SoA `virials: Vec<f32>` layout sums correctly.
 
-The real-space slot writes the per-pair virial contribution in the
-standard pair-buffer pattern (`pair_virials[slot] = 0.5 · scale · factor · r²`).
+The real-space slot accumulates the per-pair virial contribution
+`0.5 · scale · factor · r²` into the warp's `p_w` register
+accumulator, summed and written to `slot_virial[i]` by the
+warp-tree reduction (see `pair-force-kernel.md`).
 
 ### Self-energy <!-- rq-29bdf2b2 -->
 
@@ -450,25 +860,32 @@ only inside the `SpmeReciprocalState` construction path.
 - `SpmeRealSpaceState` — implements `Potential` with <!-- rq-22171569 -->
   `label() == "spme_real"`. Reports
   `max_cutoff() = Some(r_cut_real as f32)` so the shared neighbor list
-  sizes its search radius. Fields private; the slot's public surface is
-  the per-step methods invoked by `ForceField::step` (see
+  sizes its search radius. `jit_participant()` returns
+  `Some(JitParticipant::PairForce(self))`; the slot contributes its
+  real-space fragment to the JIT-composed pair-force kernel and
+  launches no kernel of its own. Fields private; the slot's public
+  surface is the per-step methods invoked by `ForceField::step` (see
   `framework.md`).
 
   Constructor:
-  - `SpmeRealSpaceState::new(gpu: &GpuContext, particle_count: usize, alpha: f32, r_cut_real: f32, max_neighbors: u32, exclusion_list: &ExclusionList) -> Result<SpmeRealSpaceState, NeighborListError>`
+  - `SpmeRealSpaceState::new(gpu: &GpuContext, particle_count: usize, alpha: f32, r_cut_real: f32, exclusion_list: &ExclusionList) -> Result<SpmeRealSpaceState, NeighborListError>`
 
 - `SpmeReciprocalState` — implements `Potential` with <!-- rq-b1148667 -->
   `label() == "spme_reciprocal"`. Reports `max_cutoff() = None` (it does
   not contribute to the shared neighbor list's search radius). Fields
   private. The slot owns its own bin-only `NeighborListState` for the
-  spread / gather kernels, plus the dedicated `recip_stream` and the
-  two cross-stream events used by the reciprocal pipeline (see
-  *Reciprocal-space pipeline*). `recip_stream` and the two events are
-  allocated by `SpmeReciprocalState::new` and released in the slot's
-  `Drop` impl.
+  spread / gather kernels and the device-resident cuFFT workspace
+  buffer used by both transforms (see *Reciprocal-space pipeline*).
+  Every kernel and cuFFT call the slot dispatches runs on the device's
+  default stream; the slot owns no secondary streams or cross-stream
+  events. At construction the slot NVRTC-compiles its charge-spread and
+  force-gather kernels specialized to `spline_order` (see *Compile-time
+  spline-order specialization*) and owns the resulting module for the run.
 
   Constructor:
   - `SpmeReciprocalState::new(gpu: &GpuContext, sim_box: &SimulationBox, particle_count: usize, charges: &[f32], alpha: f32, grid: [u32; 3], spline_order: u32) -> Result<SpmeReciprocalState, SpmeError>`
+    - NVRTC-compiles the order-specialized spread / gather module;
+      returns `Err(SpmeError::KernelCompilation(log))` if that fails.
 
 - `SpmeError` — error type for SPME slot construction. Variants: <!-- rq-ebfa6e1f -->
   - `NeighborList(NeighborListError)` — from the bin-only neighbor-list
@@ -481,6 +898,10 @@ only inside the `SpmeReciprocalState` construction path.
     re-validates as a guard against direct API misuse.
   - `Gpu(GpuError)` — a CUDA driver operation failed during buffer
     allocation.
+  - `KernelCompilation(String)` — NVRTC failed to compile the
+    order-specialized charge-spread / force-gather module (see
+    *Compile-time spline-order specialization*); the string carries the
+    compiler log.
 
 - `CuFftError` — wrapper around cuFFT failure codes from the underlying <!-- rq-1ad7e751 -->
   bindings. Variants follow the `cufftResult_t` enumeration as needed by
@@ -488,32 +909,101 @@ only inside the `SpmeReciprocalState` construction path.
 
 ### Functions <!-- rq-cf82e422 -->
 
-- `spme_real_pair_force(particle_buffers, pair_buffer, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts) -> Result<(), GpuError>` <!-- rq-f735ea05 -->
-  Launches the `spme_real_pair_force` kernel.
+- `spme_recip_compute_influence(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex) -> Result<(), GpuError>` <!-- rq-99d3d796 -->
+  Launches `spme_recip_compute_influence` on the device's default
+  stream. Writes `influence_g` and `virial_factor`. The host call
+  returns as soon as the launch has been enqueued; no host-side
+  computation of the influence function is performed.
 
-- `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-f69698b8 -->
-  Launches the charge-spread kernel. Writes `spme_state.rho`.
+- `spme_atom_sort(particle_buffers, sim_box, spme_state) -> Result<(), GpuError>` <!-- rq-a1b761fc -->
+  Rebuilds `spme_state.sorted_atom_index` on the default stream when
+  the framework's neighbour-list rebuild generation is strictly
+  greater than `spme_state.cached_neighbor_list_generation`. The
+  pipeline is:
+  1. Device-side `memset_zeros` on `bin_atom_counts` and
+     `bin_atom_cursor`.
+  2. `spme_compute_bin_key` — one thread per particle; writes
+     `atom_bin_key[i]` and atomically increments
+     `bin_atom_counts[bin]`.
+  3. The `prefix_scan_cell_counts` family (see `neighbor-list.md`) —
+     produces `bin_atom_offsets` from `bin_atom_counts`.
+  4. `scatter_atoms_into_cells` (reused from `neighbor-list.md`) —
+     one thread per particle; writes `sorted_atom_index[t]` for the
+     slot
+     `t = bin_atom_offsets[bin] + atomicAdd(&bin_atom_cursor[bin], 1)`.
+  5. `sort_cells_by_particle_id` (reused from `neighbor-list.md`) —
+     one thread per bin; insertion-sorts the bin's slice of
+     `sorted_atom_index` in strictly ascending atom-index order.
+
+  Updates `spme_state.cached_neighbor_list_generation` to the
+  framework's current value on success. Returns `Ok(())` immediately
+  once every kernel has been enqueued. When the generation has not
+  advanced, the function returns `Ok(())` without launching any
+  kernels.
+
+- `spme_spread_charges(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-a1b761fa -->
+  Launches the two-stage fixed-point charge-spread pipeline on the
+  default stream:
+  1. Device-side `memset_zeros` on `spme_state.rho_fixed` (length
+     `M`, i64) to clear the previous step's accumulation.
+  2. `spme_spread_fixed_point` — `spline_order` threads per atom,
+     256 threads per block, grid `ceil(N · spline_order / 256)`.
+     Each thread owns one z-slice of its atom's `p³` spline
+     support and issues up to `p²` `atomicAdd<i64>` operations
+     against `rho_fixed`. Atoms with `charge == 0` are skipped
+     entirely; per-contribution `v_fixed != 0` guards elide
+     atomic-adds whose fixed-point conversion would round to
+     zero. The total upper-bound contribution count is
+     `N · p³`; the realised atomic-add count is the same minus
+     the zero-skipped contributions.
+  3. `spme_spread_finish` — one thread per grid cell; converts
+     `rho_fixed[c]` to `rho[c] = (f32) rho_fixed[c] · 2^-32`.
+
+  Writes `spme_state.rho`. Returns `Ok(())` immediately once every
+  kernel has been enqueued; no host-side computation is performed.
+  When `particle_count == 0`, the fixed-point spread kernel is
+  skipped (the `memset_zeros` and `spme_spread_finish` still run),
+  so `rho` is produced as all zeros.
 
 - The R2C forward transform `rho → rho_hat` is invoked via <!-- rq-24e36eba -->
   `SpmeReciprocalGrid::forward_plan.execute(&rho, &mut rho_hat)`, where
   `forward_plan: Plan3dR2C` is constructed in
-  `SpmeReciprocalGrid::new` and pre-bound to `recip_stream` via
-  `set_stream`. The call returns `Result<(), CuFftError>`.
+  `SpmeReciprocalGrid::new`, has its work-area pre-bound to the slot's
+  device-resident workspace via `cufftSetWorkArea`, and is pre-bound
+  to the default stream via `cufftSetStream`. The call returns
+  `Result<(), CuFftError>`.
 
-- `spme_influence_multiply(spme_state) -> Result<(), GpuError>` <!-- rq-8326d2d1 -->
-  Multiplies `rho_hat[k] *= G[k]` in place, also writing the per-cell
-  virial contribution to a scratch buffer for the subsequent reduction.
+- `spme_recip_apply_influence(spme_state) -> Result<(), GpuError>` <!-- rq-5ec02591 -->
+  Multiplies `rho_hat[k] *= G[k]` in place on the default stream,
+  computes the per-thread virial contribution
+  `virial_factor[k] · |rho_hat[k]|²`, reduces those contributions
+  block-by-block via a deterministic shared-memory pairwise tree, and
+  writes the per-block partial sums to `virial_partials`. Operates
+  in a single kernel pass over the complex grid; no length-`M_complex`
+  per-cell virial buffer is materialised in global memory.
+
+- `spme_recip_reduce_partials(kernels, virial_partials, w_per_particle_virial, num_blocks, n_particles) -> Result<(), GpuError>` <!-- rq-e0d010c0 -->
+  Launches `spme_recip_reduce_partials` on the default stream. Writes
+  `w_per_particle_virial[0] = (0.5 / N) · Σ virial_partials[b]` via
+  the single-block deterministic pairwise tree described in
+  *Reciprocal-space virial*. No host download.
 
 - The C2R inverse transform `rho_hat → V` is invoked via <!-- rq-a98abc35 -->
   `SpmeReciprocalGrid::inverse_plan.execute(&rho_hat, &mut V)`, where
   `inverse_plan: Plan3dC2R` is constructed in
-  `SpmeReciprocalGrid::new` and pre-bound to `recip_stream` via
-  `set_stream`. The call returns `Result<(), CuFftError>`.
+  `SpmeReciprocalGrid::new`, has its work-area pre-bound to the slot's
+  device-resident workspace via `cufftSetWorkArea`, and is pre-bound
+  to the default stream via `cufftSetStream`. The call returns
+  `Result<(), CuFftError>`.
 
 - `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>` <!-- rq-c6f6a13c -->
-  Launches the force-gather kernel. Writes per-particle force,
-  reciprocal energy, and (after the deterministic virial reduction)
-  per-particle virial.
+  Launches the force-gather kernel. Threads address atoms via
+  `i = sorted_atom_index[t]` for `t = blockIdx.x · blockDim.x +
+  threadIdx.x` so consecutive threads work on spatially-clustered
+  atoms; per-atom output is written to the canonical particle-index
+  positions `slot_force_*[i]`, `slot_energy[i]`, `slot_virial[i]`.
+  Writes per-particle force, reciprocal energy, and (after the
+  deterministic virial reduction) per-particle virial.
 
 - `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>` <!-- rq-d880c228 -->
   Used by `init_device` when SPME is enabled. Returns `Err` on a
@@ -521,46 +1011,70 @@ only inside the `SpmeReciprocalState` construction path.
 
 ### CUDA kernels <!-- rq-7225b86f -->
 
-`kernels/spme_real.cu` declares:
-
-```c
-extern "C" __global__ void spme_real_pair_force(
-    /* signature shown in the Real-space CUDA kernel section above */);
-```
-
 `kernels/spme_recip.cu` declares:
 
 ```c
-extern "C" __global__ void spme_charge_spread(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
-    const unsigned int *sorted_particle_ids,
-    const unsigned int *cell_offsets,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+extern "C" __global__ void spme_recip_compute_influence(
+    const float *b_factors_a,           // length n_a
+    const float *b_factors_b,           // length n_b
+    const float *b_factors_c,           // length n_c
+    float *influence_G,                 // length M_complex
+    float *virial_factor,               // length M_complex
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
+    unsigned int n_a, unsigned int n_b, unsigned int n_c,
+    float k_coulomb,
+    float alpha,
+    unsigned int m_complex);
+
+extern "C" __global__ void spme_recip_reduce_partials(
+    const float *virial_partials,       // length num_blocks
+    float *w_per_particle_virial,       // length 1
+    unsigned int num_blocks,
+    float scale);                       // 0.5 / N
+
+extern "C" __global__ void spme_spread_fixed_point(
+    const float4       *posq,
+    const unsigned int *sorted_atom_index,  // length n
+    const float        *lattice,            // length 6
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
-    float *rho,
+    long long   *rho_fixed,                 // length M (i64)
     unsigned int n);
 
-extern "C" __global__ void spme_influence_multiply(
-    const float *influence_G,
+extern "C" __global__ void spme_spread_finish(
+    const long long *rho_fixed,     // length M
+    float           *rho,           // length M
+    unsigned int M);
+
+extern "C" __global__ void spme_compute_bin_key(
+    const float4 *posq,
+    const float  *lattice,           // length 6
+    unsigned int  n_a, unsigned int n_b, unsigned int n_c,
+    unsigned int *atom_bin_key,      // length n
+    unsigned int *bin_atom_counts,   // length M (atomicAdd)
+    unsigned int  n);
+
+// The bin-key scatter (step 3) reuses `scatter_atoms_into_cells` from
+// `kernels/neighbor.cu`: thread `i` reads its bin index, atomically
+// increments the per-bin write cursor, and writes the resulting sorted
+// slot. The in-bin canonicalisation pass (step 4) reuses
+// `sort_cells_by_particle_id`: one thread per bin runs an insertion
+// sort over its slice in strictly ascending atom-index order. See
+// `rqm/forces/neighbor-list.md` for both kernel signatures.
+
+extern "C" __global__ void spme_recip_apply_influence(
+    const float *influence_G,           // length M_complex
+    const float *virial_factor,         // length M_complex
     float *rho_hat_real,   // interleaved real and imag parts
     float *rho_hat_imag,
-    float *virial_per_cell,  // scratch for reciprocal-virial reduction
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    unsigned int n_a, unsigned int n_b, unsigned int n_c,
-    float alpha,
-    unsigned int n_complex);
+    float *virial_partials,             // length num_blocks
+    unsigned int m_complex);
 
 extern "C" __global__ void spme_force_gather(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
-    const float *V,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float4       *posq,
+    const float        *V,
+    const unsigned int *sorted_atom_index,  // length n
+    const float        *lattice,            // length 6
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
     float k_coulomb,
@@ -571,93 +1085,152 @@ extern "C" __global__ void spme_force_gather(
     unsigned int n);
 ```
 
-Plus a deterministic reduction kernel for the per-cell virial buffer
-(can reuse the existing `reduce_pair_forces` machinery or implement a
-new fixed-topology tree reduction; the kernel signature is left to the
-implementation).
+No length-`M_complex` per-cell virial buffer exists; the per-block
+partial sums produced by `spme_recip_apply_influence` flow directly
+into `spme_recip_reduce_partials`. Both reductions use deterministic
+fixed-topology shared-memory pairwise trees whose shape depends only
+on the launch block size (256), not on thread scheduling.
 
 ### Launch configuration <!-- rq-03d9869d -->
 
-- `spme_real_pair_force`: 16×16×1 = 256 threads/block, grid <!-- rq-eb9e5cc3 -->
-  `(ceil(max_neighbors/16), ceil(N/16), 1)`. Matches the LJ kernel.
-- `spme_charge_spread`: one thread per real grid cell, block size 256, <!-- rq-16f6c7dc -->
-  grid `ceil(M / 256)` where `M = n_a · n_b · n_c`.
-- `spme_influence_multiply`: one thread per complex grid cell, block <!-- rq-127df3d6 -->
-  size 256, grid `ceil(M_complex / 256)`.
+- `spme_recip_compute_influence`: one thread per complex grid cell, <!-- rq-17b52850 -->
+  block size 256, grid `ceil(M_complex / 256)`. No shared memory.
+- `spme_spread_fixed_point`: one warp per sorted slot, block size 256 <!-- rq-996edcaf -->
+  (8 warps × 32 lanes), grid `ceil(N / 8)`. No static shared memory
+  (per-axis B-spline weights, primary bin, and `q_i` are broadcast
+  lane-to-lane via `__shfl_sync`). Lane 0 reads
+  `i = sorted_atom_index[t]` before reading the atom's position and
+  charge. Each of the 32 lanes performs `⌈p³ / 32⌉` `atomicAdd<i64>`
+  operations into `rho_fixed`.
+- `spme_spread_finish`: one thread per grid cell, block size 256, <!-- rq-d9403350 -->
+  grid `ceil(M / 256)`. No shared memory. Reads `rho_fixed[c]`,
+  writes `rho[c] = (f32) rho_fixed[c] · 2^-32`.
+- `spme_compute_bin_key`: one thread per particle, block size 256, <!-- rq-7594b1fc -->
+  grid `ceil(N / 256)`. No shared memory. Computes the SPME primary
+  bin index per atom and atomically increments `bin_atom_counts`.
+- `scatter_atoms_into_cells` (reused): one thread per particle, block <!-- rq-ab1063b3 -->
+  size 256, grid `ceil(N / 256)`. No shared memory. Atomic cursor
+  increment into `bin_atom_cursor` to determine the sorted slot.
+- `sort_cells_by_particle_id` (reused): one thread per bin, block size <!-- rq-1b747c20 -->
+  256, grid `ceil(M / 256)`. No shared memory. Per-bin insertion sort
+  over the bin's slice of `sorted_atom_index` in strictly ascending
+  atom-index order; the slot's per-bin slice length is bounded by the
+  worst-case number of atoms whose primary bin coincides with any
+  given grid cell, which is small under SPME's grid-density convention
+  (~ a few atoms per cell).
+- `spme_recip_apply_influence`: one thread per complex grid cell, <!-- rq-b82694ec -->
+  block size 256, grid `ceil(M_complex / 256)`,
+  `__shared__ Real partial[256]` for the per-block virial reduction.
+  Per thread: read `rho_hat[k]`, `influence_G[k]`, `virial_factor[k]`,
+  write `V_hat[k]`, accumulate the per-thread virial contribution into
+  shared memory, participate in the deterministic pairwise tree.
+  Lane 0 of each block writes one entry of `virial_partials`.
+- `spme_recip_reduce_partials`: single block of 256 threads, <!-- rq-3a41a142 -->
+  `__shared__ Real partial[256]`. Strided per-thread accumulator
+  followed by deterministic left-to-right pairwise tree. Only lane 0
+  writes the output (one scalar to `w_per_particle_virial`).
 - `spme_force_gather`: one thread per particle, block size 256, grid <!-- rq-35b76155 -->
   `ceil(N / 256)`.
 
 Stream assignment:
 
-- `spme_real_pair_force` and `spme_force_gather` run on the device's <!-- rq-44cce069 -->
-  default stream carried by `particle_buffers.device`.
-- The four reciprocal-pipeline kernels — `spme_charge_spread`, the
-  cuFFT R2C transform, `spme_influence_multiply`, and the cuFFT C2R
-  transform — run on a dedicated CUDA stream `recip_stream` owned by
-  `SpmeReciprocalState`. The R2C and C2R plans are bound to
-  `recip_stream` via `cufftSetStream` once at slot construction and
-  are never rebound.
+- Every SPME kernel and cuFFT call dispatched by the SPME <!-- rq-44cce069 -->
+  reciprocal slot — `spme_force_gather`,
+  `spme_recip_compute_influence` (when triggered by a box-generation
+  change), the atom-sort pipeline (`spme_compute_bin_key`,
+  the prefix-scan family, `scatter_atoms_into_cells`,
+  `sort_cells_by_particle_id`, plus the device-side `memset_zeros`
+  on `bin_atom_counts` and `bin_atom_cursor` — fired when triggered
+  by a neighbour-list rebuild generation change),
+  the `spme_spread_fixed_point` and `spme_spread_finish`
+  kernels (plus the device-side `memset_zeros` on `rho_fixed`),
+  the cuFFT R2C transform, `spme_recip_apply_influence`, the cuFFT
+  C2R transform, and `spme_recip_reduce_partials` — runs on the
+  device's default stream carried by `particle_buffers.device`.
+  Both cuFFT plans are bound to the default stream via
+  `cufftSetStream` once at slot construction and are never rebound.
 
-Cross-stream synchronization uses two CUDA events owned by
-`SpmeReciprocalState`:
-
-- A "default → recip_stream" handoff at the start of <!-- rq-274db88b -->
-  `SpmeReciprocalState::contribute()` is implemented via
-  `recip_stream.wait_for_default()`. cudarc records an event on the
-  default stream that captures every prior default-stream launch
-  (integrator updates, bin-list rebuild, any other default-stream
-  slot launches that already returned to host) and makes
-  `recip_stream` wait on it. This guarantees that the integrator's
-  writes to `positions_x/y/z` and the construction-time writes to
-  `charges` are visible before the first reciprocal kernel enqueues.
-- A "recip_stream → default" join at the start of <!-- rq-0d5e76ec -->
-  `SpmeReciprocalState::reduce()` is implemented via
-  `device.wait_for(&recip_stream)`. cudarc records an event on
-  `recip_stream` that captures the inverse FFT and every prior
-  recip-stream launch, and makes the default stream wait on it.
-  This guarantees that `V` and `virial_per_cell` are finalized
-  before the default stream's `virial_per_cell` dtoh and the
-  `spme_force_gather` launch.
-
-Both event handles are managed internally by cudarc on each
-`wait_for_default` / `wait_for` invocation; `SpmeReciprocalState` holds
-no explicit `CudaEvent` fields. The
-host call to `SpmeReciprocalState::contribute()` returns as soon as the
-four reciprocal kernels have been enqueued on `recip_stream`; the host
-does not block on cuFFT or on the reciprocal kernels.
+The slot owns no secondary CUDA streams and no CUDA events. The
+ordering of writes and reads within a step's reciprocal pipeline
+(spread → R2C → influence-multiply → virial-finalize → C2R →
+force-gather) is the natural launch order on the default stream:
+every later kernel reads only buffers written by an earlier kernel
+on the same stream, so CUDA's implicit per-stream ordering supplies
+the producer-consumer guarantee with no explicit synchronisation.
 
 ## Reproducibility <!-- rq-20530653 -->
 
 SPME on HeddleMD is bit-exact GPU-vs-GPU when run on the same hardware
-with identical inputs. Six components carry the reproducibility
+with identical inputs. Eight components carry the reproducibility
 invariant:
 
-1. **Bin structure.** Inherits the existing cell-list service's
-   determinism: particles sorted by `(cell_index, particle_id)` with a
-   fixed-topology insertion sort within each bin.
-2. **Charge spread.** One thread per grid point; per-thread accumulation
-   in fixed `(bin_index, particle_id)` order.
+1. **Atom spatial pre-sort.** `spme_compute_bin_key` evaluates the
+   primary bin per atom from positions alone — no atomics in the
+   key computation, no inter-thread communication. The histogram
+   atomicAdd on `bin_atom_counts` reduces to integer addition of
+   `+1`s, whose result is independent of completion order. The
+   `scatter_atoms_into_cells` stage uses non-deterministic
+   `atomicAdd` cursors into `bin_atom_cursor`, but the subsequent
+   `sort_cells_by_particle_id` insertion sort fixes each bin's slice
+   of `sorted_atom_index` to strictly ascending atom-index order.
+   Two runs on the same GPU with byte-identical positions therefore
+   produce a byte-identical `sorted_atom_index`.
+2. **Charge spread.** The per-particle B-spline weight computation
+   inside `spme_spread_fixed_point` is fully per-lane and
+   deterministic — lane 0 reads `i = sorted_atom_index[t]` and
+   broadcasts the resolved atom index and per-axis weights via
+   `__shfl_sync`, every lane evaluates the same expression for its
+   assigned `(d_a, d_b, d_c)`, and the f32 → i64 conversion uses
+   round-to-nearest. The atomic adds into `rho_fixed` are on i64,
+   which is an exactly associative operation: the final cell value
+   `rho_fixed[g] = Σ v_fixed` is independent of the order in which
+   the `atomicAdd<i64>` operations complete. Two runs on the same
+   GPU with byte-identical inputs therefore produce a byte-identical
+   `rho_fixed`. The `spme_spread_finish` pass writes
+   `rho[c] = (f32) rho_fixed[c] · 2^-32` per cell with no
+   inter-thread communication, so `rho` is byte-identical too.
 3. **cuFFT.** Deterministic for fixed plan dimensions, single-stream
    usage, and the same hardware. "Single-stream usage" is satisfied
    because both cuFFT plans are bound once at slot construction to
-   `recip_stream` via `cufftSetStream` and are never rebound. The
+   the device's default stream via `cufftSetStream` and are never
+   rebound, and because their work-area pointer is fixed at
+   construction via `cufftSetAutoAllocation(plan, 0)` +
+   `cufftSetWorkArea(plan, workspace)` so cuFFT does not
+   transparently reallocate scratch memory at execution time. The
    `cufft_determinism_smoke_test` run at `init_device` time validates
    the contract on the host's specific cuFFT version.
-4. **Influence-function multiply and virial-per-cell write.** One
-   thread per complex grid cell; no atomics; no inter-thread reads.
-5. **Force gather.** One thread per particle; each thread reads `p³`
+4. **Influence function recompute.** `spme_recip_compute_influence`
+   runs one thread per complex grid cell with no inter-thread
+   communication. Inner arithmetic in `double` precision. The kernel
+   fires whenever the slot observes a changed `sim_box.generation()`,
+   producing byte-identical `influence_G` and `virial_factor` for
+   byte-identical box lattices on the same GPU.
+5. **Influence-function multiply and virial partial reduction.**
+   `spme_recip_apply_influence` runs one thread per complex grid
+   cell; no atomics; no inter-thread reads on the multiply portion.
+   The per-block partial-sum reduction over the per-thread virial
+   contributions uses a deterministic fixed-topology shared-memory
+   pairwise tree whose shape depends only on the launch block size
+   (256), so two runs on the same GPU produce byte-identical
+   `V_hat` and byte-identical `virial_partials`.
+6. **Virial partial-sums reduction.** `spme_recip_reduce_partials`
+   runs a single block of 256 threads with a strided per-thread
+   accumulator and a deterministic left-to-right pairwise tree in
+   shared memory. Two runs with byte-identical `virial_partials`
+   produce a byte-identical `w_per_particle_virial[0]`.
+7. **Force gather.** One thread per sorted slot; each thread reads `p³`
    grid points in fixed `(d_a, d_b, d_c)` lexicographic order. No
    atomics. The per-particle virial uses the equal-division attribution
-   `W_recip / N` (the slot's `reduce()` distributes the scalar
+   `W_recip / N` (the slot's `compute()` distributes the scalar
    identically to every particle, so the SoA convention is preserved
    regardless of summation order).
-6. **Two-stream model.** The reciprocal pipeline runs on
+8. **Two-stream model.** The reciprocal pipeline runs on
    `recip_stream`; the real-space slot, the force-gather kernel, and
    every non-SPME slot's kernel run on the default stream. The two
    streams write to disjoint device buffers — `recip_stream` writes
    `rho`, `rho_hat`, `V`, and `virial_per_cell`; the default stream
-   writes the real-space `PairBuffer`, the slot-output buffers, and
-   `forces_*`. Cross-stream ordering is enforced by the two events
+   writes the slot-output buffers and `forces_*`. Cross-stream ordering
+   is enforced by the two events
    `default_ready_event` and `recip_ready_event` recorded at
    deterministic points in `contribute()` and waited on at
    deterministic points in `contribute()` / `reduce()`; the
@@ -665,10 +1238,11 @@ invariant:
    identical inputs on the same GPU therefore observe byte-identical
    writes from both streams.
 
-The reciprocal-virial scalar reduction sums `virial_per_cell` on the
-host in `f64` in fixed index order at the start of `reduce()`; the
-implementation must not use unordered atomic-add or any
-non-deterministic device-side reduction.
+The reciprocal-virial scalar reduction must use deterministic
+fixed-topology tree reductions (`spme_recip_apply_influence`'s
+per-block tree plus `spme_recip_reduce_partials`' final-block tree
+in shared memory). The implementation must not use unordered
+atomic-add or any non-deterministic device-side reduction.
 
 ## Out of Scope <!-- rq-f0038583 -->
 
@@ -683,6 +1257,22 @@ non-deterministic device-side reduction.
   manually.
 - Per-frame charge updates. Charges are fixed for the lifetime of a
   run; `u_self_per_particle` is computed once.
+- Softening the bit-exact GPU-vs-GPU determinism guarantee on the
+  reciprocal-space pipeline in exchange for additional wall-clock
+  savings. The spread and gather kernels run one thread per grid
+  point (spread) and one thread per particle (gather) with no
+  atomics, in fixed iteration order over their per-thread input
+  ranges, and the per-block reduction trees in
+  `spme_recip_apply_influence` and `spme_recip_reduce_partials`
+  use fixed shared-memory shapes. A faster implementation that
+  relaxed any of these properties — for example one-thread-per-particle
+  spread with `atomicAdd` into `rho`, or a non-deterministic
+  reduction shape that depends on block-completion order — could
+  reach materially lower wall-clock per step, at the cost of breaking
+  the run-to-run byte-equality contract that `architecture.md`
+  guarantees for the engine. That tradeoff is intentionally not
+  taken here; the determinism guarantee is treated as load-bearing
+  for the long-running production runs the engine is designed for.
 - Excluded-pair real-space correction. The 1-2 and 1-3 bonded pairs are
   zero-scaled in `atom_excl_coul_scales` (the standard convention for
   excluded pairs in PME). Codes that retain a portion of the bonded
@@ -769,60 +1359,273 @@ Feature: Smooth particle-mesh Ewald (SPME)
   Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)
     Given two oppositely charged particles within r_cut_real
     And an ExclusionList listing the pair with scale_coul=0.0
-    When the real-space slot's contribute() is called
-    Then the pair-buffer slot for (0, 1) has zero force, zero energy, zero virial
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] are all 0.0
+
+  @rq-d150a16b
+  Scenario: Real-space slot scales contribution by 0.5 when scale_coul = 0.5
+    Given two oppositely charged particles at separation r = 3e-10 (< r_cut_real)
+    And an ExclusionList listing the pair with scale_coul = 0.5
+    When the SPME real-space functor is evaluated in the composed pair-force kernel to obtain values_scaled
+    And the SPME real-space functor is evaluated in the composed pair-force kernel with an empty exclusion list to obtain values_unscaled
+    Then values_scaled.slot_force_x[0] equals 0.5 * values_unscaled.slot_force_x[0] bit-for-bit
+    And values_scaled.slot_energy[0] equals 0.5 * values_unscaled.slot_energy[0] bit-for-bit
+    And values_scaled.slot_virial[0] equals 0.5 * values_unscaled.slot_virial[0] bit-for-bit
+
+  @rq-675080c4
+  Scenario: Real-space slot with scale_coul = 1.0 reproduces the un-excluded value
+    Given two oppositely charged particles at separation r = 3e-10
+    And an ExclusionList listing the pair with scale_coul = 1.0
+    When the SPME real-space functor is evaluated in the composed pair-force kernel to obtain values_explicit
+    And the SPME real-space functor is evaluated in the composed pair-force kernel with an empty exclusion list to obtain values_implicit
+    Then values_explicit.slot_force_x[0] equals values_implicit.slot_force_x[0] bit-for-bit
+    And values_explicit.slot_energy[0] equals values_implicit.slot_energy[0] bit-for-bit
+    And values_explicit.slot_virial[0] equals values_implicit.slot_virial[0] bit-for-bit
+
+  @rq-34329bda
+  Scenario: A real-space exclusion entry on one pair does not attenuate other pairs
+    Given a ParticleState of N=3 with positions p0=(0,0,0), p1=(2e-10,0,0), p2=(4e-10,0,0)
+      and charges (+1e, -1e, +1e)
+    And an ExclusionList listing only pair (0, 1) with scale_coul = 0.0
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
+    Then slot_force_x[0] equals the SPME real-space force on particle 0 due to particle 2 only
+      (the (0, 1) contribution is suppressed; the (0, 2) contribution is unscaled)
+    And slot_force_x[2] equals the SPME real-space force on particle 2 due to particles 0 and 1
+      (no exclusion entry attenuates particle 2's contributions)
 
   @rq-af7018c0
   Scenario: Real-space slot produces zero outside r_cut_real
     Given two particles at separation greater than r_cut_real
-    When the real-space slot's contribute() is called
-    Then the pair-buffer slot has zero force, zero energy, zero virial
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] are all 0.0
 
   @rq-83088c2f
   Scenario: Real-space slot matches the closed-form erfc force for an isolated pair
     Given two unit-charge particles at separation r = 4.0e-10 inside the cutoff
     And alpha = 2.0e10
-    When the real-space slot's contribute() is called
-    Then pair_forces_x[0*max + 1] equals the closed-form
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
+    Then slot_force_x[0] equals the closed-form
       k_C · q_i · q_j · (erfc(α r) · inv_r2 + (2 α / √π) · exp(-α² r²) · inv_r2) · dx · inv_r
       to within 1e-5 relative
 
   @rq-0caebe37
   Scenario: Real-space slot obeys Newton's third law for a non-boundary pair
     Given two particles at non-boundary separation
-    When the real-space slot's contribute() is called
-    Then pair_forces_x[0*max + slot_j] equals −pair_forces_x[1*max + slot_i] bit-exactly
+    When the SPME real-space functor is evaluated in the composed pair-force kernel
+    Then slot_force_x[0] equals -slot_force_x[1] bit-exactly (Newton's third law for an isolated pair)
 
-  # --- Reciprocal-space pipeline: spread ---
+  # --- JIT fragment behaviour ---
+
+  @rq-0f761603
+  Scenario: SPME-real JIT fragment uses the composer-supplied inv_r and r
+    Given a ForceField with [spme] configured and the JIT-composed kernel active
+    And the composed kernel source captured for inspection
+    Then the SPME-real fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    And the SPME-real fragment body does not contain any of: `Real_sqrt(`, `sqrt(r2)`, `sqrtf(r2)`, `1.0 / r2`, `1.0 / inv_r`
+
+  @rq-2a1f2043
+  Scenario: SPME-real JIT fragment evaluates erfc via the Hastings polynomial under f32
+    Given a heddle-md build with default features (precision = f32)
+    And a ForceField with [spme] configured and the JIT-composed kernel active
+    And the composed kernel source captured for inspection
+    Then the SPME-real fragment body contains the literal coefficient `0.254829592`
+    And the SPME-real fragment body contains the literal coefficient `0.3275911`
+    And the SPME-real fragment body does not contain `Real_erfc`
+
+  @rq-299ea1de
+  Scenario: SPME-real JIT fragment evaluates erfc via Real_erfc under f64
+    Given a heddle-md build with --features f64 (precision = f64)
+    And a ForceField with [spme] configured and the JIT-composed kernel active
+    And the composed kernel source captured for inspection
+    Then the SPME-real fragment body contains `Real_erfc(`
+    And the SPME-real fragment body does not contain the literal coefficient `0.254829592`
+
+  @rq-e4bd99f7
+  Scenario: SPME-real JIT fragment reports CutoffHandling::Uniform(r_cut_real)
+    Given any [spme] configuration with r_cut_real = c
+    When SpmeRealBuilder::pair_force_fragment(cx) is called
+    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(c)`
+
+  @rq-0fb4e752
+  Scenario: SPME-real JIT fragment force matches the closed-form within 1e-5 under f32 (Hastings is accurate enough)
+    Given two unit-charge particles at separation r = 4.0e-10 inside the cutoff
+    And alpha = 2.0e10
+    And a ForceField with [spme] configured and the JIT-composed kernel active
+    When ForceField::step(...) is called
+    Then the per-particle force on particle 0 agrees with the closed-form
+      k_C · q_i · q_j · (erfc(α r) · inv_r2 + (2 α / √π) · exp(-α² r²) · inv_r2) · dx · inv_r
+      to within 1e-5 relative tolerance
+    And two runs of the same configuration produce byte-identical results on the same GPU
+
+  # --- Reciprocal-space pipeline: atom spatial pre-sort ---
+
+  @rq-0f592ab6
+  Scenario: Sort fires on the first compute() call
+    Given an SpmeReciprocalState immediately after construction
+      with cached_neighbor_list_generation == 0
+    And the framework's neighbour-list rebuild generation is 1 (or any value > 0)
+    When SpmeReciprocalState::compute() is called
+    Then the five-stage sort pipeline (memset_zeros, spme_compute_bin_key,
+      prefix_scan_cell_counts family, scatter_atoms_into_cells, sort_cells_by_particle_id)
+      launches exactly once on the default stream
+    And the slot's cached_neighbor_list_generation equals the framework's
+      generation after the call
+
+  @rq-9ffb2eb3
+  Scenario: Sort fires when the neighbour-list rebuild generation advances
+    Given an SpmeReciprocalState whose cached_neighbor_list_generation matches
+      the framework's current generation
+    When the framework rebuilds the neighbour list (advancing its rebuild generation)
+    And SpmeReciprocalState::compute() is called
+    Then the sort pipeline launches exactly once during this call
+    And the slot's cached_neighbor_list_generation equals the new value
+
+  @rq-be54d0f6
+  Scenario: Sort does not fire when generation is unchanged
+    Given an SpmeReciprocalState whose cached_neighbor_list_generation matches
+      the framework's current generation
+    When SpmeReciprocalState::compute() is called twice in succession with
+      no intervening neighbour-list rebuild
+    Then the sort pipeline launches zero times during the second call
+    And sorted_atom_index is byte-identical to its pre-second-call contents
+
+  @rq-03cbd438
+  Scenario: sorted_atom_index is a permutation of [0, N)
+    Given an SpmeReciprocalState with N particles
+    When the sort pipeline runs
+    Then sorted_atom_index has length N
+    And the set of values in sorted_atom_index is exactly {0, 1, ..., N - 1}
+      (every original atom index appears exactly once)
+
+  @rq-e59ee965
+  Scenario: sorted_atom_index orders atoms by primary bin
+    Given N atoms with known fractional positions
+    When the sort pipeline runs
+    Then for every t in 0..N - 1, atom_bin_key[sorted_atom_index[t]] is
+      less than or equal to atom_bin_key[sorted_atom_index[t + 1]]
+      (consecutive sorted slots have monotonically non-decreasing primary bin)
+
+  @rq-c88ec28e
+  Scenario: In-bin order is canonical (strictly ascending atom index)
+    Given N atoms with at least one primary bin holding multiple atoms
+    When the sort pipeline runs
+    Then within each bin's slice of sorted_atom_index, the entries are in
+      strictly ascending atom-index order (the canonicalising pass has
+      fixed the order regardless of the non-deterministic scatter cursor)
+
+  @rq-99cb2bd3
+  Scenario: Two runs of the sort pipeline produce byte-identical sorted_atom_index
+    Given two SpmeReciprocalState instances with identical configuration,
+      identical particle positions, and identical particle charges
+    When the sort pipeline runs on each
+    Then dtoh(sorted_atom_index) is byte-identical between the two runs
+
+  @rq-d4d66d02
+  Scenario: Initial sorted_atom_index is the identity permutation
+    Given an SpmeReciprocalState immediately after construction
+    When sorted_atom_index is read before any compute() call
+    Then sorted_atom_index[t] == t for every t in [0, N)
+      (so the very first compute() call can run the spread / gather kernels
+      even before the first sort completes, processing atoms in particle-index order)
+
+  # --- Reciprocal-space pipeline: spread (fixed-point atomic-add) ---
 
   @rq-881559bd
   Scenario: Spread produces zero charge density at a grid point with no particle support
     Given one particle at position s = (0.5, 0.5, 0.5) in fractional coords
     And a grid point at fractional position (0.0, 0.0, 0.0) far from the particle's support
-    When spme_charge_spread is called
+    When the spread pipeline runs
     Then rho[grid_index(0, 0, 0)] equals 0.0
 
   @rq-79291441
   Scenario: Spread sum integrates to total charge
     Given a system of N particles with total charge Q = Σ q_i
-    When spme_charge_spread is called
+    When the spread pipeline runs
     Then Σ_g rho[g] equals Q to within 1e-5 relative tolerance
       (B-splines are partition-of-unity normalised)
 
   @rq-07297467
-  Scenario: Spread is independent of particle order in the bin
-    Given two particles at the same primary bin, presented in two different
-      input orderings (e.g. swapped IDs)
-    When spme_charge_spread is called
-    Then the resulting rho is byte-identical between the two runs
-      (the cell-list sort canonicalises particle order within a bin)
+  Scenario: Spread is byte-identical regardless of input particle ordering
+    Given two particles within each other's p-bin support, presented in two
+      different input orderings (e.g. swapped IDs)
+    When the spread pipeline runs
+    Then the resulting `rho` is byte-identical between the two runs
+      (`atomicAdd<i64>` is exactly associative, so the order in which
+      atomic adds complete does not affect the final fixed-point grid)
 
   @rq-3c0beda9
   Scenario: Spread reduces to a single B-spline weight for one isolated particle
     Given exactly one particle with charge q at fractional position s
-    When spme_charge_spread is called
+    When the spread pipeline runs
     Then rho[g] equals q · M_p(s_a·n_a - g_a) · M_p(s_b·n_b - g_b) · M_p(s_c·n_c - g_c)
-      for every grid point g
+      for every grid point g to within f32 round-off of the
+      `rho_fixed[g] · 2^-32` conversion
+
+  @rq-5b4519e9
+  Scenario: rho_fixed is zeroed at the start of every step
+    Given an SpmeReciprocalState whose `rho_fixed` holds non-zero values
+      from a prior step
+    When `spme_spread_charges` runs
+    Then `rho_fixed` is observed to be zeroed by the device's
+      `memset_zeros` before `spme_spread_fixed_point` issues any
+      `atomicAdd<i64>`
+
+  @rq-3dc94856
+  Scenario: spme_spread_fixed_point issues at most N · p³ atomicAdd<i64> operations
+    Given N particles, spline order p, and an instrumented atomic counter
+    When `spme_spread_fixed_point` runs
+    Then the device-side counter records at most `N · p³`
+      `atomicAdd<i64>` invocations on `rho_fixed`
+    And the count equals `N · p³` minus the number of contributions
+      whose round-to-nearest fixed-point value is zero (which the
+      kernel's `v_fixed != 0` guard elides)
+
+  @rq-8c630ad6
+  Scenario: Charge-zero atoms issue no atomicAdd<i64> against rho_fixed
+    Given N particles, one of which carries `charge == 0`
+    When `spme_spread_fixed_point` runs
+    Then the charge-zero atom's `spline_order` threads return
+      immediately and issue zero `atomicAdd<i64>` invocations on
+      `rho_fixed`
+
+  @rq-6098e0c1
+  Scenario: One particle's contribution at a single cell matches the fixed-point B-spline value
+    Given exactly one particle with charge q at fractional position s,
+      whose support uniquely covers grid cell g (no other particle
+      contributes to g)
+    When `spme_spread_fixed_point` runs
+    Then `rho_fixed[g]` equals `(i64) rintf(q · w_a · w_b · w_c · 2^32)`
+      bit-exactly, where `(w_a, w_b, w_c)` are the per-axis B-spline
+      weights for the offset of g from the particle's primary bin
+
+  @rq-09b6b539
+  Scenario: spme_spread_finish converts rho_fixed to rho via the inverse scale
+    Given a `rho_fixed[c]` populated with a known i64 value X
+    When `spme_spread_finish` runs
+    Then `rho[c]` equals `(f32)((double)X * 2^-32)` to within f32
+      round-off, with no inter-thread communication during the
+      conversion
+
+  @rq-723b40a0
+  Scenario: Two runs of the full spread pipeline produce byte-identical rho_fixed and rho
+    Given two independently-constructed SpmeReciprocalState instances with
+      identical configurations and identical particle positions and charges
+    When the spread pipeline runs on each
+    Then dtoh(rho_fixed) is byte-identical between the two runs
+    And dtoh(rho) is byte-identical between the two runs
+
+  @rq-c60c1d5f
+  Scenario: Spread output is independent of sorted_atom_index permutation
+    Given two SpmeReciprocalState instances A and B with identical
+      configuration, positions, and charges
+    And A's sorted_atom_index is the identity permutation
+      (the slot's construction default before any sort runs)
+    And B's sorted_atom_index is the canonical bin-sorted permutation
+      (the post-sort permutation)
+    When spread runs on each instance
+    Then dtoh(rho_fixed) is byte-identical between the two runs
+      (i64 atomic-add associativity guarantees that the final cell
+      values do not depend on the warp processing order)
 
   # --- Reciprocal-space pipeline: FFT ---
 
@@ -840,14 +1643,114 @@ Feature: Smooth particle-mesh Ewald (SPME)
     Then the round-trip output equals the input scaled by the FFT normalisation factor
       (cuFFT convention: forward+inverse = N · identity)
 
-  # --- Reciprocal-space pipeline: multiply ---
+  # --- Reciprocal-space pipeline: influence function recompute ---
+
+  @rq-b3f2381a
+  Scenario: B-spline correction factors are finite for odd spline orders
+    When compute_b_factors(16, p) is evaluated for p = 5 and p = 7
+    Then every returned value is finite (no inf / NaN)
+    And every returned value is below 1e3
+    # The near-zero B-spline structure-factor moduli odd orders produce are
+    # neighbour-averaged before inversion, so the reciprocal stays bounded.
+
+  @rq-9cee9bfd
+  Scenario: Influence buffers are populated at slot construction
+    Given an SpmeReciprocalState constructed with a sim_box B0 and parameters (alpha, grid, p)
+    When the slot's construction finishes
+    Then influence_G and virial_factor are device buffers of length M_complex
+    And dtoh(influence_G) and dtoh(virial_factor) agree cell-by-cell with the
+      analytical formula for B0 to within f32 round-off
+    And the slot's cached_box_generation equals B0.generation()
+
+  @rq-c8954d3e
+  Scenario: Influence buffers are rebuilt when sim_box generation changes
+    Given an SpmeReciprocalState whose cached_box_generation matches the current sim_box
+    And a new sim_box B1 with a different generation counter
+    When SpmeReciprocalState::compute() is called with B1
+    Then spme_recip_compute_influence launches exactly once on recip_stream
+      during this call
+    And after the call, dtoh(influence_G) agrees with the analytical formula for B1
+    And the slot's cached_box_generation equals B1.generation()
+
+  @rq-c4d04411
+  Scenario: Influence buffers are reused when sim_box generation is unchanged
+    Given an SpmeReciprocalState whose cached_box_generation matches the current sim_box
+    When SpmeReciprocalState::compute() is called with the same sim_box twice in succession
+    Then spme_recip_compute_influence launches zero times during the second call
+    And influence_G and virial_factor are byte-identical to their pre-second-call contents
+
+  @rq-ff16a2c9
+  Scenario: k=0 cell is zero in both influence_G and virial_factor after recompute
+    Given any sim_box and any SpmeReciprocalState
+    When spme_recip_compute_influence runs (at construction or on generation change)
+    Then influence_G[grid_index(0, 0, 0)] equals 0.0
+    And virial_factor[grid_index(0, 0, 0)] equals 0.0
+
+  @rq-f8a66553
+  Scenario: virial_factor[k] = G[k] · (1 - K² / (2 α²)) cell-by-cell
+    Given an SpmeReciprocalState with parameters (alpha, grid, p) and a sim_box B
+    When spme_recip_compute_influence has run for B
+    Then for every cell k with k ≠ (0, 0, 0),
+      virial_factor[k] equals influence_G[k] · (1 - K(k)² / (2 α²))
+      to within f32 round-off
+
+  @rq-4bd0b129
+  Scenario: Influence recompute is deterministic across two independent slots
+    Given two SpmeReciprocalState instances with identical (alpha, grid, p) and identical sim_box
+    When spme_recip_compute_influence runs on each
+    Then dtoh(influence_G) and dtoh(virial_factor) are byte-identical between the two slots
+
+  @rq-ce68c21a
+  Scenario: Influence recompute under a C-rescale barostat fires every step
+    Given a 100-step NPT run with the C-rescale barostat enabled
+    When the run completes
+    Then spme_recip_compute_influence has launched 100 + 1 times
+      (one at slot construction plus one per step's box update)
+
+  @rq-8e6a1933
+  Scenario: Influence recompute under NVT fires once
+    Given a 100-step NVT run with no barostat
+    When the run completes
+    Then spme_recip_compute_influence has launched exactly once (at slot construction)
+
+  # --- Reciprocal-space pipeline: fused apply-influence ---
 
   @rq-e5bf6fea
-  Scenario: The k=0 entry is zeroed by the influence-function multiply
+  Scenario: The k=0 entry is zeroed by the fused apply-influence kernel
     Given any non-zero rho_hat
-    When spme_influence_multiply is called
-    Then rho_hat[k=0] equals 0.0 + 0.0i after the multiply
+    When spme_recip_apply_influence is called
+    Then rho_hat[k=0] equals 0.0 + 0.0i after the kernel
       (tinfoil boundary condition)
+
+  @rq-35af4d98
+  Scenario: apply_influence produces V_hat[k] = G[k] * rho_hat[k] for k != 0
+    Given a complex grid of known rho_hat values and a known influence_G
+    When spme_recip_apply_influence runs
+    Then for every k != 0, V_hat[k] equals influence_G[k] * rho_hat[k]
+      to within f32 round-off
+
+  @rq-d4d54057
+  Scenario: apply_influence writes one virial partial per block
+    Given a complex grid of M_complex cells and block size 256
+    And num_blocks = ceil(M_complex / 256)
+    When spme_recip_apply_influence runs
+    Then exactly num_blocks entries of virial_partials are written
+    And each entry equals the sum of virial_factor[k] * |rho_hat[k]|² over the cells assigned to its block,
+      reduced via the deterministic shared-memory pairwise tree
+
+  @rq-191d86df
+  Scenario: apply_influence does not materialise a length-M_complex virial buffer
+    Given the SpmeReciprocalState is constructed
+    When the slot's owned device allocations are enumerated
+    Then no allocation of length M_complex is reserved for per-cell virial staging
+    And virial_partials has length ceil(M_complex / 256)
+
+  @rq-70442b56
+  Scenario: Two runs of apply_influence on identical inputs are byte-identical
+    Given two device-resident copies of identical rho_hat, influence_G, virial_factor inputs
+    When spme_recip_apply_influence runs on each
+    Then dtoh(V_hat) is byte-identical between the two runs
+    And dtoh(virial_partials) is byte-identical between the two runs
 
   # --- Force gather ---
 
@@ -857,6 +1760,34 @@ Feature: Smooth particle-mesh Ewald (SPME)
     And explicit-Ewald reference forces computed on the host with the same parameters
     When the full SPME pipeline runs
     Then per-particle forces agree with the reference within 1e-3 relative tolerance
+
+  # --- Compile-time spline-order specialization ---
+
+  @rq-f81b4298
+  Scenario: Reciprocal energy matches explicit Ewald for every accepted spline order
+    Given a small charged system with a known explicit-Ewald reference energy
+    And a grid satisfying n_d >= 2*spline_order for spline_order up to 8
+    When SpmeReciprocalState::new and a force/energy evaluation run for each spline_order in {4, 5, 6, 7, 8}
+    Then each run compiles its order-specialized module successfully
+    And each run's reciprocal energy matches the explicit-Ewald reference within 5e-3 relative tolerance
+
+  @rq-3cfebff3
+  Scenario: The order-specialized force-gather kernel uses no local memory
+    Given an SpmeReciprocalState constructed with spline_order=4
+    When the local-memory size of the JIT-compiled force-gather kernel is queried (CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES)
+    Then it is zero
+
+  @rq-141360a1
+  Scenario: Specialized pipeline is byte-identical across two runs at a non-default order
+    Given two SpmeReciprocalState slots constructed with spline_order=5 on identical inputs
+    When the full spread -> FFT -> apply -> IFFT -> gather pipeline runs on each
+    Then rho_fixed, V, slot_force_*, and slot_energy are byte-identical between the two slots
+
+  @rq-7fb4b760
+  Scenario: An NVRTC compile failure surfaces as SpmeError::KernelCompilation
+    Given the order-specialized SPME module source contains a deliberate compile error
+    When the slot's order-specialization compile step is invoked
+    Then it returns Err(SpmeError::KernelCompilation(log)) with a non-empty log
 
   # --- Self-energy ---
 
@@ -876,6 +1807,27 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When the reciprocal slot's reduce() runs
     Then every particle's virials[i] entry equals W_recip / N (to within f32 round-off)
     And summing virials over all particles recovers W_recip
+
+  @rq-ede87154
+  Scenario: spme_recip_reduce_partials writes (0.5 / N) · Σ virial_partials on device
+    Given a virial_partials device buffer of length num_blocks with known per-block values
+    When spme_recip_reduce_partials is launched with scale = 0.5 / N
+    Then dtoh(w_per_particle_virial)[0] equals 0.5 / N · Σ_b virial_partials[b]
+      to within f32 round-off
+    And no host download of virial_partials occurs
+
+  @rq-9d344eb9
+  Scenario: Two runs of spme_recip_reduce_partials on identical inputs are byte-identical
+    Given two device-resident copies of an identical virial_partials buffer
+    When spme_recip_reduce_partials runs on each
+    Then dtoh(w_per_particle_virial) produces byte-identical scalars between the two runs
+
+  @rq-65ba517f
+  Scenario: End-to-end recip-virial reduction equals (0.5 / N) · Σ_k virial_factor[k] · |rho_hat[k]|²
+    Given a known rho_hat, influence_G, and virial_factor on device
+    And reference total W = Σ_k virial_factor[k] · |rho_hat[k]|² computed on host in f64
+    When spme_recip_apply_influence followed by spme_recip_reduce_partials runs
+    Then dtoh(w_per_particle_virial)[0] equals (0.5 / N) · W to within f32 round-off
 
   # --- Reproducibility ---
 

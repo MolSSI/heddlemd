@@ -388,8 +388,11 @@ Degenerate cases:
 - `AnalysisBuilder` — open-shaped builder trait. Mirrors <!-- rq-86f01d20 -->
   `IntegratorBuilder` etc.:
   ```rust
-  pub trait AnalysisBuilder: Send + Sync {
-      fn kind_name(&self) -> &'static str;
+  pub trait AnalysisBuilder:
+      KindedBuilder + AnalysisBuilderClone + Send + Sync
+  {
+      // `kind_name()` from `KindedBuilder`; cloning from the generated `AnalysisBuilderClone` helper.
+      // See `registry-framework.md`.
       fn validate_params(&self, params: &toml::Value) -> Result<(), AnalyzeError>;
       fn build(
           &self,
@@ -422,14 +425,11 @@ Degenerate cases:
   `finalize_and_write` is invoked exactly once per analysis at the
   end of the trajectory pass.
 
-- `AnalysisRegistry` — open-builder registry, mirrors <!-- rq-e3ba8c3b -->
-  `IntegratorRegistry`. Fields and methods:
-  - `pub fn new() -> Self` — empty registry.
-  - `pub fn with_builtins() -> Self` — registry pre-populated with
-    every built-in builder. v1 ships exactly one: the RDF builder
-    documented in `rqm/analysis/rdf.md`.
-  - `pub fn register(&mut self, builder: Box<dyn AnalysisBuilder>)`
-  - `pub fn lookup(&self, kind: &str) -> Option<&dyn AnalysisBuilder>`
+- `AnalysisRegistry` — `Registry<dyn AnalysisBuilder>` (the generic <!-- rq-e3ba8c3b -->
+  container; see `registry-framework.md`). A named-selection registry,
+  so the generic `new`, `with_builtins`, `register`, `lookup(kind)`,
+  `Clone`, and `Default` apply. `with_builtins()` ships exactly one
+  built-in: the RDF builder documented in `rqm/analysis/rdf.md`.
 
 - `Registries` (the bundle defined in `rqm/simulation-runner.md`) <!-- rq-a7211dfd -->
   carries an additional field `analyses: AnalysisRegistry`. The

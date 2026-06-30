@@ -58,6 +58,18 @@ unsafe extern "C" {
         odata: *mut f64,
     ) -> CufftResult;
     fn cufftSetStream(plan: CufftHandle, stream: *mut c_void) -> CufftResult;
+    fn cufftSetAutoAllocation(plan: CufftHandle, auto_allocate: c_int) -> CufftResult;
+    fn cufftSetWorkArea(plan: CufftHandle, work_area: *mut c_void) -> CufftResult;
+    fn cufftGetSize(plan: CufftHandle, work_size: *mut usize) -> CufftResult;
+    fn cufftCreate(plan: *mut CufftHandle) -> CufftResult;
+    fn cufftMakePlan3d(
+        plan: CufftHandle,
+        nx: c_int,
+        ny: c_int,
+        nz: c_int,
+        ttype: CufftType,
+        work_size: *mut usize,
+    ) -> CufftResult;
 }
 
 #[cfg(not(feature = "f64"))]
@@ -127,6 +139,43 @@ impl Plan3dR2C {
         })
     }
 
+    /// Construct a plan with auto-allocation disabled. The caller is
+    /// responsible for binding a work area via `set_work_area` before
+    /// the first `execute()` call. Required for graph-capture-safe
+    /// plans.
+    pub fn new_unallocated(
+        device: &Arc<CudaDevice>,
+        n_a: u32,
+        n_b: u32,
+        n_c: u32,
+    ) -> Result<Self, CuFftError> {
+        device.bind_to_thread().map_err(|_| CuFftError::Status(-1))?;
+        let mut handle = CufftHandle(0);
+        let result = unsafe { cufftCreate(&mut handle) };
+        check(result)?;
+        let result = unsafe { cufftSetAutoAllocation(handle, 0) };
+        check(result)?;
+        let mut work_size: usize = 0;
+        let result = unsafe {
+            cufftMakePlan3d(
+                handle,
+                n_a as c_int,
+                n_b as c_int,
+                n_c as c_int,
+                CUFFT_FWD_TYPE,
+                &mut work_size,
+            )
+        };
+        check(result)?;
+        Ok(Plan3dR2C {
+            handle,
+            n_a,
+            n_b,
+            n_c,
+            _device: device.clone(),
+        })
+    }
+
     // rq-4c21c386
     /// Execute the R2C transform `input → output`. `input` must hold
     /// `n_a * n_b * n_c` `Real` values; `output` must hold
@@ -157,6 +206,32 @@ impl Plan3dR2C {
     /// rebound.
     pub fn set_stream(&self, stream: CUstream) -> Result<(), CuFftError> {
         let result = unsafe { cufftSetStream(self.handle, stream as *mut c_void) };
+        check(result)
+    }
+
+    /// Returns cuFFT's requested work-area size in bytes for this plan.
+    pub fn work_size(&self) -> Result<usize, CuFftError> {
+        let mut size: usize = 0;
+        let result = unsafe { cufftGetSize(self.handle, &mut size) };
+        check(result)?;
+        Ok(size)
+    }
+
+    /// Override the plan's work-area pointer to a caller-owned buffer.
+    /// After this call cuFFT uses `work_area` for all subsequent
+    /// executions; the buffer must be at least `self.work_size()` bytes
+    /// and live as long as the plan. Pinning the work area at plan
+    /// construction is the cuFFT-side prerequisite for safe CUDA graph
+    /// capture: a captured `cufftExec*` records the work-area pointer,
+    /// so it must be stable across replays.
+    pub fn set_work_area(&self, work_area: *mut c_void) -> Result<(), CuFftError> {
+        // Disable auto-allocation so future plan operations don't
+        // reallocate behind our back. (Internal scratch from the
+        // construction-time `cufftPlan3d` remains allocated until the
+        // plan is destroyed — a small one-time overhead per slot.)
+        let result = unsafe { cufftSetAutoAllocation(self.handle, 0) };
+        check(result)?;
+        let result = unsafe { cufftSetWorkArea(self.handle, work_area) };
         check(result)
     }
 }
@@ -208,6 +283,40 @@ impl Plan3dC2R {
         })
     }
 
+    /// See `Plan3dR2C::new_unallocated`.
+    pub fn new_unallocated(
+        device: &Arc<CudaDevice>,
+        n_a: u32,
+        n_b: u32,
+        n_c: u32,
+    ) -> Result<Self, CuFftError> {
+        device.bind_to_thread().map_err(|_| CuFftError::Status(-1))?;
+        let mut handle = CufftHandle(0);
+        let result = unsafe { cufftCreate(&mut handle) };
+        check(result)?;
+        let result = unsafe { cufftSetAutoAllocation(handle, 0) };
+        check(result)?;
+        let mut work_size: usize = 0;
+        let result = unsafe {
+            cufftMakePlan3d(
+                handle,
+                n_a as c_int,
+                n_b as c_int,
+                n_c as c_int,
+                CUFFT_INV_TYPE,
+                &mut work_size,
+            )
+        };
+        check(result)?;
+        Ok(Plan3dC2R {
+            handle,
+            n_a,
+            n_b,
+            n_c,
+            _device: device.clone(),
+        })
+    }
+
     pub fn execute(
         &self,
         input: &CudaSlice<Real>,
@@ -231,6 +340,23 @@ impl Plan3dC2R {
     /// calls run on this stream.
     pub fn set_stream(&self, stream: CUstream) -> Result<(), CuFftError> {
         let result = unsafe { cufftSetStream(self.handle, stream as *mut c_void) };
+        check(result)
+    }
+
+    /// Returns cuFFT's requested work-area size in bytes for this plan.
+    pub fn work_size(&self) -> Result<usize, CuFftError> {
+        let mut size: usize = 0;
+        let result = unsafe { cufftGetSize(self.handle, &mut size) };
+        check(result)?;
+        Ok(size)
+    }
+
+    /// Override the plan's work-area pointer to a caller-owned buffer.
+    /// See `Plan3dR2C::set_work_area` for the contract.
+    pub fn set_work_area(&self, work_area: *mut c_void) -> Result<(), CuFftError> {
+        let result = unsafe { cufftSetAutoAllocation(self.handle, 0) };
+        check(result)?;
+        let result = unsafe { cufftSetWorkArea(self.handle, work_area) };
         check(result)
     }
 }
@@ -276,6 +402,13 @@ pub fn cufft_determinism_smoke_test(
         .map_err(|_| CuFftError::Status(-1))?;
 
     let plan = Plan3dR2C::new(device, N, N, N)?;
+    // Bind the plan to the device's default stream. Without this,
+    // cuFFT defaults to the legacy NULL stream while our buffer
+    // allocations and dtoh copies use the device's non-NULL stream;
+    // the two streams are not synchronised, so cuFFT may read stale
+    // input and the smoke test would report a false-positive
+    // determinism failure.
+    plan.set_stream(*device.cu_stream())?;
     let mut out_a = device
         .alloc_zeros::<Real>(2 * m_complex)
         .map_err(|_| CuFftError::Status(-1))?;

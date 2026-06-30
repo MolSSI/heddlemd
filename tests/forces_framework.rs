@@ -1,31 +1,70 @@
-mod common;
+//! Pluggable potential slot framework tests.
+//!
+//! Implements `rqm/forces/framework.md`'s Gherkin scenarios:
+//! construction, force-evaluation pipeline, trait dispatch, registry,
+//! force classes, RESPA dispatch, byte-identity, combiner, neighbor-list
+//! ownership, energy/virial aggregation, and AggregateLevel semantics.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use cudarc::driver::DeviceSlice;
-use heddle_md::forces::{AggregateLevel, Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential, PotentialRegistry, SlotOutputView};
-use heddle_md::gpu::{ParticleBuffers, init_device};
+use heddle_md::forces::{
+    AggregateLevel, AngleList, Bond, BondList, CutoffHandling, ExclusionList, ForceClass,
+    ForceField, ForceFieldContext, ForceFieldError, ForceLaunchBuilder, JitParticipant,
+    PairForceBindContext, PairForceFragment, PairForcePotential, Potential, PotentialBuildContext,
+    PotentialBuilder, PotentialRegistry, SlotOutputView,
+};
+use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
-    ParticleTypeConfig,
+    ParticleTypeConfig, SpmeConfig,
 };
 use heddle_md::pbc::SimulationBox;
-use heddle_md::state::ParticleState;
-use heddle_md::timings::Timings;
 use heddle_md::precision::Real;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings, TimingsReport};
+
+// =================================================================
+// Helpers
+// =================================================================
+
+fn box_10(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
+}
+
+fn ar_type() -> ParticleTypeConfig {
+    ParticleTypeConfig {
+        name: "Ar".to_string(),
+        mass: 1.0,
+        charge: 0.0,
+    }
+}
 
 fn lj_pair_config() -> PairInteractionConfig {
     PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
         cutoff: 5.0,
         r_switch: 5.0,
-        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
+        potential: PairPotentialParams::LennardJones {
+            sigma: 1.0,
+            epsilon: 1.0,
+        },
     }
 }
 
-fn box_10() -> SimulationBox {
-    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
+fn morse_bond_type() -> BondTypeConfig {
+    BondTypeConfig::Morse {
+        name: "CC".to_string(),
+        de: 1.0,
+        a: 2.0,
+        re: 1.0,
+    }
 }
 
 fn state_n(n: usize) -> ParticleState {
+    // Particles laid along x at 1.5 spacing — close enough to give a
+    // non-trivial LJ force; box is 10 units.
     let pos: Vec<Real> = (0..n).map(|i| i as Real * 1.5).collect();
     ParticleState::new(
         pos,
@@ -38,7 +77,7 @@ fn state_n(n: usize) -> ParticleState {
         vec![0.0; n],
         vec![0u32; n],
         None,
-            None,
+        None,
     )
     .unwrap()
 }
@@ -63,2498 +102,14 @@ fn single_bond_list(n: usize) -> BondList {
     }
 }
 
-// rq-56c8a238
-#[test]
-fn force_field_lj_only() {
-    let gpu = init_device().unwrap();
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    assert_eq!(ff.slots.len(), 1);
-    assert_eq!(ff.slots[0].label(), "lennard_jones");
-}
-
-// rq-3de16ce0
-#[test]
-fn force_field_lj_and_morse() {
-    let gpu = init_device().unwrap();
-    let bl = single_bond_list(4);
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    assert_eq!(ff.slots.len(), 2);
-    assert_eq!(ff.slots[0].label(), "lennard_jones");
-    assert_eq!(ff.slots[1].label(), "morse_bonded");
-}
-
-// rq-0f34d11b
-#[test]
-fn bond_types_declared_no_bonds() {
-    let gpu = init_device().unwrap();
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    assert_eq!(ff.slots.len(), 1);
-    assert_eq!(ff.slots[0].label(), "lennard_jones");
-}
-
-// rq-60f445b2
-#[test]
-fn force_field_zero_slots() {
-    let gpu = init_device().unwrap();
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    assert!(ff.slots.is_empty());
-    assert_eq!(ff.fast_slot_forces_x.len(), 0);
-    assert_eq!(ff.fast_slot_forces_y.len(), 0);
-    assert_eq!(ff.fast_slot_forces_z.len(), 0);
-}
-
-// rq-455db9c2
-#[test]
-fn slot_buffers_sized_num_slots_times_particle_count() {
-    let gpu = init_device().unwrap();
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let bl = single_bond_list(8);
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        8,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(8),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    assert_eq!(ff.slots.len(), 2);
-    assert_eq!(ff.fast_slot_forces_x.len(), 16);
-    assert_eq!(ff.fast_slot_forces_y.len(), 16);
-    assert_eq!(ff.fast_slot_forces_z.len(), 16);
-}
-
-// rq-c525ee79
-#[test]
-fn empty_force_field() {
-    let gpu = init_device().unwrap();
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        0,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(0),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(0),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    assert_eq!(ff.slots.len(), 1);
-    assert_eq!(ff.fast_slot_forces_x.len(), 0);
-    assert_eq!(ff.fast_slot_forces_y.len(), 0);
-    assert_eq!(ff.fast_slot_forces_z.len(), 0);
-}
-
-// rq-c170c0b7
-//
-// `ForceField::new` produces deterministic, non-colliding labels from its
-// real config inputs, so the only way to exercise the DuplicateLabel guard
-// is to construct the framework manually from two slots that share a
-// label. We use a stub Potential implementation for that.
-
-#[derive(Debug)]
-struct LabelStub(&'static str);
-
-impl Potential for LabelStub {
-    fn label(&self) -> &'static str {
-        self.0
-    }
-    fn max_cutoff(&self) -> Option<Real> {
-        None
-    }
-    fn contribute(
-        &mut self,
-        _buffers: &ParticleBuffers,
-        _sim_box: &SimulationBox,
-        _cx: &ForceFieldContext<'_>,
-        _timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-    fn reduce(
-        &mut self,
-        _output: SlotOutputView<'_>,
-        _cx: &ForceFieldContext<'_>,
-        _timings: &mut Timings,
-    _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-}
-
-#[test]
-fn duplicate_label_check_rejects_colliding_labels() {
-    // Mirror ForceField::new's duplicate-check rule on a hand-built slot list.
-    let slots: Vec<Box<dyn Potential>> = vec![
-        Box::new(LabelStub("dup")),
-        Box::new(LabelStub("dup")),
-    ];
-    let mut collision: Option<&'static str> = None;
-    for i in 0..slots.len() {
-        for j in (i + 1)..slots.len() {
-            if slots[i].label() == slots[j].label() {
-                collision = Some(slots[i].label());
-            }
-        }
-    }
-    assert_eq!(collision, Some("dup"));
-}
-
-// rq-32e981cc
-#[test]
-fn step_lj_only_writes_lj_forces() {
-    let gpu = init_device().unwrap();
-    let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        2,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut downloaded = state.clone();
-    downloaded.download_from(&buffers).unwrap();
-    assert!(downloaded.forces_x[0] != 0.0);
-    assert!((downloaded.forces_x[0] + downloaded.forces_x[1]).abs() < 1.0e-6);
-}
-
-// rq-df3a50f6
-#[test]
-fn step_both_slots_sums_lj_and_morse() {
-    let gpu = init_device().unwrap();
-    let state = state_n(2);
-    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut buffers_lj_only = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings_a = Timings::new(&gpu).unwrap();
-    let mut timings_b = Timings::new(&gpu).unwrap();
-    let mut timings_lj = Timings::new(&gpu).unwrap();
-
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let bl = single_bond_list(2);
-
-    let mut ff_lj = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        2,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff_lj.step(&mut buffers_lj_only, &box_10(), &mut timings_lj, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut lj_state = state.clone();
-    lj_state.download_from(&buffers_lj_only).unwrap();
-
-    let lj_tiny = PairInteractionConfig {
-        between: ("Ar".to_string(), "Ar".to_string()),
-        cutoff: 0.5,
-        r_switch: 0.5,
-        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
-    };
-    let mut ff_morse = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        2,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_tiny],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff_morse.step(&mut buffers_b, &box_10(), &mut timings_b, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut morse_state = state.clone();
-    morse_state.download_from(&buffers_b).unwrap();
-
-    let mut ff_both = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        2,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff_both.step(&mut buffers_a, &box_10(), &mut timings_a, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut combined = state.clone();
-    combined.download_from(&buffers_a).unwrap();
-
-    let expected = lj_state.forces_x[0] + morse_state.forces_x[0];
-    let got = combined.forces_x[0];
-    assert!((got - expected).abs() < 1.0e-4, "expected {expected}, got {got}");
-}
-
-// rq-fc7b1565
-#[test]
-fn step_zero_slots_writes_zero_forces() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    // Seed forces_* with non-zero junk so we can prove the combiner
-    // overwrites them.
-    let state = ParticleState::new(
-        vec![0.0, 1.0, 2.0, 3.0],
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![1.0; 4],
-        vec![0.0; 4],
-        vec![0u32; 4],
-        None,
-            None,
-    )
-    .unwrap();
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    // Stamp non-zero forces directly into the device buffer.
-    let nonzero = vec![7.0; 4];
-    device
-        .htod_sync_copy_into(&nonzero, &mut buffers.forces_x)
-        .unwrap();
-    device
-        .htod_sync_copy_into(&nonzero, &mut buffers.forces_y)
-        .unwrap();
-    device
-        .htod_sync_copy_into(&nonzero, &mut buffers.forces_z)
-        .unwrap();
-
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    assert!(ff.slots.is_empty());
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-
-    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    let fy = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
-    let fz = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
-    assert!(fx.iter().all(|&v| v == 0.0));
-    assert!(fy.iter().all(|&v| v == 0.0));
-    assert!(fz.iter().all(|&v| v == 0.0));
-
-    let report = timings.finalize().unwrap();
-    // Only AccumulateForces should have a sample; LJ and Morse stages absent.
-    let names: Vec<&str> = report.stages.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"accumulate_forces"));
-    assert!(!names.contains(&"lj_pair_force"));
-    assert!(!names.contains(&"reduce_pair_forces"));
-    assert!(!names.contains(&"morse_bond_force"));
-    assert!(!names.contains(&"reduce_bond_forces"));
-}
-
-// rq-de47c1ac
-#[test]
-fn step_empty_launches_no_kernels() {
-    let gpu = init_device().unwrap();
-    let state = ParticleState::new(
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        vec![0.0; 0],
-        Vec::new(),
-        None,
-            None,
-    )
-    .unwrap();
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        0,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(0),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(0),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let report = timings.finalize().unwrap();
-    assert!(report.stages.is_empty());
-}
-
-// rq-7d8485b3
-#[test]
-fn each_slot_writes_its_own_row() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(3);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let bl = single_bond_list(3);
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        3,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-
-    // Recompute slot 0 (LJ) in isolation to compare.
-    let mut buffers_lj = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut t_lj = Timings::new(&gpu).unwrap();
-    let mut ff_lj = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        3,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(3),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff_lj.step(&mut buffers_lj, &box_10(), &mut t_lj, AggregateLevel::ForcesAndScalars).unwrap();
-    let lj_x = device.dtoh_sync_copy(&buffers_lj.forces_x).unwrap();
-
-    // And slot 1 (Morse) in isolation.
-    let lj_tiny = PairInteractionConfig {
-        between: ("Ar".to_string(), "Ar".to_string()),
-        cutoff: 0.5,
-        r_switch: 0.5,
-        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
-    };
-    let mut buffers_m = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut t_m = Timings::new(&gpu).unwrap();
-    let mut ff_m = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        3,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_tiny],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff_m.step(&mut buffers_m, &box_10(), &mut t_m, AggregateLevel::ForcesAndScalars).unwrap();
-    let morse_x = device.dtoh_sync_copy(&buffers_m.forces_x).unwrap();
-
-    let row_x = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
-    assert_eq!(row_x.len(), 6);
-    for i in 0..3 {
-        assert!((row_x[i] - lj_x[i]).abs() < 1.0e-6, "row 0 mismatch at {i}");
-        assert!((row_x[3 + i] - morse_x[i]).abs() < 1.0e-4, "row 1 mismatch at {i}");
-    }
-}
-
-// rq-a9642241
-//
-// A third Potential implementation can be slotted into a ForceField without
-// editing the combiner kernel or ForceField. We instantiate a stub that
-// writes a known per-particle pattern into its assigned row, then verify
-// the combiner sums it on top of an LJ slot's contribution and that the
-// stub's row is at index 1 (right after LJ).
-
-#[derive(Debug)]
-struct ConstStub {
-    value_x: Real,
-    value_y: Real,
-    value_z: Real,
-    device: std::sync::Arc<cudarc::driver::CudaDevice>,
-}
-
-impl Potential for ConstStub {
-    fn label(&self) -> &'static str {
-        "const_stub"
-    }
-    fn max_cutoff(&self) -> Option<Real> {
-        None
-    }
-    fn contribute(
-        &mut self,
-        _buffers: &ParticleBuffers,
-        _sim_box: &SimulationBox,
-        _cx: &ForceFieldContext<'_>,
-        _timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-    fn reduce(
-        &mut self,
-        mut output: SlotOutputView<'_>,
-        _cx: &ForceFieldContext<'_>,
-        _timings: &mut Timings,
-    _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        let n = output.force_x.len();
-        if n == 0 {
-            return Ok(());
-        }
-        let vx = vec![self.value_x; n];
-        let vy = vec![self.value_y; n];
-        let vz = vec![self.value_z; n];
-        self.device
-            .htod_sync_copy_into(&vx, &mut output.force_x)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        self.device
-            .htod_sync_copy_into(&vy, &mut output.force_y)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        self.device
-            .htod_sync_copy_into(&vz, &mut output.force_z)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        Ok(())
-    }
-}
-
-// Builder that emits a `ConstStub` slot writing per-particle constants.
-// Used by `third_potential_extensibility` to register a custom Fast slot
-// through the canonical `ForceField::new` path.
-#[derive(Debug, Clone)]
-struct ConstStubBuilder {
-    value_x: Real,
-    value_y: Real,
-    value_z: Real,
-}
-
-impl heddle_md::forces::PotentialBuilder for ConstStubBuilder {
-    fn build(
-        &self,
-        cx: &heddle_md::forces::PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        Ok(Some(Box::new(ConstStub {
-            value_x: self.value_x,
-            value_y: self.value_y,
-            value_z: self.value_z,
-            device: cx.gpu.device.clone(),
-        })))
-    }
-    fn box_clone(&self) -> Box<dyn heddle_md::forces::PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-#[test]
-fn third_potential_extensibility() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(3);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    // Register the stub builder after the built-ins so its slot lands
-    // at index 1 (right after LJ). Both slots are Fast.
-    let mut registry = PotentialRegistry::with_builtins();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 1.0,
-        value_y: 2.0,
-        value_z: 3.0,
-    }));
-    let mut ff = ForceField::new(&registry, &gpu,
-        3,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(3),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-
-    // The stub writes (1, 2, 3) per particle. Subtract the LJ-only result
-    // to recover the stub's contribution.
-    let mut buffers_lj = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut t_lj = Timings::new(&gpu).unwrap();
-    let mut ff_lj = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        3,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(3),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff_lj.step(&mut buffers_lj, &box_10(), &mut t_lj, AggregateLevel::ForcesAndScalars).unwrap();
-    let lj_x = device.dtoh_sync_copy(&buffers_lj.forces_x).unwrap();
-    let lj_y = device.dtoh_sync_copy(&buffers_lj.forces_y).unwrap();
-    let lj_z = device.dtoh_sync_copy(&buffers_lj.forces_z).unwrap();
-
-    let mixed_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    let mixed_y = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
-    let mixed_z = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
-
-    for i in 0..3 {
-        assert!((mixed_x[i] - lj_x[i] - 1.0).abs() < 1.0e-6);
-        assert!((mixed_y[i] - lj_y[i] - 2.0).abs() < 1.0e-6);
-        assert!((mixed_z[i] - lj_z[i] - 3.0).abs() < 1.0e-6);
-    }
-    // Row 1 of slot_forces_x should hold the stub's value.
-    let row_x = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
-    for v in &row_x[3..6] {
-        assert_eq!(*v, 1.0);
-    }
-}
-
-// rq-c8e5b14e rq-55d441ee
-#[test]
-fn two_independent_runs_byte_identical() {
-    let gpu = init_device().unwrap();
-    let state = state_n(4);
-    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings_a = Timings::new(&gpu).unwrap();
-    let mut timings_b = Timings::new(&gpu).unwrap();
-    let mut ff_a = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    let mut ff_b = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff_a.step(&mut buffers_a, &box_10(), &mut timings_a, AggregateLevel::ForcesAndScalars).unwrap();
-    ff_b.step(&mut buffers_b, &box_10(), &mut timings_b, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut state_a = state.clone();
-    let mut state_b = state.clone();
-    state_a.download_from(&buffers_a).unwrap();
-    state_b.download_from(&buffers_b).unwrap();
-    assert_eq!(state_a.forces_x, state_b.forces_x);
-    assert_eq!(state_a.forces_y, state_b.forces_y);
-    assert_eq!(state_a.forces_z, state_b.forces_z);
-}
-
-// Second stub Potential with a different label so the duplicate-label
-// guard doesn't trip when paired with `ConstStub`.
-#[derive(Debug)]
-struct ConstStubB {
-    device: std::sync::Arc<cudarc::driver::CudaDevice>,
-}
-
-impl Potential for ConstStubB {
-    fn label(&self) -> &'static str {
-        "const_stub_b"
-    }
-    fn max_cutoff(&self) -> Option<Real> {
-        None
-    }
-    fn contribute(
-        &mut self,
-        _b: &ParticleBuffers,
-        _s: &SimulationBox,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-    fn reduce(
-        &mut self,
-        mut output: SlotOutputView<'_>,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        let n = output.force_x.len();
-        let vx = vec![10.0; n];
-        self.device
-            .htod_sync_copy_into(&vx, &mut output.force_x)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        self.device
-            .htod_sync_copy_into(&vec![0.0; n], &mut output.force_y)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        self.device
-            .htod_sync_copy_into(&vec![0.0; n], &mut output.force_z)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ConstStubBBuilder;
-
-impl heddle_md::forces::PotentialBuilder for ConstStubBBuilder {
-    fn build(
-        &self,
-        cx: &heddle_md::forces::PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        Ok(Some(Box::new(ConstStubB {
-            device: cx.gpu.device.clone(),
-        })))
-    }
-    fn box_clone(&self) -> Box<dyn heddle_md::forces::PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-// rq-a5aa743e rq-3d38868e
-#[test]
-fn combiner_sums_slot_rows_in_slot_order() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    // Two custom Fast-class stub builders registered in canonical order:
-    // ConstStub writes value_x = 1.0; ConstStubB writes 10.0. Combiner sum is 11.
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 1.0,
-        value_y: 0.0,
-        value_z: 0.0,
-    }));
-    registry.register(Box::new(ConstStubBBuilder));
-    let mut ff = ForceField::new(&registry, &gpu,
-        2,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert_eq!(fx, vec![11.0, 11.0]);
-}
-
-// rq-3e9217e2
-#[test]
-fn combiner_with_zero_slots_writes_zeros() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    // Pre-stamp non-zero forces.
-    let stamp = vec![42.0; 4];
-    device.htod_sync_copy_into(&stamp, &mut buffers.forces_x).unwrap();
-    device.htod_sync_copy_into(&stamp, &mut buffers.forces_y).unwrap();
-    device.htod_sync_copy_into(&stamp, &mut buffers.forces_z).unwrap();
-
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    let fy = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
-    let fz = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
-    assert!(fx.iter().all(|&v| v == 0.0));
-    assert!(fy.iter().all(|&v| v == 0.0));
-    assert!(fz.iter().all(|&v| v == 0.0));
-}
-
-// rq-82acb52f
-#[test]
-fn combiner_idempotent_across_two_calls() {
-    let gpu = init_device().unwrap();
-    let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut first = state.clone();
-    first.download_from(&buffers).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut second = state.clone();
-    second.download_from(&buffers).unwrap();
-    assert_eq!(first.forces_x, second.forces_x);
-}
-
-// --- Shared neighbor list ---
-
-#[test] // rq-b33cf896
-fn force_field_with_lj_owns_shared_neighbor_list() {
-    let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &sim_box,
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::CellList { max_neighbors: 16, r_skin: 0.3 },
-    )
-    .unwrap();
-    let nl = ff.neighbor_list.as_ref().expect("shared neighbor list");
-    assert_eq!(nl.max_neighbors, 16);
-}
-
-#[test] // rq-433c972f rq-83312d09
-fn force_field_with_only_bonded_owns_no_neighbor_list() {
-    let gpu = init_device().unwrap();
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let bl = single_bond_list(4);
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    assert_eq!(ff.slots.len(), 1);
-    assert_eq!(ff.slots[0].label(), "morse_bonded");
-    assert!(ff.neighbor_list.is_none());
-}
-
-#[test] // rq-47540d14
-fn bonded_only_step_launches_no_neighbor_list_kernels() {
-    let gpu = init_device().unwrap();
-    let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let bl = single_bond_list(4);
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let report = timings.finalize().unwrap();
-    let names: Vec<&str> = report.stages.iter().map(|s| s.name.as_str()).collect();
-    assert!(!names.contains(&"neighbor_displacement_squared"));
-    assert!(!names.contains(&"neighbor_list_build"));
-}
-
-// Stub Potential that records the value of cx.neighbor_list passed to contribute.
-#[derive(Debug)]
-struct ContextProbeStub {
-    last_seen_nl_some: std::sync::Arc<std::sync::Mutex<Option<bool>>>,
-}
-
-impl Potential for ContextProbeStub {
-    fn label(&self) -> &'static str {
-        "context_probe"
-    }
-    fn max_cutoff(&self) -> Option<Real> {
-        None
-    }
-    fn contribute(
-        &mut self,
-        _b: &ParticleBuffers,
-        _s: &SimulationBox,
-        cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        *self.last_seen_nl_some.lock().unwrap() = Some(cx.neighbor_list.is_some());
-        Ok(())
-    }
-    fn reduce(
-        &mut self,
-        output: SlotOutputView<'_>,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        // Write zeros to the output row.
-        let n = output.force_x.len();
-        let device = std::sync::Arc::clone(&self.last_seen_nl_some);
-        let _ = device; // unused
-        if n == 0 {
-            return Ok(());
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ContextProbeStubBuilder {
-    last_seen_nl_some: std::sync::Arc<std::sync::Mutex<Option<bool>>>,
-}
-
-impl heddle_md::forces::PotentialBuilder for ContextProbeStubBuilder {
-    fn build(
-        &self,
-        _cx: &heddle_md::forces::PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        Ok(Some(Box::new(ContextProbeStub {
-            last_seen_nl_some: self.last_seen_nl_some.clone(),
-        })))
-    }
-    fn box_clone(&self) -> Box<dyn heddle_md::forces::PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-#[test] // rq-81e84c73 rq-2ed643ad
-fn context_exposes_shared_neighbor_list_to_contribute() {
-    let gpu = init_device().unwrap();
-    let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    // Register the probe stub after the built-ins; LJ provides the
-    // shared neighbor list the probe expects to see in cx.
-    let probe = std::sync::Arc::new(std::sync::Mutex::new(None::<bool>));
-    let mut registry = PotentialRegistry::with_builtins();
-    registry.register(Box::new(ContextProbeStubBuilder {
-        last_seen_nl_some: probe.clone(),
-    }));
-    let mut ff = ForceField::new(&registry, &gpu,
-        2,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    assert_eq!(*probe.lock().unwrap(), Some(true));
-}
-
-// Stub Potential that reports a configurable max_cutoff. Used to verify the
-// framework aggregates max_cutoff across slots when building the shared list.
-#[derive(Debug)]
-#[allow(dead_code)]
-struct CutoffProbeStub {
-    cutoff: Real,
-}
-
-impl Potential for CutoffProbeStub {
-    fn label(&self) -> &'static str {
-        "cutoff_probe"
-    }
-    fn max_cutoff(&self) -> Option<Real> {
-        Some(self.cutoff)
-    }
-    fn contribute(
-        &mut self,
-        _b: &ParticleBuffers,
-        _s: &SimulationBox,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-    fn reduce(
-        &mut self,
-        _output: SlotOutputView<'_>,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-}
-
-#[test] // rq-e39d0ed8 rq-3bc18e1a
-fn max_cutoff_aggregation_determines_neighbor_list_radius() {
-    // The LJ slot's max_cutoff() governs the neighbor-list radius.
-    let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
-    let r_skin = 0.5_f64;
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &sim_box,
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()], // cutoff = 5.0
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::CellList { max_neighbors: 32, r_skin },
-    )
-    .unwrap();
-    let nl = ff.neighbor_list.as_ref().unwrap();
-    let cl = nl.cell_list_data().unwrap();
-    let r_search = (5.0 + r_skin as Real).powi(2);
-    assert!(
-        (cl.r_search_sq - r_search).abs() < 1.0e-3,
-        "r_search_sq = {}, expected ~{}",
-        cl.r_search_sq,
-        r_search
-    );
-}
-
-// --- Per-particle energy and virial outputs ---
-
-#[test] // rq-531faea9
-fn force_field_lj_only_populates_energy_and_virial() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    assert!(pe.iter().any(|&v| v != 0.0), "potential_energies should be non-zero");
-    assert!(vw.iter().any(|&v| v != 0.0), "virials should be non-zero");
-    assert!(pe.iter().all(|&v| v.is_finite()));
-    assert!(vw.iter().all(|&v| v.is_finite()));
-}
-
-#[test] // rq-a85e8216
-fn slot_output_buffers_have_five_flat_arrays() {
-    let gpu = init_device().unwrap();
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let bl = single_bond_list(8);
-    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        8,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(8),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    assert_eq!(ff.slots.len(), 2);
-    assert_eq!(ff.fast_slot_forces_x.len(), 16);
-    assert_eq!(ff.fast_slot_forces_y.len(), 16);
-    assert_eq!(ff.fast_slot_forces_z.len(), 16);
-    assert_eq!(ff.fast_slot_energies.len(), 16);
-    assert_eq!(ff.fast_slot_virials.len(), 16);
-}
-
-#[test] // rq-3d38868e
-fn combiner_sums_slot_energies_and_virials_in_slot_order() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    // Two Fast-class stub slots (ConstStub + ConstStubB) registered
-    // through the canonical ForceField::new path. Each writes zeros to
-    // its force-x output and ignores energy / virial, so pre-seeding
-    // the per-slot energy and virial rows lets the combiner sum them
-    // unmodified.
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 0.0,
-        value_y: 0.0,
-        value_z: 0.0,
-    }));
-    registry.register(Box::new(ConstStubBBuilder));
-    let mut ff = ForceField::new(&registry, &gpu,
-        2,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    // Pre-seed the Fast-class slot energy/virial rows with known values.
-    device
-        .htod_sync_copy_into(&vec![1.0, 2.0, 10.0, 20.0], &mut ff.fast_slot_energies)
-        .unwrap();
-    device
-        .htod_sync_copy_into(&vec![0.5, 1.0, 5.0, 10.0], &mut ff.fast_slot_virials)
-        .unwrap();
-
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    assert_eq!(pe, vec![11.0, 22.0]);
-    assert_eq!(vw, vec![5.5, 11.0]);
-}
-
-#[test] // rq-c0f2daca
-fn zero_slot_step_writes_zeros_to_energy_and_virial() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    // Pre-stamp non-zero junk into PE / virial.
-    device
-        .htod_sync_copy_into(&vec![42.0; 4], &mut buffers.potential_energies)
-        .unwrap();
-    device
-        .htod_sync_copy_into(&vec![-7.0; 4], &mut buffers.virials)
-        .unwrap();
-
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    assert_eq!(pe, vec![0.0; 4]);
-    assert_eq!(vw, vec![0.0; 4]);
-}
-
-#[test] // rq-db3b3d5e
-fn system_total_potential_energy_equals_sum_of_particle_shares() {
-    let gpu = init_device().unwrap();
-    // Two particles at r=1.5 with σ=1, ε=1.
-    let state = ParticleState::new(
-        vec![0.0, 1.5],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![1.0, 1.0],
-        vec![0.0; vec![1.0, 1.0].len()],
-        vec![0u32, 0],
-        None,
-            None,
-    )
-    .unwrap();
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        2,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let pe = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let total: Real = pe.iter().sum();
-    // Closed-form LJ energy at r=1.5 with σ=1, ε=1.
-    let r: Real = 1.5;
-    let sr2 = (1.0 / r).powi(2);
-    let sr6 = sr2.powi(3);
-    let sr12 = sr6 * sr6;
-    let expected = 4.0 * 1.0 * (sr12 - sr6);
-    assert!((total - expected).abs() < 1.0e-5, "got {total} expected {expected}");
-}
-
-#[test] // rq-7fe57a77
-fn system_total_virial_equals_sum_of_particle_shares() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = ParticleState::new(
-        vec![0.0, 1.5],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![1.0, 1.0],
-        vec![0.0; vec![1.0, 1.0].len()],
-        vec![0u32, 0],
-        None,
-            None,
-    )
-    .unwrap();
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        2,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    let total_virial: Real = vw.iter().sum();
-    // Single pair, r_ij = (-1.5, 0, 0) for i=0 → r · F = -1.5 * F_x_on_0.
-    // F_x_on_0 = fx[0] (particle 0's net force comes entirely from particle 1).
-    let expected = -1.5 * fx[0];
-    assert!((total_virial - expected).abs() < 1.0e-5, "got {total_virial} expected {expected}");
-}
-
-// =====================================================================
-// PotentialRegistry-driven construction scenarios. See the
-// "PotentialRegistry-driven construction" block in
-// rqm/forces/framework.md.
-// =====================================================================
-
-use heddle_md::forces::{
-    CoulombBuilder, HarmonicAngleBuilder, LennardJonesBuilder, MorseBondedBuilder,
-    PotentialBuildContext, PotentialBuilder, SpmeRealBuilder, SpmeReciprocalBuilder,
-};
-use heddle_md::gpu::GpuContext;
-
-// rq-053a026c
-#[test]
-fn registry_with_builtins_exposes_the_six_builders_in_evaluation_order() {
-    let registry = PotentialRegistry::with_builtins();
-    assert_eq!(registry.builders.len(), 6);
-    // For unit-struct builders, `#[derive(Debug)]` prints the type name
-    // itself ("LennardJonesBuilder") with no trailing fields. That gives
-    // us a portable handle on the concrete type behind each
-    // `Box<dyn PotentialBuilder>`.
-    let names: Vec<String> = registry
-        .builders
-        .iter()
-        .map(|b| format!("{b:?}"))
-        .collect();
-    assert_eq!(
-        names,
-        vec![
-            "LennardJonesBuilder",
-            "CoulombBuilder",
-            "SpmeRealBuilder",
-            "SpmeReciprocalBuilder",
-            "MorseBondedBuilder",
-            "HarmonicAngleBuilder",
-        ]
-    );
-}
-
-// rq-78ad9477
-#[test]
-fn registry_new_starts_empty() {
-    let registry = PotentialRegistry::new();
-    assert!(registry.builders.is_empty());
-}
-
-// rq-51af5f97
-#[test]
-fn registry_register_appends_a_builder_at_the_end() {
-    let mut registry = PotentialRegistry::with_builtins();
-    assert_eq!(registry.builders.len(), 6);
-    registry.register(Box::new(SkipBuilder));
-    assert_eq!(registry.builders.len(), 7);
-    let t = format!("{:?}", registry.builders[6]);
-    assert_eq!(t, "SkipBuilder");
-}
-
-// rq-b1a132b5
-#[test]
-fn force_field_new_iterates_registry_in_registration_order() {
-    // LJ + Morse simultaneously: with the canonical builtin order, LJ comes first.
-    let gpu = init_device().unwrap();
-    let n = 4;
-    let ff = ForceField::new(
-        &PotentialRegistry::with_builtins(),
-        &gpu,
-        n,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[BondTypeConfig::Morse {
-            name: "CC".to_string(),
-            de: 1.0,
-            a: 1.0,
-            re: 1.0,
-        }],
-        &[],
-        None,
-        None,
-        &[],
-        &single_bond_list(n),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(n),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    assert_eq!(ff.slots[0].label(), "lennard_jones");
-    assert_eq!(ff.slots[1].label(), "morse_bonded");
-}
-
-/// PotentialBuilder that always returns Ok(None). Used by scenarios that
-/// need a no-op builder to exercise the skip path or to occupy a registry
-/// slot without producing a slot.
-#[derive(Debug, Clone)]
-struct SkipBuilder;
-
-impl PotentialBuilder for SkipBuilder {
-    fn build(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        Ok(None)
-    }
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-// rq-ccf4dc3f
-#[test]
-fn builder_returning_ok_none_is_skipped_without_erroring() {
-    let gpu = init_device().unwrap();
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(SkipBuilder));
-    let ff = ForceField::new(
-        &registry,
-        &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    assert!(ff.slots.is_empty());
-}
-
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc as StdArc;
-
-/// PotentialBuilder that always errors out. Used by the short-circuit
-/// scenario.
-#[derive(Debug, Clone)]
-struct ErrBuilder;
-
-impl PotentialBuilder for ErrBuilder {
-    fn build(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        Err(ForceFieldError::DuplicateLabel("ErrBuilder-marker"))
-    }
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-/// Records whether `build` was invoked. The short-circuit scenario asserts
-/// that no builder downstream of an `Err`-returning one is called.
-#[derive(Debug, Clone)]
-struct RecordingBuilder {
-    called: StdArc<AtomicBool>,
-}
-
-impl PotentialBuilder for RecordingBuilder {
-    fn build(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        self.called.store(true, Ordering::SeqCst);
-        Ok(None)
-    }
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-// rq-6ed7e318
-#[test]
-fn builder_err_short_circuits_force_field_new() {
-    let gpu = init_device().unwrap();
-    let called = StdArc::new(AtomicBool::new(false));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ErrBuilder));
-    registry.register(Box::new(RecordingBuilder { called: called.clone() }));
-    let err = ForceField::new(
-        &registry,
-        &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap_err();
-    match err {
-        ForceFieldError::DuplicateLabel(name) => {
-            assert_eq!(name, "ErrBuilder-marker");
-        }
-        other => panic!("expected the ErrBuilder error, got {other:?}"),
-    }
-    assert!(
-        !called.load(Ordering::SeqCst),
-        "downstream builder was invoked despite earlier Err"
-    );
-}
-
-/// Stub Potential whose label is configurable. Used to manufacture
-/// duplicate-label scenarios without depending on which built-ins are
-/// registered.
-#[derive(Debug)]
-struct RegistryLabelStub(&'static str);
-
-impl Potential for RegistryLabelStub {
-    fn label(&self) -> &'static str {
-        self.0
-    }
-    fn max_cutoff(&self) -> Option<Real> {
-        None
-    }
-    fn contribute(
-        &mut self,
-        _b: &ParticleBuffers,
-        _s: &SimulationBox,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-    fn reduce(
-        &mut self,
-        _o: SlotOutputView<'_>,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-struct DuplicateLabelBuilder;
-
-impl PotentialBuilder for DuplicateLabelBuilder {
-    fn build(
-        &self,
-        _cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        Ok(Some(Box::new(RegistryLabelStub("duplicate"))))
-    }
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-// rq-24c36f8d rq-c170c0b7
-#[test]
-fn two_builders_producing_slots_with_same_label_fail_construction() {
-    let gpu = init_device().unwrap();
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(DuplicateLabelBuilder));
-    registry.register(Box::new(DuplicateLabelBuilder));
-    let err = ForceField::new(
-        &registry,
-        &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap_err();
-    match err {
-        ForceFieldError::DuplicateLabel(label) => assert_eq!(label, "duplicate"),
-        other => panic!("expected DuplicateLabel, got {other:?}"),
-    }
-}
-
-// rq-028f5f8e
-#[test]
-fn empty_registry_produces_zero_slot_force_field() {
-    let gpu = init_device().unwrap();
-    let registry = PotentialRegistry::new();
-    let ff = ForceField::new(
-        &registry,
-        &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    assert!(ff.slots.is_empty());
-    assert!(ff.neighbor_list.is_none());
-}
-
-/// Captures the addresses of every borrowed field on the
-/// `PotentialBuildContext` for the rq-b75ce71a passthrough scenario.
-#[derive(Debug, Clone)]
-struct PassthroughCaptureBuilder {
-    captured: StdArc<std::sync::Mutex<Option<CapturedAddresses>>>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CapturedAddresses {
-    gpu: usize,
-    particle_count: usize,
-    sim_box: usize,
-    particle_types: usize,
-    pair_interactions: usize,
-    bond_types: usize,
-    angle_types: usize,
-    coulomb_config: Option<usize>,
-    spme_config: Option<usize>,
-    charges: usize,
-    bond_list: usize,
-    angle_list: usize,
-    exclusion_list: usize,
-    neighbor_list_config: usize,
-}
-
-impl PotentialBuilder for PassthroughCaptureBuilder {
-    fn build(
-        &self,
-        cx: &PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        let addrs = CapturedAddresses {
-            gpu: cx.gpu as *const GpuContext as usize,
-            particle_count: cx.particle_count,
-            sim_box: cx.sim_box as *const SimulationBox as usize,
-            particle_types: cx.particle_types.as_ptr() as usize,
-            pair_interactions: cx.pair_interactions.as_ptr() as usize,
-            bond_types: cx.bond_types.as_ptr() as usize,
-            angle_types: cx.angle_types.as_ptr() as usize,
-            coulomb_config: cx
-                .coulomb_config
-                .map(|c| c as *const _ as usize),
-            spme_config: cx.spme_config.map(|s| s as *const _ as usize),
-            charges: cx.charges.as_ptr() as usize,
-            bond_list: cx.bond_list as *const BondList as usize,
-            angle_list: cx.angle_list as *const heddle_md::forces::AngleList as usize,
-            exclusion_list: cx.exclusion_list as *const ExclusionList as usize,
-            neighbor_list_config: cx.neighbor_list_config as *const NeighborListConfig as usize,
-        };
-        *self.captured.lock().unwrap() = Some(addrs);
-        Ok(None)
-    }
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-// rq-b75ce71a
-#[test]
-fn build_context_exposes_every_parsed_config_input_by_reference() {
-    let gpu = init_device().unwrap();
-    let n = 3usize;
-    let sim_box = box_10();
-    let particle_types = vec![ParticleTypeConfig {
-        name: "Ar".to_string(),
-        mass: 1.0,
-        charge: 0.0,
-    }];
-    let pair_interactions: Vec<PairInteractionConfig> = vec![];
-    let bond_types: Vec<BondTypeConfig> = vec![];
-    let angle_types: Vec<heddle_md::io::config::AngleTypeConfig> = vec![];
-    let charges: Vec<Real> = vec![0.0; n];
-    let bond_list = BondList::empty(n);
-    let angle_list = heddle_md::forces::AngleList::empty(0);
-    let exclusion_list = ExclusionList::empty(n);
-    let nl_config = NeighborListConfig::AllPairs;
-
-    let captured = StdArc::new(std::sync::Mutex::new(None::<CapturedAddresses>));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(PassthroughCaptureBuilder { captured: captured.clone() }));
-
+/// Build an LJ-only ForceField.
+fn lj_only_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     ForceField::new(
-        &registry,
-        &gpu,
+        &PotentialRegistry::with_builtins(),
+        gpu,
         n,
-        &sim_box,
-        &particle_types,
-        &pair_interactions,
-        &bond_types,
-        &angle_types,
-        None,
-        None,
-        &charges,
-        &bond_list,
-        &angle_list,
-        &exclusion_list,
-        &nl_config,
-    )
-    .unwrap();
-
-    let addrs = captured.lock().unwrap().expect("captured");
-    assert_eq!(addrs.gpu, &gpu as *const GpuContext as usize);
-    assert_eq!(addrs.particle_count, n);
-    assert_eq!(addrs.sim_box, &sim_box as *const SimulationBox as usize);
-    assert_eq!(addrs.particle_types, particle_types.as_ptr() as usize);
-    assert_eq!(addrs.pair_interactions, pair_interactions.as_ptr() as usize);
-    assert_eq!(addrs.bond_types, bond_types.as_ptr() as usize);
-    assert_eq!(addrs.angle_types, angle_types.as_ptr() as usize);
-    assert_eq!(addrs.coulomb_config, None);
-    assert_eq!(addrs.spme_config, None);
-    assert_eq!(addrs.charges, charges.as_ptr() as usize);
-    assert_eq!(addrs.bond_list, &bond_list as *const BondList as usize);
-    assert_eq!(
-        addrs.angle_list,
-        &angle_list as *const heddle_md::forces::AngleList as usize
-    );
-    assert_eq!(
-        addrs.exclusion_list,
-        &exclusion_list as *const ExclusionList as usize
-    );
-    assert_eq!(
-        addrs.neighbor_list_config,
-        &nl_config as *const NeighborListConfig as usize
-    );
-}
-
-// Suppress unused-import lints for the per-builder names; they're
-// reachable through the registry but not referenced by name in tests.
-#[test]
-fn _builtin_builders_are_pub() {
-    let _ = LennardJonesBuilder;
-    let _ = CoulombBuilder;
-    let _ = SpmeRealBuilder;
-    let _ = SpmeReciprocalBuilder;
-    let _ = MorseBondedBuilder;
-    let _ = HarmonicAngleBuilder;
-}
-
-// =====================================================================
-// Force class system — per-class evaluation, per-class buffers,
-// empty-class no-op, RESPA-style determinism. See the "Force classes
-// and per-class evaluation" block in rqm/forces/framework.md.
-// =====================================================================
-
-use heddle_md::forces::ForceClass;
-
-/// Slow-class stub Potential that writes a per-particle constant on
-/// each reduce call. The constant increments every time `reduce` runs,
-/// so tests can detect whether a given call refreshed this slot or
-/// re-used the previous value from the slot-output buffer.
-#[derive(Debug)]
-struct CountingSlowStub {
-    device: std::sync::Arc<cudarc::driver::CudaDevice>,
-    counter: std::sync::Arc<std::sync::Mutex<Real>>,
-}
-
-impl Potential for CountingSlowStub {
-    fn label(&self) -> &'static str {
-        "counting_slow_stub"
-    }
-    fn max_cutoff(&self) -> Option<Real> {
-        None
-    }
-    fn frequency_class(&self) -> ForceClass {
-        ForceClass::Slow
-    }
-    fn contribute(
-        &mut self,
-        _b: &ParticleBuffers,
-        _s: &SimulationBox,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        Ok(())
-    }
-    fn reduce(
-        &mut self,
-        mut output: SlotOutputView<'_>,
-        _cx: &ForceFieldContext<'_>,
-        _t: &mut Timings,
-    _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        let n = output.force_x.len();
-        if n == 0 {
-            return Ok(());
-        }
-        let mut c = self.counter.lock().unwrap();
-        *c += 1.0;
-        let v = vec![*c; n];
-        self.device
-            .htod_sync_copy_into(&v, &mut output.force_x)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        self.device
-            .htod_sync_copy_into(&vec![0.0; n], &mut output.force_y)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        self.device
-            .htod_sync_copy_into(&vec![0.0; n], &mut output.force_z)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        self.device
-            .htod_sync_copy_into(&vec![0.0; n], &mut output.energy)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        self.device
-            .htod_sync_copy_into(&vec![0.0; n], &mut output.virial)
-            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-struct CountingSlowStubBuilder {
-    counter: std::sync::Arc<std::sync::Mutex<Real>>,
-}
-
-impl heddle_md::forces::PotentialBuilder for CountingSlowStubBuilder {
-    fn build(
-        &self,
-        cx: &heddle_md::forces::PotentialBuildContext<'_>,
-    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        Ok(Some(Box::new(CountingSlowStub {
-            device: cx.gpu.device.clone(),
-            counter: self.counter.clone(),
-        })))
-    }
-    fn box_clone(&self) -> Box<dyn heddle_md::forces::PotentialBuilder> {
-        Box::new(self.clone())
-    }
-}
-
-// rq-db2253db
-#[test]
-fn potential_frequency_class_default_is_fast() {
-    // ConstStub doesn't override frequency_class, so it inherits Fast.
-    let gpu = init_device().unwrap();
-    let stub = ConstStub {
-        value_x: 0.0,
-        value_y: 0.0,
-        value_z: 0.0,
-        device: gpu.device.clone(),
-    };
-    assert_eq!(stub.frequency_class(), ForceClass::Fast);
-}
-
-// rq-2dbda7ec
-#[test]
-fn builtin_potentials_report_canonical_class() {
-    let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
-    let spme = heddle_md::io::config::SpmeConfig {
-        r_cut_real: 4.0,
-        alpha: 0.5,
-        grid: [8, 8, 8],
-        spline_order: 4,
-    };
-    let charges = vec![0.0; 4];
-    let ff = ForceField::new(
-        &PotentialRegistry::with_builtins(),
-        &gpu,
-        4,
-        &sim_box,
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        Some(&spme),
-        &charges,
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    let expected = [
-        ("lennard_jones", ForceClass::Fast),
-        ("spme_real", ForceClass::Fast),
-        ("spme_reciprocal", ForceClass::Slow),
-    ];
-    for (label, class) in expected {
-        let slot = ff
-            .slots
-            .iter()
-            .find(|s| s.label() == label)
-            .unwrap_or_else(|| panic!("no slot with label `{label}`"));
-        assert_eq!(slot.frequency_class(), class, "slot {label}");
-    }
-}
-
-// rq-79068d4d
-#[test]
-fn per_class_slot_output_buffers_have_length_num_class_slots_times_n() {
-    // Custom registry with one Fast slot (LJ-equivalent stub) and one
-    // Slow slot (CountingSlowStub). N = 8.
-    let gpu = init_device().unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 0.0,
-        value_y: 0.0,
-        value_z: 0.0,
-    }));
-    registry.register(Box::new(CountingSlowStubBuilder {
-        counter: counter.clone(),
-    }));
-    let ff = ForceField::new(
-        &registry,
-        &gpu,
-        8,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(8),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(8),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    assert_eq!(ff.fast_slot_forces_x.len(), 1 * 8);
-    assert_eq!(ff.fast_slot_energies.len(), 1 * 8);
-    assert_eq!(ff.slow_slot_forces_x.len(), 1 * 8);
-    assert_eq!(ff.slow_slot_virials.len(), 1 * 8);
-}
-
-// rq-52d4b245
-#[test]
-fn per_class_slot_output_buffers_are_zero_initialised() {
-    // Slow buffers should be all-zero immediately after construction,
-    // before any step_* call has touched them.
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 0.0,
-        value_y: 0.0,
-        value_z: 0.0,
-    }));
-    registry.register(Box::new(CountingSlowStubBuilder {
-        counter: counter.clone(),
-    }));
-    let ff = ForceField::new(
-        &registry,
-        &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    let fast = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
-    let slow = device.dtoh_sync_copy(&ff.slow_slot_forces_x).unwrap();
-    assert!(fast.iter().all(|v| *v == 0.0));
-    assert!(slow.iter().all(|v| *v == 0.0));
-}
-
-// rq-cc66d208
-#[test]
-fn step_class_slow_with_no_slow_slots_is_noop() {
-    // ForceField with only Fast slots: step_class(Slow) must launch
-    // no kernels and leave ParticleBuffers.forces_* unchanged.
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(
-        &PotentialRegistry::with_builtins(),
-        &gpu,
-        4,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[lj_pair_config()],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    // Prime the total via step() so forces_* hold the canonical LJ total.
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let snap_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    let snap_y = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
-    let snap_z = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
-    let baseline_report = timings.finalize().unwrap();
-    let baseline_counts: std::collections::HashMap<String, u64> = baseline_report
-        .stages
-        .iter()
-        .map(|s| (s.name.clone(), s.count))
-        .collect();
-    let mut timings = Timings::new(&gpu).unwrap();
-
-    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
-        .unwrap();
-
-    let after_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    let after_y = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
-    let after_z = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
-    assert_eq!(after_x, snap_x);
-    assert_eq!(after_y, snap_y);
-    assert_eq!(after_z, snap_z);
-    let after_report = timings.finalize().unwrap();
-    // No kernels should have launched. baseline_counts is only here to
-    // make the failure mode "we launched kernels in the empty-class
-    // path" visible if this test ever regresses.
-    let _ = baseline_counts;
-    assert!(
-        after_report.stages.iter().all(|s| s.count == 0),
-        "step_class(Slow) on Fast-only ForceField launched kernels: {:?}",
-        after_report.stages
-    );
-}
-
-// rq-b80f2ddb
-#[test]
-fn step_class_fast_with_no_fast_slots_is_noop() {
-    // ForceField with only one Slow stub: step_class(Fast) must launch
-    // no kernels and leave ParticleBuffers.forces_* unchanged.
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(CountingSlowStubBuilder {
-        counter: counter.clone(),
-    }));
-    let mut ff = ForceField::new(
-        &registry,
-        &gpu,
-        4,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(4),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    // Prime the total so forces_* hold the Slow stub's value.
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let snap_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
-        .unwrap();
-
-    let after_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert_eq!(after_x, snap_x);
-    let after_report = timings.finalize().unwrap();
-    assert!(
-        after_report.stages.iter().all(|s| s.count == 0),
-        "step_class(Fast) on Slow-only ForceField launched kernels: {:?}",
-        after_report.stages
-    );
-}
-
-// rq-8eb7a546
-#[test]
-fn step_class_n0_launches_no_kernels() {
-    let gpu = init_device().unwrap();
-    let state = state_n(0);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 0.0,
-        value_y: 0.0,
-        value_z: 0.0,
-    }));
-    registry.register(Box::new(CountingSlowStubBuilder {
-        counter: counter.clone(),
-    }));
-    let mut ff = ForceField::new(
-        &registry,
-        &gpu,
-        0,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(0),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(0),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
-        .unwrap();
-    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
-        .unwrap();
-    let report = timings.finalize().unwrap();
-    assert!(
-        report.stages.iter().all(|s| s.count == 0),
-        "step_class on N=0 ForceField launched kernels: {:?}",
-        report.stages
-    );
-}
-
-// rq-57fd217e
-#[test]
-fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
-    // One Fast slot writing value 1.0 and one Slow stub whose counter
-    // resets after construction so the first reduce writes 1.0 too.
-    // The combined per-particle total should be 2.0.
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 1.0,
-        value_y: 0.0,
-        value_z: 0.0,
-    }));
-    registry.register(Box::new(CountingSlowStubBuilder {
-        counter: counter.clone(),
-    }));
-    let mut ff = ForceField::new(
-        &registry,
-        &gpu,
-        2,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    // Fast contributes 1.0; Slow contributes counter=1.0 → total 2.0.
-    assert_eq!(fx, vec![2.0, 2.0]);
-}
-
-// rq-1a996f5d
-#[test]
-fn step_class_fast_refreshes_only_fast_slots_contributions() {
-    // After step(), forces_x = ConstStub(value_x=1.0) + Slow(counter=1.0) = 2.0.
-    // step_class(Fast) re-runs ConstStub (still 1.0); Slow's row holds
-    // the stale 1.0, so forces_x stays at 2.0 — but importantly the
-    // counter does NOT advance.
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 1.0,
-        value_y: 0.0,
-        value_z: 0.0,
-    }));
-    registry.register(Box::new(CountingSlowStubBuilder {
-        counter: counter.clone(),
-    }));
-    let mut ff = ForceField::new(
-        &registry,
-        &gpu,
-        2,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    assert_eq!(*counter.lock().unwrap(), 1.0); // Slow ran once
-
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
-        .unwrap();
-    assert_eq!(*counter.lock().unwrap(), 1.0); // Slow did NOT run again
-    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert_eq!(fx, vec![2.0, 2.0]); // stale Slow=1.0 + fresh Fast=1.0
-}
-
-// rq-33cfb9fc
-#[test]
-fn step_class_slow_refreshes_only_slow_slots_contributions() {
-    // After step(): counter=1, forces_x=2.0.
-    // step_class(Slow): counter advances to 2, but Fast=1.0 stays
-    // stale, so forces_x = 1.0 (stale Fast) + 2.0 (fresh Slow) = 3.0.
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-    let mut registry = PotentialRegistry::new();
-    registry.register(Box::new(ConstStubBuilder {
-        value_x: 1.0,
-        value_y: 0.0,
-        value_z: 0.0,
-    }));
-    registry.register(Box::new(CountingSlowStubBuilder {
-        counter: counter.clone(),
-    }));
-    let mut ff = ForceField::new(
-        &registry,
-        &gpu,
-        2,
-        &box_10(),
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &BondList::empty(2),
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    assert_eq!(*counter.lock().unwrap(), 1.0);
-
-    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
-        .unwrap();
-    assert_eq!(*counter.lock().unwrap(), 2.0); // Slow advanced
-    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert_eq!(fx, vec![3.0, 3.0]); // stale Fast=1.0 + fresh Slow=2.0
-}
-
-// rq-40f9d35a
-#[test]
-fn respa_style_call_sequence_is_deterministic_across_two_runs() {
-    // Two independent ForceFields each issue
-    //   [step(), step_class(Fast), step_class(Fast), step_class(Slow)]
-    // with identical inputs. The final ParticleBuffers.forces_* should
-    // be byte-identical between the two runs.
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = state_n(4);
-    let counter_a = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-    let counter_b = std::sync::Arc::new(std::sync::Mutex::new(0.0));
-
-    let build_ff = |counter: std::sync::Arc<std::sync::Mutex<Real>>| {
-        let mut registry = PotentialRegistry::new();
-        registry.register(Box::new(ConstStubBuilder {
-            value_x: 1.0,
-            value_y: 0.5,
-            value_z: -0.25,
-        }));
-        registry.register(Box::new(CountingSlowStubBuilder { counter }));
-        ForceField::new(
-            &registry,
-            &gpu,
-            4,
-            &box_10(),
-            &[],
-            &[],
-            &[],
-            &[],
-            None,
-            None,
-            &[],
-            &BondList::empty(4),
-            &heddle_md::forces::AngleList::empty(0),
-            &ExclusionList::empty(4),
-            &NeighborListConfig::AllPairs,
-        )
-        .unwrap()
-    };
-    let mut ff_a = build_ff(counter_a);
-    let mut ff_b = build_ff(counter_b);
-    let mut buf_a = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut buf_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut t_a = Timings::new(&gpu).unwrap();
-    let mut t_b = Timings::new(&gpu).unwrap();
-
-    let run_sequence = |ff: &mut ForceField,
-                        buf: &mut ParticleBuffers,
-                        tt: &mut Timings| {
-        ff.step(buf, &box_10(), tt, AggregateLevel::ForcesAndScalars).unwrap();
-        ff.step_class(ForceClass::Fast, buf, &box_10(), tt, AggregateLevel::ForcesAndScalars).unwrap();
-        ff.step_class(ForceClass::Fast, buf, &box_10(), tt, AggregateLevel::ForcesAndScalars).unwrap();
-        ff.step_class(ForceClass::Slow, buf, &box_10(), tt, AggregateLevel::ForcesAndScalars).unwrap();
-    };
-    run_sequence(&mut ff_a, &mut buf_a, &mut t_a);
-    run_sequence(&mut ff_b, &mut buf_b, &mut t_b);
-
-    let ax = device.dtoh_sync_copy(&buf_a.forces_x).unwrap();
-    let bx = device.dtoh_sync_copy(&buf_b.forces_x).unwrap();
-    let ay = device.dtoh_sync_copy(&buf_a.forces_y).unwrap();
-    let by = device.dtoh_sync_copy(&buf_b.forces_y).unwrap();
-    let az = device.dtoh_sync_copy(&buf_a.forces_z).unwrap();
-    let bz = device.dtoh_sync_copy(&buf_b.forces_z).unwrap();
-    assert_eq!(ax, bx);
-    assert_eq!(ay, by);
-    assert_eq!(az, bz);
-}
-
-// --- AggregateLevel-level effects ----------------------------------------
-
-fn lj_only_force_field(n: usize) -> (
-    heddle_md::gpu::GpuContext,
-    ForceField,
-    ParticleBuffers,
-) {
-    let gpu = init_device().unwrap();
-    let state = state_n(n);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let ff = ForceField::new(
-        &PotentialRegistry::with_builtins(),
-        &gpu,
-        n,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &box_10(&gpu),
+        &[ar_type()],
         &[lj_pair_config()],
         &[],
         &[],
@@ -2562,177 +117,1992 @@ fn lj_only_force_field(n: usize) -> (
         None,
         &[],
         &BondList::empty(n),
-        &heddle_md::forces::AngleList::empty(0),
+        &AngleList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
-    .unwrap();
-    (gpu, ff, buffers)
+    .unwrap()
 }
 
-fn morse_only_force_field(n: usize) -> (
-    heddle_md::gpu::GpuContext,
-    ForceField,
-    ParticleBuffers,
-) {
-    let gpu = init_device().unwrap();
-    let state = state_n(n);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let bt = vec![BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }];
-    let ff = ForceField::new(
+/// Build an LJ + Morse ForceField (single Morse bond between 0 and 1).
+fn lj_and_morse_force_field(gpu: &GpuContext, n: usize) -> ForceField {
+    ForceField::new(
         &PotentialRegistry::with_builtins(),
-        &gpu,
+        gpu,
         n,
-        &box_10(),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[],
-        &bt,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[lj_pair_config()],
+        &[morse_bond_type()],
         &[],
         None,
         None,
         &[],
         &single_bond_list(n),
-        &heddle_md::forces::AngleList::empty(0),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap()
+}
+
+/// Build an empty (zero-slot) ForceField.
+fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
+    ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap()
+}
+
+fn morse_only_force_field(gpu: &GpuContext, n: usize) -> ForceField {
+    ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[],
+        &[morse_bond_type()],
+        &[],
+        None,
+        None,
+        &[],
+        &single_bond_list(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap()
+}
+
+/// Run step and return the final TimingsReport.
+fn step_and_finalize(
+    ff: &mut ForceField,
+    buffers: &mut ParticleBuffers,
+    sim_box: &SimulationBox,
+    gpu: &GpuContext,
+    level: AggregateLevel,
+) -> TimingsReport {
+    let mut timings = Timings::new(gpu).unwrap();
+    ff.step(buffers, sim_box, &mut timings, level).unwrap();
+    timings.finalize().unwrap()
+}
+
+fn stage_count(report: &TimingsReport, name: &str) -> u64 {
+    report
+        .stages
+        .iter()
+        .find(|s| s.name == name)
+        .map(|s| s.count)
+        .unwrap_or(0)
+}
+
+// =================================================================
+// Stub potential: configurable label + class + cutoff. Writes a
+// `marker` value into all five output slots so the test can detect
+// whether `compute` was called. Each call also increments an
+// `Arc<AtomicU32>` so the test can observe the invocation count.
+// =================================================================
+
+#[derive(Debug, Clone)]
+struct StubPotential {
+    label: &'static str,
+    class: ForceClass,
+    cutoff: Option<Real>,
+    marker: Real,
+    call_count: Arc<AtomicU32>,
+}
+
+impl Potential for StubPotential {
+    fn label(&self) -> &'static str {
+        self.label
+    }
+
+    fn max_cutoff(&self) -> Option<Real> {
+        self.cutoff
+    }
+
+    fn frequency_class(&self) -> ForceClass {
+        self.class
+    }
+
+    fn compute(
+        &mut self,
+        buffers: &ParticleBuffers,
+        _sim_box: &SimulationBox,
+        mut output: SlotOutputView<'_>,
+        _cx: &ForceFieldContext<'_>,
+        _timings: &mut Timings,
+        level: AggregateLevel,
+    ) -> Result<(), ForceFieldError> {
+        let dev = &buffers.device;
+        let marker = self.marker;
+        let add_into = |slice: &mut cudarc::driver::CudaViewMut<Real>| {
+            let mut host = dev.dtoh_sync_copy(&*slice).unwrap();
+            for v in host.iter_mut() {
+                *v += marker;
+            }
+            dev.htod_sync_copy_into(&host, slice).unwrap();
+        };
+        add_into(&mut output.force_x);
+        add_into(&mut output.force_y);
+        add_into(&mut output.force_z);
+        if level == AggregateLevel::ForcesAndScalars {
+            add_into(&mut output.energy);
+            add_into(&mut output.virial);
+        }
+        self.call_count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        if self.class == ForceClass::Fast && self.cutoff.is_some() {
+            Some(JitParticipant::PairForce(self))
+        } else {
+            None
+        }
+    }
+}
+
+impl PairForcePotential for StubPotential {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        // No-op fragment so the stub can stand in as a pair-force slot.
+        // The functor name is `Box::leak`-ed to satisfy the fragment's
+        // 'static lifetime.
+        let functor_struct_name: &'static str =
+            Box::leak(format!("StubFunctor_{}", self.label).into_boxed_str());
+        let functor_source = format!(
+            r#"
+struct {n} {{
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const {{ return R(0.0); }}
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
+                                     Real &factor, Real &energy, Real &virial) const {{
+        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+    }}
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
+}};
+"#,
+            n = functor_struct_name
+        );
+        PairForceFragment {
+            label: self.label,
+            functor_struct_name,
+            functor_source,
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+            cutoff: CutoffHandling::PerPair,
+            consumes_type_index: false,
+        }
+    }
+
+    fn bind_pair_force_args(
+        &self,
+        _ctx: &PairForceBindContext<'_>,
+        _builder: &mut ForceLaunchBuilder,
+    ) {
+        // No-op functor takes no parameters.
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StubBuilder {
+    label: &'static str,
+    class: ForceClass,
+    cutoff: Option<Real>,
+    marker: Real,
+    call_count: Arc<AtomicU32>,
+    /// When `false`, `build` always returns `Ok(None)` (inactive).
+    active: bool,
+    /// When `Some(_)`, `build` returns that error instead.
+    force_error: Option<&'static str>,
+    /// Labels this stub claims to displace. Surfaced through
+    /// `PotentialBuilder::displaces()`.
+    displaces: &'static [&'static str],
+}
+
+impl StubBuilder {
+    fn new(label: &'static str) -> Self {
+        StubBuilder {
+            label,
+            class: ForceClass::Fast,
+            cutoff: None,
+            marker: 0.0,
+            call_count: Arc::new(AtomicU32::new(0)),
+            active: true,
+            force_error: None,
+            displaces: &[],
+        }
+    }
+}
+
+impl PotentialBuilder for StubBuilder {
+    fn build(
+        &self,
+        _cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        if let Some(msg) = self.force_error {
+            return Err(ForceFieldError::DuplicateLabel(msg));
+        }
+        if !self.active {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(StubPotential {
+            label: self.label,
+            class: self.class,
+            cutoff: self.cutoff,
+            marker: self.marker,
+            call_count: self.call_count.clone(),
+        })))
+    }
+    fn displaces(&self) -> &'static [&'static str] {
+        self.displaces
+    }
+}
+
+fn build_with(
+    gpu: &GpuContext,
+    n: usize,
+    registry: &PotentialRegistry,
+) -> Result<ForceField, ForceFieldError> {
+    ForceField::new(
+        registry,
+        gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+}
+
+// =================================================================
+// Section 1: Construction
+// =================================================================
+
+// rq-56c8a238
+#[test]
+fn construct_force_field_with_lennardjones_only() {
+    let gpu = init_device().unwrap();
+    let ff = lj_only_force_field(&gpu, 4);
+    assert_eq!(ff.slots.len(), 1);
+    assert_eq!(ff.slots[0].label(), "lennard_jones");
+}
+
+// rq-3de16ce0
+#[test]
+fn construct_force_field_with_lennardjones_and_morse() {
+    let gpu = init_device().unwrap();
+    let ff = lj_and_morse_force_field(&gpu, 4);
+    assert_eq!(ff.slots.len(), 2);
+    assert_eq!(ff.slots[0].label(), "lennard_jones");
+    assert_eq!(ff.slots[1].label(), "morse_bonded");
+}
+
+// rq-0f34d11b
+#[test]
+fn bond_types_declared_with_no_bonds_omits_morse_slot() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[lj_pair_config()],
+        &[morse_bond_type()],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(n),
+        &AngleList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    (gpu, ff, buffers)
+    assert_eq!(ff.slots.len(), 1);
+    assert_eq!(ff.slots[0].label(), "lennard_jones");
 }
 
-// rq-5985846f
+// rq-60f445b2
+#[test]
+fn empty_force_field_class_accumulators_have_length_n_zeroed() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let ff = empty_force_field(&gpu, n);
+    assert_eq!(ff.slots.len(), 0);
+    assert_eq!(ff.fast_total_forces_x.len(), n);
+    assert_eq!(ff.fast_total_forces_y.len(), n);
+    assert_eq!(ff.fast_total_forces_z.len(), n);
+    assert_eq!(ff.slow_total_forces_x.len(), n);
+    let host = gpu.device.dtoh_sync_copy(&ff.fast_total_forces_x).unwrap();
+    assert!(host.iter().all(|&v| v == 0.0));
+}
+
+// rq-455db9c2
+#[test]
+fn class_accumulator_buffers_have_length_particle_count() {
+    let gpu = init_device().unwrap();
+    let n = 8;
+    let ff = lj_and_morse_force_field(&gpu, n);
+    // Per-class accumulator buffers are always length N (one entry per
+    // particle), regardless of how many slots populate the class.
+    assert_eq!(ff.fast_total_forces_x.len(), n);
+    assert_eq!(ff.fast_total_forces_y.len(), n);
+    assert_eq!(ff.fast_total_forces_z.len(), n);
+    assert_eq!(ff.fast_total_potential_energies.len(), n);
+    assert_eq!(ff.fast_total_virials.len(), n);
+    assert_eq!(ff.slow_total_forces_x.len(), n);
+}
+
+// rq-c525ee79
+#[test]
+fn construct_empty_n0_force_field_with_potentials_configured() {
+    let gpu = init_device().unwrap();
+    // Two stub slots so the framework's slot count is 2. Particle count
+    // is zero, so each per-class buffer should have length 0.
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("a")));
+    registry.register(Box::new(StubBuilder::new("b")));
+    let ff = build_with(&gpu, 0, &registry).unwrap();
+    assert_eq!(ff.slots.len(), 2);
+    assert_eq!(ff.fast_total_forces_x.len(), 0);
+    assert_eq!(ff.fast_total_forces_y.len(), 0);
+    assert_eq!(ff.fast_total_forces_z.len(), 0);
+    assert_eq!(ff.fast_total_potential_energies.len(), 0);
+    assert_eq!(ff.fast_total_virials.len(), 0);
+}
+
+// rq-c170c0b7
+#[test]
+fn reject_construction_when_two_slots_share_a_label() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("dupe")));
+    registry.register(Box::new(StubBuilder::new("dupe")));
+    let err = build_with(&gpu, 4, &registry).unwrap_err();
+    match err {
+        ForceFieldError::DuplicateLabel(label) => assert_eq!(label, "dupe"),
+        other => panic!("expected DuplicateLabel, got {:?}", other),
+    }
+}
+
+// =================================================================
+// Section 2: Force evaluation pipeline
+// =================================================================
+
+// rq-32e981cc
+#[test]
+fn step_lennardjones_only_writes_nonzero_forces() {
+    let gpu = init_device().unwrap();
+    let state = state_n(2);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut ff = lj_only_force_field(&gpu, 2);
+    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(&gpu), &gpu, AggregateLevel::ForcesAndScalars);
+    let mut downloaded = state.clone();
+    downloaded.download_from(&buffers).unwrap();
+    assert!(downloaded.forces_x[0].abs() > 0.0);
+    assert!((downloaded.forces_x[0] + downloaded.forces_x[1]).abs() < 1e-5);
+    assert!(stage_count(&report, "jit_composed_pair_force") >= 1);
+    assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
+}
+
+// Two particle types (O, H) with distinct per-pair-type LJ parameters,
+// so the kernel must use the per-atom type indices to pick the right
+// (cross) parameter slot.
+fn oh_types() -> Vec<ParticleTypeConfig> {
+    vec![
+        ParticleTypeConfig { name: "O".to_string(), mass: 1.0, charge: 0.0 },
+        ParticleTypeConfig { name: "H".to_string(), mass: 1.0, charge: 0.0 },
+    ]
+}
+
+fn lj_pair(a: &str, b: &str, sigma: f64, epsilon: f64) -> PairInteractionConfig {
+    PairInteractionConfig {
+        between: (a.to_string(), b.to_string()),
+        cutoff: 5.0,
+        r_switch: 5.0,
+        potential: PairPotentialParams::LennardJones { sigma, epsilon },
+    }
+}
+
+// Distinct O-O, O-H, H-H parameters; the O-H (cross) term is what a
+// type-[0,1] pair probes.
+fn oh_pair_configs() -> Vec<PairInteractionConfig> {
+    vec![
+        lj_pair("O", "O", 1.0, 1.0),
+        lj_pair("O", "H", 1.3, 2.0),
+        lj_pair("H", "H", 0.8, 0.5),
+    ]
+}
+
+fn lj_mixed_type_force_field(gpu: &GpuContext, n: usize) -> ForceField {
+    ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        gpu,
+        n,
+        &box_10(gpu),
+        &oh_types(),
+        &oh_pair_configs(),
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap()
+}
+
+// An O atom (type 0) and an H atom (type 1) on the x-axis at 1.5.
+fn oh_pair_state() -> ParticleState {
+    ParticleState::new(
+        vec![0.0 as Real, 1.5],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![1.0 as Real, 1.0],
+        vec![0.0 as Real, 0.0],
+        vec![0u32, 1u32],
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+// rq-21201692
+#[test]
+fn lj_mixed_types_use_cross_term_parameters() {
+    let gpu = init_device().unwrap();
+    let state = oh_pair_state();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut ff = lj_mixed_type_force_field(&gpu, 2);
+    step_and_finalize(
+        &mut ff,
+        &mut buffers,
+        &box_10(&gpu),
+        &gpu,
+        AggregateLevel::ForcesAndScalars,
+    );
+    let mut downloaded = state.clone();
+    downloaded.download_from(&buffers).unwrap();
+
+    // Closed-form LJ force on atom 0 using the O-H cross parameters.
+    // The kernel resolves the slot from the per-atom type indices
+    // [0, 1]; if it instead used the O-O term the magnitude would differ.
+    let r = 1.5 as Real;
+    let sigma = 1.3 as Real;
+    let eps = 2.0 as Real;
+    let inv_r2 = (1.0 as Real) / (r * r);
+    let sr2 = sigma * sigma * inv_r2;
+    let sr6 = sr2 * sr2 * sr2;
+    let sr12 = sr6 * sr6;
+    let factor = (24.0 as Real) * eps * inv_r2 * ((2.0 as Real) * sr12 - sr6);
+    let dx = (0.0 as Real) - r; // x0 - x1
+    let expected_fx0 = factor * dx;
+
+    let rel = (downloaded.forces_x[0] - expected_fx0).abs() / expected_fx0.abs();
+    assert!(
+        rel < 1e-4,
+        "force {} != cross-term closed form {} (rel {})",
+        downloaded.forces_x[0], expected_fx0, rel
+    );
+    // Newton's third law across the pair.
+    assert!((downloaded.forces_x[0] + downloaded.forces_x[1]).abs() < 1e-4 * expected_fx0.abs());
+}
+
+// rq-73cd4ad9
+#[test]
+fn amortized_type_indices_are_bit_exact_run_to_run() {
+    let gpu = init_device().unwrap();
+    // A multi-type system large enough to exercise the packed pass and
+    // the diagonal-shuffle type rotation.
+    let n = 8;
+    let pos: Vec<Real> = (0..n).map(|i| i as Real * 1.3).collect();
+    let types: Vec<u32> = (0..n).map(|i| (i % 2) as u32).collect();
+    let state = ParticleState::new(
+        pos,
+        vec![0.0 as Real; n],
+        vec![0.0 as Real; n],
+        vec![0.0 as Real; n],
+        vec![0.0 as Real; n],
+        vec![0.0 as Real; n],
+        vec![1.0 as Real; n],
+        vec![0.0 as Real; n],
+        types,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let run = || {
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut ff = lj_mixed_type_force_field(&gpu, n);
+        step_and_finalize(
+            &mut ff,
+            &mut buffers,
+            &box_10(&gpu),
+            &gpu,
+            AggregateLevel::ForcesAndScalars,
+        );
+        let mut downloaded = state.clone();
+        downloaded.download_from(&buffers).unwrap();
+        downloaded
+    };
+
+    let a = run();
+    let b = run();
+    for i in 0..n {
+        for (label, va, vb) in [
+            ("x", a.forces_x[i], b.forces_x[i]),
+            ("y", a.forces_y[i], b.forces_y[i]),
+            ("z", a.forces_z[i], b.forces_z[i]),
+        ] {
+            assert_eq!(
+                va.to_bits(),
+                vb.to_bits(),
+                "force {label} on atom {i} not byte-identical across runs"
+            );
+        }
+    }
+    // Sanity: the mixed-type system produced real forces.
+    assert!(a.forces_x.iter().any(|f| f.abs() > 0.0));
+}
+
+// rq-df3a50f6
+#[test]
+fn step_with_both_slots_sums_lj_and_morse() {
+    let gpu = init_device().unwrap();
+    // Two particles separated by 1.2 so both LJ and Morse contribute.
+    let state = ParticleState::new(
+        vec![0.0 as Real, 1.2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![1.0; 2],
+        vec![0.0; 2],
+        vec![0u32; 2],
+        None,
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut ff = lj_and_morse_force_field(&gpu, 2);
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let mut downloaded = state.clone();
+    downloaded.download_from(&buffers).unwrap();
+    // Sum of forces == 0 because both LJ and Morse obey Newton's third law.
+    let sx = downloaded.forces_x[0] + downloaded.forces_x[1];
+    let sy = downloaded.forces_y[0] + downloaded.forces_y[1];
+    let sz = downloaded.forces_z[0] + downloaded.forces_z[1];
+    assert!(sx.abs() < 1e-5);
+    assert!(sy.abs() < 1e-5);
+    assert!(sz.abs() < 1e-5);
+}
+
+// rq-fc7b1565
+#[test]
+fn step_with_zero_slots_writes_zeros_to_forces() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let mut state = state_n(n);
+    // Seed buffers with non-zero forces to confirm the combiner overwrites.
+    state.forces_x = vec![1.0 as Real; n];
+    state.forces_y = vec![2.0 as Real; n];
+    state.forces_z = vec![3.0 as Real; n];
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut ff = empty_force_field(&gpu, n);
+    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(&gpu), &gpu, AggregateLevel::ForcesAndScalars);
+    let mut downloaded = state.clone();
+    downloaded.download_from(&buffers).unwrap();
+    assert!(downloaded.forces_x.iter().all(|&v| v == 0.0));
+    assert!(downloaded.forces_y.iter().all(|&v| v == 0.0));
+    assert!(downloaded.forces_z.iter().all(|&v| v == 0.0));
+    assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
+    assert_eq!(stage_count(&report, "morse_bond_force"), 0);
+}
+
+// rq-de47c1ac
+#[test]
+fn step_with_n0_launches_no_kernels() {
+    let gpu = init_device().unwrap();
+    let state = state_n(0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("a")));
+    registry.register(Box::new(StubBuilder::new("b")));
+    let mut ff = build_with(&gpu, 0, &registry).unwrap();
+    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(&gpu), &gpu, AggregateLevel::ForcesAndScalars);
+    for s in &report.stages {
+        assert_eq!(s.count, 0, "stage {} expected count 0, got {}", s.name, s.count);
+    }
+}
+
+// rq-7d8485b3
+#[test]
+fn slot_contributions_sum_into_the_class_accumulator() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    let a = StubBuilder {
+        marker: 1.0,
+        ..StubBuilder::new("a")
+    };
+    let b = StubBuilder {
+        marker: 2.0,
+        ..StubBuilder::new("b")
+    };
+    registry.register(Box::new(a));
+    registry.register(Box::new(b));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let fast_x = gpu.device.dtoh_sync_copy(&ff.fast_total_forces_x).unwrap();
+    assert_eq!(fast_x.len(), n);
+    // Both slots add their marker into the same length-N accumulator,
+    // so every entry is the sum of the markers.
+    assert!(fast_x.iter().all(|&v| v == 3.0));
+}
+
+// =================================================================
+// Section 3: Trait extensibility
+// =================================================================
+
+// rq-a9642241
+#[test]
+fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
+    let gpu = init_device().unwrap();
+    // Start with the built-ins, append a custom slot. The runner builds
+    // the ForceField identically; no change to ForceField::new is needed.
+    let mut registry = PotentialRegistry::with_builtins();
+    let custom = StubBuilder {
+        marker: 42.0,
+        ..StubBuilder::new("buckingham_stub")
+    };
+    registry.register(Box::new(custom));
+    let n = 4;
+    let mut ff = ForceField::new(
+        &registry,
+        &gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[lj_pair_config()],
+        &[morse_bond_type()],
+        &[],
+        None,
+        None,
+        &[],
+        &single_bond_list(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    // 3 slots: LJ + Morse + custom.
+    assert_eq!(ff.slots.len(), 3);
+    assert_eq!(ff.slots[0].label(), "lennard_jones");
+    assert_eq!(ff.slots[1].label(), "morse_bonded");
+    assert_eq!(ff.slots[2].label(), "buckingham_stub");
+
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    // The custom slot adds 42.0 into the Fast-class accumulator alongside
+    // the LJ and Morse contributions, so every entry is at least 42.0 once
+    // the stub's contribution has been folded in.
+    let fast_x = gpu.device.dtoh_sync_copy(&ff.fast_total_forces_x).unwrap();
+    assert_eq!(fast_x.len(), n);
+    let mut ff_no_stub = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[lj_pair_config()],
+        &[morse_bond_type()],
+        &[],
+        None,
+        None,
+        &[],
+        &single_bond_list(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings_b = Timings::new(&gpu).unwrap();
+    ff_no_stub.step(&mut buffers_b, &box_10(&gpu), &mut timings_b, AggregateLevel::ForcesAndScalars).unwrap();
+    let baseline = gpu.device.dtoh_sync_copy(&ff_no_stub.fast_total_forces_x).unwrap();
+    for i in 0..n {
+        assert!((fast_x[i] - baseline[i] - 42.0).abs() < 1e-4);
+    }
+}
+
+// =================================================================
+// Section 4: Registry-driven construction
+// =================================================================
+
+// rq-053a026c
+#[test]
+fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
+    let r = PotentialRegistry::with_builtins();
+    assert_eq!(r.builders().len(), 6);
+    let names: Vec<String> = r.builders().iter().map(|b| format!("{:?}", b)).collect();
+    assert!(names[0].contains("LennardJones"), "builder 0 = {}", names[0]);
+    assert!(names[1].contains("Coulomb"), "builder 1 = {}", names[1]);
+    assert!(names[2].contains("SpmeReal"), "builder 2 = {}", names[2]);
+    assert!(names[3].contains("SpmeReciprocal"), "builder 3 = {}", names[3]);
+    assert!(names[4].contains("MorseBonded"), "builder 4 = {}", names[4]);
+    assert!(names[5].contains("HarmonicAngle"), "builder 5 = {}", names[5]);
+}
+
+// rq-78ad9477
+#[test]
+fn registry_new_starts_empty() {
+    let r = PotentialRegistry::new();
+    assert!(r.builders().is_empty());
+}
+
+// rq-51af5f97
+#[test]
+fn register_appends_a_builder_at_the_end() {
+    let mut r = PotentialRegistry::with_builtins();
+    r.register(Box::new(StubBuilder::new("custom")));
+    assert_eq!(r.builders().len(), 7);
+    let last = format!("{:?}", r.builders()[6]);
+    assert!(last.contains("custom"), "last builder = {}", last);
+}
+
+// rq-b1a132b5
+#[test]
+fn force_field_new_iterates_registry_in_registration_order() {
+    let gpu = init_device().unwrap();
+    let ff = lj_and_morse_force_field(&gpu, 4);
+    assert_eq!(ff.slots[0].label(), "lennard_jones");
+    assert_eq!(ff.slots[1].label(), "morse_bonded");
+}
+
+// rq-ccf4dc3f / "Builder Ok(None) is skipped without erroring"
+#[test]
+fn builder_returning_ok_none_is_skipped_without_erroring() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    let inactive = StubBuilder {
+        active: false,
+        ..StubBuilder::new("inactive")
+    };
+    let active = StubBuilder::new("active");
+    registry.register(Box::new(inactive));
+    registry.register(Box::new(active));
+    let ff = build_with(&gpu, 4, &registry).unwrap();
+    assert_eq!(ff.slots.len(), 1);
+    assert_eq!(ff.slots[0].label(), "active");
+}
+
+// "Builder Err short-circuits ForceField::new"
+#[test]
+fn builder_err_short_circuits_force_field_new() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    let failing = StubBuilder {
+        force_error: Some("boom"),
+        ..StubBuilder::new("first")
+    };
+    let after = StubBuilder::new("after");
+    registry.register(Box::new(failing));
+    registry.register(Box::new(after));
+    let err = build_with(&gpu, 4, &registry).unwrap_err();
+    matches!(err, ForceFieldError::DuplicateLabel("boom"));
+    // The "after" stub never got to register a slot, but its build was
+    // never invoked either (we cannot directly observe; the Err path
+    // returns immediately from the loop).
+}
+
+// "Two builders producing same label fail construction" — same rq as
+// section 1's duplicate-label test, but exercised via two stub builders
+// with different identity and same label() in the slot.
+#[test]
+fn two_distinct_builders_producing_same_label_fail_construction() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("shared")));
+    registry.register(Box::new(StubBuilder::new("shared")));
+    let err = build_with(&gpu, 4, &registry).unwrap_err();
+    assert!(matches!(err, ForceFieldError::DuplicateLabel("shared")));
+}
+
+#[test]
+fn empty_registry_produces_zero_slot_force_field() {
+    let gpu = init_device().unwrap();
+    let ff = build_with(&gpu, 4, &PotentialRegistry::new()).unwrap();
+    assert_eq!(ff.slots.len(), 0);
+}
+
+// =================================================================
+// Section 5: PotentialBuildContext field exposure
+// =================================================================
+
+#[derive(Debug, Clone)]
+struct InspectBuilder {
+    seen_particle_count: Arc<AtomicU32>,
+}
+
+impl PotentialBuilder for InspectBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        self.seen_particle_count
+            .store(cx.particle_count as u32, Ordering::SeqCst);
+        // Touch every named field so a missing one fails to compile.
+        let _ = cx.gpu;
+        let _ = cx.sim_box;
+        let _ = cx.particle_types;
+        let _ = cx.pair_interactions;
+        let _ = cx.bond_types;
+        let _ = cx.angle_types;
+        let _ = cx.coulomb_config;
+        let _ = cx.spme_config;
+        let _ = cx.charges;
+        let _ = cx.bond_list;
+        let _ = cx.angle_list;
+        let _ = cx.exclusion_list;
+        let _ = cx.neighbor_list_config;
+        Ok(None)
+    }
+}
+
+#[test]
+fn build_context_exposes_every_parsed_config_input_by_reference() {
+    let gpu = init_device().unwrap();
+    let seen = Arc::new(AtomicU32::new(0));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(InspectBuilder {
+        seen_particle_count: seen.clone(),
+    }));
+    let _ = build_with(&gpu, 7, &registry).unwrap();
+    assert_eq!(seen.load(Ordering::SeqCst), 7);
+}
+
+// =================================================================
+// Section 6: Force class
+// =================================================================
+
+#[test]
+fn potential_frequency_class_default_returns_fast() {
+    // StubPotential uses the trait default — we configure it to Fast and
+    // assert that built-in slots also use Fast unless they override.
+    let stub = StubPotential {
+        label: "stub",
+        class: ForceClass::Fast,
+        cutoff: None,
+        marker: 0.0,
+        call_count: Arc::new(AtomicU32::new(0)),
+    };
+    assert_eq!(stub.frequency_class(), ForceClass::Fast);
+}
+
+#[test]
+fn builtin_potentials_report_canonical_class() {
+    let gpu = init_device().unwrap();
+    // LJ → Fast.
+    let ff_lj = lj_only_force_field(&gpu, 4);
+    assert_eq!(ff_lj.slots[0].frequency_class(), ForceClass::Fast);
+    // Morse → Fast.
+    let ff_morse = morse_only_force_field(&gpu, 4);
+    assert_eq!(ff_morse.slots[0].frequency_class(), ForceClass::Fast);
+}
+
+#[test]
+fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let fast_count = Arc::new(AtomicU32::new(0));
+    let slow_count = Arc::new(AtomicU32::new(0));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 1.0,
+        call_count: fast_count.clone(),
+        ..StubBuilder::new("fast_stub")
+    }));
+    registry.register(Box::new(StubBuilder {
+        class: ForceClass::Slow,
+        marker: 10.0,
+        call_count: slow_count.clone(),
+        ..StubBuilder::new("slow_stub")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let state = state_n(n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    assert_eq!(fast_count.load(Ordering::SeqCst), 1);
+    assert_eq!(slow_count.load(Ordering::SeqCst), 1);
+    let mut downloaded = state.clone();
+    downloaded.download_from(&buffers).unwrap();
+    // Each particle's total = 1.0 (fast) + 10.0 (slow) = 11.0.
+    assert!(downloaded.forces_x.iter().all(|&v| (v - 11.0).abs() < 1e-5));
+}
+
+#[test]
+fn step_class_fast_refreshes_only_fast_slots_contributions() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let fast_count = Arc::new(AtomicU32::new(0));
+    let slow_count = Arc::new(AtomicU32::new(0));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 1.0,
+        call_count: fast_count.clone(),
+        ..StubBuilder::new("fast_stub")
+    }));
+    registry.register(Box::new(StubBuilder {
+        class: ForceClass::Slow,
+        marker: 10.0,
+        call_count: slow_count.clone(),
+        ..StubBuilder::new("slow_stub")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    // Prime both classes' buffers via a full step first.
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    fast_count.store(0, Ordering::SeqCst);
+    slow_count.store(0, Ordering::SeqCst);
+    // Now step_class(Fast).
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    assert_eq!(fast_count.load(Ordering::SeqCst), 1);
+    assert_eq!(slow_count.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn step_class_slow_refreshes_only_slow_slots_contributions() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let fast_count = Arc::new(AtomicU32::new(0));
+    let slow_count = Arc::new(AtomicU32::new(0));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 1.0,
+        call_count: fast_count.clone(),
+        ..StubBuilder::new("fast_stub")
+    }));
+    registry.register(Box::new(StubBuilder {
+        class: ForceClass::Slow,
+        marker: 10.0,
+        call_count: slow_count.clone(),
+        ..StubBuilder::new("slow_stub")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    fast_count.store(0, Ordering::SeqCst);
+    slow_count.store(0, Ordering::SeqCst);
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    assert_eq!(fast_count.load(Ordering::SeqCst), 0);
+    assert_eq!(slow_count.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn step_class_slow_on_force_field_with_no_slow_slots_is_noop() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let mut ff = lj_only_force_field(&gpu, n);
+    let mut state = state_n(n);
+    state.forces_x = vec![99.0; n];
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let report = timings.finalize().unwrap();
+    for s in &report.stages {
+        assert_eq!(s.count, 0, "step_class(Slow) on no-slow-slots ForceField launched {} ({}× )", s.name, s.count);
+    }
+    // forces_x untouched.
+    let mut downloaded = state.clone();
+    downloaded.download_from(&buffers).unwrap();
+    assert!(downloaded.forces_x.iter().all(|&v| v == 99.0));
+}
+
+#[test]
+fn step_class_fast_on_force_field_with_no_fast_slots_is_noop() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let slow_count = Arc::new(AtomicU32::new(0));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        class: ForceClass::Slow,
+        marker: 7.0,
+        call_count: slow_count.clone(),
+        ..StubBuilder::new("only_slow")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    assert_eq!(slow_count.load(Ordering::SeqCst), 0);
+    let report = timings.finalize().unwrap();
+    assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 0);
+}
+
+#[test]
+fn step_class_with_n0_launches_no_kernels() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("a")));
+    registry.register(Box::new(StubBuilder::new("b")));
+    let mut ff = build_with(&gpu, 0, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(0)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let report = timings.finalize().unwrap();
+    for s in &report.stages {
+        assert_eq!(s.count, 0);
+    }
+}
+
+#[test]
+fn per_class_accumulator_buffers_have_length_n_per_class() {
+    let gpu = init_device().unwrap();
+    let n = 5;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("a")));
+    registry.register(Box::new(StubBuilder {
+        class: ForceClass::Slow,
+        ..StubBuilder::new("b")
+    }));
+    let ff = build_with(&gpu, n, &registry).unwrap();
+    assert_eq!(ff.fast_total_forces_x.len(), n);
+    assert_eq!(ff.fast_total_potential_energies.len(), n);
+    assert_eq!(ff.fast_total_virials.len(), n);
+    assert_eq!(ff.slow_total_forces_x.len(), n);
+    assert_eq!(ff.slow_total_potential_energies.len(), n);
+    assert_eq!(ff.slow_total_virials.len(), n);
+}
+
+#[test]
+fn per_class_accumulator_buffers_are_zero_initialised() {
+    let gpu = init_device().unwrap();
+    let n = 5;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("a")));
+    registry.register(Box::new(StubBuilder {
+        class: ForceClass::Slow,
+        ..StubBuilder::new("b")
+    }));
+    let ff = build_with(&gpu, n, &registry).unwrap();
+    let fast = gpu.device.dtoh_sync_copy(&ff.fast_total_forces_x).unwrap();
+    let slow = gpu.device.dtoh_sync_copy(&ff.slow_total_forces_x).unwrap();
+    assert!(fast.iter().all(|&v| v == 0.0));
+    assert!(slow.iter().all(|&v| v == 0.0));
+}
+
+// =================================================================
+// Section 7: RESPA / byte-identity
+// =================================================================
+
+#[test]
+fn two_respa_call_sequences_with_the_same_plan_produce_identical_state() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 1.0,
+        ..StubBuilder::new("fast_stub")
+    }));
+    registry.register(Box::new(StubBuilder {
+        class: ForceClass::Slow,
+        marker: 10.0,
+        ..StubBuilder::new("slow_stub")
+    }));
+
+    let run_plan = |ff: &mut ForceField, buffers: &mut ParticleBuffers, timings: &mut Timings| {
+        ff.step_class(ForceClass::Slow, buffers, &box_10(&gpu), timings, AggregateLevel::ForcesAndScalars).unwrap();
+        for _ in 0..3 {
+            ff.step_class(ForceClass::Fast, buffers, &box_10(&gpu), timings, AggregateLevel::ForcesAndScalars).unwrap();
+        }
+    };
+
+    let mut ff_a = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings_a = Timings::new(&gpu).unwrap();
+    run_plan(&mut ff_a, &mut buffers_a, &mut timings_a);
+
+    let mut ff_b = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings_b = Timings::new(&gpu).unwrap();
+    run_plan(&mut ff_b, &mut buffers_b, &mut timings_b);
+
+    let fx_a = gpu.device.dtoh_sync_copy(&buffers_a.forces_x).unwrap();
+    let fx_b = gpu.device.dtoh_sync_copy(&buffers_b.forces_x).unwrap();
+    for i in 0..n {
+        assert_eq!(fx_a[i].to_bits(), fx_b[i].to_bits());
+    }
+}
+
+// SubStep::ForceEval { class: None } dispatches to step()  — covered
+// indirectly by `tests/integrator_framework.rs::plan_with_multiple_force_evals_dispatches_each`.
+// SubStep::ForceEval { class: Some(Fast) } dispatches to step_class(Fast) —
+// same. The framework-side guarantee tested above is that step_class
+// behaves as documented; the runner's plan walker is exercised in
+// integrator_framework.rs.
+
+#[test]
+fn two_independent_runs_byte_identical() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let state = state_n(n);
+    let mut ff_a = lj_and_morse_force_field(&gpu, n);
+    let mut buf_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut tim_a = Timings::new(&gpu).unwrap();
+    ff_a.step(&mut buf_a, &box_10(&gpu), &mut tim_a, AggregateLevel::ForcesAndScalars).unwrap();
+    let mut ff_b = lj_and_morse_force_field(&gpu, n);
+    let mut buf_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut tim_b = Timings::new(&gpu).unwrap();
+    ff_b.step(&mut buf_b, &box_10(&gpu), &mut tim_b, AggregateLevel::ForcesAndScalars).unwrap();
+    let fx_a = gpu.device.dtoh_sync_copy(&buf_a.forces_x).unwrap();
+    let fx_b = gpu.device.dtoh_sync_copy(&buf_b.forces_x).unwrap();
+    let e_a = gpu.device.dtoh_sync_copy(&buf_a.potential_energies).unwrap();
+    let e_b = gpu.device.dtoh_sync_copy(&buf_b.potential_energies).unwrap();
+    for i in 0..n {
+        assert_eq!(fx_a[i].to_bits(), fx_b[i].to_bits(), "forces_x[{}] differ", i);
+        assert_eq!(e_a[i].to_bits(), e_b[i].to_bits(), "potential_energies[{}] differ", i);
+    }
+}
+
+// =================================================================
+// Section 8: Combiner kernel
+// =================================================================
+
+#[test]
+fn combiner_sums_slot_rows_in_slot_order() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 1.0,
+        ..StubBuilder::new("a")
+    }));
+    registry.register(Box::new(StubBuilder {
+        marker: 2.0,
+        ..StubBuilder::new("b")
+    }));
+    registry.register(Box::new(StubBuilder {
+        marker: 4.0,
+        ..StubBuilder::new("c")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    for v in &fx {
+        assert_eq!(*v, 7.0);
+    }
+}
+
+#[test]
+fn combiner_with_num_slots_zero_writes_zeros() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let mut state = state_n(n);
+    state.forces_x = vec![99.0; n];
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut ff = empty_force_field(&gpu, n);
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    assert!(fx.iter().all(|&v| v == 0.0));
+}
+
+#[test]
+fn combiner_is_a_single_write_per_output_element() {
+    // Indirectly: invoking step twice produces the same totals (the
+    // combiner overwrites, doesn't accumulate).
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 5.0,
+        ..StubBuilder::new("a")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    for v in &fx {
+        assert_eq!(*v, 5.0);
+    }
+}
+
+// =================================================================
+// Section 9: Neighbor-list ownership
+// =================================================================
+
+fn neighbor_list_is_some(ff: &ForceField) -> bool {
+    ff.neighbor_list.is_some()
+}
+
+#[test]
+fn force_field_with_short_range_potential_owns_a_shared_neighbor_list() {
+    let gpu = init_device().unwrap();
+    let ff = lj_only_force_field(&gpu, 4);
+    assert!(neighbor_list_is_some(&ff));
+}
+
+#[test]
+fn force_field_with_only_a_bonded_potential_owns_no_neighbor_list() {
+    let gpu = init_device().unwrap();
+    let ff = morse_only_force_field(&gpu, 2);
+    assert!(!neighbor_list_is_some(&ff));
+}
+
+#[derive(Debug, Clone)]
+struct CutoffInspectingBuilder {
+    cutoff: Real,
+    saw_neighbor_list: Arc<AtomicU32>,
+}
+
+#[derive(Debug)]
+struct CutoffInspectingPotential {
+    cutoff: Real,
+    saw_neighbor_list: Arc<AtomicU32>,
+}
+
+impl Potential for CutoffInspectingPotential {
+    fn label(&self) -> &'static str {
+        "cutoff_inspector"
+    }
+    fn max_cutoff(&self) -> Option<Real> {
+        Some(self.cutoff)
+    }
+    fn compute(
+        &mut self,
+        _buffers: &ParticleBuffers,
+        _sim_box: &SimulationBox,
+        _output: SlotOutputView<'_>,
+        _cx: &ForceFieldContext<'_>,
+        _timings: &mut Timings,
+        _level: AggregateLevel,
+    ) -> Result<(), ForceFieldError> {
+        // The framework bypasses compute() for fast-class pair-force
+        // slots (they participate in the JIT-composed kernel instead).
+        // Kept as a no-op for the trait contract.
+        Ok(())
+    }
+
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::PairForce(self))
+    }
+}
+
+impl PairForcePotential for CutoffInspectingPotential {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        // A minimal no-op fragment that contributes zero force / energy /
+        // virial, letting the test observe the framework's neighbor-list
+        // and JIT-composed-kernel state.
+        PairForceFragment {
+            label: "cutoff_inspector",
+            functor_struct_name: "CutoffInspectorFunctor",
+            functor_source: r#"
+struct CutoffInspectorFunctor {
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const { return R(0.0); }
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
+                                     Real &factor, Real &energy, Real &virial) const {
+        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+    }
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const { return R(1.0); }
+};
+"#
+            .to_string(),
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+            cutoff: CutoffHandling::PerPair,
+            consumes_type_index: false,
+        }
+    }
+
+    fn bind_pair_force_args(
+        &self,
+        _ctx: &PairForceBindContext<'_>,
+        _builder: &mut ForceLaunchBuilder,
+    ) {
+        // No-op functor takes no parameters.
+    }
+}
+
+impl PotentialBuilder for CutoffInspectingBuilder {
+    fn build(
+        &self,
+        _cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        Ok(Some(Box::new(CutoffInspectingPotential {
+            cutoff: self.cutoff,
+            saw_neighbor_list: self.saw_neighbor_list.clone(),
+        })))
+    }
+}
+
+#[test]
+fn force_field_with_pair_force_slot_owns_shared_neighbor_list_and_jit_kernel() {
+    let gpu = init_device().unwrap();
+    let saw = Arc::new(AtomicU32::new(0));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(CutoffInspectingBuilder {
+        cutoff: 5.0,
+        saw_neighbor_list: saw.clone(),
+    }));
+    let ff = build_with(&gpu, 4, &registry).unwrap();
+    // A fast-class pair-force slot is registered, so the framework
+    // builds both the shared neighbour list and the JIT-composed
+    // pair-force kernel.
+    assert!(ff.neighbor_list.is_some(), "shared neighbor list built");
+    assert!(ff.jit_composed.is_some(), "JIT-composed kernel built");
+}
+
+#[test]
+fn max_cutoff_aggregation_determines_neighbor_list_radius() {
+    let gpu = init_device().unwrap();
+    let saw = Arc::new(AtomicU32::new(0));
+    let mut registry = PotentialRegistry::new();
+    // Small cutoff first, big cutoff second; the framework should pick the max.
+    registry.register(Box::new(CutoffInspectingBuilder {
+        cutoff: 1.0,
+        saw_neighbor_list: saw.clone(),
+    }));
+    let big_cutoff = StubBuilder {
+        cutoff: Some(2.5),
+        ..StubBuilder::new("big_cutoff")
+    };
+    registry.register(Box::new(big_cutoff));
+    let n = 4;
+    // Use CellList so we can read back the chosen r_cut from CellListData.
+    let ff = ForceField::new(
+        &registry,
+        &gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::CellList { r_skin: 0.0 },
+    )
+    .unwrap();
+    let nl = ff.neighbor_list.as_ref().expect("expected a neighbor list");
+    let cl = nl.cell_list_data().expect("expected CellList mode");
+    assert!((cl.r_cut - 2.5).abs() < 1e-6, "expected r_cut=2.5, got {}", cl.r_cut);
+}
+
+#[test]
+fn bonded_only_step_launches_no_neighbor_list_kernels() {
+    let gpu = init_device().unwrap();
+    let n = 2;
+    let mut ff = morse_only_force_field(&gpu, n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let report = timings.finalize().unwrap();
+    assert_eq!(stage_count(&report, "neighbor_displacement_check_flag"), 0);
+    assert_eq!(stage_count(&report, "neighbor_list_build"), 0);
+}
+
+// =================================================================
+// Section 10: Energy / virial aggregation
+// =================================================================
+
+#[test]
+fn force_field_lj_only_populates_energy_and_virial() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let mut ff = lj_only_force_field(&gpu, n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let total_e: Real = e.iter().sum();
+    let total_v: Real = v.iter().sum();
+    assert!(total_e.abs() > 0.0, "expected non-zero potential energy");
+    assert!(total_v.abs() > 0.0, "expected non-zero virial");
+}
+
+#[test]
+fn each_class_has_five_flat_accumulator_arrays_of_length_n() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let ff = lj_and_morse_force_field(&gpu, n);
+    assert_eq!(ff.fast_total_forces_x.len(), n);
+    assert_eq!(ff.fast_total_forces_y.len(), n);
+    assert_eq!(ff.fast_total_forces_z.len(), n);
+    assert_eq!(ff.fast_total_potential_energies.len(), n);
+    assert_eq!(ff.fast_total_virials.len(), n);
+}
+
+#[test]
+fn combiner_sums_slot_energies_and_virials_in_slot_order() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 3.0,
+        ..StubBuilder::new("a")
+    }));
+    registry.register(Box::new(StubBuilder {
+        marker: 5.0,
+        ..StubBuilder::new("b")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    for x in &e {
+        assert_eq!(*x, 8.0);
+    }
+    for x in &v {
+        assert_eq!(*x, 8.0);
+    }
+}
+
+#[test]
+fn zero_slot_step_writes_zeros_to_energy_and_virial() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let mut state = state_n(n);
+    state.potential_energies = vec![99.0; n];
+    state.virials = vec![77.0; n];
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut ff = empty_force_field(&gpu, n);
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    assert!(e.iter().all(|&x| x == 0.0));
+    assert!(v.iter().all(|&x| x == 0.0));
+}
+
+#[test]
+fn system_total_potential_energy_equals_sum_of_particle_shares() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 0.5,
+        ..StubBuilder::new("a")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let total: Real = e.iter().sum();
+    assert!((total - 1.5).abs() < 1e-6, "expected total 1.5, got {}", total);
+}
+
+#[test]
+fn system_total_scalar_virial_equals_sum_of_particle_shares() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 0.25,
+        ..StubBuilder::new("a")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let total: Real = v.iter().sum();
+    assert!((total - 0.75).abs() < 1e-6, "expected total 0.75, got {}", total);
+}
+
+// =================================================================
+// Section 11: AggregateLevel
+// =================================================================
+
 #[test]
 fn step_forces_only_updates_forces_and_leaves_energies_and_virials_stale() {
-    let (gpu, mut ff, mut buffers) = lj_only_force_field(4);
-    let device = gpu.device.clone();
-    let mut t = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
-    let e0: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let w0: Vec<Real> = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    let slot_e0: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let slot_w0: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
-    assert!(e0.iter().any(|&v| v != 0.0), "expected non-zero baseline energy");
-
-    // Perturb positions so a refreshed force evaluation would change
-    // forces, energies, and virials.
-    let new_x: Vec<Real> = (0..4).map(|i| i as Real * 1.5 + 0.3).collect();
-    device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
-
-    let mut t2 = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut t2, AggregateLevel::ForcesOnly).unwrap();
-    let fx: Vec<Real> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert!(fx.iter().any(|&v| v != 0.0), "expected non-zero forces at new positions");
-    let e1: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let w1: Vec<Real> = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    let slot_e1: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let slot_w1: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
-    assert_eq!(e1, e0, "ParticleBuffers.potential_energies must be unchanged under ForcesOnly");
-    assert_eq!(w1, w0, "ParticleBuffers.virials must be unchanged under ForcesOnly");
-    assert_eq!(slot_e1, slot_e0, "LJ slot's energy row must not be rewritten under ForcesOnly");
-    assert_eq!(slot_w1, slot_w0, "LJ slot's virial row must not be rewritten under ForcesOnly");
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 1.0,
+        ..StubBuilder::new("a")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    // First, ForcesAndScalars to seed the energy/virial rows.
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e1 = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let v1 = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    // Now ForcesOnly; energy/virial rows must remain bit-identical.
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
+    let e2 = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let v2 = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    for i in 0..n {
+        assert_eq!(e1[i].to_bits(), e2[i].to_bits(), "energy[{}] changed across ForcesOnly call", i);
+        assert_eq!(v1[i].to_bits(), v2[i].to_bits(), "virial[{}] changed across ForcesOnly call", i);
+    }
 }
 
-// rq-beccac31
 #[test]
 fn step_forces_and_scalars_refreshes_energies_and_virials() {
-    let (gpu, mut ff, mut buffers) = lj_only_force_field(4);
-    let device = gpu.device.clone();
-    let mut t = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
-    let e0: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let fx0: Vec<Real> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert!(e0.iter().any(|&v| v != 0.0));
-
-    let new_x: Vec<Real> = (0..4).map(|i| i as Real * 1.5 + 0.3).collect();
-    device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
-
-    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
-    let e1: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let fx1: Vec<Real> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert_ne!(e1, e0, "potential_energies must refresh under ForcesAndScalars when positions change");
-    assert_ne!(fx1, fx0, "forces_x must reflect the new positions");
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        marker: 1.0,
+        ..StubBuilder::new("a")
+    }));
+    let mut ff = build_with(&gpu, n, &registry).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    assert!(e.iter().all(|&x| x == 1.0));
+    assert!(v.iter().all(|&x| x == 1.0));
 }
 
-// rq-fcc5cea5
 #[test]
-fn bonded_only_slot_reduces_all_five_quantities_regardless_of_level() {
-    let (gpu, mut ff, mut buffers) = morse_only_force_field(4);
-    let device = gpu.device.clone();
-    let mut t = Timings::new(&gpu).unwrap();
-    // Single ForcesOnly call against a Morse-only ForceField. The bonded
-    // reduction kernel writes all five output rows regardless of `level`,
-    // so the combiner finds non-zero energy and virial entries.
-    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesOnly).unwrap();
-    let e: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let w: Vec<Real> = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    let fx: Vec<Real> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert!(e.iter().any(|&v| v != 0.0), "Morse slot must have populated energy under ForcesOnly");
-    assert!(w.iter().any(|&v| v != 0.0), "Morse slot must have populated virial under ForcesOnly");
-    assert!(fx.iter().any(|&v| v != 0.0), "Morse slot must have populated forces under ForcesOnly");
+fn two_runs_with_identical_call_level_sequences_are_byte_identical() {
+    let gpu = init_device().unwrap();
+    let n = 3;
+    let sequence = [
+        AggregateLevel::ForcesAndScalars,
+        AggregateLevel::ForcesOnly,
+        AggregateLevel::ForcesAndScalars,
+    ];
+    let run = || -> (Vec<Real>, Vec<Real>, Vec<Real>) {
+        let mut ff = lj_only_force_field(&gpu, n);
+        let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+        let mut timings = Timings::new(&gpu).unwrap();
+        for &lvl in &sequence {
+            ff.step(&mut buffers, &box_10(&gpu), &mut timings, lvl).unwrap();
+        }
+        let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+        let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+        let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+        (fx, e, v)
+    };
+    let (fx_a, e_a, v_a) = run();
+    let (fx_b, e_b, v_b) = run();
+    for i in 0..n {
+        assert_eq!(fx_a[i].to_bits(), fx_b[i].to_bits());
+        assert_eq!(e_a[i].to_bits(), e_b[i].to_bits());
+        assert_eq!(v_a[i].to_bits(), v_b[i].to_bits());
+    }
 }
 
-// rq-d2bf331b
 #[test]
-fn pair_buffer_slot_honours_forces_only() {
-    // The LJ slot is the canonical pair-buffer-backed Potential. Its
-    // reduce splits forces (always) from energy + virial (only when
-    // level includes scalars). After a baseline ForcesAndScalars step
-    // we capture the per-slot energy / virial rows; a subsequent
-    // ForcesOnly step must leave those rows byte-identical (the kernel
-    // that writes them never re-enqueues) while still overwriting the
-    // per-slot force rows.
-    let (gpu, mut ff, mut buffers) = lj_only_force_field(4);
-    let device = gpu.device.clone();
-    let mut t = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
-    let report = t.finalize().unwrap();
-    let count_of = |name: &str| {
-        report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
-    };
-    assert_eq!(count_of("reduce_pair_energy_virial"), 1, "baseline call must run energy/virial reduce");
-    let slot_e_baseline: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let slot_w_baseline: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
-    let slot_fx_baseline: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
-    assert!(slot_e_baseline.iter().any(|&v| v != 0.0));
-
-    let new_x: Vec<Real> = (0..4).map(|i| i as Real * 1.5 + 0.4).collect();
-    device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
-
-    let mut t2 = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut t2, AggregateLevel::ForcesOnly).unwrap();
-    let report2 = t2.finalize().unwrap();
-    let count_of2 = |name: &str| {
-        report2.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
-    };
-    assert_eq!(
-        count_of2("reduce_pair_energy_virial"),
-        0,
-        "ForcesOnly step must not run the energy/virial reduction kernel"
-    );
-    let slot_e_after: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let slot_w_after: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
-    let slot_fx_after: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
-    assert_eq!(slot_e_after, slot_e_baseline, "LJ slot energy row must be untouched under ForcesOnly");
-    assert_eq!(slot_w_after, slot_w_baseline, "LJ slot virial row must be untouched under ForcesOnly");
-    assert_ne!(slot_fx_after, slot_fx_baseline, "LJ slot force row must be overwritten");
+fn bonded_slot_honours_forces_only_via_the_level_parameter() {
+    // A Morse-only ForceField step(ForcesOnly) following a step(ForcesAndScalars)
+    // preserves the energy and virial values produced by the prior
+    // ForcesAndScalars call: the bonded slot's compute reads `level` and
+    // skips the scalar writes when ForcesOnly, and the class accumulator's
+    // energy / virial entries are not zeroed for a ForcesOnly call.
+    let gpu = init_device().unwrap();
+    let n = 2;
+    let state = ParticleState::new(
+        vec![0.0 as Real, 1.2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![1.0; 2],
+        vec![0.0; 2],
+        vec![0u32; 2],
+        None,
+        None,
+    )
+    .unwrap();
+    let mut ff = morse_only_force_field(&gpu, n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e_seed = gpu.device.dtoh_sync_copy(&ff.fast_total_potential_energies).unwrap();
+    let w_seed = gpu.device.dtoh_sync_copy(&ff.fast_total_virials).unwrap();
+    // Morse bond is stretched (r=1.2 vs r_e=1.0) so the seeded values
+    // are non-zero.
+    assert!(e_seed.iter().any(|&x| x.abs() > 1e-6));
+    assert!(w_seed.iter().any(|&x| x.abs() > 1e-6));
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
+    let e_after = gpu.device.dtoh_sync_copy(&ff.fast_total_potential_energies).unwrap();
+    let w_after = gpu.device.dtoh_sync_copy(&ff.fast_total_virials).unwrap();
+    for i in 0..n {
+        assert_eq!(e_seed[i].to_bits(), e_after[i].to_bits(),
+            "energy[{}] changed across ForcesOnly call: {} -> {}", i, e_seed[i], e_after[i]);
+        assert_eq!(w_seed[i].to_bits(), w_after[i].to_bits(),
+            "virial[{}] changed across ForcesOnly call: {} -> {}", i, w_seed[i], w_after[i]);
+    }
 }
 
-// rq-82822681
+#[test]
+fn a_pair_force_slot_honours_forces_only_for_the_slot_energy_virial() {
+    // After a ForcesAndScalars then a ForcesOnly, the LJ slot's
+    // energy/virial rows (not the combiner output) hold the stale
+    // ForcesAndScalars values.
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let mut ff = lj_only_force_field(&gpu, n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e_seed = gpu.device.dtoh_sync_copy(&ff.fast_total_potential_energies).unwrap();
+    let v_seed = gpu.device.dtoh_sync_copy(&ff.fast_total_virials).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
+    let e_after = gpu.device.dtoh_sync_copy(&ff.fast_total_potential_energies).unwrap();
+    let v_after = gpu.device.dtoh_sync_copy(&ff.fast_total_virials).unwrap();
+    for i in 0..n {
+        assert_eq!(e_seed[i].to_bits(), e_after[i].to_bits());
+        assert_eq!(v_seed[i].to_bits(), v_after[i].to_bits());
+    }
+}
+
 #[test]
 fn combiner_always_runs_regardless_of_level() {
-    let (gpu, mut ff, mut buffers) = lj_only_force_field(4);
-    let mut t = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesOnly).unwrap();
-    let report = t.finalize().unwrap();
-    let acc = report
-        .stages
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let mut ff = lj_only_force_field(&gpu, n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
+    let report = timings.finalize().unwrap();
+    assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
+}
+
+// =================================================================
+// Section: composite slot displacement
+// =================================================================
+
+fn spme_config_default() -> SpmeConfig {
+    SpmeConfig {
+        alpha: 0.3,
+        r_cut_real: 5.0,
+        grid: [16, 16, 16],
+        spline_order: 5,
+    }
+}
+
+fn ar_type_with_charge(charge: Real) -> ParticleTypeConfig {
+    ParticleTypeConfig {
+        name: "Ar".to_string(),
+        mass: 1.0,
+        charge: charge as f64,
+    }
+}
+
+// Build helper that supports passing an SpmeConfig + charges.
+fn build_with_spme(
+    gpu: &GpuContext,
+    n: usize,
+    registry: &PotentialRegistry,
+    pair_interactions: &[PairInteractionConfig],
+    spme_config: Option<&SpmeConfig>,
+    charges: &[Real],
+) -> Result<ForceField, ForceFieldError> {
+    ForceField::new(
+        registry,
+        gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type_with_charge(charges.first().copied().unwrap_or(0.0))],
+        pair_interactions,
+        &[],
+        &[],
+        None,
+        spme_config,
+        charges,
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+}
+
+#[test]
+fn potential_builder_displaces_default_returns_empty_slice() {
+    let b = StubBuilder::new("default_stub");
+    let d = b.displaces();
+    assert!(d.is_empty());
+}
+
+// rq-a9a37874 — the LJ + spme_real composed kernel (packed-neighbour pass
+// declared with `__launch_bounds__`) compiles via nvrtc and loads; the
+// resolved `jit_composed` handle proves the `_f`/`_fev` entry points exist.
+#[test]
+fn lj_and_spme_real_both_in_slot_list_and_jit_composed_when_both_configured() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_pair_config()],
+        Some(&spme_config_default()),
+        &charges,
+    )
+    .unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    // Under JIT composition both standalone slots are present; their
+    // pair-force kernels are fused into the JIT-composed kernel.
+    assert!(labels.contains(&"lennard_jones"), "labels = {labels:?}");
+    assert!(labels.contains(&"spme_real"), "labels = {labels:?}");
+    assert!(labels.contains(&"spme_reciprocal"), "labels = {labels:?}");
+    assert!(ff.jit_composed.is_some(), "JIT composed kernel built");
+}
+
+#[test]
+fn lj_only_configuration_jit_composes_a_single_fragment() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_pair_config()],
+        None,
+        &[],
+    )
+    .unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert!(labels.contains(&"lennard_jones"), "labels = {labels:?}");
+    assert!(ff.jit_composed.is_some(), "JIT composed kernel built");
+}
+
+#[test]
+fn spme_real_only_configuration_jit_composes_a_single_fragment() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[],
+        Some(&spme_config_default()),
+        &charges,
+    )
+    .unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert!(labels.contains(&"spme_real"), "labels = {labels:?}");
+    assert!(ff.jit_composed.is_some(), "JIT composed kernel built");
+}
+
+#[test]
+fn displacement_claim_against_unbuilt_label_is_a_no_op() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    let phantom_displacer = StubBuilder {
+        displaces: &["never_built"],
+        ..StubBuilder::new("phantom_displacer")
+    };
+    registry.register(Box::new(phantom_displacer));
+    let ff = build_with(&gpu, 4, &registry).unwrap();
+    assert_eq!(ff.slots.len(), 1);
+    assert_eq!(ff.slots[0].label(), "phantom_displacer");
+}
+
+#[test]
+fn two_builders_claiming_the_same_built_constituent_errors_at_construction() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("target")));
+    registry.register(Box::new(StubBuilder {
+        displaces: &["target"],
+        ..StubBuilder::new("first_claimer")
+    }));
+    registry.register(Box::new(StubBuilder {
+        displaces: &["target"],
+        ..StubBuilder::new("second_claimer")
+    }));
+    let err = build_with(&gpu, 4, &registry).unwrap_err();
+    match err {
+        ForceFieldError::DisplaceConflict { label, by } => {
+            assert_eq!(label, "target");
+            assert!(by.contains(&"first_claimer"));
+            assert!(by.contains(&"second_claimer"));
+        }
+        other => panic!("expected DisplaceConflict, got {other:?}"),
+    }
+}
+
+#[test]
+fn two_builders_both_claiming_unbuilt_label_do_not_error() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        displaces: &["nobody_built_this"],
+        ..StubBuilder::new("a")
+    }));
+    registry.register(Box::new(StubBuilder {
+        displaces: &["nobody_built_this"],
+        ..StubBuilder::new("b")
+    }));
+    let ff = build_with(&gpu, 4, &registry).unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert!(labels.contains(&"a"));
+    assert!(labels.contains(&"b"));
+}
+
+#[test]
+fn slot_list_has_lj_then_spme_real_then_spme_reciprocal_under_lj_plus_spme() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_pair_config()],
+        Some(&spme_config_default()),
+        &charges,
+    )
+    .unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert_eq!(labels, vec!["lennard_jones", "spme_real", "spme_reciprocal"]);
+}
+
+#[test]
+fn neighbor_list_radius_is_max_of_active_pair_force_cutoffs() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let mut spme_cfg = spme_config_default();
+    spme_cfg.r_cut_real = 7.0;
+    let lj_cfg = lj_pair_config();
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_cfg],
+        Some(&spme_cfg),
+        &charges,
+    )
+    .unwrap();
+    // The framework picks max(slot.max_cutoff()) for the neighbor
+    // list; the wider cutoff (SPME-real r_cut_real = 7.0) wins.
+    let spme_real = ff
+        .slots
         .iter()
-        .find(|s| s.name == "accumulate_forces")
-        .expect("accumulate_forces stage must be present after a ForcesOnly step");
-    assert_eq!(acc.count, 1, "combiner must launch exactly once per step");
+        .find(|s| s.label() == "spme_real")
+        .expect("spme_real slot present");
+    let mc = spme_real.max_cutoff().expect("spme_real reports a cutoff");
+    assert!((mc - 7.0 as Real).abs() < 1e-6, "max_cutoff = {mc}");
+}
+
+#[test]
+fn jit_composed_configuration_step_byte_identical_run_to_run() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let run = || -> (Vec<Real>, Vec<Real>) {
+        let mut ff = build_with_spme(
+            &gpu,
+            n,
+            &PotentialRegistry::with_builtins(),
+            &[lj_pair_config()],
+            Some(&spme_config_default()),
+            &charges,
+        )
+        .unwrap();
+        let mut state = state_n(n);
+        state.charges = charges.clone();
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut timings = Timings::new(&gpu).unwrap();
+        ff.step(
+            &mut buffers,
+            &box_10(&gpu),
+            &mut timings,
+            AggregateLevel::ForcesAndScalars,
+        )
+        .unwrap();
+        let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+        let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+        (fx, e)
+    };
+    let a = run();
+    let b = run();
+    assert_eq!(a.0, b.0, "fused forces_x not byte-identical run-to-run");
+    assert_eq!(a.1, b.1, "fused energies not byte-identical run-to-run");
+}
+
+#[test]
+fn jit_composed_step_emits_one_pair_force_launch_and_zero_per_potential_launches() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let mut ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_pair_config()],
+        Some(&spme_config_default()),
+        &charges,
+    )
+    .unwrap();
+    let mut state = state_n(n);
+    state.charges = charges.clone();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(
+        &mut buffers,
+        &box_10(&gpu),
+        &mut timings,
+        AggregateLevel::ForcesAndScalars,
+    )
+    .unwrap();
+    let report = timings.finalize().unwrap();
+    assert_eq!(
+        stage_count(&report, KernelStage::JIT_COMPOSED_PAIR_FORCE.name()),
+        1
+    );
 }

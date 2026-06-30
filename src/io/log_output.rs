@@ -79,7 +79,7 @@ impl LogWriter {
         temperature: f64,
         extras: &[f64],
     ) -> Result<(), LogWriterError> {
-        debug_assert_eq!(
+        assert_eq!(
             extras.len(),
             self.extra_dims.len(),
             "extras length does not match the count declared at open()",

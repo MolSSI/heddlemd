@@ -8,9 +8,7 @@
 #include "precision.cuh"
 
 extern "C" __global__ void sd_compute_step(
-    Real *positions_x,
-    Real *positions_y,
-    Real *positions_z,
+    Real4 *posq,
     const Real *forces_x,
     const Real *forces_y,
     const Real *forces_z,
@@ -23,18 +21,18 @@ extern "C" __global__ void sd_compute_step(
     return;
   }
   Real scale = step_size * inv_f_max;
-  positions_x[i] = positions_x[i] + forces_x[i] * scale;
-  positions_y[i] = positions_y[i] + forces_y[i] * scale;
-  positions_z[i] = positions_z[i] + forces_z[i] * scale;
+  Real4 pq = posq[i];
+  pq.x = pq.x + forces_x[i] * scale;
+  pq.y = pq.y + forces_y[i] * scale;
+  pq.z = pq.z + forces_z[i] * scale;
+  posq[i] = pq;
 }
 
 // Snapshot positions to per-particle scratch buffers. One thread per
 // particle. Used before each trial step so a rejected trial can
 // restore the previous accepted positions.
 extern "C" __global__ void sd_snapshot(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
+    const Real4 *posq,
     Real *snapshot_x,
     Real *snapshot_y,
     Real *snapshot_z,
@@ -44,16 +42,15 @@ extern "C" __global__ void sd_snapshot(
   if (i >= n) {
     return;
   }
-  snapshot_x[i] = positions_x[i];
-  snapshot_y[i] = positions_y[i];
-  snapshot_z[i] = positions_z[i];
+  Real4 pq = posq[i];
+  snapshot_x[i] = pq.x;
+  snapshot_y[i] = pq.y;
+  snapshot_z[i] = pq.z;
 }
 
 // Restore positions from the snapshot. One thread per particle.
 extern "C" __global__ void sd_restore(
-    Real *positions_x,
-    Real *positions_y,
-    Real *positions_z,
+    Real4 *posq,
     const Real *snapshot_x,
     const Real *snapshot_y,
     const Real *snapshot_z,
@@ -63,9 +60,11 @@ extern "C" __global__ void sd_restore(
   if (i >= n) {
     return;
   }
-  positions_x[i] = snapshot_x[i];
-  positions_y[i] = snapshot_y[i];
-  positions_z[i] = snapshot_z[i];
+  Real4 pq = posq[i];
+  pq.x = snapshot_x[i];
+  pq.y = snapshot_y[i];
+  pq.z = snapshot_z[i];
+  posq[i] = pq;
 }
 
 // Single-block deterministic max-magnitude reduction over per-atom

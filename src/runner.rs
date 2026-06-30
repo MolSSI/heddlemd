@@ -26,7 +26,8 @@ use crate::io::{
 use crate::io::log_output::{compute_kinetic_energy, compute_temperature};
 use crate::state::{ParticleState, ParticleStateError};
 use crate::timings::{
-    HostStage, KernelStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
+    GraphVariant, HostStage, KernelStage, Timings, TimingsError, TimingsWriterError,
+    write_timings_file,
 };
 use crate::precision::Real;
 
@@ -53,6 +54,8 @@ pub enum RunnerError {
     Thermostat(#[source] ThermostatError),
     #[error("{0}")]
     Barostat(#[source] BarostatError),
+    #[error("{0}")]
+    SimulationBox(#[source] crate::pbc::SimulationBoxError),
     #[error("{0}")]
     Constraint(#[source] ConstraintError),
     #[error("{0}")]
@@ -99,6 +102,17 @@ pub enum RunnerError {
         final_force: f64,
         final_step: f64,
     },
+    #[error(
+        "built-in {kind} slot `{label}` did not expose a post-force per-particle source fragment"
+    )]
+    MissingPostForcePerParticleFragment {
+        kind: &'static str,
+        label: &'static str,
+    },
+    #[error("JIT-composed post-force per-particle kernel failed to compile: {log}")]
+    PostForceFragmentCompileFailed { log: String },
+    #[error("JIT-composed post-force per-particle kernel failed to load: {0}")]
+    PostForceFragmentLoadFailed(crate::gpu::GpuError),
 }
 
 // rq-5c1cfc93 rq-b00170c6
@@ -350,14 +364,30 @@ pub fn lint_simulation_with_registries(
         });
     }
 
-    // Stage 3: init.
+    // Stage 3: init. Lint always initialises the GPU here because
+    // `SimulationBox` is device-resident; the `--with-gpu` flag now
+    // only gates the heavier GPU stages (cuFFT smoke test, ForceField
+    // allocation).
     let type_name_strings: Vec<String> = config
         .particle_types
         .iter()
         .map(|t| t.name.clone())
         .collect();
     let type_name_refs: Vec<&str> = type_name_strings.iter().map(|s| s.as_str()).collect();
-    let init = match load_init_state(&config.init, &type_name_refs, config.units) {
+    let lint_gpu = match init_device() {
+        Ok(g) => g,
+        Err(e) => {
+            stages.push(LintStage {
+                label: "init",
+                status: LintStatus::Fail {
+                    detail: format!("init_device failed: {e}"),
+                    error: RunnerError::Gpu(e),
+                },
+            });
+            return finalize_with_skips(stages, &["box/cutoff", "topology", "gpu"]);
+        }
+    };
+    let init = match load_init_state(&lint_gpu.device, &config.init, &type_name_refs, config.units) {
         Ok(i) => {
             stages.push(LintStage {
                 label: "init",
@@ -519,7 +549,7 @@ pub fn lint_simulation_with_registries(
     }
 
     let _ = n;
-    match lint_gpu_full_setup(config, init, sim_box, topology, registries) {
+    match lint_gpu_full_setup(config, init, sim_box, topology, registries, lint_gpu) {
         Ok(()) => {
             stages.push(LintStage {
                 label: "gpu",
@@ -602,6 +632,7 @@ fn lint_gpu_full_setup(
     sim_box: crate::pbc::SimulationBox,
     topology: Option<(BondList, AngleList, ExclusionList, ConstraintList)>,
     registries: &crate::Registries,
+    gpu: crate::gpu::GpuContext,
 ) -> Result<(), (String, RunnerError)> {
     let n = init.particle_count;
     let topology = topology.unwrap_or_else(|| {
@@ -619,6 +650,8 @@ fn lint_gpu_full_setup(
         sim_box,
         topology,
         Duration::ZERO,
+        Duration::ZERO,
+        gpu,
         Duration::ZERO,
     )
     .map_err(|e| (format!("{e}"), e))?;
@@ -764,9 +797,15 @@ fn simulation_setup_new_impl(
         .collect();
     let type_name_refs: Vec<&str> = type_name_strings.iter().map(|s| s.as_str()).collect();
 
+    // `SimulationBox` is device-resident, so we need a CudaDevice to
+    // load the init state. `init_device` initialises the singleton
+    // device + module-cache; downstream stages reuse the same handle.
+    let mut gpu_init_duration = Duration::ZERO;
+    let gpu = timed(&mut gpu_init_duration, init_device).map_err(RunnerError::Gpu)?;
+
     let mut init_load_duration = Duration::ZERO;
     let init = timed(&mut init_load_duration, || {
-        load_init_state(&config.init, &type_name_refs, config.units)
+        load_init_state(&gpu.device, &config.init, &type_name_refs, config.units)
     })
     .map_err(RunnerError::InitState)?;
 
@@ -840,6 +879,8 @@ fn simulation_setup_new_impl(
         topology,
         config_load_duration,
         init_load_duration,
+        gpu,
+        gpu_init_duration,
     )
 }
 
@@ -847,6 +888,7 @@ fn simulation_setup_new_impl(
 // `SimulationSetup::new` (via `simulation_setup_new_impl`) and the
 // GPU-touching half of the lint pipeline. Takes ownership of the
 // inputs because the resulting `SimulationSetup` owns them.
+#[allow(clippy::too_many_arguments)]
 fn simulation_setup_finish_gpu(
     config: crate::io::Config,
     registries: crate::Registries,
@@ -855,12 +897,11 @@ fn simulation_setup_finish_gpu(
     topology: (BondList, AngleList, ExclusionList, ConstraintList),
     config_load_duration: Duration,
     init_load_duration: Duration,
+    gpu: crate::gpu::GpuContext,
+    gpu_init_duration: Duration,
 ) -> Result<SimulationSetup, RunnerError> {
     let n = init.particle_count;
     let (bond_list, angle_list, exclusion_list, constraint_list) = topology;
-
-    let mut gpu_init_duration = Duration::ZERO;
-    let gpu = timed(&mut gpu_init_duration, init_device).map_err(RunnerError::Gpu)?;
 
     // rq-637cd1a5 rq-02f4d342 rq-ea4205ec
     if config.spme.is_some() {
@@ -971,7 +1012,7 @@ fn simulation_setup_finish_gpu(
                 .device
                 .alloc_zeros::<Real>(1)
                 .map_err(|e| RunnerError::Gpu(crate::gpu::GpuError::from(e)))?;
-            let ke_after = crate::gpu::compute_kinetic_energy(&buffers, &mut ke_scratch)
+            let ke_after = crate::gpu::compute_kinetic_energy(&mut buffers, &mut ke_scratch)
                 .map_err(RunnerError::Gpu)? as f64;
             let n_thermal_dof_f64 = n_thermal_dof as f64;
             // k_B = 1 in atomic units; simulation.temperature is k_B · T in Hartrees.
@@ -982,6 +1023,11 @@ fn simulation_setup_finish_gpu(
             }
         }
     }
+
+    // Select the JIT fast-math compile mode before any kernel is built
+    // (ForceField::new compiles the composed pair/bonded/angle and SPME
+    // kernels; the post-force composer is built further below). rq-a84e1c76
+    crate::forces::set_jit_fast_math(config.simulation.fast_math);
 
     // ForceField persists across phases.
     let force_field = ForceField::new(
@@ -1162,6 +1208,18 @@ pub(crate) fn run_md_phase_inner(
         .barostats
         .build_optional(phase.barostat.as_ref(), &setup.gpu, n, n_constraints)
         .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+    // rq-3e1fba8b — hand the barostat the connectivity-derived molecule
+    // partition and the initial box (the Monte-Carlo barostat uploads
+    // its molecule tables and resolves its default volume step here).
+    if let Some(b) = barostat.as_mut() {
+        let molecules = crate::forces::MoleculeList::from_topology(
+            n,
+            &setup.bond_list,
+            &setup.constraint_list,
+        );
+        b.init_run(&setup.sim_box, &molecules)
+            .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+    }
     let mut constraint = setup
         .registries
         .constraint_types
@@ -1173,6 +1231,93 @@ pub(crate) fn run_md_phase_inner(
             &setup.config.constraint_types,
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
+
+    // rq-8ac9773d — JIT-composed post-force per-particle kernel setup
+    // runs once per phase, before the CUDA-graph eligibility check.
+    // Both the graph-capture path and the per-step launch path
+    // dispatch the same composed kernel. Built-in slots always
+    // expose a post-force fragment; a slot returning `None` raises
+    // `MissingPostForcePerParticleFragment` before either path runs.
+    let mut composed_post_force: Option<crate::forces::JitComposedPostForcePerParticle> =
+        None;
+    let mut post_force_substep_index: Option<usize> = None;
+    {
+        let int_frag = integrator
+            .post_force_per_particle()
+            .map(|p| p.post_force_per_particle_fragment());
+        let therm_active = thermostat.is_some();
+        // Only a per-step barostat contributes a post-force per-particle
+        // fragment; a periodic (Monte-Carlo) barostat does no per-step
+        // work and is exempt from the fragment requirement.
+        let baro_active = barostat_couples_per_step(&barostat);
+        let therm_frag = thermostat
+            .as_ref()
+            .and_then(|t| t.post_force_per_particle())
+            .map(|p| p.post_force_per_particle_fragment());
+        let baro_frag = barostat
+            .as_ref()
+            .and_then(|b| b.post_force_per_particle())
+            .map(|p| p.post_force_per_particle_fragment());
+        if int_frag.is_none() {
+            return Err((
+                RunnerError::MissingPostForcePerParticleFragment {
+                    kind: "integrator",
+                    label: "<integrator>",
+                },
+                ExitPhase::Setup,
+            ));
+        }
+        if therm_active && therm_frag.is_none() {
+            return Err((
+                RunnerError::MissingPostForcePerParticleFragment {
+                    kind: "thermostat",
+                    label: "<thermostat>",
+                },
+                ExitPhase::Setup,
+            ));
+        }
+        if baro_active && baro_frag.is_none() {
+            return Err((
+                RunnerError::MissingPostForcePerParticleFragment {
+                    kind: "barostat",
+                    label: "<barostat>",
+                },
+                ExitPhase::Setup,
+            ));
+        }
+        let mut fragments: Vec<crate::forces::PerParticleFragment> = Vec::new();
+        fragments.push(int_frag.unwrap());
+        if let Some(f) = therm_frag {
+            fragments.push(f);
+        }
+        if let Some(f) = baro_frag {
+            fragments.push(f);
+        }
+        match crate::forces::JitComposedPostForcePerParticle::compile_and_load(
+            &setup.gpu.device,
+            &fragments,
+        ) {
+            Ok(k) => {
+                composed_post_force = Some(k);
+                post_force_substep_index =
+                    integrator.post_force_substep_index(phase.dt as Real);
+            }
+            Err(e) => {
+                return Err((
+                    match e {
+                        crate::forces::ForceFieldError::FragmentCompileFailed { log } => {
+                            RunnerError::PostForceFragmentCompileFailed { log }
+                        }
+                        crate::forces::ForceFieldError::FragmentLoadFailed(g) => {
+                            RunnerError::PostForceFragmentLoadFailed(g)
+                        }
+                        other => RunnerError::ForceField(other),
+                    },
+                    ExitPhase::Setup,
+                ));
+            }
+        }
+    }
 
     // Open per-phase output writers.
     let mut traj_writer: Option<TrajectoryWriter> = if phase.output.trajectory_every > 0 {
@@ -1253,6 +1398,14 @@ pub(crate) fn run_md_phase_inner(
         frames_written += 1;
     }
     if let Some(writer) = log_writer.as_mut() {
+        if let Some(t) = thermostat.as_mut() {
+            t.flush_pending_injection(&setup.gpu.device)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
+        }
+        if let Some(b) = barostat.as_mut() {
+            b.flush_pending_injection(&setup.gpu.device)
+                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+        }
         let ke = compute_kinetic_energy(
             &frame.masses,
             &frame.velocities_x,
@@ -1269,7 +1422,7 @@ pub(crate) fn run_md_phase_inner(
             timings
                 .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
                 .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-            let pe = compute_total_potential_energy(&setup.buffers, scratch)
+            let pe = compute_total_potential_energy(&mut setup.buffers, scratch)
                 .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Setup))?;
             timings
                 .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
@@ -1303,121 +1456,189 @@ pub(crate) fn run_md_phase_inner(
         .map(|b| b.supports_constraints(&phase.integrator.params))
         .unwrap_or(false);
 
-    for step in 1..=n_steps {
-        if let Some(t) = thermostat.as_mut() {
-            t.apply_pre(&mut setup.buffers, dt, &mut timings)
-                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+    // Decide whether this phase is eligible for CUDA graph capture.
+    // See `rqm/cuda-graphs.md` for the activation policy. Every
+    // active slot must report `graph_compatible == true`, the
+    // run-wide override flag must be off, and capture must succeed
+    // at runtime; otherwise the phase runs the per-step launch loop
+    // with full per-kernel `Timings`.
+    let graph_eligible = !setup.config.simulation.cuda_graphs_disable
+        && phase_slots_graph_compatible(setup, phase);
+
+    // Graph-timing calibration: CUDA forbids `cuEventElapsedTime` on the
+    // per-kernel events captured into a graph, so graph mode cannot time
+    // its own replays. Instead run a few instrumented per-step iterations
+    // up front (real CUDA-event timing) and snapshot a representative
+    // per-kernel duration; the replay loop folds it in for every step.
+    // The per-step path is bit-identical to the graph replay (fixed-point
+    // forces are summation-order invariant), so this does not perturb the
+    // trajectory; the cost is a handful of steps out of `n_steps`.
+    const GRAPH_TIMING_CALIBRATION_STEPS: u64 = 8;
+    let calib: u64 = if graph_eligible && n_steps >= 1 {
+        GRAPH_TIMING_CALIBRATION_STEPS.min(n_steps)
+    } else {
+        0
+    };
+    if calib > 0 {
+        run_per_step_range(
+            1,
+            calib,
+            setup,
+            phase,
+            &mut integrator,
+            &mut thermostat,
+            &mut barostat,
+            &mut constraint,
+            supports_constraints,
+            dt,
+            composed_post_force.as_ref(),
+            post_force_substep_index,
+            &mut timings,
+            &mut frame,
+            &mut traj_writer,
+            &mut log_writer,
+            &mut pe_scratch,
+            &type_indices,
+            n_thermal_dof,
+            &log_extra_columns,
+            phase_started,
+            phase_name,
+            progress_to_stdout,
+            progress_every,
+            &mut frames_written,
+            &mut log_rows_written,
+        )?;
+        timings.snapshot_graph_representatives();
+    }
+
+    let graph_loop: Option<crate::gpu::GraphLoop> = if graph_eligible && calib < n_steps {
+        match capture_phase_graph(
+            &mut setup.buffers,
+            &mut setup.sim_box,
+            &mut setup.force_field,
+            integrator.as_mut(),
+            &mut thermostat,
+            &mut barostat,
+            &mut constraint,
+            supports_constraints,
+            dt,
+            &mut timings,
+            &setup.gpu.device,
+            composed_post_force.as_ref(),
+            post_force_substep_index,
+        ) {
+            Ok(exec) => Some(exec),
+            Err(e) => {
+                eprintln!(
+                    "warning: cuda graph capture failed for phase `{phase_name}`: {e}; falling back to per-step launches"
+                );
+                None
+            }
         }
-        {
-            let constraint_arg: Option<&mut dyn crate::integrator::Constraint> =
-                match constraint.as_mut() {
-                    Some(b) => Some(b.as_mut()),
-                    None => None,
-                };
-            let trajectory_due = phase.output.trajectory_every > 0
-                && step % phase.output.trajectory_every == 0;
-            let log_due = phase.output.log_every > 0 && step % phase.output.log_every == 0;
-            let runner_needs_scalars = trajectory_due || log_due || barostat.is_some();
-            crate::integrator::run_step(
-                integrator.as_mut(),
-                &mut setup.buffers,
-                &mut setup.sim_box,
-                &mut setup.force_field,
-                constraint_arg,
+    } else {
+        None
+    };
+
+    if let Some(mut graph_loop) = graph_loop {
+        // rq-67a09135 rq-1217c816
+        // The batched loop re-captures the phase graph in place when a
+        // batch-boundary rebuild reallocates a packed-neighbour buffer.
+        // It returns `Some(resume_step)` only when such a re-capture
+        // failed, in which case the remaining steps run on the per-step
+        // launch loop.
+        let fallback_from = run_batched_graph_loop(
+            setup,
+            phase,
+            phase_index,
+            calib,
+            &mut graph_loop,
+            integrator.as_mut(),
+            &mut thermostat,
+            &mut barostat,
+            &mut constraint,
+            supports_constraints,
+            dt,
+            composed_post_force.as_ref(),
+            post_force_substep_index,
+            &mut timings,
+            &mut frame,
+            &mut traj_writer,
+            &mut log_writer,
+            &mut pe_scratch,
+            &type_indices,
+            n_thermal_dof,
+            &log_extra_columns,
+            phase_started,
+            phase_name,
+            progress_to_stdout,
+            progress_every,
+            &mut frames_written,
+            &mut log_rows_written,
+        )?;
+        if let Some(resume) = fallback_from {
+            run_per_step_range(
+                resume,
+                n_steps,
+                setup,
+                phase,
+                &mut integrator,
+                &mut thermostat,
+                &mut barostat,
+                &mut constraint,
                 supports_constraints,
                 dt,
+                composed_post_force.as_ref(),
+                post_force_substep_index,
                 &mut timings,
-                runner_needs_scalars,
-            )
-            .map_err(|e| {
-                let runner_err = match e {
-                    crate::integrator::StepError::Integrator(e) => RunnerError::Integrator(e),
-                    crate::integrator::StepError::ForceField(e) => RunnerError::ForceField(e),
-                    crate::integrator::StepError::Constraint(e) => RunnerError::Constraint(e),
-                    crate::integrator::StepError::IntegratorRejectsConstraint { reason } => {
-                        unreachable!("run_step returned IntegratorRejectsConstraint ({reason})")
-                    }
-                };
-                (runner_err, ExitPhase::Loop)
-            })?;
+                &mut frame,
+                &mut traj_writer,
+                &mut log_writer,
+                &mut pe_scratch,
+                &type_indices,
+                n_thermal_dof,
+                &log_extra_columns,
+                phase_started,
+                phase_name,
+                progress_to_stdout,
+                progress_every,
+                &mut frames_written,
+                &mut log_rows_written,
+            )?;
         }
-        if let Some(t) = thermostat.as_mut() {
-            t.apply_post(&mut setup.buffers, dt, &mut timings)
-                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
-        }
-        if let Some(b) = barostat.as_mut() {
-            b.apply(&mut setup.buffers, &mut setup.sim_box, dt, &mut timings)
-                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
-        }
-
-        let want_traj =
-            phase.output.trajectory_every > 0 && step % phase.output.trajectory_every == 0;
-        let want_log = phase.output.log_every > 0 && step % phase.output.log_every == 0;
-        if want_traj || want_log {
-            let mut dl = Duration::ZERO;
-            timed(&mut dl, || frame.download_from(&setup.buffers)).map_err(|e| match e {
-                ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Loop),
-                other => (RunnerError::ParticleState(other), ExitPhase::Loop),
-            })?;
-            timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
-        }
-        if want_traj {
-            let writer = traj_writer.as_mut().expect("traj_writer enabled");
-            let mut tw = Duration::ZERO;
-            timed(&mut tw, || {
-                write_traj_frame(writer, step, phase.dt, &setup.sim_box, &type_indices, &frame)
-            })
-            .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
-            timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
-            frames_written += 1;
-        }
-        if want_log {
-            let writer = log_writer.as_mut().expect("log_writer enabled");
-            let ke = compute_kinetic_energy(
-                &frame.masses,
-                &frame.velocities_x,
-                &frame.velocities_y,
-                &frame.velocities_z,
-            );
-            let t = compute_temperature(ke, n_thermal_dof);
-            let time = (step as f64) * phase.dt;
-            let extras = if log_extra_columns.is_empty() {
-                Vec::new()
-            } else {
-                let scratch = pe_scratch
-                    .as_mut()
-                    .expect("pe_scratch allocated when log_extra_columns non-empty");
-                timings
-                    .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
-                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-                let pe = compute_total_potential_energy(&setup.buffers, scratch)
-                    .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
-                timings
-                    .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
-                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-                collect_log_extras(
-                    integrator.as_ref(),
-                    thermostat.as_deref(),
-                    barostat.as_deref(),
-                    ke,
-                    pe as f64,
-                )
-            };
-            let mut lw = Duration::ZERO;
-            timed(&mut lw, || writer.write_row(step, time, ke, t, &extras))
-                .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
-            timings.record_host(HostStage::LOG_WRITE, lw);
-            log_rows_written += 1;
-        }
-
-        // rq-73fbb111
-        if progress_to_stdout && (step % progress_every == 0 || step == n_steps) {
-            let pct = 100.0 * step as f64 / n_steps.max(1) as f64;
-            let rate = step as f64 / phase_started.elapsed().as_secs_f64().max(1e-9);
-            println!(
-                "[heddlemd] phase `{phase_name}` step {step}/{n_steps} ({pct:.1}%) — {rate:.1e} steps/sec"
-            );
-        }
+    } else {
+        // Steps `1..=calib` already ran on the per-step path as graph
+        // calibration; resume after them. When `calib == 0` (graphs
+        // disabled / ineligible) this is the whole phase; when
+        // `calib == n_steps` (tiny phase fully covered by calibration)
+        // the range is empty and this is a no-op.
+        run_per_step_range(
+            calib + 1,
+            n_steps,
+            setup,
+            phase,
+            &mut integrator,
+            &mut thermostat,
+            &mut barostat,
+            &mut constraint,
+            supports_constraints,
+            dt,
+            composed_post_force.as_ref(),
+            post_force_substep_index,
+            &mut timings,
+            &mut frame,
+            &mut traj_writer,
+            &mut log_writer,
+            &mut pe_scratch,
+            &type_indices,
+            n_thermal_dof,
+            &log_extra_columns,
+            phase_started,
+            phase_name,
+            progress_to_stdout,
+            progress_every,
+            &mut frames_written,
+            &mut log_rows_written,
+        )?;
     }
 
     if let Some(writer) = traj_writer.as_mut() {
@@ -1818,6 +2039,997 @@ pub(crate) fn run_minimization_phase_inner(
     })
 }
 
+/// Returns `true` iff every active slot for the phase reports
+/// `graph_compatible = true`. Used by the runner to decide whether a
+/// phase is eligible for CUDA graph capture. See `cuda-graphs.md`.
+fn phase_slots_graph_compatible(
+    setup: &SimulationSetup,
+    phase: &crate::io::PhaseConfig,
+) -> bool {
+    // ForceField-level check: any potential whose `compute` uses a
+    // secondary stream (e.g. SPME reciprocal) makes the phase
+    // ineligible. Work on uncaptured streams runs immediately and is
+    // not part of the resulting graph.
+    if !setup.force_field.graph_compatible() {
+        return false;
+    }
+    let int_ok = setup
+        .registries
+        .integrators
+        .lookup(&phase.integrator.kind)
+        .map(|b| b.graph_compatible(&phase.integrator.params))
+        .unwrap_or(false);
+    if !int_ok {
+        return false;
+    }
+    if let Some(t) = phase.thermostat.as_ref() {
+        let ok = setup
+            .registries
+            .thermostats
+            .lookup(&t.kind)
+            .map(|builder| builder.graph_compatible(&t.params))
+            .unwrap_or(false);
+        if !ok {
+            return false;
+        }
+    }
+    if let Some(b) = phase.barostat.as_ref() {
+        let ok = setup
+            .registries
+            .barostats
+            .lookup(&b.kind)
+            .map(|builder| builder.graph_compatible(&b.params))
+            .unwrap_or(false);
+        if !ok {
+            return false;
+        }
+    }
+    // Constraints are looked up per `[[constraint_types]]` entry; if any
+    // type's builder reports `graph_compatible = false`, the phase is
+    // ineligible.
+    for ct in &setup.config.constraint_types {
+        let ok = setup
+            .registries
+            .constraint_types
+            .lookup(&ct.kind)
+            .map(|builder| builder.graph_compatible(&ct.params))
+            .unwrap_or(false);
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+/// Captures the per-step kernel sequence for a phase into an
+/// executable CUDA graph. The sequence is:
+///   1. `thermostat.apply_pre` (if any)
+///   2. `run_step` with `RunStepOptions { run_neighbor_pre_step: false, .. }`
+///   3. `thermostat.apply_post` (if any)
+///   4. `barostat.apply` (if any)
+///
+/// The captured iteration counts as physical step 1: the device state
+/// is left advanced by exactly one step after this call returns.
+/// Launches the JIT-composed post-force per-particle kernel for one
+/// physical step. Used both inside `capture_phase_graph` (where the
+/// launch becomes a node in the captured graph) and inside the
+/// per-step launch loop. Pre-populates the launch builder with the
+/// common args, invokes each active slot's `bind_post_force_per_particle_args`
+/// in canonical order, pushes the trailing `n` arg, then issues
+/// `cuLaunchKernel`. Returns any timing or launch error to the
+/// caller.
+fn launch_composed_post_force(
+    composed: &crate::forces::JitComposedPostForcePerParticle,
+    buffers: &crate::gpu::ParticleBuffers,
+    sim_box: &crate::pbc::SimulationBox,
+    integrator: &dyn crate::integrator::Integrator,
+    thermostat: &Option<Box<dyn crate::integrator::Thermostat>>,
+    barostat: &Option<Box<dyn crate::integrator::Barostat>>,
+    dt: Real,
+    timings: &mut Timings,
+) -> Result<(), RunnerError> {
+    if buffers.particle_count() == 0 {
+        return Ok(());
+    }
+    let mut builder = crate::forces::ForceLaunchBuilder::new();
+    builder.push_device_buffer(&buffers.posq);
+    builder.push_device_buffer(&buffers.images_x);
+    builder.push_device_buffer(&buffers.images_y);
+    builder.push_device_buffer(&buffers.images_z);
+    builder.push_device_buffer(&buffers.velocities_x);
+    builder.push_device_buffer(&buffers.velocities_y);
+    builder.push_device_buffer(&buffers.velocities_z);
+    builder.push_device_buffer(&buffers.forces_x);
+    builder.push_device_buffer(&buffers.forces_y);
+    builder.push_device_buffer(&buffers.forces_z);
+    builder.push_device_buffer(&buffers.masses);
+    builder.push_device_buffer(sim_box.lattice_device());
+    let bind_ctx = crate::forces::PostForceBindContext {
+        buffers,
+        sim_box,
+        dt,
+    };
+    integrator
+        .post_force_per_particle()
+        .expect("composed post-force kernel implies the integrator participates")
+        .bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+    if let Some(t) = thermostat.as_ref().and_then(|t| t.post_force_per_particle()) {
+        t.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+    }
+    if let Some(b) = barostat.as_ref().and_then(|b| b.post_force_per_particle()) {
+        b.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+    }
+    let n_particles = buffers.particle_count() as u32;
+    builder.push_scalar::<u32>(n_particles);
+    timings
+        .kernel_start(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
+        .map_err(RunnerError::Timings)?;
+    unsafe {
+        composed
+            .launch(n_particles, builder)
+            .map_err(RunnerError::Gpu)?;
+    }
+    timings
+        .kernel_stop(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
+        .map_err(RunnerError::Timings)?;
+    Ok(())
+}
+
+/// See `cuda-graphs.md` for the capture lifecycle.
+// rq-76db55bb
+/// Whether a physical step's force evaluation must compute the total
+/// potential energy and virial. True only when the step produces a log
+/// row or a barostat consumes the per-step virial; a trajectory frame
+/// and the thermostat's kinetic-energy reduction need no force-kernel
+/// scalars. The per-step launch loop and the graph replay loop both
+/// select `AggregateLevel` / the captured graph through this predicate.
+fn step_needs_force_scalars(log_due: bool, barostat_active: bool) -> bool {
+    log_due || barostat_active
+}
+
+// rq-26dce0f6 rq-c6c56cdc
+/// Whether a phase captures the forces-only graph alongside the
+/// always-captured forces+scalars graph. A barostat consumes the virial
+/// on every step, so a barostat phase evaluates scalars every step and
+/// captures only the forces+scalars graph.
+fn captures_forces_only_graph(barostat_active: bool) -> bool {
+    !barostat_active
+}
+
+// rq-0d729ecb rq-2acc094a — periodic (Monte-Carlo) barostat helpers. A
+// periodic barostat does no per-step work: it consumes no virial (so it
+// does not force per-step scalars or suppress the forces-only graph) and
+// runs a host-orchestrated move every `frequency` steps at a batch
+// boundary.
+fn barostat_move_frequency(
+    barostat: &Option<Box<dyn crate::integrator::Barostat>>,
+) -> Option<u32> {
+    match barostat.as_ref().map(|b| b.periodicity()) {
+        Some(crate::integrator::BarostatPeriodicity::EveryNSteps(n)) => Some(n),
+        _ => None,
+    }
+}
+
+/// Whether a barostat couples to the dynamics on every step (and so
+/// consumes the per-step virial). False for an absent or periodic
+/// barostat.
+fn barostat_couples_per_step(
+    barostat: &Option<Box<dyn crate::integrator::Barostat>>,
+) -> bool {
+    matches!(
+        barostat.as_ref().map(|b| b.periodicity()),
+        Some(crate::integrator::BarostatPeriodicity::EveryStep)
+    )
+}
+
+/// Packed-neighbour buffer capacities, used to detect whether a barostat
+/// move's trial force evaluation grew (and so reallocated) a buffer —
+/// which invalidates the captured graph's device pointers. A move that
+/// leaves the capacities unchanged needs no graph re-capture.
+fn packed_capacities(force_field: &ForceField) -> Option<(u32, u32)> {
+    force_field
+        .neighbor_list
+        .as_ref()
+        .and_then(|nl| nl.packed.as_ref())
+        .map(|p| (p.interacting_tiles_capacity, p.single_pairs_capacity))
+}
+
+// rq-766c88fb rq-e35fa835
+/// Captures the phase's executable graphs: the forces+scalars graph
+/// always, and the forces-only graph unless a barostat is active. Both
+/// are recorded from the same pre-capture device state; stream capture
+/// records without executing, so neither advances the simulation. See
+/// `cuda-graphs.md` *Capture Lifecycle*.
+#[allow(clippy::too_many_arguments)]
+fn capture_phase_graph(
+    buffers: &mut crate::gpu::ParticleBuffers,
+    sim_box: &mut crate::pbc::SimulationBox,
+    force_field: &mut crate::forces::ForceField,
+    integrator: &mut dyn crate::integrator::Integrator,
+    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
+    barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
+    constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    supports_constraints: bool,
+    dt: Real,
+    timings: &mut Timings,
+    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
+    post_force_substep_index: Option<usize>,
+) -> Result<crate::gpu::GraphLoop, crate::gpu::GraphError> {
+    let forces_and_scalars = capture_one_graph(
+        buffers,
+        sim_box,
+        force_field,
+        integrator,
+        thermostat,
+        barostat,
+        constraint,
+        supports_constraints,
+        dt,
+        timings,
+        device,
+        composed_post_force,
+        post_force_substep_index,
+        true,
+        GraphVariant::ForcesAndScalars,
+    )?;
+    // A barostat consumes the per-step virial inside the captured
+    // sequence, so a barostat phase evaluates scalars on every step and
+    // does not capture a forces-only graph.
+    let forces_only = if captures_forces_only_graph(barostat_couples_per_step(barostat)) {
+        Some(capture_one_graph(
+            buffers,
+            sim_box,
+            force_field,
+            integrator,
+            thermostat,
+            barostat,
+            constraint,
+            supports_constraints,
+            dt,
+            timings,
+            device,
+            composed_post_force,
+            post_force_substep_index,
+            false,
+            GraphVariant::ForcesOnly,
+        )?)
+    } else {
+        None
+    };
+    Ok(crate::gpu::GraphLoop {
+        forces_and_scalars,
+        forces_only,
+    })
+}
+
+/// Captures and instantiates a single one-step graph with the force
+/// evaluation at the `AggregateLevel` selected by `needs_scalars`, and
+/// commits its per-stage `kernel_stop` counts to `variant`.
+// rq-766c88fb
+#[allow(clippy::too_many_arguments)]
+fn capture_one_graph(
+    buffers: &mut crate::gpu::ParticleBuffers,
+    sim_box: &mut crate::pbc::SimulationBox,
+    force_field: &mut crate::forces::ForceField,
+    integrator: &mut dyn crate::integrator::Integrator,
+    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
+    barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
+    constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    supports_constraints: bool,
+    dt: Real,
+    timings: &mut Timings,
+    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
+    post_force_substep_index: Option<usize>,
+    needs_scalars: bool,
+    variant: GraphVariant,
+) -> Result<crate::gpu::CudaGraphExec, crate::gpu::GraphError> {
+    use crate::gpu::{CaptureMode, begin_stream_capture, end_stream_capture};
+    // Settle any outstanding `Timings` event pairs from the warm-up
+    // step before capture begins; `event::synchronize` calls inside
+    // `kernel_start` would otherwise invalidate the capture region.
+    if let Err(e) = timings.drain_outstanding() {
+        eprintln!("warning: timings drain before graph capture failed: {e}; falling back");
+        return Err(crate::gpu::GraphError::BeginCaptureFailed(
+            cudarc::driver::DriverError(
+                cudarc::driver::sys::CUresult::CUDA_ERROR_NOT_READY,
+            ),
+        ));
+    }
+    timings.begin_capture();
+    // `ThreadLocal` restricts capture-mode side effects to the
+    // calling thread; without this, every other thread sharing the
+    // CUDA primary context fails routine ops like `cuMemAllocAsync`
+    // with `CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED` for the duration
+    // of the capture. The runner's per-phase loop is single-threaded,
+    // so the broader restrictions of `Global` are not needed.
+    begin_stream_capture(device, CaptureMode::ThreadLocal)?;
+    let mut inner_failure: Option<String> = None;
+    if let Some(t) = thermostat.as_mut() {
+        if let Err(e) = t.apply_pre(buffers, dt, timings) {
+            inner_failure = Some(format!("thermostat.apply_pre: {e}"));
+        }
+    }
+    if inner_failure.is_none() {
+        let constraint_arg: Option<&mut dyn crate::integrator::Constraint> = match constraint
+            .as_mut()
+        {
+            Some(c) => Some(c.as_mut()),
+            None => None,
+        };
+        // `needs_scalars` selects the force evaluation's `AggregateLevel`:
+        // `true` records the forces+scalars (`_fev`) graph, `false` the
+        // forces-only (`_f`) graph. The replay loop launches the
+        // forces-only graph on steps that need no scalars (see
+        // `cuda-graphs.md` *Batched Replay Loop*).
+        let result = if let (Some(_), Some(skip_idx)) =
+            (composed_post_force, post_force_substep_index)
+        {
+            crate::integrator::run_step(
+                integrator,
+                buffers,
+                sim_box,
+                force_field,
+                constraint_arg,
+                dt,
+                timings,
+                crate::integrator::RunStepOptions {
+                    run_neighbor_pre_step: false,
+                    skip_substep_index: Some(skip_idx),
+                    install_constraint_hooks: supports_constraints,
+                    runner_needs_scalars: needs_scalars,
+                },
+            )
+        } else {
+            crate::integrator::run_step(
+                integrator,
+                buffers,
+                sim_box,
+                force_field,
+                constraint_arg,
+                dt,
+                timings,
+                crate::integrator::RunStepOptions {
+                    run_neighbor_pre_step: false,
+                    install_constraint_hooks: supports_constraints,
+                    runner_needs_scalars: needs_scalars,
+                    ..Default::default()
+                },
+            )
+        };
+        if let Err(e) = result {
+            inner_failure = Some(format!("run_step: {e:?}"));
+        }
+    }
+    if inner_failure.is_none() {
+        if let Some(t) = thermostat.as_mut() {
+            if let Err(e) = t.apply_post(buffers, dt, timings) {
+                inner_failure = Some(format!("thermostat.apply_post: {e}"));
+            }
+        }
+    }
+    if inner_failure.is_none() {
+        if let Some(b) = barostat.as_mut() {
+            if let Err(e) = b.apply(buffers, sim_box, dt, timings) {
+                inner_failure = Some(format!("barostat.apply: {e}"));
+            }
+        }
+    }
+    if inner_failure.is_none() {
+        if let Some(composed) = composed_post_force {
+            if let Err(e) = launch_composed_post_force(
+                composed,
+                buffers,
+                sim_box,
+                integrator,
+                thermostat,
+                barostat,
+                dt,
+                timings,
+            ) {
+                inner_failure = Some(format!("composed post-force launch: {e:?}"));
+            }
+        }
+    }
+    // Always end capture, even on inner failure — a captured stream
+    // must be closed to avoid leaving the device in capture mode.
+    let graph = end_stream_capture(device)?;
+    timings.end_capture(variant);
+    if let Some(reason) = inner_failure {
+        eprintln!("warning: cuda graph capture inner sequence failed ({reason}); falling back");
+        return Err(crate::gpu::GraphError::EndCaptureFailed(
+            cudarc::driver::DriverError(
+                cudarc::driver::sys::CUresult::CUDA_ERROR_STREAM_CAPTURE_INVALIDATED,
+            ),
+        ));
+    }
+    graph.instantiate()
+}
+
+/// Per-step launch loop over physical steps `start_step..=n_steps`.
+/// Used both for graph-ineligible phases (`start_step = 1`) and as the
+/// fallback when a mid-phase graph re-capture fails (`start_step` is the
+/// first un-run step). See `cuda-graphs.md` *Neighbor-List Pre-Step
+/// Decomposition*.
+#[allow(clippy::too_many_arguments)]
+fn run_per_step_range(
+    start_step: u64,
+    n_steps: u64,
+    setup: &mut SimulationSetup,
+    phase: &crate::io::PhaseConfig,
+    integrator: &mut Box<dyn crate::integrator::Integrator>,
+    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
+    barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
+    constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    supports_constraints: bool,
+    dt: Real,
+    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
+    post_force_substep_index: Option<usize>,
+    timings: &mut Timings,
+    frame: &mut ParticleState,
+    traj_writer: &mut Option<TrajectoryWriter>,
+    log_writer: &mut Option<LogWriter>,
+    pe_scratch: &mut Option<cudarc::driver::CudaSlice<Real>>,
+    type_indices: &[u32],
+    n_thermal_dof: u32,
+    log_extra_columns: &[(&'static str, crate::units::Dimension)],
+    phase_started: Instant,
+    phase_name: &str,
+    progress_to_stdout: bool,
+    progress_every: u64,
+    frames_written: &mut u64,
+    log_rows_written: &mut u64,
+) -> Result<(), (RunnerError, ExitPhase)> {
+    for step in start_step..=n_steps {
+        if let Some(t) = thermostat.as_mut() {
+            t.apply_pre(&mut setup.buffers, dt, &mut *timings)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        }
+        {
+            let constraint_arg: Option<&mut dyn crate::integrator::Constraint> =
+                match constraint.as_mut() {
+                    Some(b) => Some(b.as_mut()),
+                    None => None,
+                };
+            // rq-76db55bb — the force evaluation computes total PE and
+            // virial only when the step produces a log row or a barostat
+            // consumes the virial. A trajectory frame carries positions
+            // and velocities (no force-kernel scalars), and the
+            // thermostat reduces kinetic energy independently, so neither
+            // forces a scalars step. The graph replay loop selects its
+            // forces-only / forces+scalars graphs on the same condition.
+            let log_due = phase.output.log_every > 0 && step % phase.output.log_every == 0;
+            // rq-03a5a290 — evaluate scalars on the step preceding a
+            // periodic-barostat move so the move reads the current-config
+            // energy without a redundant force evaluation.
+            let is_move_boundary = barostat_move_frequency(barostat)
+                .is_some_and(|f| f > 0 && step % f as u64 == 0);
+            let runner_needs_scalars =
+                step_needs_force_scalars(log_due, barostat_couples_per_step(barostat))
+                    || is_move_boundary;
+            let result = if let Some(skip_idx) = post_force_substep_index {
+                crate::integrator::run_step(
+                    integrator.as_mut(),
+                    &mut setup.buffers,
+                    &mut setup.sim_box,
+                    &mut setup.force_field,
+                    constraint_arg,
+                    dt,
+                    &mut *timings,
+                    crate::integrator::RunStepOptions {
+                        skip_substep_index: Some(skip_idx),
+                        install_constraint_hooks: supports_constraints,
+                        runner_needs_scalars,
+                        ..Default::default()
+                    },
+                )
+            } else {
+                crate::integrator::run_step(
+                    integrator.as_mut(),
+                    &mut setup.buffers,
+                    &mut setup.sim_box,
+                    &mut setup.force_field,
+                    constraint_arg,
+                    dt,
+                    &mut *timings,
+                    crate::integrator::RunStepOptions {
+                        install_constraint_hooks: supports_constraints,
+                        runner_needs_scalars,
+                        ..Default::default()
+                    },
+                )
+            };
+            result.map_err(|e| {
+                let runner_err = match e {
+                    crate::integrator::StepError::Integrator(e) => RunnerError::Integrator(e),
+                    crate::integrator::StepError::ForceField(e) => RunnerError::ForceField(e),
+                    crate::integrator::StepError::Constraint(e) => RunnerError::Constraint(e),
+                    crate::integrator::StepError::IntegratorRejectsConstraint { reason } => {
+                        unreachable!("run_step returned IntegratorRejectsConstraint ({reason})")
+                    }
+                    crate::integrator::StepError::MissingPostForcePerParticleFragment {
+                        kind,
+                        label,
+                    } => RunnerError::MissingPostForcePerParticleFragment { kind, label },
+                    crate::integrator::StepError::PostForceFragmentCompileFailed { log } => {
+                        RunnerError::PostForceFragmentCompileFailed { log }
+                    }
+                    crate::integrator::StepError::PostForceFragmentLoadFailed(e) => {
+                        RunnerError::PostForceFragmentLoadFailed(e)
+                    }
+                };
+                (runner_err, ExitPhase::Loop)
+            })?;
+        }
+        if let Some(t) = thermostat.as_mut() {
+            t.apply_post(&mut setup.buffers, dt, &mut *timings)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        }
+        if let Some(b) = barostat.as_mut() {
+            b.apply(&mut setup.buffers, &mut setup.sim_box, dt, &mut *timings)
+                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+        }
+        if let Some(composed) = composed_post_force {
+            launch_composed_post_force(
+                composed,
+                &setup.buffers,
+                &setup.sim_box,
+                integrator.as_ref(),
+                thermostat,
+                barostat,
+                dt,
+                &mut *timings,
+            )
+            .map_err(|e| (e, ExitPhase::Loop))?;
+        }
+
+        // rq-03a5a290 — a periodic (Monte-Carlo) barostat runs its
+        // host-orchestrated move every `frequency` steps, after the
+        // dynamics step and before this step's output. The neighbour-
+        // checking force evaluations inside the move (and the next step's
+        // full `step` call) rebuild the neighbour list against the moved
+        // box.
+        if let Some(freq) = barostat_move_frequency(barostat) {
+            if freq > 0 && step % freq as u64 == 0 {
+                if let Some(b) = barostat.as_mut() {
+                    b.apply_move(
+                        &mut setup.force_field,
+                        &mut setup.buffers,
+                        &mut setup.sim_box,
+                        None,
+                        dt,
+                        &mut *timings,
+                    )
+                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+                }
+            }
+        }
+
+        let want_traj =
+            phase.output.trajectory_every > 0 && step % phase.output.trajectory_every == 0;
+        let want_log = phase.output.log_every > 0 && step % phase.output.log_every == 0;
+        if want_traj || want_log {
+            let mut dl = Duration::ZERO;
+            timed(&mut dl, || frame.download_from(&setup.buffers)).map_err(|e| match e {
+                ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Loop),
+                other => (RunnerError::ParticleState(other), ExitPhase::Loop),
+            })?;
+            timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
+            if barostat.is_some() {
+                setup
+                    .sim_box
+                    .flush_from_device()
+                    .map_err(|e| (RunnerError::SimulationBox(e), ExitPhase::Loop))?;
+            }
+        }
+        if want_traj {
+            let writer = traj_writer.as_mut().expect("traj_writer enabled");
+            let mut tw = Duration::ZERO;
+            timed(&mut tw, || {
+                write_traj_frame(writer, step, phase.dt, &setup.sim_box, type_indices, frame)
+            })
+            .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
+            timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
+            *frames_written += 1;
+        }
+        if want_log {
+            let writer = log_writer.as_mut().expect("log_writer enabled");
+            if let Some(t) = thermostat.as_mut() {
+                t.flush_pending_injection(&setup.gpu.device)
+                    .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+            }
+            if let Some(b) = barostat.as_mut() {
+                b.flush_pending_injection(&setup.gpu.device)
+                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+            }
+            let ke = compute_kinetic_energy(
+                &frame.masses,
+                &frame.velocities_x,
+                &frame.velocities_y,
+                &frame.velocities_z,
+            );
+            let t = compute_temperature(ke, n_thermal_dof);
+            let time = (step as f64) * phase.dt;
+            let extras = if log_extra_columns.is_empty() {
+                Vec::new()
+            } else {
+                let scratch = pe_scratch
+                    .as_mut()
+                    .expect("pe_scratch allocated when log_extra_columns non-empty");
+                timings
+                    .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+                let pe = compute_total_potential_energy(&mut setup.buffers, scratch)
+                    .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
+                timings
+                    .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+                collect_log_extras(
+                    integrator.as_ref(),
+                    thermostat.as_deref(),
+                    barostat.as_deref(),
+                    ke,
+                    pe as f64,
+                )
+            };
+            let mut lw = Duration::ZERO;
+            timed(&mut lw, || writer.write_row(step, time, ke, t, &extras))
+                .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
+            timings.record_host(HostStage::LOG_WRITE, lw);
+            *log_rows_written += 1;
+        }
+
+        // rq-73fbb111
+        if progress_to_stdout && (step % progress_every == 0 || step == n_steps) {
+            let pct = 100.0 * step as f64 / n_steps.max(1) as f64;
+            let rate = step as f64 / phase_started.elapsed().as_secs_f64().max(1e-9);
+            println!(
+                "[heddlemd] phase `{phase_name}` step {step}/{n_steps} ({pct:.1}%) — {rate:.1e} steps/sec"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Runs the batched graph-replay loop, replaying the captured graph in
+/// batches up to `phase.n_steps`. When a batch-boundary rebuild
+/// reallocates a packed-neighbour buffer the phase graph is re-captured
+/// in place (see `cuda-graphs.md` *Neighbor-List Pre-Step
+/// Decomposition*). Returns `Some(resume_step)` when a re-capture failed
+/// and the caller must finish the phase on the per-step launch loop from
+/// `resume_step`; `None` on normal completion.
+#[allow(clippy::too_many_arguments)]
+fn run_batched_graph_loop(
+    setup: &mut SimulationSetup,
+    phase: &crate::io::PhaseConfig,
+    _phase_index: usize,
+    start_step: u64,
+    graph_loop: &mut crate::gpu::GraphLoop,
+    integrator: &mut dyn crate::integrator::Integrator,
+    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
+    barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
+    constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    supports_constraints: bool,
+    dt: Real,
+    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
+    post_force_substep_index: Option<usize>,
+    timings: &mut Timings,
+    frame: &mut ParticleState,
+    traj_writer: &mut Option<TrajectoryWriter>,
+    log_writer: &mut Option<LogWriter>,
+    pe_scratch: &mut Option<cudarc::driver::CudaSlice<Real>>,
+    type_indices: &[u32],
+    n_thermal_dof: u32,
+    log_extra_columns: &[(&'static str, crate::units::Dimension)],
+    phase_started: Instant,
+    phase_name: &str,
+    progress_to_stdout: bool,
+    progress_every: u64,
+    frames_written: &mut u64,
+    log_rows_written: &mut u64,
+) -> Result<Option<u64>, (RunnerError, ExitPhase)> {
+    let n_steps = phase.n_steps;
+    let log_every = phase.output.log_every;
+    let traj_every = phase.output.trajectory_every;
+    let batch_size = setup.config.simulation.graph_batch_size as u64;
+    // A clone of the default-stream device handle, used to re-capture the
+    // phase graph without aliasing the `&mut setup` borrow.
+    let device = setup.gpu.device.clone();
+
+    // The captured graph records a one-step kernel sequence with no
+    // work executed during capture (`CU_STREAM_CAPTURE_MODE_GLOBAL`
+    // semantics). The batched loop launches it for every physical step
+    // from `start_step + 1` to `n_steps`; the first `start_step` steps
+    // ran on the instrumented per-step path (graph-timing calibration).
+    let mut step: u64 = start_step;
+
+    // rq-0d729ecb — a periodic (Monte-Carlo) barostat runs a host move
+    // every `move_frequency` steps; batches are bounded so each move lands
+    // exactly on a batch boundary.
+    let move_frequency = barostat_move_frequency(barostat).map(|f| f as u64);
+
+    while step < n_steps {
+        let remaining = n_steps - step;
+        let next_log = if log_every > 0 {
+            log_every - (step % log_every)
+        } else {
+            remaining
+        };
+        let next_traj = if traj_every > 0 {
+            traj_every - (step % traj_every)
+        } else {
+            remaining
+        };
+        let next_move = match move_frequency {
+            Some(f) if f > 0 => f - (step % f),
+            _ => remaining,
+        };
+        let batch = batch_size
+            .min(remaining)
+            .min(next_log)
+            .min(next_traj)
+            .min(next_move);
+        let barostat_active = barostat_couples_per_step(barostat);
+        let mut forces_only_launches: u32 = 0;
+        let mut forces_and_scalars_launches: u32 = 0;
+        for i in 1..=batch {
+            let s = step + i;
+            // rq-76db55bb — a step needs force-kernel scalars (total PE +
+            // virial) only when it produces a log row or a barostat
+            // consumes the per-step virial. Other steps replay the
+            // forces-only graph.
+            let needs_scalars =
+                step_needs_force_scalars(log_every > 0 && s % log_every == 0, barostat_active)
+                    || move_frequency.is_some_and(|f| f > 0 && s % f == 0);
+            graph_loop.launch(needs_scalars).map_err(|e| {
+                (
+                    RunnerError::Gpu(crate::gpu::GpuError(match e {
+                        crate::gpu::GraphError::LaunchFailed(d) => d,
+                        crate::gpu::GraphError::BeginCaptureFailed(d) => d,
+                        crate::gpu::GraphError::EndCaptureFailed(d) => d,
+                        crate::gpu::GraphError::InstantiateFailed(d) => d,
+                        crate::gpu::GraphError::DestroyFailed(d) => d,
+                    })),
+                    ExitPhase::Loop,
+                )
+            })?;
+            if needs_scalars {
+                forces_and_scalars_launches += 1;
+            } else {
+                forces_only_launches += 1;
+            }
+        }
+        // rq-9ec19227 — advance per-stage sample counts per graph variant,
+        // so a stage present only in the forces+scalars graph (the scalar
+        // reductions, the `_fev` pair-force kernel) accrues samples only
+        // from the scalar steps. Durations are the calibrated
+        // representatives (see `cuda-graphs.md`).
+        if forces_only_launches > 0 {
+            timings.record_graph_replays(GraphVariant::ForcesOnly, forces_only_launches);
+        }
+        if forces_and_scalars_launches > 0 {
+            timings
+                .record_graph_replays(GraphVariant::ForcesAndScalars, forces_and_scalars_launches);
+        }
+        step += batch;
+
+        // rq-03a5a290 — a periodic (Monte-Carlo) barostat runs its
+        // host-orchestrated move at the move boundary, before the
+        // neighbour pre-step so that the moved box is rebuilt against. The
+        // captured graph reads the box from the persistent lattice device
+        // buffer (pointer stable), so a move alone needs no re-capture;
+        // only a move whose trial force evaluation grew a packed-neighbour
+        // buffer invalidates the captured device pointers and forces one.
+        let mut move_reallocated = false;
+        if let Some(f) = move_frequency {
+            if f > 0 && step % f == 0 && step <= n_steps {
+                if let Some(b) = barostat.as_mut() {
+                    let caps_before = packed_capacities(&setup.force_field);
+                    b.apply_move(
+                        &mut setup.force_field,
+                        &mut setup.buffers,
+                        &mut setup.sim_box,
+                        None,
+                        dt,
+                        timings,
+                    )
+                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+                    move_reallocated = caps_before != packed_capacities(&setup.force_field);
+                }
+            }
+        }
+
+        // Displacement check + neighbor-list rebuild (if triggered)
+        // run at every batch boundary, outside the captured graph.
+        let reallocated = setup
+            .force_field
+            .run_neighbor_pre_step(&mut setup.buffers, &setup.sim_box, timings)
+            .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Loop))?;
+
+        // A rebuild that grew a packed-neighbour buffer reallocated it,
+        // invalidating the device pointers and single-pair grid
+        // dimensions baked into the captured graph. Re-capture the phase
+        // graph against the new buffers before the next batch. On a
+        // re-capture driver error, finish the phase on the per-step
+        // launch loop from the next un-run step. rq-67a09135 rq-1217c816
+        if (reallocated || move_reallocated) && step < n_steps {
+            match capture_phase_graph(
+                &mut setup.buffers,
+                &mut setup.sim_box,
+                &mut setup.force_field,
+                integrator,
+                thermostat,
+                barostat,
+                constraint,
+                supports_constraints,
+                dt,
+                timings,
+                &device,
+                composed_post_force,
+                post_force_substep_index,
+            ) {
+                Ok(new_loop) => {
+                    *graph_loop = new_loop;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "warning: cuda graph capture failed for phase `{phase_name}`: {e}; falling back to per-step launches"
+                    );
+                    return Ok(Some(step + 1));
+                }
+            }
+        }
+
+        handle_step_output(
+            setup,
+            phase,
+            step,
+            thermostat,
+            barostat,
+            timings,
+            frame,
+            traj_writer,
+            log_writer,
+            pe_scratch,
+            type_indices,
+            n_thermal_dof,
+            log_extra_columns,
+            frames_written,
+            log_rows_written,
+        )?;
+
+        if progress_to_stdout && (step % progress_every == 0 || step == n_steps) {
+            let pct = 100.0 * step as f64 / n_steps.max(1) as f64;
+            let rate = step as f64 / phase_started.elapsed().as_secs_f64().max(1e-9);
+            println!(
+                "[heddlemd] phase `{phase_name}` step {step}/{n_steps} ({pct:.1}%) — {rate:.1e} steps/sec"
+            );
+        }
+    }
+    Ok(None)
+}
+
+/// Per-step output handler shared by the per-step launch loop and the
+/// batched graph-replay loop. Downloads the host frame, flushes the
+/// simulation box, drains slot diagnostic accumulators, and writes
+/// log / trajectory rows if `step` aligns with the configured cadence.
+#[allow(clippy::too_many_arguments)]
+fn handle_step_output(
+    setup: &mut SimulationSetup,
+    phase: &crate::io::PhaseConfig,
+    step: u64,
+    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
+    barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
+    timings: &mut Timings,
+    frame: &mut ParticleState,
+    traj_writer: &mut Option<TrajectoryWriter>,
+    log_writer: &mut Option<LogWriter>,
+    pe_scratch: &mut Option<cudarc::driver::CudaSlice<Real>>,
+    type_indices: &[u32],
+    n_thermal_dof: u32,
+    log_extra_columns: &[(&'static str, crate::units::Dimension)],
+    frames_written: &mut u64,
+    log_rows_written: &mut u64,
+) -> Result<(), (RunnerError, ExitPhase)> {
+    let want_traj =
+        phase.output.trajectory_every > 0 && step % phase.output.trajectory_every == 0;
+    let want_log = phase.output.log_every > 0 && step % phase.output.log_every == 0;
+    if !(want_traj || want_log) {
+        return Ok(());
+    }
+    let mut dl = Duration::ZERO;
+    timed(&mut dl, || frame.download_from(&setup.buffers)).map_err(|e| match e {
+        ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Loop),
+        other => (RunnerError::ParticleState(other), ExitPhase::Loop),
+    })?;
+    timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
+    if barostat.is_some() {
+        setup
+            .sim_box
+            .flush_from_device()
+            .map_err(|e| (RunnerError::SimulationBox(e), ExitPhase::Loop))?;
+    }
+    if want_traj {
+        let writer = traj_writer.as_mut().expect("traj_writer enabled");
+        let mut tw = Duration::ZERO;
+        timed(&mut tw, || {
+            write_traj_frame(writer, step, phase.dt, &setup.sim_box, type_indices, frame)
+        })
+        .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
+        timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
+        *frames_written += 1;
+    }
+    if want_log {
+        let writer = log_writer.as_mut().expect("log_writer enabled");
+        if let Some(t) = thermostat.as_mut() {
+            t.flush_pending_injection(&setup.gpu.device)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        }
+        if let Some(b) = barostat.as_mut() {
+            b.flush_pending_injection(&setup.gpu.device)
+                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+        }
+        let ke = compute_kinetic_energy(
+            &frame.masses,
+            &frame.velocities_x,
+            &frame.velocities_y,
+            &frame.velocities_z,
+        );
+        let t = compute_temperature(ke, n_thermal_dof);
+        let time = (step as f64) * phase.dt;
+        let extras = if log_extra_columns.is_empty() {
+            Vec::new()
+        } else {
+            let scratch = pe_scratch
+                .as_mut()
+                .expect("pe_scratch allocated when log_extra_columns non-empty");
+            timings
+                .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+            let pe = compute_total_potential_energy(&mut setup.buffers, scratch)
+                .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
+            timings
+                .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+            collect_log_extras_from_slots(
+                thermostat.as_deref(),
+                barostat.as_deref(),
+                ke,
+                pe as f64,
+            )
+        };
+        let mut lw = Duration::ZERO;
+        timed(&mut lw, || writer.write_row(step, time, ke, t, &extras))
+            .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
+        timings.record_host(HostStage::LOG_WRITE, lw);
+        *log_rows_written += 1;
+    }
+    Ok(())
+}
+
+/// Variant of `collect_log_extras` that omits the integrator's extras
+/// — used by the batched-replay output handler, which does not have a
+/// borrow on the integrator. Integrator log columns are absent for the
+/// graph-mode case in this implementation; integrators that publish
+/// log columns require their values to be drained device-side at
+/// batch boundaries.
+fn collect_log_extras_from_slots(
+    thermostat: Option<&dyn crate::integrator::Thermostat>,
+    barostat: Option<&dyn crate::integrator::Barostat>,
+    ke: f64,
+    pe: f64,
+) -> Vec<f64> {
+    let mut extras: Vec<f64> = Vec::new();
+    if let Some(t) = thermostat {
+        extras.extend(t.log_column_values(ke, pe));
+    }
+    if let Some(b) = barostat {
+        extras.extend(b.log_column_values(ke, pe));
+    }
+    extras
+}
+
 // Concatenate the diagnostic-column values from every configured slot in
 // dispatch order (integrator, thermostat, barostat). Mirrors the
 // header-construction order in `LogWriter::open(...)` above.
@@ -2155,5 +3367,51 @@ fn cli_main_analyze(rest: Vec<String>) -> u8 {
                 _ => 1,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod scalar_predicate_tests {
+    use super::{captures_forces_only_graph, step_needs_force_scalars};
+
+    // rq-2af44cf4
+    #[test]
+    fn log_step_needs_force_scalars() {
+        // A log step (no barostat) evaluates forces+scalars.
+        assert!(step_needs_force_scalars(true, false));
+    }
+
+    // rq-ed183041
+    #[test]
+    fn plain_step_is_forces_only() {
+        // Neither a log step nor a barostat step: forces only.
+        assert!(!step_needs_force_scalars(false, false));
+    }
+
+    // rq-091a4341
+    #[test]
+    fn trajectory_only_step_is_forces_only() {
+        // A trajectory-only step is not a log step and has no barostat,
+        // so it does not require force-kernel scalars.
+        assert!(!step_needs_force_scalars(false, false));
+    }
+
+    #[test]
+    fn barostat_step_needs_force_scalars() {
+        // A barostat consumes the per-step virial regardless of logging.
+        assert!(step_needs_force_scalars(false, true));
+        assert!(step_needs_force_scalars(true, true));
+    }
+
+    // rq-26dce0f6
+    #[test]
+    fn no_barostat_captures_forces_only_graph() {
+        assert!(captures_forces_only_graph(false));
+    }
+
+    // rq-c6c56cdc
+    #[test]
+    fn barostat_skips_forces_only_graph() {
+        assert!(!captures_forces_only_graph(true));
     }
 }

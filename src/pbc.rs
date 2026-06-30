@@ -1,8 +1,13 @@
 // rq-03830444
+use std::sync::Arc;
+
+use cudarc::driver::{CudaDevice, CudaSlice};
+
+use crate::gpu::GpuError;
 use crate::precision::Real;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
 // rq-b75afb31
+#[derive(Debug)]
 pub struct SimulationBox {
     lx: Real,
     ly: Real,
@@ -11,6 +16,43 @@ pub struct SimulationBox {
     xz: Real,
     yz: Real,
     generation: u64,
+    device: Arc<CudaDevice>,
+    lattice_device: CudaSlice<Real>,
+}
+
+impl Clone for SimulationBox {
+    fn clone(&self) -> Self {
+        // Allocate a fresh device buffer and copy our values into it so
+        // mutations through one handle never reach the other.
+        let host = [self.lx, self.ly, self.lz, self.xy, self.xz, self.yz];
+        let lattice_device = self
+            .device
+            .htod_sync_copy(&host)
+            .expect("SimulationBox clone htod failed");
+        SimulationBox {
+            lx: self.lx,
+            ly: self.ly,
+            lz: self.lz,
+            xy: self.xy,
+            xz: self.xz,
+            yz: self.yz,
+            generation: self.generation,
+            device: self.device.clone(),
+            lattice_device,
+        }
+    }
+}
+
+impl PartialEq for SimulationBox {
+    fn eq(&self, other: &Self) -> bool {
+        self.lx == other.lx
+            && self.ly == other.ly
+            && self.lz == other.lz
+            && self.xy == other.xy
+            && self.xz == other.xz
+            && self.yz == other.yz
+            && self.generation == other.generation
+    }
 }
 
 // rq-aef9888b
@@ -26,6 +68,8 @@ pub enum SimulationBoxError {
         width: Real,
         required: Real,
     },
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
 }
 
 fn check_finite(name: &'static str, value: Real) -> Result<(), SimulationBoxError> {
@@ -67,6 +111,7 @@ fn validate_lattice(
 impl SimulationBox {
     // rq-f0da71ea
     pub fn new(
+        device: &Arc<CudaDevice>,
         lx: Real,
         ly: Real,
         lz: Real,
@@ -75,6 +120,8 @@ impl SimulationBox {
         yz: Real,
     ) -> Result<Self, SimulationBoxError> {
         validate_lattice(lx, ly, lz, xy, xz, yz)?;
+        let host = [lx, ly, lz, xy, xz, yz];
+        let lattice_device = device.htod_sync_copy(&host).map_err(GpuError::from)?;
         Ok(SimulationBox {
             lx,
             ly,
@@ -83,6 +130,8 @@ impl SimulationBox {
             xz,
             yz,
             generation: 0,
+            device: device.clone(),
+            lattice_device,
         })
     }
 
@@ -97,6 +146,10 @@ impl SimulationBox {
         yz: Real,
     ) -> Result<(), SimulationBoxError> {
         validate_lattice(lx, ly, lz, xy, xz, yz)?;
+        let host = [lx, ly, lz, xy, xz, yz];
+        self.device
+            .htod_sync_copy_into(&host, &mut self.lattice_device)
+            .map_err(GpuError::from)?;
         self.lx = lx;
         self.ly = ly;
         self.lz = lz;
@@ -105,6 +158,82 @@ impl SimulationBox {
         self.yz = yz;
         self.generation = self.generation.wrapping_add(1);
         Ok(())
+    }
+
+    /// Read-only access to the device-resident lattice mirror.
+    /// Length 6, in `[lx, ly, lz, xy, xz, yz]` order. Kernel launchers
+    /// pass this to CUDA kernels as a `const Real *lattice` argument.
+    pub fn lattice_device(&self) -> &CudaSlice<Real> {
+        &self.lattice_device
+    }
+
+    /// Mutable access to the device-resident lattice mirror. Bumps the
+    /// generation counter; host fields become stale until the next
+    /// `flush_from_device` call. Used by barostat kernels that compute
+    /// the new lattice on device.
+    pub fn lattice_device_mut(&mut self) -> &mut CudaSlice<Real> {
+        self.generation = self.generation.wrapping_add(1);
+        &mut self.lattice_device
+    }
+
+    /// Multiplies every component of the device-resident lattice mirror
+    /// by `factor` via the `multiply_lattice_isotropic` kernel. Bumps
+    /// the generation counter on success. Host fields are not updated.
+    ///
+    /// Returns `NonFiniteLatticeValue { name: "factor" }` if `factor`
+    /// is non-finite or `NonPositiveDiagonal { name: "factor" }` if
+    /// `factor <= 0`. On any error the device buffer and generation
+    /// counter are left unchanged.
+    pub fn multiply_lattice_isotropic(
+        &mut self,
+        factor: Real,
+    ) -> Result<(), SimulationBoxError> {
+        check_diagonal("factor", factor)?;
+        let func = self
+            .device
+            .get_func("barostat", "multiply_lattice_isotropic")
+            .ok_or_else(|| {
+                GpuError(cudarc::driver::DriverError(
+                    cudarc::driver::sys::CUresult::CUDA_ERROR_NOT_FOUND,
+                ))
+            })?;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: (1, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        use cudarc::driver::LaunchAsync;
+        unsafe {
+            func.launch(cfg, (&mut self.lattice_device, factor))
+                .map_err(GpuError::from)?;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        Ok(())
+    }
+
+    /// Downloads the device-resident lattice into the host fields. The
+    /// generation counter is left unchanged. After a successful return,
+    /// every host accessor reflects the latest device state.
+    pub fn flush_from_device(&mut self) -> Result<(), SimulationBoxError> {
+        let mut host = [0.0 as Real; 6];
+        self.device
+            .dtoh_sync_copy_into(&self.lattice_device, &mut host)
+            .map_err(GpuError::from)?;
+        self.lx = host[0];
+        self.ly = host[1];
+        self.lz = host[2];
+        self.xy = host[3];
+        self.xz = host[4];
+        self.yz = host[5];
+        Ok(())
+    }
+
+    /// The `Arc<CudaDevice>` the box was constructed against. Kernel
+    /// launchers needing a device handle (for buffer allocation or
+    /// stream management) read it from here when no other handle is in
+    /// scope.
+    pub fn device(&self) -> &Arc<CudaDevice> {
+        &self.device
     }
 
     // Multiply all six lattice parameters by `factor` in a single

@@ -1,17 +1,23 @@
 use std::sync::Arc;
 
 use cudarc::driver::{
-    CudaDevice, CudaSlice, CudaStream, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig,
+    CudaDevice, CudaFunction, CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig,
 };
 
 #[cfg(not(feature = "f64"))]
 use crate::gpu::LosslessBuffers;
-use crate::gpu::{GpuError, Kernels, PairBuffer, ParticleBuffers};
+use crate::gpu::{GpuError, Kernels, ParticleBuffers};
 use crate::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
-use crate::precision::Real;
+use crate::precision::{Real, Real4};
 
 const BLOCK_SIZE: u32 = 256;
+
+/// Warps per block in the fused pair-force warp-per-particle topology.
+/// Must match the `PAIR_FORCE_WARPS_PER_BLOCK` constant in
+/// `kernels/pair_compute.cuh`.
+pub const PAIR_FORCE_WARPS_PER_BLOCK: u32 = 8;
+pub const PAIR_FORCE_BLOCK_SIZE: u32 = 256;
 
 fn launch_config(n: u32) -> LaunchConfig {
     let grid = n.div_ceil(BLOCK_SIZE);
@@ -35,14 +41,12 @@ pub fn vv_kick_drift(
     let n_u32 = n as u32;
     let func = buffers.kernels.integrate.vv_kick_drift.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 &mut buffers.images_x,
                 &mut buffers.images_y,
                 &mut buffers.images_z,
@@ -53,12 +57,7 @@ pub fn vv_kick_drift(
                 &buffers.forces_y,
                 &buffers.forces_z,
                 &buffers.masses,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 n_u32,
             ),
@@ -89,109 +88,6 @@ pub fn vv_kick(buffers: &mut ParticleBuffers, dt: Real) -> Result<(), GpuError> 
                 &buffers.forces_z,
                 &buffers.masses,
                 dt,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// rq-6690fae9
-#[allow(clippy::too_many_arguments)]
-pub fn reduce_pair_forces(
-    pair_buffer: &PairBuffer,
-    neighbor_counts: &CudaSlice<u32>,
-    target_force_x: &mut CudaViewMut<'_, Real>,
-    target_force_y: &mut CudaViewMut<'_, Real>,
-    target_force_z: &mut CudaViewMut<'_, Real>,
-    particle_count: usize,
-) -> Result<(), GpuError> {
-    let n = particle_count;
-    if n == 0 {
-        return Ok(());
-    }
-    let max_neighbors = pair_buffer.max_neighbors();
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(target_force_x.len(), n);
-    debug_assert_eq!(target_force_y.len(), n);
-    debug_assert_eq!(target_force_z.len(), n);
-    debug_assert_eq!(
-        pair_buffer.pair_forces_x.len(),
-        n * max_neighbors as usize
-    );
-
-    let n_u32 = n as u32;
-    let func = pair_buffer.kernels.reduce.reduce_pair_forces.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (n_u32, 1, 1),
-        block_dim: (BLOCK_SIZE, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &pair_buffer.pair_forces_x,
-                &pair_buffer.pair_forces_y,
-                &pair_buffer.pair_forces_z,
-                neighbor_counts,
-                max_neighbors,
-                target_force_x,
-                target_force_y,
-                target_force_z,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// rq-c9240ed4
-pub fn reduce_pair_energy_virial(
-    pair_buffer: &PairBuffer,
-    neighbor_counts: &CudaSlice<u32>,
-    target_energy: &mut CudaViewMut<'_, Real>,
-    target_virial: &mut CudaViewMut<'_, Real>,
-    particle_count: usize,
-) -> Result<(), GpuError> {
-    let n = particle_count;
-    if n == 0 {
-        return Ok(());
-    }
-    let max_neighbors = pair_buffer.max_neighbors();
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(target_energy.len(), n);
-    debug_assert_eq!(target_virial.len(), n);
-    debug_assert_eq!(
-        pair_buffer.pair_energies.len(),
-        n * max_neighbors as usize
-    );
-
-    let n_u32 = n as u32;
-    let func = pair_buffer
-        .kernels
-        .reduce
-        .reduce_pair_energy_virial
-        .clone();
-    let cfg = LaunchConfig {
-        grid_dim: (n_u32, 1, 1),
-        block_dim: (BLOCK_SIZE, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &pair_buffer.pair_energies,
-                &pair_buffer.pair_virials,
-                neighbor_counts,
-                max_neighbors,
-                target_energy,
-                target_virial,
                 n_u32,
             ),
         )
@@ -274,403 +170,115 @@ fn htod_or_empty(
     }
 }
 
-// rq-d3a14184
-#[allow(clippy::too_many_arguments)]
-pub fn lj_pair_force(
-    particle_buffers: &ParticleBuffers,
-    pair_buffer: &mut PairBuffer,
-    sim_box: &SimulationBox,
-    params: &LennardJonesParameterTable,
-    atom_excl_offsets: &CudaSlice<u32>,
-    atom_excl_partners: &CudaSlice<u32>,
-    atom_excl_lj_scales: &CudaSlice<Real>,
-    neighbor_list: &CudaSlice<u32>,
-    neighbor_counts: &CudaSlice<u32>,
-) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
-    if n == 0 {
-        return Ok(());
-    }
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    let max_neighbors = pair_buffer.max_neighbors();
-    debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
-    debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(atom_excl_offsets.len(), n + 1);
-    debug_assert_eq!(atom_excl_partners.len(), atom_excl_lj_scales.len());
-    let table_len = params.n_types as usize * params.n_types as usize;
-    debug_assert_eq!(params.sigma.len(), table_len);
-    debug_assert_eq!(params.epsilon.len(), table_len);
-    debug_assert_eq!(params.cutoff.len(), table_len);
-    debug_assert_eq!(params.switch.len(), table_len);
-
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.lj.pair_force.clone();
-
-    let grid_y = n_u32.div_ceil(16);
-    let grid_x = max_neighbors.div_ceil(16).max(1);
-    let cfg = LaunchConfig {
-        grid_dim: (grid_x, grid_y, 1),
-        block_dim: (16, 16, 1),
-        shared_mem_bytes: 0,
-    };
-
-    let lat = sim_box.lattice();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.type_indices,
-                &mut pair_buffer.pair_forces_x,
-                &mut pair_buffer.pair_forces_y,
-                &mut pair_buffer.pair_forces_z,
-                &mut pair_buffer.pair_energies,
-                &mut pair_buffer.pair_virials,
-                max_neighbors,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                params.n_types,
-                &params.sigma,
-                &params.epsilon,
-                &params.cutoff,
-                &params.switch,
-                atom_excl_offsets,
-                atom_excl_partners,
-                atom_excl_lj_scales,
-                neighbor_list,
-                neighbor_counts,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
 /// Coulomb prefactor `k_C = 1 / (4 π ε₀)`. In the engine's internal
 /// Hartree atomic units `k_C = 1` exactly, so no permittivity factor
 /// appears in the pair-force or SPME kernels. See
 /// `forces/coulomb-pair-force.md`. rq-bfd7004c
 pub const K_COULOMB_F32: Real = 1.0;
 
-// rq-846bdb8b rq-38676211
-#[allow(clippy::too_many_arguments)]
-pub fn coulomb_pair_force(
+
+
+// Fixed-point charge spread. One warp per sorted slot (8 warps per
+// 256-thread block, grid ceil(N / 8)). Lane 0 reads
+// `i = sorted_atom_index[t]` to resolve its assigned atom index before
+// reading the atom's position and charge; each lane then issues
+// `ceil(p^3 / 32)` `atomicAdd<i64>` operations into `rho_fixed`. The
+// caller is responsible for zeroing `rho_fixed` before this kernel
+// runs (via `memset_zeros` on the device).
+// rq-94bfcb7e
+// `func` is the order-specialized `spme_spread_fixed_point` kernel
+// NVRTC-compiled by the SPME slot (PME_ORDER fixed at `spline_order`).
+pub fn spme_spread_fixed_point(
+    func: &CudaFunction,
     particle_buffers: &ParticleBuffers,
-    pair_buffer: &mut PairBuffer,
+    sorted_atom_index: &CudaSlice<u32>,
     sim_box: &SimulationBox,
-    cutoff: Real,
-    r_switch: Real,
-    atom_excl_offsets: &CudaSlice<u32>,
-    atom_excl_partners: &CudaSlice<u32>,
-    atom_excl_coul_scales: &CudaSlice<Real>,
-    neighbor_list: &CudaSlice<u32>,
-    neighbor_counts: &CudaSlice<u32>,
+    grid: [u32; 3],
+    spline_order: u32,
+    rho_fixed: &mut CudaSlice<i64>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
         return Ok(());
     }
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    let max_neighbors = pair_buffer.max_neighbors();
-    debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
-    debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(atom_excl_offsets.len(), n + 1);
-    debug_assert_eq!(atom_excl_partners.len(), atom_excl_coul_scales.len());
-    debug_assert_eq!(particle_buffers.charges.len(), n);
-
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.coulomb.coulomb_pair_force.clone();
-
-    let grid_y = n_u32.div_ceil(16);
-    let grid_x = max_neighbors.div_ceil(16).max(1);
-    let cfg = LaunchConfig {
-        grid_dim: (grid_x, grid_y, 1),
-        block_dim: (16, 16, 1),
-        shared_mem_bytes: 0,
-    };
-
-    let lat = sim_box.lattice();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.charges,
-                &mut pair_buffer.pair_forces_x,
-                &mut pair_buffer.pair_forces_y,
-                &mut pair_buffer.pair_forces_z,
-                &mut pair_buffer.pair_energies,
-                &mut pair_buffer.pair_virials,
-                max_neighbors,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                K_COULOMB_F32,
-                cutoff,
-                r_switch,
-                atom_excl_offsets,
-                atom_excl_partners,
-                atom_excl_coul_scales,
-                neighbor_list,
-                neighbor_counts,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// rq-9a512ed1 rq-f6d45062 rq-44cce069 rq-eb9e5cc3 rq-f735ea05
-#[allow(clippy::too_many_arguments)]
-pub fn spme_real_pair_force(
-    particle_buffers: &ParticleBuffers,
-    pair_buffer: &mut PairBuffer,
-    sim_box: &SimulationBox,
-    alpha: Real,
-    r_cut_real: Real,
-    atom_excl_offsets: &CudaSlice<u32>,
-    atom_excl_partners: &CudaSlice<u32>,
-    atom_excl_coul_scales: &CudaSlice<Real>,
-    neighbor_list: &CudaSlice<u32>,
-    neighbor_counts: &CudaSlice<u32>,
-) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
-    if n == 0 {
-        return Ok(());
-    }
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    let max_neighbors = pair_buffer.max_neighbors();
-    debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
-    debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(atom_excl_offsets.len(), n + 1);
-    debug_assert_eq!(atom_excl_partners.len(), atom_excl_coul_scales.len());
-    debug_assert_eq!(particle_buffers.charges.len(), n);
-
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.spme_real.spme_real_pair_force.clone();
-
-    let grid_y = n_u32.div_ceil(16);
-    let grid_x = max_neighbors.div_ceil(16).max(1);
-    let cfg = LaunchConfig {
-        grid_dim: (grid_x, grid_y, 1),
-        block_dim: (16, 16, 1),
-        shared_mem_bytes: 0,
-    };
-
-    let lat = sim_box.lattice();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.charges,
-                &mut pair_buffer.pair_forces_x,
-                &mut pair_buffer.pair_forces_y,
-                &mut pair_buffer.pair_forces_z,
-                &mut pair_buffer.pair_energies,
-                &mut pair_buffer.pair_virials,
-                max_neighbors,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                K_COULOMB_F32,
-                alpha,
-                r_cut_real,
-                atom_excl_offsets,
-                atom_excl_partners,
-                atom_excl_coul_scales,
-                neighbor_list,
-                neighbor_counts,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// rq-9ca00d25 rq-202493a5 rq-16f6c7dc rq-f69698b8
-#[allow(clippy::too_many_arguments)]
-pub fn spme_charge_spread(
-    particle_buffers: &ParticleBuffers,
-    sim_box: &SimulationBox,
-    sorted_particle_ids: &CudaSlice<u32>,
-    cell_offsets: &CudaSlice<u32>,
-    grid: [u32; 3],
-    spline_order: u32,
-    rho: &mut CudaSlice<Real>,
-) -> Result<(), GpuError> {
-    spme_charge_spread_impl(
-        particle_buffers,
-        sim_box,
-        sorted_particle_ids,
-        cell_offsets,
-        grid,
-        spline_order,
-        rho,
-        None,
-    )
-}
-
-// rq-9ca00d25
-#[allow(clippy::too_many_arguments)]
-pub fn spme_charge_spread_on_stream(
-    particle_buffers: &ParticleBuffers,
-    sim_box: &SimulationBox,
-    sorted_particle_ids: &CudaSlice<u32>,
-    cell_offsets: &CudaSlice<u32>,
-    grid: [u32; 3],
-    spline_order: u32,
-    rho: &mut CudaSlice<Real>,
-    stream: &CudaStream,
-) -> Result<(), GpuError> {
-    spme_charge_spread_impl(
-        particle_buffers,
-        sim_box,
-        sorted_particle_ids,
-        cell_offsets,
-        grid,
-        spline_order,
-        rho,
-        Some(stream),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spme_charge_spread_impl(
-    particle_buffers: &ParticleBuffers,
-    sim_box: &SimulationBox,
-    sorted_particle_ids: &CudaSlice<u32>,
-    cell_offsets: &CudaSlice<u32>,
-    grid: [u32; 3],
-    spline_order: u32,
-    rho: &mut CudaSlice<Real>,
-    stream: Option<&CudaStream>,
-) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
     let n_a = grid[0];
     let n_b = grid[1];
     let n_c = grid[2];
     let m = n_a as usize * n_b as usize * n_c as usize;
-    debug_assert_eq!(rho.len(), m);
-    debug_assert_eq!(cell_offsets.len(), m + 1);
-    debug_assert_eq!(sorted_particle_ids.len(), n.max(1));
-    debug_assert_eq!(particle_buffers.charges.len(), n);
+    debug_assert_eq!(rho_fixed.len(), m);
+    debug_assert_eq!(sorted_atom_index.len(), n);
 
-    let m_u32 = m as u32;
-    let func = particle_buffers.kernels.spme_recip.spme_charge_spread.clone();
-    let cfg = launch_config(m_u32);
-    let lat = sim_box.lattice();
     let n_u32 = n as u32;
+    // PME_ORDER (= spline_order) threads per atom, each owning one
+    // z-slice of the p^3 spline support and looping over the
+    // p^2 (d_a, d_b) cells in that slice.
+    let n_threads = n_u32.checked_mul(spline_order).expect(
+        "n * spline_order overflows u32 — particle_count too large for this kernel",
+    );
+    let cfg = LaunchConfig {
+        grid_dim: (n_threads.div_ceil(256), 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let lattice = sim_box.lattice_device();
+    let func = func.clone();
     let args = (
-        &particle_buffers.positions_x,
-        &particle_buffers.positions_y,
-        &particle_buffers.positions_z,
-        &particle_buffers.charges,
-        sorted_particle_ids,
-        cell_offsets,
-        lat[0],
-        lat[1],
-        lat[2],
-        lat[3],
-        lat[4],
-        lat[5],
+        &particle_buffers.posq,
+        sorted_atom_index,
+        lattice,
         n_a,
         n_b,
         n_c,
         spline_order,
-        rho,
+        rho_fixed,
         n_u32,
     );
     unsafe {
-        match stream {
-            Some(s) => func.launch_on_stream(s, cfg, args).map_err(GpuError::from)?,
-            None => func.launch(cfg, args).map_err(GpuError::from)?,
-        }
+        func.launch(cfg, args).map_err(GpuError::from)?;
     }
     Ok(())
 }
 
-// rq-9ca00d25 rq-127df3d6 rq-8326d2d1
-#[allow(clippy::too_many_arguments)]
-pub fn spme_influence_multiply(
+// Fixed-point -> f32 conversion. One thread per real grid cell.
+pub fn spme_spread_finish(
     kernels: &Kernels,
-    influence_g: &CudaSlice<Real>,
-    virial_factor: &CudaSlice<Real>,
-    rho_hat_interleaved: &mut CudaSlice<Real>,
-    virial_per_cell: &mut CudaSlice<Real>,
-    n_c: u32,
-    n_c_complex: u32,
-    n_complex: u32,
+    rho_fixed: &CudaSlice<i64>,
+    rho: &mut CudaSlice<Real>,
+    m: u32,
 ) -> Result<(), GpuError> {
-    spme_influence_multiply_impl(
-        kernels,
-        influence_g,
-        virial_factor,
-        rho_hat_interleaved,
-        virial_per_cell,
-        n_c,
-        n_c_complex,
-        n_complex,
-        None,
-    )
+    if m == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(rho_fixed.len(), m as usize);
+    debug_assert_eq!(rho.len(), m as usize);
+    let func = kernels.spme_recip.spme_spread_finish.clone();
+    let cfg = launch_config(m);
+    let args = (rho_fixed, rho, m);
+    unsafe {
+        func.launch(cfg, args).map_err(GpuError::from)?;
+    }
+    Ok(())
 }
 
-// rq-9ca00d25
+// rq-9ca00d25 rq-95385a9d
+//
+// Launches the fused `spme_recip_apply_influence` kernel:
+// one thread per complex grid cell writes V_hat = G * rho_hat in place
+// and accumulates the per-thread virial contribution into a per-block
+// partial sum written to `virial_partials`.
+//
+// `virial_partials.len()` must equal the launch's grid size
+// (`ceil(n_complex / 256)`); each block writes exactly one entry.
 #[allow(clippy::too_many_arguments)]
-pub fn spme_influence_multiply_on_stream(
+pub fn spme_recip_apply_influence(
     kernels: &Kernels,
     influence_g: &CudaSlice<Real>,
     virial_factor: &CudaSlice<Real>,
     rho_hat_interleaved: &mut CudaSlice<Real>,
-    virial_per_cell: &mut CudaSlice<Real>,
+    virial_partials: &mut CudaSlice<Real>,
     n_c: u32,
     n_c_complex: u32,
     n_complex: u32,
-    stream: &CudaStream,
-) -> Result<(), GpuError> {
-    spme_influence_multiply_impl(
-        kernels,
-        influence_g,
-        virial_factor,
-        rho_hat_interleaved,
-        virial_per_cell,
-        n_c,
-        n_c_complex,
-        n_complex,
-        Some(stream),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spme_influence_multiply_impl(
-    kernels: &Kernels,
-    influence_g: &CudaSlice<Real>,
-    virial_factor: &CudaSlice<Real>,
-    rho_hat_interleaved: &mut CudaSlice<Real>,
-    virial_per_cell: &mut CudaSlice<Real>,
-    n_c: u32,
-    n_c_complex: u32,
-    n_complex: u32,
-    stream: Option<&CudaStream>,
 ) -> Result<(), GpuError> {
     if n_complex == 0 {
         return Ok(());
@@ -678,35 +286,125 @@ fn spme_influence_multiply_impl(
     debug_assert_eq!(influence_g.len(), n_complex as usize);
     debug_assert_eq!(virial_factor.len(), n_complex as usize);
     debug_assert_eq!(rho_hat_interleaved.len(), 2 * n_complex as usize);
-    debug_assert_eq!(virial_per_cell.len(), n_complex as usize);
-    let func = kernels.spme_recip.spme_influence_multiply.clone();
     let cfg = launch_config(n_complex);
+    debug_assert_eq!(virial_partials.len(), cfg.grid_dim.0 as usize);
+    let func = kernels.spme_recip.spme_recip_apply_influence.clone();
     let args = (
         influence_g,
         virial_factor,
         rho_hat_interleaved,
-        virial_per_cell,
+        virial_partials,
         n_c,
         n_c_complex,
         n_complex,
     );
     unsafe {
-        match stream {
-            Some(s) => func.launch_on_stream(s, cfg, args).map_err(GpuError::from)?,
-            None => func.launch(cfg, args).map_err(GpuError::from)?,
-        }
+        func.launch(cfg, args).map_err(GpuError::from)?;
     }
     Ok(())
 }
 
-// rq-9ca00d25 rq-35b76155 rq-c6f6a13c
+/// Launches `spme_recip_compute_influence` on the supplied stream:
+/// recomputes both `influence_G` and `virial_factor` cell-by-cell from
+/// the current lattice. One thread per complex grid cell, block size
+/// 256, grid `ceil(M_complex / 256)`. Inner arithmetic is `double`
+/// precision; the device store casts to the storage `Real`.
+///
+/// Returns `Ok(())` immediately (no host wait); the launch is
+/// asynchronous on the supplied stream. The caller is expected to
+/// schedule downstream consumers (`spme_charge_spread`,
+/// `spme_recip_apply_influence`) on the same stream so the writes are
+/// visible without additional synchronization.
+// rq-e7b74f7a
+#[allow(clippy::too_many_arguments)]
+pub fn spme_recip_compute_influence(
+    kernels: &Kernels,
+    b_factors_a: &CudaSlice<Real>,
+    b_factors_b: &CudaSlice<Real>,
+    b_factors_c: &CudaSlice<Real>,
+    influence_g: &mut CudaSlice<Real>,
+    virial_factor: &mut CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    grid: [u32; 3],
+    k_coulomb: Real,
+    alpha: Real,
+    m_complex: u32,
+) -> Result<(), GpuError> {
+    if m_complex == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(b_factors_a.len(), grid[0] as usize);
+    debug_assert_eq!(b_factors_b.len(), grid[1] as usize);
+    debug_assert_eq!(b_factors_c.len(), grid[2] as usize);
+    debug_assert_eq!(influence_g.len(), m_complex as usize);
+    debug_assert_eq!(virial_factor.len(), m_complex as usize);
+    let func = kernels.spme_recip.spme_recip_compute_influence.clone();
+    let cfg = launch_config(m_complex);
+    let lattice = sim_box.lattice_device();
+    let args = (
+        b_factors_a,
+        b_factors_b,
+        b_factors_c,
+        &mut *influence_g,
+        &mut *virial_factor,
+        lattice,
+        grid[0],
+        grid[1],
+        grid[2],
+        k_coulomb,
+        alpha,
+        m_complex,
+    );
+    unsafe {
+        func.launch(cfg, args).map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches the single-block deterministic reduction of
+/// `virial_partials` followed by the Ewald half-sum / per-particle
+/// scale. Writes
+///   w_per_particle_virial[0] = (0.5 / n) * Σ virial_partials[b]
+/// on the supplied stream. Block size 256 (matches the kernel's
+/// `__shared__ Real partial[256]`).
+pub fn spme_recip_reduce_partials(
+    kernels: &Kernels,
+    virial_partials: &CudaSlice<Real>,
+    w_per_particle_virial: &mut CudaSlice<Real>,
+    num_blocks: u32,
+    n_particles: u32,
+) -> Result<(), GpuError> {
+    if num_blocks == 0 || n_particles == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(virial_partials.len(), num_blocks as usize);
+    debug_assert_eq!(w_per_particle_virial.len(), 1);
+    let func = kernels.spme_recip.spme_recip_reduce_partials.clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let scale: Real = 0.5 / (n_particles as Real);
+    let args = (virial_partials, w_per_particle_virial, num_blocks, scale);
+    unsafe {
+        func.launch(cfg, args).map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-9ca00d25 rq-35b76155 rq-c6f6a13c rq-df8766ae rq-94bfcb7e
+// `func` is the order-specialized `spme_force_gather` kernel NVRTC-compiled
+// by the SPME slot (PME_ORDER fixed at `spline_order`).
 #[allow(clippy::too_many_arguments)]
 pub fn spme_force_gather(
+    func: &CudaFunction,
     particle_buffers: &ParticleBuffers,
+    sorted_atom_index: &CudaSlice<u32>,
     sim_box: &SimulationBox,
     v: &CudaSlice<Real>,
     u_self_per_particle: &CudaSlice<Real>,
-    w_per_particle_virial: Real,
+    w_per_particle_virial: &CudaSlice<Real>,
     grid: [u32; 3],
     spline_order: u32,
     slot_force_x: &mut CudaViewMut<'_, Real>,
@@ -722,8 +420,9 @@ pub fn spme_force_gather(
     let m =
         grid[0] as usize * grid[1] as usize * grid[2] as usize;
     debug_assert_eq!(v.len(), m);
-    debug_assert_eq!(particle_buffers.charges.len(), n);
+    debug_assert_eq!(w_per_particle_virial.len(), 1);
     debug_assert_eq!(u_self_per_particle.len(), n);
+    debug_assert_eq!(sorted_atom_index.len(), n);
     debug_assert_eq!(slot_force_x.len(), n);
     debug_assert_eq!(slot_force_y.len(), n);
     debug_assert_eq!(slot_force_z.len(), n);
@@ -731,26 +430,19 @@ pub fn spme_force_gather(
     debug_assert_eq!(slot_virial.len(), n);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.spme_recip.spme_force_gather.clone();
+    let func = func.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.charges,
+                &particle_buffers.posq,
                 v,
                 u_self_per_particle,
                 w_per_particle_virial,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                sorted_atom_index,
+                lattice,
                 grid[0],
                 grid[1],
                 grid[2],
@@ -768,61 +460,143 @@ pub fn spme_force_gather(
     Ok(())
 }
 
-// rq-f00f729e rq-66d80d54 (morse_bond_force launcher mirroring the `gpu` convention)
+// rq-06f1edf2 rq-7594b1fc
+//
+// Atom spatial pre-sort key computation. One thread per particle.
+// Each thread computes the SPME primary-bin index from the same
+// `spread_per_particle_setup` geometry the spread and gather kernels
+// use, writes the bin to `atom_bin_key[i]`, and atomically increments
+// `bin_atom_counts[bin]`. The caller is responsible for zeroing
+// `bin_atom_counts` (length M) via `memset_zeros` before launch.
 #[allow(clippy::too_many_arguments)]
-pub fn morse_bond_force(
+pub fn spme_compute_bin_key(
     particle_buffers: &ParticleBuffers,
-    bonds: &CudaSlice<u32>,
-    bond_de: &CudaSlice<Real>,
-    bond_a: &CudaSlice<Real>,
-    bond_re: &CudaSlice<Real>,
     sim_box: &SimulationBox,
-    bond_pair_x: &mut CudaSlice<Real>,
-    bond_pair_y: &mut CudaSlice<Real>,
-    bond_pair_z: &mut CudaSlice<Real>,
-    bond_pair_energy: &mut CudaSlice<Real>,
-    bond_pair_virial: &mut CudaSlice<Real>,
-    n_bonds: usize,
+    grid: [u32; 3],
+    atom_bin_key: &mut CudaSlice<u32>,
+    bin_atom_counts: &mut CudaSlice<u32>,
 ) -> Result<(), GpuError> {
-    if n_bonds == 0 {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
         return Ok(());
     }
-    let n_u32 = n_bonds as u32;
-    let func = particle_buffers.kernels.morse.morse_bond_force.clone();
+    let n_a = grid[0];
+    let n_b = grid[1];
+    let n_c = grid[2];
+    let m = n_a as usize * n_b as usize * n_c as usize;
+    debug_assert_eq!(atom_bin_key.len(), n);
+    debug_assert_eq!(bin_atom_counts.len(), m);
+
+    let n_u32 = n as u32;
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
+    let func = particle_buffers.kernels.spme_recip.spme_compute_bin_key.clone();
+    let args = (
+        &particle_buffers.posq,
+        lattice,
+        n_a,
+        n_b,
+        n_c,
+        &mut *atom_bin_key,
+        &mut *bin_atom_counts,
+        n_u32,
+    );
     unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                bonds,
-                bond_de,
-                bond_a,
-                bond_re,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                bond_pair_x,
-                bond_pair_y,
-                bond_pair_z,
-                bond_pair_energy,
-                bond_pair_virial,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
+        func.launch(cfg, args).map_err(GpuError::from)?;
     }
     Ok(())
 }
 
-// rq-6435723d (well, that was Langevin's id; this is the bond reduction —
-// using a fresh id-comment in the spec rqm-bond reduction declaration.)
+// rq-a1b761fc
+//
+// Atom spatial pre-sort orchestrator. Runs the five-stage count-sort
+// pipeline on the default stream when the framework's neighbour-list
+// rebuild generation has advanced past the slot's cached value.
+//
+// Returns `Ok(())` immediately when the generation is unchanged — no
+// kernel launches.
+#[allow(clippy::too_many_arguments)]
+pub fn spme_atom_sort(
+    particle_buffers: &ParticleBuffers,
+    sim_box: &SimulationBox,
+    grid: [u32; 3],
+    atom_bin_key: &mut CudaSlice<u32>,
+    bin_atom_counts: &mut CudaSlice<u32>,
+    bin_atom_offsets: &mut CudaSlice<u32>,
+    bin_atom_cursor: &mut CudaSlice<u32>,
+    sorted_atom_index: &mut CudaSlice<u32>,
+    sort_scan_block_totals: &mut [CudaSlice<u32>],
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let device = particle_buffers.device.clone();
+    let kernels = particle_buffers.kernels.clone();
+    let n_a = grid[0];
+    let n_b = grid[1];
+    let n_c = grid[2];
+    let m = n_a as usize * n_b as usize * n_c as usize;
+    debug_assert_eq!(atom_bin_key.len(), n);
+    debug_assert_eq!(bin_atom_counts.len(), m);
+    debug_assert_eq!(bin_atom_offsets.len(), m + 1);
+    debug_assert_eq!(bin_atom_cursor.len(), m);
+    debug_assert_eq!(sorted_atom_index.len(), n);
+
+    // Stage 1: zero the histogram and the scatter cursor.
+    device.memset_zeros(bin_atom_counts).map_err(GpuError::from)?;
+    device.memset_zeros(bin_atom_cursor).map_err(GpuError::from)?;
+
+    // Stage 2: per-atom primary-bin computation + histogram.
+    spme_compute_bin_key(
+        particle_buffers,
+        sim_box,
+        grid,
+        atom_bin_key,
+        bin_atom_counts,
+    )?;
+
+    // Stage 3: exclusive prefix scan of the histogram into offsets.
+    prefix_scan_cell_counts(
+        &kernels,
+        bin_atom_counts,
+        bin_atom_offsets,
+        sort_scan_block_totals,
+        m,
+        PrefixScanSentinel::Host(n as u32),
+    )?;
+
+    // Stage 4: scatter atoms into their sorted slots using a per-bin
+    // atomic cursor. The cursor was zeroed in stage 1; the scatter
+    // launcher does not re-zero it.
+    {
+        let n_u32 = n as u32;
+        let func = kernels.neighbor.scatter_atoms_into_cells.clone();
+        let cfg = launch_config(n_u32);
+        unsafe {
+            func.launch(
+                cfg,
+                (
+                    &*atom_bin_key,
+                    &*bin_atom_offsets,
+                    &mut *bin_atom_cursor,
+                    &mut *sorted_atom_index,
+                    n_u32,
+                ),
+            )
+            .map_err(GpuError::from)?;
+        }
+    }
+
+    // Stage 5: per-bin insertion sort over sorted_atom_index in
+    // strictly ascending atom-index order. After this pass, two runs
+    // with byte-identical positions produce a byte-identical
+    // sorted_atom_index regardless of the non-deterministic scatter
+    // cursor.
+    sort_cells_by_particle_id(&kernels, bin_atom_offsets, sorted_atom_index, m)?;
+    Ok(())
+}
+
 // rq-10adebc4
 #[allow(clippy::too_many_arguments)]
 pub fn reduce_bond_forces(
@@ -840,6 +614,7 @@ pub fn reduce_bond_forces(
     slot_energy: &mut CudaViewMut<'_, Real>,
     slot_virial: &mut CudaViewMut<'_, Real>,
     particle_count: usize,
+    write_scalars: bool,
 ) -> Result<(), GpuError> {
     if particle_count == 0 {
         return Ok(());
@@ -847,6 +622,7 @@ pub fn reduce_bond_forces(
     let n_u32 = particle_count as u32;
     let func = kernels.morse.reduce_bond_forces.clone();
     let cfg = launch_config(n_u32);
+    let write_scalars_u32: u32 = if write_scalars { 1 } else { 0 };
     unsafe {
         func.launch(
             cfg,
@@ -864,58 +640,7 @@ pub fn reduce_bond_forces(
                 slot_energy,
                 slot_virial,
                 n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// Launch helper for the harmonic-angle kernel. One thread per angle.
-// rq-db5924d8
-#[allow(clippy::too_many_arguments)]
-pub fn harmonic_angle_force(
-    particle_buffers: &ParticleBuffers,
-    angles: &CudaSlice<u32>,
-    angle_k_theta: &CudaSlice<Real>,
-    angle_theta_0: &CudaSlice<Real>,
-    sim_box: &SimulationBox,
-    angle_triple_x: &mut CudaSlice<Real>,
-    angle_triple_y: &mut CudaSlice<Real>,
-    angle_triple_z: &mut CudaSlice<Real>,
-    angle_triple_energy: &mut CudaSlice<Real>,
-    angle_triple_virial: &mut CudaSlice<Real>,
-    n_angles: usize,
-) -> Result<(), GpuError> {
-    if n_angles == 0 {
-        return Ok(());
-    }
-    let n_u32 = n_angles as u32;
-    let func = particle_buffers.kernels.angle.harmonic_angle_force.clone();
-    let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                angles,
-                angle_k_theta,
-                angle_theta_0,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                angle_triple_x,
-                angle_triple_y,
-                angle_triple_z,
-                angle_triple_energy,
-                angle_triple_virial,
-                n_u32,
+                write_scalars_u32,
             ),
         )
         .map_err(GpuError::from)?;
@@ -941,6 +666,7 @@ pub fn reduce_angle_forces(
     slot_energy: &mut CudaViewMut<'_, Real>,
     slot_virial: &mut CudaViewMut<'_, Real>,
     particle_count: usize,
+    write_scalars: bool,
 ) -> Result<(), GpuError> {
     if particle_count == 0 {
         return Ok(());
@@ -948,6 +674,7 @@ pub fn reduce_angle_forces(
     let n_u32 = particle_count as u32;
     let func = kernels.angle.reduce_angle_forces.clone();
     let cfg = launch_config(n_u32);
+    let write_scalars_u32: u32 = if write_scalars { 1 } else { 0 };
     unsafe {
         func.launch(
             cfg,
@@ -965,6 +692,7 @@ pub fn reduce_angle_forces(
                 slot_energy,
                 slot_virial,
                 n_u32,
+                write_scalars_u32,
             ),
         )
         .map_err(GpuError::from)?;
@@ -972,13 +700,156 @@ pub fn reduce_angle_forces(
     Ok(())
 }
 
-// Launch helper for the NHC kinetic-energy reduction. Single-block,
-// 256 threads. Output goes to a length-1 device buffer the caller owns
-// (typically reused across calls to avoid per-step allocation). The
-// helper synchronously downloads the value and returns it as Real.
-// rq-f606ff6f
+// rq-1727d6bd
+// Largest particle count handled by the single-block scalar reductions.
+// Above this the deterministic two-pass multi-block path is used (the
+// whole GPU instead of one SM). The single-block path's summation order
+// is bit-identical to the historical reduction, so values for systems at
+// or below this size are unchanged. See `rqm/pipeline-reproducibility.md`.
+const SINGLE_BLOCK_REDUCE_MAX: u32 = 8192;
+
+fn single_block_reduce_cfg() -> LaunchConfig {
+    LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0, // shared array is __shared__ static, not dynamic
+    }
+}
+
+// rq-1727d6bd
+// Pass 2 of the multi-block reduction: deterministically sum
+// `reduction_partials[0..REDUCE_PARTIAL_BLOCKS]` into `scratch[0]` with
+// the single-block `virial_sum_reduce`.
+fn reduce_partials_into(
+    buffers: &ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let func = buffers.kernels.barostat.virial_sum_reduce.clone();
+    unsafe {
+        func.launch(
+            single_block_reduce_cfg(),
+            (
+                &buffers.reduction_partials,
+                &mut *scratch,
+                crate::gpu::buffers::REDUCE_PARTIAL_BLOCKS,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-1727d6bd
+// Deterministic kinetic-energy reduction into `scratch[0]`. Single-block
+// for `n <= SINGLE_BLOCK_REDUCE_MAX`, two-pass multi-block otherwise.
+fn reduce_kinetic_energy_into(
+    buffers: &mut ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n_u32 = buffers.particle_count() as u32;
+    if n_u32 <= SINGLE_BLOCK_REDUCE_MAX {
+        let func = buffers.kernels.nose_hoover.kinetic_energy_reduce.clone();
+        unsafe {
+            func.launch(
+                single_block_reduce_cfg(),
+                (
+                    &buffers.velocities_x,
+                    &buffers.velocities_y,
+                    &buffers.velocities_z,
+                    &buffers.masses,
+                    &mut *scratch,
+                    n_u32,
+                ),
+            )
+            .map_err(GpuError::from)?;
+        }
+    } else {
+        let func = buffers
+            .kernels
+            .nose_hoover
+            .kinetic_energy_reduce_partials
+            .clone();
+        let cfg = LaunchConfig {
+            grid_dim: (crate::gpu::buffers::REDUCE_PARTIAL_BLOCKS, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            func.launch(
+                cfg,
+                (
+                    &buffers.velocities_x,
+                    &buffers.velocities_y,
+                    &buffers.velocities_z,
+                    &buffers.masses,
+                    &mut buffers.reduction_partials,
+                    n_u32,
+                ),
+            )
+            .map_err(GpuError::from)?;
+        }
+        reduce_partials_into(buffers, scratch)?;
+    }
+    Ok(())
+}
+
+// rq-1727d6bd
+// Deterministic sum of a per-particle `Real` array (`buffers.virials` or
+// `buffers.potential_energies`) into `scratch[0]`. `is_pe` selects the
+// input field; both follow the same single-block / multi-block split.
+fn reduce_particle_array_into(
+    buffers: &mut ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+    is_pe: bool,
+) -> Result<(), GpuError> {
+    let n_u32 = buffers.particle_count() as u32;
+    if n_u32 <= SINGLE_BLOCK_REDUCE_MAX {
+        let func = buffers.kernels.barostat.virial_sum_reduce.clone();
+        let cfg = single_block_reduce_cfg();
+        unsafe {
+            if is_pe {
+                func.launch(cfg, (&buffers.potential_energies, &mut *scratch, n_u32))
+                    .map_err(GpuError::from)?;
+            } else {
+                func.launch(cfg, (&buffers.virials, &mut *scratch, n_u32))
+                    .map_err(GpuError::from)?;
+            }
+        }
+    } else {
+        let func = buffers
+            .kernels
+            .barostat
+            .virial_sum_reduce_partials
+            .clone();
+        let cfg = LaunchConfig {
+            grid_dim: (crate::gpu::buffers::REDUCE_PARTIAL_BLOCKS, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            if is_pe {
+                func.launch(
+                    cfg,
+                    (&buffers.potential_energies, &mut buffers.reduction_partials, n_u32),
+                )
+                .map_err(GpuError::from)?;
+            } else {
+                func.launch(cfg, (&buffers.virials, &mut buffers.reduction_partials, n_u32))
+                    .map_err(GpuError::from)?;
+            }
+        }
+        reduce_partials_into(buffers, scratch)?;
+    }
+    Ok(())
+}
+
+// Launch helper for the kinetic-energy reduction. Deterministic
+// (single-block for small N, two-pass multi-block for large N). Output
+// goes to a length-1 device buffer the caller owns; the helper
+// synchronously downloads the value and returns it as Real.
+// rq-f606ff6f rq-1727d6bd
 pub fn compute_kinetic_energy(
-    particle_buffers: &ParticleBuffers,
+    particle_buffers: &mut ParticleBuffers,
     scratch: &mut CudaSlice<Real>,
 ) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
@@ -986,27 +857,7 @@ pub fn compute_kinetic_energy(
         return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.nose_hoover.kinetic_energy_reduce.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (256, 1, 1),
-        shared_mem_bytes: 0, // shared array is __shared__ static, not dynamic
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.velocities_x,
-                &particle_buffers.velocities_y,
-                &particle_buffers.velocities_z,
-                &particle_buffers.masses,
-                &mut *scratch,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
+    reduce_kinetic_energy_into(particle_buffers, scratch)?;
     let mut out = [0.0; 1];
     particle_buffers
         .device
@@ -1045,6 +896,218 @@ pub fn rescale_velocities(
     Ok(())
 }
 
+/// Launches `kinetic_energy_reduce` and leaves the scalar result in
+/// `scratch[0]` on device — no dtoh. Same kernel as
+/// `compute_kinetic_energy`, just without the blocking host transfer;
+/// the caller is expected to consume the value either via another
+/// device-side kernel (e.g. `csvr_sample_and_factor`) or via a later
+/// host dtoh when one is unavoidable.
+pub fn compute_kinetic_energy_on_device(
+    particle_buffers: &mut ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(scratch.len(), 1);
+    reduce_kinetic_energy_into(particle_buffers, scratch)
+}
+
+/// Launches `rescale_velocities_device_factor`: applies a velocity
+/// rescale `v_i ← factor[0] · v_i` where `factor` is a single-element
+/// device buffer (typically the output of `csvr_sample_and_factor`).
+pub fn rescale_velocities_device_factor(
+    particle_buffers: &mut ParticleBuffers,
+    factor: &CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(factor.len(), 1);
+    let n_u32 = n as u32;
+    let func = particle_buffers
+        .kernels
+        .nose_hoover
+        .rescale_velocities_device_factor
+        .clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                factor,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `berendsen_compute_factor`: reads the kinetic-energy
+/// scalar from `k_old`, computes λ on the device, writes
+/// `factor_out[0]`, and accumulates the per-step injection delta
+/// `K_old · (λ² − 1)` into `cumulative_injection_delta[0]`. Single
+/// 1-thread launch. Stays graph-capturable.
+pub fn berendsen_compute_factor(
+    particle_buffers: &ParticleBuffers,
+    k_old: &CudaSlice<Real>,
+    factor_out: &mut CudaSlice<Real>,
+    cumulative_injection_delta: &mut CudaSlice<f64>,
+    k_target: f64,
+    dt_over_tau: f64,
+) -> Result<(), GpuError> {
+    debug_assert_eq!(k_old.len(), 1);
+    debug_assert_eq!(factor_out.len(), 1);
+    debug_assert_eq!(cumulative_injection_delta.len(), 1);
+    let func = particle_buffers
+        .kernels
+        .nose_hoover
+        .berendsen_compute_factor
+        .clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                k_old,
+                &mut *factor_out,
+                &mut *cumulative_injection_delta,
+                k_target,
+                dt_over_tau,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `csvr_sample_and_factor`: reads `k_old` from device,
+/// generates `g_dof` Philox samples in parallel, evaluates the CSVR
+/// chain, and writes `factor_out[0] = sqrt(k_new/k_old)` plus accumulates
+/// `(k_new - k_old)` into `cumulative_injection_delta[0]`. Single
+/// 256-thread block; no host sync required.
+#[allow(clippy::too_many_arguments)]
+// rq-5f59fa80
+// Number of blocks (and the `csvr_partials` buffer length) for the
+// multi-block CSVR sample. Fixed so the launch dims are graph-capturable
+// and the deterministic block→chunk mapping is stable run-to-run.
+pub const CSVR_PARTIAL_BLOCKS: u32 = 1024;
+// At or below this `g_dof` the single-block `csvr_sample_and_factor`
+// kernel is used (preserving exact values for small-system fixtures);
+// above it, the deterministic two-pass multi-block path parallelises the
+// `g_dof - 1` Gaussian draws across the whole device.
+const SINGLE_BLOCK_CSVR_MAX: u32 = 8192;
+
+// rq-5f59fa80
+pub fn csvr_sample_and_factor(
+    particle_buffers: &ParticleBuffers,
+    k_old: &CudaSlice<Real>,
+    factor_out: &mut CudaSlice<Real>,
+    cumulative_injection_delta: &mut CudaSlice<f64>,
+    draw_counter_device: &mut CudaSlice<u64>,
+    csvr_partials: &mut CudaSlice<f64>,
+    seed: u64,
+    g_dof: u32,
+    c: f64,
+    one_minus_c: f64,
+    k_target_over_nf: f64,
+) -> Result<(), GpuError> {
+    if g_dof == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(k_old.len(), 1);
+    debug_assert_eq!(factor_out.len(), 1);
+    debug_assert_eq!(cumulative_injection_delta.len(), 1);
+    debug_assert_eq!(draw_counter_device.len(), 1);
+    let kernels = &particle_buffers.kernels.nose_hoover;
+    let seed_lo = seed as u32;
+    let seed_hi = (seed >> 32) as u32;
+
+    if g_dof <= SINGLE_BLOCK_CSVR_MAX {
+        let func = kernels.csvr_sample_and_factor.clone();
+        let cfg = LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            func.launch(
+                cfg,
+                (
+                    k_old,
+                    &mut *factor_out,
+                    &mut *cumulative_injection_delta,
+                    &mut *draw_counter_device,
+                    seed_lo,
+                    seed_hi,
+                    g_dof,
+                    c,
+                    one_minus_c,
+                    k_target_over_nf,
+                ),
+            )
+            .map_err(GpuError::from)?;
+        }
+        return Ok(());
+    }
+
+    // Multi-block: pass 1 draws + sums the partials, pass 2 reduces them
+    // and performs the scalar finish.
+    debug_assert_eq!(csvr_partials.len(), CSVR_PARTIAL_BLOCKS as usize);
+    let part_func = kernels.csvr_sample_partials.clone();
+    let cfg1 = LaunchConfig {
+        grid_dim: (CSVR_PARTIAL_BLOCKS, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        part_func
+            .launch(
+                cfg1,
+                (&*draw_counter_device, &mut *csvr_partials, seed_lo, seed_hi, g_dof),
+            )
+            .map_err(GpuError::from)?;
+    }
+
+    let finish_func = kernels.csvr_finish_from_partials.clone();
+    let cfg2 = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        finish_func
+            .launch(
+                cfg2,
+                (
+                    k_old,
+                    &mut *factor_out,
+                    &mut *cumulative_injection_delta,
+                    &mut *draw_counter_device,
+                    &*csvr_partials,
+                    CSVR_PARTIAL_BLOCKS,
+                    seed_lo,
+                    seed_hi,
+                    c,
+                    one_minus_c,
+                    k_target_over_nf,
+                ),
+            )
+            .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // Launch helper for the Andersen per-particle resample kernel. Block
 // size 256, grid `ceil(n / 256)`. When `n == 0` returns Ok(()) without
 // launching. Debug-asserts `p_collision ∈ [0, 1]` (caller clamps).
@@ -1052,8 +1115,8 @@ pub fn rescale_velocities(
 #[allow(clippy::too_many_arguments)]
 pub fn andersen_resample(
     buffers: &mut ParticleBuffers,
+    draw_counter_device: &mut CudaSlice<u64>,
     seed: u64,
-    draw_counter: u64,
     p_collision: Real,
     kt: Real,
 ) -> Result<(), GpuError> {
@@ -1062,13 +1125,12 @@ pub fn andersen_resample(
         return Ok(());
     }
     debug_assert!((0.0..=1.0).contains(&p_collision));
+    debug_assert_eq!(draw_counter_device.len(), 1);
     let n_u32 = n as u32;
     let func = buffers.kernels.andersen.andersen_resample.clone();
     let cfg = launch_config(n_u32);
     let seed_lo = seed as u32;
     let seed_hi = (seed >> 32) as u32;
-    let draw_lo = draw_counter as u32;
-    let draw_hi = (draw_counter >> 32) as u32;
     unsafe {
         func.launch(
             cfg,
@@ -1078,16 +1140,41 @@ pub fn andersen_resample(
                 &mut buffers.velocities_z,
                 &buffers.masses,
                 &buffers.particle_ids,
+                &*draw_counter_device,
                 seed_lo,
                 seed_hi,
-                draw_lo,
-                draw_hi,
                 p_collision,
                 kt,
                 n_u32,
             ),
         )
         .map_err(GpuError::from)?;
+    }
+    // Bump the counter on device for the next launch.
+    increment_u64_device(buffers, draw_counter_device)?;
+    Ok(())
+}
+
+/// Launches the trivial `increment_u64` kernel, which adds 1 to a
+/// single u64 device counter. Used after multi-block Philox kernels
+/// (where reading and writing the counter inside the same kernel is
+/// not safe across blocks) to advance the counter by exactly one per
+/// graph node. Captured as a graph node so a replayed graph advances
+/// the counter on each replay.
+pub fn increment_u64_device(
+    buffers: &ParticleBuffers,
+    counter: &mut CudaSlice<u64>,
+) -> Result<(), GpuError> {
+    debug_assert_eq!(counter.len(), 1);
+    let func = buffers.kernels.nose_hoover.increment_u64.clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(cfg, (&mut *counter,))
+            .map_err(GpuError::from)?;
     }
     Ok(())
 }
@@ -1099,7 +1186,7 @@ pub fn andersen_resample(
 // value and returns it as Real.
 // rq-0d8c8688 rq-0f50dade
 pub fn compute_total_virial(
-    particle_buffers: &ParticleBuffers,
+    particle_buffers: &mut ParticleBuffers,
     scratch: &mut CudaSlice<Real>,
 ) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
@@ -1107,24 +1194,7 @@ pub fn compute_total_virial(
         return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.barostat.virial_sum_reduce.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (256, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.virials,
-                &mut *scratch,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
+    reduce_particle_array_into(particle_buffers, scratch, false)?;
     let mut out = [0.0; 1];
     particle_buffers
         .device
@@ -1133,15 +1203,184 @@ pub fn compute_total_virial(
     Ok(out[0])
 }
 
-// rq-fc6859df
+/// Same as `compute_total_virial` but leaves the result in `scratch[0]`
+/// on device — no host download. Used by the c-rescale barostat's
+/// device-resident pipeline.
+pub fn compute_total_virial_on_device(
+    particle_buffers: &mut ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(scratch.len(), 1);
+    reduce_particle_array_into(particle_buffers, scratch, false)
+}
+
+/// Launches `c_rescale_compute_mu`: reads `k`, `w`, and the device
+/// lattice (mutated in place by this kernel), samples one Philox normal,
+/// computes µ + pressure + post-rescale volume in double precision,
+/// mutates the lattice by µ, writes µ to `mu_out`, and writes
+/// `[pressure, v_post, injection_delta]` into `diagnostics`. Single
+/// thread.
+#[allow(clippy::too_many_arguments)]
+pub fn c_rescale_compute_mu(
+    particle_buffers: &ParticleBuffers,
+    k: &CudaSlice<Real>,
+    w: &CudaSlice<Real>,
+    lattice: &mut CudaSlice<Real>,
+    mu_out: &mut CudaSlice<Real>,
+    diagnostics: &mut CudaSlice<f64>,
+    draw_counter_device: &mut CudaSlice<u64>,
+    seed: u64,
+    pressure_target: f64,
+    tau: f64,
+    compressibility: f64,
+    kt: f64,
+    dt: f64,
+    mu_cubed_min: f64,
+) -> Result<(), GpuError> {
+    debug_assert_eq!(k.len(), 1);
+    debug_assert_eq!(w.len(), 1);
+    debug_assert_eq!(lattice.len(), 6);
+    debug_assert_eq!(mu_out.len(), 1);
+    debug_assert_eq!(diagnostics.len(), 3);
+    debug_assert_eq!(draw_counter_device.len(), 1);
+    let func = particle_buffers
+        .kernels
+        .barostat
+        .c_rescale_compute_mu
+        .clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let seed_lo = seed as u32;
+    let seed_hi = (seed >> 32) as u32;
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                k,
+                w,
+                &mut *lattice,
+                &mut *mu_out,
+                &mut *diagnostics,
+                &mut *draw_counter_device,
+                seed_lo,
+                seed_hi,
+                pressure_target,
+                tau,
+                compressibility,
+                kt,
+                dt,
+                mu_cubed_min,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `berendsen_compute_mu`: deterministic isotropic rescale
+/// variant of `c_rescale_compute_mu` (no Philox). Mutates the lattice
+/// in place by µ; writes µ to `mu_out`; writes `[pressure, v_post]`
+/// to `diagnostics` (length 2).
+#[allow(clippy::too_many_arguments)]
+pub fn berendsen_compute_mu(
+    particle_buffers: &ParticleBuffers,
+    k: &CudaSlice<Real>,
+    w: &CudaSlice<Real>,
+    lattice: &mut CudaSlice<Real>,
+    mu_out: &mut CudaSlice<Real>,
+    diagnostics: &mut CudaSlice<f64>,
+    pressure_target: f64,
+    tau: f64,
+    compressibility: f64,
+    dt: f64,
+    mu_cubed_min: f64,
+) -> Result<(), GpuError> {
+    debug_assert_eq!(k.len(), 1);
+    debug_assert_eq!(w.len(), 1);
+    debug_assert_eq!(lattice.len(), 6);
+    debug_assert_eq!(mu_out.len(), 1);
+    debug_assert_eq!(diagnostics.len(), 2);
+    let func = particle_buffers
+        .kernels
+        .barostat
+        .berendsen_compute_mu
+        .clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                k,
+                w,
+                &mut *lattice,
+                &mut *mu_out,
+                &mut *diagnostics,
+                pressure_target,
+                tau,
+                compressibility,
+                dt,
+                mu_cubed_min,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `rescale_positions_device_factor`: applies a uniform
+/// per-particle position rescale `x_i ← factor[0] · x_i` reading the
+/// rescale factor from a 1-element device buffer instead of taking it
+/// as a host scalar.
+pub fn rescale_positions_device_factor(
+    particle_buffers: &mut ParticleBuffers,
+    factor: &CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(factor.len(), 1);
+    let n_u32 = n as u32;
+    let func = particle_buffers
+        .kernels
+        .barostat
+        .rescale_positions_device_factor
+        .clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.posq,
+                factor,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-fc6859df rq-1727d6bd
 //
-// Reuses `virial_sum_reduce` (the generic single-block deterministic
-// f32 sum-reduction kernel) against `particle_buffers.potential_energies`.
+// Deterministically sums `particle_buffers.potential_energies`
+// (single-block for small N, two-pass multi-block for large N).
 // Runner-side helper for assembling integrator/thermostat log columns
 // that need the total potential energy without downloading the
 // per-particle buffer.
 pub fn compute_total_potential_energy(
-    particle_buffers: &ParticleBuffers,
+    particle_buffers: &mut ParticleBuffers,
     scratch: &mut CudaSlice<Real>,
 ) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
@@ -1149,30 +1388,51 @@ pub fn compute_total_potential_energy(
         return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.barostat.virial_sum_reduce.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (256, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.potential_energies,
-                &mut *scratch,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
+    reduce_particle_array_into(particle_buffers, scratch, true)?;
     let mut out = [0.0; 1];
     particle_buffers
         .device
         .dtoh_sync_copy_into(scratch, &mut out)
         .map_err(GpuError::from)?;
     Ok(out[0])
+}
+
+// Monte-Carlo barostat: rigid molecular-centre-of-mass volume scale.
+// One thread per molecule; translates every atom of a molecule by
+// `(scale - 1) * COM_molecule`. Block 256, grid ceil(n_mol / 256).
+// Returns Ok(()) without launching when there are no molecules.
+// See `rqm/integration/mc-barostat.md`.
+pub fn mc_barostat_scale_molecule_com(
+    buffers: &mut ParticleBuffers,
+    mol_atom_offsets: &CudaSlice<u32>,
+    mol_atom_indices: &CudaSlice<u32>,
+    scale: Real,
+) -> Result<(), GpuError> {
+    let n_mol = mol_atom_offsets.len().saturating_sub(1);
+    if n_mol == 0 {
+        return Ok(());
+    }
+    let func = buffers
+        .kernels
+        .mc_barostat
+        .mc_barostat_scale_molecule_com
+        .clone();
+    let cfg = launch_config(n_mol as u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.posq,
+                mol_atom_offsets,
+                mol_atom_indices,
+                &buffers.masses,
+                scale,
+                n_mol as u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
 }
 
 // Uniform per-particle position rescale used by the Berendsen barostat.
@@ -1195,9 +1455,7 @@ pub fn rescale_positions(
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 factor,
                 n_u32,
             ),
@@ -1265,9 +1523,7 @@ pub fn mtk_position_drift(
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 &particle_buffers.velocities_x,
                 &particle_buffers.velocities_y,
                 &particle_buffers.velocities_z,
@@ -1283,56 +1539,52 @@ pub fn mtk_position_drift(
 
 // rq-c0f98145
 #[allow(clippy::too_many_arguments)]
-pub fn accumulate_forces(
+pub fn combine_class_totals(
     particle_buffers: &mut ParticleBuffers,
-    fast_slot_forces_x: &CudaSlice<Real>,
-    fast_slot_forces_y: &CudaSlice<Real>,
-    fast_slot_forces_z: &CudaSlice<Real>,
-    fast_slot_energies: &CudaSlice<Real>,
-    fast_slot_virials: &CudaSlice<Real>,
-    num_fast_slots: u32,
-    slow_slot_forces_x: &CudaSlice<Real>,
-    slow_slot_forces_y: &CudaSlice<Real>,
-    slow_slot_forces_z: &CudaSlice<Real>,
-    slow_slot_energies: &CudaSlice<Real>,
-    slow_slot_virials: &CudaSlice<Real>,
-    num_slow_slots: u32,
+    fast_total_forces_x: &CudaSlice<Real>,
+    fast_total_forces_y: &CudaSlice<Real>,
+    fast_total_forces_z: &CudaSlice<Real>,
+    fast_total_potential_energies: &CudaSlice<Real>,
+    fast_total_virials: &CudaSlice<Real>,
+    slow_total_forces_x: &CudaSlice<Real>,
+    slow_total_forces_y: &CudaSlice<Real>,
+    slow_total_forces_z: &CudaSlice<Real>,
+    slow_total_potential_energies: &CudaSlice<Real>,
+    slow_total_virials: &CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
         return Ok(());
     }
     let n_u32 = n as u32;
-    debug_assert_eq!(fast_slot_forces_x.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(fast_slot_forces_y.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(fast_slot_forces_z.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(fast_slot_energies.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(fast_slot_virials.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(slow_slot_forces_x.len(), num_slow_slots as usize * n);
-    debug_assert_eq!(slow_slot_forces_y.len(), num_slow_slots as usize * n);
-    debug_assert_eq!(slow_slot_forces_z.len(), num_slow_slots as usize * n);
-    debug_assert_eq!(slow_slot_energies.len(), num_slow_slots as usize * n);
-    debug_assert_eq!(slow_slot_virials.len(), num_slow_slots as usize * n);
+    debug_assert_eq!(fast_total_forces_x.len(), n);
+    debug_assert_eq!(fast_total_forces_y.len(), n);
+    debug_assert_eq!(fast_total_forces_z.len(), n);
+    debug_assert_eq!(fast_total_potential_energies.len(), n);
+    debug_assert_eq!(fast_total_virials.len(), n);
+    debug_assert_eq!(slow_total_forces_x.len(), n);
+    debug_assert_eq!(slow_total_forces_y.len(), n);
+    debug_assert_eq!(slow_total_forces_z.len(), n);
+    debug_assert_eq!(slow_total_potential_energies.len(), n);
+    debug_assert_eq!(slow_total_virials.len(), n);
 
-    let func = particle_buffers.kernels.forces.accumulate_forces.clone();
+    let func = particle_buffers.kernels.forces.combine_class_totals.clone();
     let cfg = launch_config(n_u32);
 
     unsafe {
         func.launch(
             cfg,
             (
-                fast_slot_forces_x,
-                fast_slot_forces_y,
-                fast_slot_forces_z,
-                fast_slot_energies,
-                fast_slot_virials,
-                num_fast_slots,
-                slow_slot_forces_x,
-                slow_slot_forces_y,
-                slow_slot_forces_z,
-                slow_slot_energies,
-                slow_slot_virials,
-                num_slow_slots,
+                fast_total_forces_x,
+                fast_total_forces_y,
+                fast_total_forces_z,
+                fast_total_potential_energies,
+                fast_total_virials,
+                slow_total_forces_x,
+                slow_total_forces_y,
+                slow_total_forces_z,
+                slow_total_potential_energies,
+                slow_total_virials,
                 &mut particle_buffers.forces_x,
                 &mut particle_buffers.forces_y,
                 &mut particle_buffers.forces_z,
@@ -1347,13 +1599,14 @@ pub fn accumulate_forces(
 }
 
 // rq-884b5cd6
-pub fn neighbor_displacement_squared(
+pub fn neighbor_displacement_check_flag(
     particle_buffers: &ParticleBuffers,
     reference_x: &CudaSlice<Real>,
     reference_y: &CudaSlice<Real>,
     reference_z: &CudaSlice<Real>,
     sim_box: &SimulationBox,
-    disp_sq: &mut CudaSlice<Real>,
+    threshold_sq: Real,
+    disp_rebuild_flag: &mut CudaSlice<u32>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -1362,28 +1615,26 @@ pub fn neighbor_displacement_squared(
     debug_assert_eq!(reference_x.len(), n);
     debug_assert_eq!(reference_y.len(), n);
     debug_assert_eq!(reference_z.len(), n);
-    debug_assert_eq!(disp_sq.len(), n);
+    debug_assert!(disp_rebuild_flag.len() >= 1);
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.neighbor.neighbor_displacement_squared.clone();
+    let func = particle_buffers
+        .kernels
+        .neighbor
+        .neighbor_displacement_check_flag
+        .clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 reference_x,
                 reference_y,
                 reference_z,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                disp_sq,
+                lattice,
+                threshold_sq,
+                disp_rebuild_flag,
                 n_u32,
             ),
         )
@@ -1392,80 +1643,6 @@ pub fn neighbor_displacement_squared(
     Ok(())
 }
 
-// rq-a1262872
-#[allow(clippy::too_many_arguments)]
-pub fn neighbor_list_build(
-    particle_buffers: &ParticleBuffers,
-    sorted_particle_ids: &CudaSlice<u32>,
-    cell_offsets: &CudaSlice<u32>,
-    sim_box: &SimulationBox,
-    n_cells: [u32; 3],
-    r_search_sq: Real,
-    max_neighbors: u32,
-    neighbor_list: &mut CudaSlice<u32>,
-    neighbor_counts: &mut CudaSlice<u32>,
-    overflow_flag: &mut CudaSlice<u32>,
-) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
-    if n == 0 {
-        return Ok(());
-    }
-    debug_assert_eq!(sorted_particle_ids.len(), n);
-    debug_assert_eq!(
-        cell_offsets.len(),
-        (n_cells[0] * n_cells[1] * n_cells[2]) as usize + 1
-    );
-    debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
-    debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(overflow_flag.len(), 1);
-
-    let n_u32 = n as u32;
-    let n_cells_total = n_cells[0] * n_cells[1] * n_cells[2];
-    // One block per home cell, BLOCK_SIZE threads per block. Each block
-    // tiles candidate positions for one neighbour cell at a time into
-    // dynamic shared memory: three Real arrays (x, y, z) and one u32
-    // array (particle_id), each BLOCK_SIZE wide. Per-element bytes
-    // therefore depend on `Real`: 16 bytes in the f32 build, 28 bytes
-    // in the f64 build.
-    let func = particle_buffers.kernels.neighbor.neighbor_list_build.clone();
-    let per_elem_bytes =
-        3 * std::mem::size_of::<Real>() as u32 + std::mem::size_of::<u32>() as u32;
-    let cfg = LaunchConfig {
-        grid_dim: (n_cells_total, 1, 1),
-        block_dim: (BLOCK_SIZE, 1, 1),
-        shared_mem_bytes: BLOCK_SIZE * per_elem_bytes,
-    };
-    let lat = sim_box.lattice();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                sorted_particle_ids,
-                cell_offsets,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                n_cells[0],
-                n_cells[1],
-                n_cells[2],
-                r_search_sq,
-                max_neighbors,
-                neighbor_list,
-                neighbor_counts,
-                overflow_flag,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
 
 // rq-344f7af0
 pub fn copy_positions_into_reference(
@@ -1488,9 +1665,7 @@ pub fn copy_positions_into_reference(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 reference_x,
                 reference_y,
                 reference_z,
@@ -1531,20 +1706,13 @@ pub fn compute_cell_indices_and_histogram(
         .compute_cell_indices_and_histogram
         .clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                &particle_buffers.posq,
+                lattice,
                 n_cells[0],
                 n_cells[1],
                 n_cells[2],
@@ -1574,13 +1742,25 @@ pub fn compute_cell_indices_and_histogram(
 //   4. writes the `cell_offsets[n_cells_total] = particle_count`
 //      sentinel.
 // Issues O(log(n_cells_total)) kernel launches.
+/// Source of the trailing sentinel slot `offsets[n]` written by the
+/// final phase of `prefix_scan_cell_counts`. The cell-list scan knows
+/// its grand total (`particle_count`) on the host; the i-block scan's
+/// total lives only in the device-resident `interaction_count`, so it
+/// is read on the device to keep a steady-state rebuild dtoh-free.
+///
+/// rq-67a09135
+pub enum PrefixScanSentinel<'a> {
+    Host(u32),
+    Device(&'a CudaSlice<u32>),
+}
+
 pub fn prefix_scan_cell_counts(
     kernels: &Kernels,
     cell_counts: &CudaSlice<u32>,
     cell_offsets: &mut CudaSlice<u32>,
     scan_block_totals: &mut [CudaSlice<u32>],
     n_cells_total: usize,
-    particle_count: usize,
+    sentinel: PrefixScanSentinel<'_>,
 ) -> Result<(), GpuError> {
     if n_cells_total == 0 {
         return Ok(());
@@ -1655,14 +1835,27 @@ pub fn prefix_scan_cell_counts(
     }
 
     // Phase 4: write the trailing cell_offsets[n_cells_total] sentinel.
-    {
-        let func = kernels.neighbor.prefix_scan_finalize_offsets.clone();
-        unsafe {
-            func.launch(
-                launch_config(1),
-                (&mut *cell_offsets, n_cells_total_u32, particle_count as u32),
-            )
-            .map_err(GpuError::from)?;
+    match sentinel {
+        PrefixScanSentinel::Host(total) => {
+            let func = kernels.neighbor.prefix_scan_finalize_offsets.clone();
+            unsafe {
+                func.launch(
+                    launch_config(1),
+                    (&mut *cell_offsets, n_cells_total_u32, total),
+                )
+                .map_err(GpuError::from)?;
+            }
+        }
+        // rq-67a09135
+        PrefixScanSentinel::Device(count) => {
+            let func = kernels.neighbor.prefix_scan_finalize_offsets_dev.clone();
+            unsafe {
+                func.launch(
+                    launch_config(1),
+                    (&mut *cell_offsets, n_cells_total_u32, count),
+                )
+                .map_err(GpuError::from)?;
+            }
         }
     }
     Ok(())
@@ -1715,6 +1908,307 @@ pub fn sort_cells_by_particle_id(
     Ok(())
 }
 
+// =====================================================================
+// Packed-neighbour pair-force pipeline launchers
+// (rqm/forces/packed-neighbour-pair-force.md)
+// =====================================================================
+
+const PACKED_NL_WARPS_PER_BLOCK: u32 = 4;
+const PACKED_NL_BLOCK_SIZE: u32 = PACKED_NL_WARPS_PER_BLOCK * 32;
+const PACKED_BBOX_WARPS_PER_BLOCK: u32 = 8;
+const PACKED_BBOX_BLOCK_SIZE: u32 = PACKED_BBOX_WARPS_PER_BLOCK * 32;
+
+pub fn scatter_positions_to_tile_order(
+    kernels: &Kernels,
+    particle_buffers: &ParticleBuffers,
+    sorted_particle_ids: &CudaSlice<u32>,
+    tile_sorted_posq: &mut CudaSlice<Real4>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = kernels.neighbor.scatter_positions_to_tile_order.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.posq,
+                sorted_particle_ids,
+                &mut *tile_sorted_posq,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn fill_tile_position_padding(
+    kernels: &Kernels,
+    tile_sorted_posq: &mut CudaSlice<Real4>,
+    n: u32,
+    padded_n: u32,
+) -> Result<(), GpuError> {
+    if padded_n <= n {
+        return Ok(());
+    }
+    let padding = padded_n - n;
+    let func = kernels.neighbor.fill_tile_position_padding.clone();
+    let cfg = launch_config(padding);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut *tile_sorted_posq,
+                n,
+                padded_n,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn compute_block_bbox(
+    kernels: &Kernels,
+    tile_sorted_posq: &CudaSlice<Real4>,
+    tile_atom_count: &CudaSlice<u32>,
+    block_centre: &mut CudaSlice<Real>,
+    block_bbox: &mut CudaSlice<Real>,
+    n_blocks: u32,
+) -> Result<(), GpuError> {
+    if n_blocks == 0 {
+        return Ok(());
+    }
+    let cfg = LaunchConfig {
+        grid_dim: (n_blocks.div_ceil(PACKED_BBOX_WARPS_PER_BLOCK).max(1), 1, 1),
+        block_dim: (PACKED_BBOX_BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let func = kernels.neighbor.compute_block_bbox.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                tile_sorted_posq,
+                tile_atom_count,
+                &mut *block_centre,
+                &mut *block_bbox,
+                n_blocks,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn find_blocks_with_interactions(
+    kernels: &Kernels,
+    tile_sorted_posq: &CudaSlice<Real4>,
+    sorted_particle_ids: &CudaSlice<u32>,
+    block_centre: &CudaSlice<Real>,
+    block_bbox: &CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    r_search_sq: Real,
+    n_blocks: u32,
+    n_atoms: u32,
+    max_entries: u32,
+    max_single_pairs: u32,
+    interacting_tiles: &mut CudaSlice<u32>,
+    interacting_atoms: &mut CudaSlice<u32>,
+    single_pair_atoms: &mut CudaSlice<u32>,
+    interaction_count: &mut CudaSlice<u32>,
+) -> Result<(), GpuError> {
+    if n_blocks == 0 {
+        return Ok(());
+    }
+    let cfg = LaunchConfig {
+        grid_dim: (n_blocks.div_ceil(PACKED_NL_WARPS_PER_BLOCK).max(1), 1, 1),
+        block_dim: (PACKED_NL_BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let func = kernels.neighbor.find_blocks_with_interactions.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                tile_sorted_posq,
+                sorted_particle_ids,
+                block_centre,
+                block_bbox,
+                sim_box.lattice_device(),
+                r_search_sq,
+                n_blocks,
+                n_atoms,
+                max_entries,
+                max_single_pairs,
+                &mut *interacting_tiles,
+                &mut *interacting_atoms,
+                &mut *single_pair_atoms,
+                &mut *interaction_count,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-67a09135 rq-169e1d84
+/// Set bits 1-4 of `neighbor_status` (high-water / overflow) from the
+/// device-resident interaction counts. One thread; no host transfer.
+pub fn set_neighbor_status_bits(
+    kernels: &Kernels,
+    interaction_count: &CudaSlice<u32>,
+    tiles_capacity: u32,
+    single_pairs_capacity: u32,
+    tiles_high_water_mark: u32,
+    single_pairs_high_water_mark: u32,
+    neighbor_status: &mut CudaSlice<u32>,
+) -> Result<(), GpuError> {
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let func = kernels.neighbor.set_neighbor_status_bits.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                interaction_count,
+                tiles_capacity,
+                single_pairs_capacity,
+                tiles_high_water_mark,
+                single_pairs_high_water_mark,
+                &mut *neighbor_status,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn histogram_entries_by_iblock(
+    kernels: &Kernels,
+    interacting_tiles: &CudaSlice<u32>,
+    entry_count_ptr: &CudaSlice<u32>,
+    iblock_count: &mut CudaSlice<u32>,
+    n_blocks: u32,
+    max_entry_count: u32,
+) -> Result<(), GpuError> {
+    if max_entry_count == 0 || n_blocks == 0 {
+        return Ok(());
+    }
+    let cfg = launch_config(max_entry_count);
+    let func = kernels.neighbor.histogram_entries_by_iblock.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                interacting_tiles,
+                entry_count_ptr,
+                &mut *iblock_count,
+                n_blocks,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn scatter_entries_by_iblock(
+    kernels: &Kernels,
+    interacting_tiles: &CudaSlice<u32>,
+    interacting_atoms: &CudaSlice<u32>,
+    entry_count_ptr: &CudaSlice<u32>,
+    iblock_offset: &CudaSlice<u32>,
+    iblock_cursor: &mut CudaSlice<u32>,
+    sorted_interacting_atoms: &mut CudaSlice<u32>,
+    n_blocks: u32,
+    max_entry_count: u32,
+) -> Result<(), GpuError> {
+    if max_entry_count == 0 || n_blocks == 0 {
+        return Ok(());
+    }
+    // One warp per entry; 8 warps per block = 256 threads.
+    let warps_per_block: u32 = 8;
+    let block_dim: u32 = warps_per_block * 32;
+    let grid_x = max_entry_count.div_ceil(warps_per_block).max(1);
+    let cfg = LaunchConfig {
+        grid_dim: (grid_x, 1, 1),
+        block_dim: (block_dim, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let func = kernels.neighbor.scatter_entries_by_iblock.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                interacting_tiles,
+                interacting_atoms,
+                entry_count_ptr,
+                iblock_offset,
+                &mut *iblock_cursor,
+                &mut *sorted_interacting_atoms,
+                n_blocks,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn finalize_packed_forces(
+    kernels: &Kernels,
+    fp_fx: &CudaSlice<u64>,
+    fp_fy: &CudaSlice<u64>,
+    fp_fz: &CudaSlice<u64>,
+    fp_e: &CudaSlice<u64>,
+    fp_w: &CudaSlice<u64>,
+    out_fx: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    out_fy: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    out_fz: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    out_e: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    out_w: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    n: u32,
+    write_ev: bool,
+) -> Result<(), GpuError> {
+    if n == 0 {
+        return Ok(());
+    }
+    let cfg = launch_config(n);
+    let func = kernels.neighbor.finalize_packed_forces.clone();
+    let ev_u32: u32 = if write_ev { 1 } else { 0 };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                fp_fx,
+                fp_fy,
+                fp_fz,
+                fp_e,
+                fp_w,
+                &mut *out_fx,
+                &mut *out_fy,
+                &mut *out_fz,
+                &mut *out_e,
+                &mut *out_w,
+                n,
+                ev_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-7d5e87ee
 #[cfg(not(feature = "f64"))]
 pub fn vv_kick_drift_lossless(
@@ -1731,14 +2225,12 @@ pub fn vv_kick_drift_lossless(
     let n_u32 = n as u32;
     let func = buffers.kernels.integrate.vv_kick_drift_lossless.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 &mut buffers.images_x,
                 &mut buffers.images_y,
                 &mut buffers.images_z,
@@ -1755,12 +2247,7 @@ pub fn vv_kick_drift_lossless(
                 &buffers.forces_y,
                 &buffers.forces_z,
                 &buffers.masses,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 n_u32,
             ),
@@ -1783,26 +2270,19 @@ pub fn lan_drift_half(
     let n_u32 = n as u32;
     let func = buffers.kernels.langevin.lan_drift_half.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 &mut buffers.images_x,
                 &mut buffers.images_y,
                 &mut buffers.images_z,
                 &buffers.velocities_x,
                 &buffers.velocities_y,
                 &buffers.velocities_z,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 n_u32,
             ),
@@ -1815,8 +2295,8 @@ pub fn lan_drift_half(
 // rq-6435723d
 pub fn lan_ou_step(
     buffers: &mut ParticleBuffers,
+    draw_counter_device: &mut CudaSlice<u64>,
     seed: u64,
-    draw_counter: u64,
     alpha: Real,
     kt: Real,
 ) -> Result<(), GpuError> {
@@ -1824,13 +2304,12 @@ pub fn lan_ou_step(
     if n == 0 {
         return Ok(());
     }
+    debug_assert_eq!(draw_counter_device.len(), 1);
     let n_u32 = n as u32;
     let func = buffers.kernels.langevin.lan_ou_step.clone();
     let cfg = launch_config(n_u32);
     let seed_lo = (seed & 0xFFFF_FFFF) as u32;
     let seed_hi = (seed >> 32) as u32;
-    let draw_lo = (draw_counter & 0xFFFF_FFFF) as u32;
-    let draw_hi = (draw_counter >> 32) as u32;
     unsafe {
         func.launch(
             cfg,
@@ -1840,10 +2319,9 @@ pub fn lan_ou_step(
                 &mut buffers.velocities_z,
                 &buffers.masses,
                 &buffers.particle_ids,
+                &*draw_counter_device,
                 seed_lo,
                 seed_hi,
-                draw_lo,
-                draw_hi,
                 alpha,
                 kt,
                 n_u32,
@@ -1851,6 +2329,7 @@ pub fn lan_ou_step(
         )
         .map_err(GpuError::from)?;
     }
+    increment_u64_device(buffers, draw_counter_device)?;
     Ok(())
 }
 
@@ -1915,9 +2394,7 @@ pub fn shake_snapshot(
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 group_atoms,
                 group_atom_offset,
                 group_atom_count,
@@ -1951,21 +2428,35 @@ pub fn shake_positions(
     dt: Real,
     constraint_virial: &mut CudaSlice<Real>,
     n_groups: usize,
+    max_group_atoms: u32,
 ) -> Result<(), GpuError> {
     if n_groups == 0 {
         return Ok(());
     }
     let n_u32 = n_groups as u32;
     let func = particle_buffers.kernels.shake.shake_positions.clone();
-    let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    // rq-115e5926
+    // One thread per group, in blocks of SHAKE_POS_BLOCK_SIZE. Each block
+    // stages its groups' atoms into dynamic shared memory (16 Reals per
+    // atom). The block size is kept at 64 so the reservation
+    // `block * max_group_atoms * 16 * sizeof(Real)` stays within the 48 KB
+    // default shared budget even at MAX_GROUP_ATOMS = 8.
+    const SHAKE_POS_BLOCK_SIZE: u32 = 64;
+    let block = SHAKE_POS_BLOCK_SIZE;
+    let grid = n_u32.div_ceil(block);
+    let shared_atoms = block * max_group_atoms.max(1);
+    let shared_mem_bytes = shared_atoms * 16 * (std::mem::size_of::<Real>() as u32);
+    let cfg = LaunchConfig {
+        grid_dim: (grid, 1, 1),
+        block_dim: (block, 1, 1),
+        shared_mem_bytes,
+    };
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 &mut particle_buffers.velocities_x,
                 &mut particle_buffers.velocities_y,
                 &mut particle_buffers.velocities_z,
@@ -1981,12 +2472,7 @@ pub fn shake_positions(
                 group_constraints_local_j,
                 group_constraints_r2,
                 atom_mass,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 &mut *constraint_virial,
                 n_u32,
@@ -2054,14 +2540,12 @@ pub fn shake_positions_no_velocity(
         .shake_positions_no_velocity
         .clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &mut particle_buffers.positions_x,
-                &mut particle_buffers.positions_y,
-                &mut particle_buffers.positions_z,
+                &mut particle_buffers.posq,
                 group_atoms,
                 group_atom_offset,
                 group_atom_count,
@@ -2071,12 +2555,7 @@ pub fn shake_positions_no_velocity(
                 group_constraints_local_j,
                 group_constraints_r2,
                 atom_mass,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 n_u32,
             ),
         )
@@ -2100,21 +2579,35 @@ pub fn rattle_velocities(
     dt: Real,
     constraint_virial: &mut CudaSlice<Real>,
     n_groups: usize,
+    max_group_atoms: u32,
 ) -> Result<(), GpuError> {
     if n_groups == 0 {
         return Ok(());
     }
     let n_u32 = n_groups as u32;
     let func = particle_buffers.kernels.shake.rattle_velocities.clone();
-    let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    // rq-53800cef rq-115e5926
+    // One thread per group, in blocks of RATTLE_BLOCK_SIZE. The block
+    // stages its groups' atoms into dynamic shared memory (11 Reals per
+    // atom), so the launch reserves
+    // `block * max_group_atoms * 11 * sizeof(Real)` bytes — the worst-case
+    // atom count a block can own. See `kernels/shake.cu` rattle_velocities.
+    const RATTLE_BLOCK_SIZE: u32 = 128;
+    let block = RATTLE_BLOCK_SIZE;
+    let grid = n_u32.div_ceil(block);
+    let shared_atoms = block * max_group_atoms.max(1);
+    let shared_mem_bytes = shared_atoms * 11 * (std::mem::size_of::<Real>() as u32);
+    let cfg = LaunchConfig {
+        grid_dim: (grid, 1, 1),
+        block_dim: (block, 1, 1),
+        shared_mem_bytes,
+    };
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
             (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
+                &particle_buffers.posq,
                 &mut particle_buffers.velocities_x,
                 &mut particle_buffers.velocities_y,
                 &mut particle_buffers.velocities_z,
@@ -2126,14 +2619,228 @@ pub fn rattle_velocities(
                 group_constraints_local_i,
                 group_constraints_local_j,
                 atom_mass,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 &mut *constraint_virial,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — snapshot pre-drift positions into the SETTLE slot's
+// per-group snapshot arrays. One thread per water group.
+pub fn settle_snapshot(
+    particle_buffers: &ParticleBuffers,
+    group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    snapshot_x: &mut CudaSlice<Real>,
+    snapshot_y: &mut CudaSlice<Real>,
+    snapshot_z: &mut CudaSlice<Real>,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle.settle_snapshot.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.posq,
+                group_atoms,
+                group_atom_offset,
+                group_atom_count,
+                snapshot_x,
+                snapshot_y,
+                snapshot_z,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — SETTLE position reset. One thread per water group; no
+// shared-memory staging (the per-group working set fits in registers).
+pub fn settle_positions(
+    particle_buffers: &mut ParticleBuffers,
+    snapshot_x: &CudaSlice<Real>,
+    snapshot_y: &CudaSlice<Real>,
+    snapshot_z: &CudaSlice<Real>,
+    group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_ra: &CudaSlice<Real>,
+    group_rb: &CudaSlice<Real>,
+    group_rc: &CudaSlice<Real>,
+    group_m_o: &CudaSlice<Real>,
+    group_m_h: &CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    dt: Real,
+    constraint_virial: &mut CudaSlice<Real>,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle.settle_positions.clone();
+    let cfg = launch_config(n_u32);
+    let lattice = sim_box.lattice_device();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.posq,
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                snapshot_x,
+                snapshot_y,
+                snapshot_z,
+                group_atoms,
+                group_atom_offset,
+                group_atom_count,
+                group_ra,
+                group_rb,
+                group_rc,
+                group_m_o,
+                group_m_h,
+                lattice,
+                dt,
+                &mut *constraint_virial,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — SETTLE velocity reset. One thread per water group.
+pub fn settle_velocities(
+    particle_buffers: &mut ParticleBuffers,
+    group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_m_o: &CudaSlice<Real>,
+    group_m_h: &CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    dt: Real,
+    constraint_virial: &mut CudaSlice<Real>,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle.settle_velocities.clone();
+    let cfg = launch_config(n_u32);
+    let lattice = sim_box.lattice_device();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.posq,
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                group_atoms,
+                group_atom_offset,
+                group_atom_count,
+                group_m_o,
+                group_m_h,
+                lattice,
+                dt,
+                &mut *constraint_virial,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — scatter per-atom-of-group constraint virial into the
+// global per-particle virial array. One thread per atom slot.
+pub fn settle_virial_scatter(
+    particle_buffers: &mut ParticleBuffers,
+    constraint_virial: &CudaSlice<Real>,
+    group_atoms: &CudaSlice<u32>,
+    n_atom_slots: usize,
+) -> Result<(), GpuError> {
+    if n_atom_slots == 0 {
+        return Ok(());
+    }
+    let n_atom_slots_u32 = n_atom_slots as u32;
+    let func = particle_buffers
+        .kernels
+        .settle
+        .settle_virial_scatter
+        .clone();
+    let cfg = launch_config(n_atom_slots_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                constraint_virial,
+                group_atoms,
+                &mut particle_buffers.virials,
+                n_atom_slots_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-709c8eb5 — position-only SETTLE reset for the minimizer. One thread
+// per water group; touches positions only.
+pub fn settle_positions_no_velocity(
+    particle_buffers: &mut ParticleBuffers,
+    group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_ra: &CudaSlice<Real>,
+    group_rb: &CudaSlice<Real>,
+    group_rc: &CudaSlice<Real>,
+    group_m_o: &CudaSlice<Real>,
+    group_m_h: &CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers
+        .kernels
+        .settle
+        .settle_positions_no_velocity
+        .clone();
+    let cfg = launch_config(n_u32);
+    let lattice = sim_box.lattice_device();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.posq,
+                group_atoms,
+                group_atom_offset,
+                group_atom_count,
+                group_ra,
+                group_rb,
+                group_rc,
+                group_m_o,
+                group_m_h,
+                lattice,
                 n_u32,
             ),
         )

@@ -10,10 +10,13 @@ compose at every timestep:
    (`apply_post`), so symmetric Trotter splittings such as
    Nosé-Hoover-chain can place a half-step on each side of the
    integrator's velocity-Verlet body.
-3. An optional `Barostat` — pressure coupling. Fires once per step,
-   after the thermostat's post-step, so it consumes the freshest
-   virial / kinetic-energy data and mutates the box for the next
-   step's force evaluation.
+3. An optional `Barostat` — pressure coupling. A per-step barostat fires
+   once per step, after the thermostat's post-step, so it consumes the
+   freshest virial / kinetic-energy data and mutates the box for the next
+   step's force evaluation. A periodic barostat (declared through
+   `Barostat::periodicity`) instead performs no per-step work and runs a
+   host-orchestrated move every `N` steps at a batch boundary through
+   `apply_move` (the Monte-Carlo barostat; see `mc-barostat.md`).
 4. An optional `Constraint` — holonomic constraint projection (rigid
    bonds, rigid groups). Driven by the runner during its walk of the
    integrator's `StepPlan` (see *Per-Step Interface*): the runner
@@ -72,12 +75,13 @@ The default registry exposes four thermostats:
 
 ### Barostat slot <!-- rq-d898f1cd -->
 
-The default registry exposes two barostats:
+The default registry exposes three barostats:
 
-| `kind` value | Implementation                                                       | File                      |
-| ------------ | -------------------------------------------------------------------- | ------------------------- |
-| `berendsen`  | weak-coupling isotropic pressure coupling (equilibration only — not canonical) | `berendsen-barostat.md`   |
-| `c-rescale`  | stochastic isotropic cell-rescaling (canonical NPT)                  | `c-rescale-barostat.md`   |
+| `kind` value   | Implementation                                                       | File                      |
+| -------------- | -------------------------------------------------------------------- | ------------------------- |
+| `berendsen`    | weak-coupling isotropic pressure coupling (equilibration only — not canonical) | `berendsen-barostat.md`   |
+| `c-rescale`    | stochastic isotropic cell-rescaling (canonical NPT)                  | `c-rescale-barostat.md`   |
+| `monte-carlo`  | periodic isotropic Metropolis volume moves on molecular centres of mass (canonical NPT) | `mc-barostat.md`          |
 
 ## Per-Step Interface <!-- rq-daadfc1a -->
 
@@ -98,6 +102,7 @@ loop step in 1..=n_steps:
     let plan = integrator.plan(dt)
     let install_hooks = constraint.is_some()
         && integrator_builder.supports_constraints(&integrator_slot.params)
+    let post_force_sub_idx = plan.last_post_force_substep_index()
     for (i, sub) in plan.steps.iter().enumerate():
         let is_drift = matches!(sub, SubStep::Drift{..} | SubStep::KickDrift{..})
         if install_hooks && is_drift {
@@ -110,6 +115,9 @@ loop step in 1..=n_steps:
             SubStep::ForceEval { class: Some(c), level } =>
                 force_field.step_class(c, buffers, sim_box, timings,
                                        runner.resolve_level(level))
+            other if Some(i) == post_force_sub_idx
+                    && post_force_composed_kernel.is_some() =>
+                /* skip — composed kernel handles this SubStep */
             other =>
                 integrator.execute(other, buffers, sim_box, timings)
         if install_hooks && is_drift {
@@ -121,10 +129,34 @@ loop step in 1..=n_steps:
     if install_hooks && last_is_kick {
         constraint.apply_after_kick(buffers, sim_box, dt, timings)
     }
-    if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }
-    if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }
+    if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }  /* scalar prep */
+    if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }  /* scalar prep */
+    if let Some(k) = post_force_composed_kernel {
+        k.launch(buffers, integrator, thermostat.as_ref(), barostat.as_ref(),
+                 sim_box, dt, timings)
+    }
     ...trajectory / log output...
 ```
+
+When the runner's JIT-composed post-force per-particle kernel
+(`jit-composed-post-force.md`) is active, the post-force
+`KickHalf` / `KickDrift` SubStep is skipped from the plan-walk
+loop and the composed kernel is launched after every slot's
+scalar-prep work. When the composed kernel is absent (no active
+integrator), the loop walks the plan in full and no composed
+launch fires.
+
+The plan-walk portion of this loop — the inner per-sub-step dispatch
+plus the constraint-hook insertion — is the free function `run_step`,
+parameterised by a `RunStepOptions` value (see *Feature API*). The
+runner builds one `RunStepOptions` per step to select among the
+variations the loop needs: `run_neighbor_pre_step` toggles the
+`force_field.step_no_neighbor_check` path used during CUDA-graph
+capture, `skip_substep_index` skips the SubStep the composed post-force
+kernel handles, `install_constraint_hooks` gates the hook insertion,
+and `runner_needs_scalars` forces the scalar-aggregating force level.
+`run_step` is the only plan walker; there are no per-combination
+wrapper functions.
 
 The runner calls `integrator.plan(dt)` once per timestep. `plan(dt)` is
 a pure function of `dt` and the integrator's static configuration; it
@@ -377,6 +409,46 @@ successfully.
     pattern. More than one: predictor-corrector or future multi-step
     integrators.
 
+- `RunStepOptions` — per-call options for `run_step`, bundling the four <!-- rq-1d366b88 -->
+  flags that select among plan-walk modes. Plain `Copy` data; a caller
+  overrides individual fields against `Default`.
+
+  ```rust
+  #[derive(Debug, Clone, Copy)]
+  pub struct RunStepOptions {
+      pub run_neighbor_pre_step: bool,
+      pub skip_substep_index: Option<usize>,
+      pub install_constraint_hooks: bool,
+      pub runner_needs_scalars: bool,
+  }
+  ```
+
+  - `run_neighbor_pre_step` — `true` makes each `ForceEval` sub-step
+    call `force_field.step(...)` (which runs the neighbour-list
+    pre-step); `false` makes it call
+    `force_field.step_no_neighbor_check(...)`, used by the CUDA-graph
+    capture path where the neighbour pre-step runs at batch boundaries
+    (see `cuda-graphs.md`).
+  - `skip_substep_index` — `Some(i)` skips the integrator's `execute`
+    for sub-step `i`; the runner dispatches that sub-step's per-particle
+    work through the JIT-composed post-force kernel instead (see
+    `jit-composed-post-force.md`). `None` walks every sub-step.
+  - `install_constraint_hooks` — `true` (with a constraint slot passed
+    to `run_step`) fires the constraint hooks at the canonical sub-step
+    boundaries. Set from
+    `IntegratorBuilder::supports_constraints(&params)`; a constraint
+    slot may be passed with this `false` when the integrator does not
+    support hooks (see `constraint-framework.md`).
+  - `runner_needs_scalars` — `true` resolves every `ForceEval` to
+    `AggregateLevel::ForcesAndScalars` regardless of the sub-step's own
+    preference (see `resolve_aggregate_level`).
+
+  `RunStepOptions::default()` is
+  `{ run_neighbor_pre_step: true, skip_substep_index: None,
+  install_constraint_hooks: false, runner_needs_scalars: false }` — the
+  ordinary per-step path with no constraint hooks and the cheap force
+  level.
+
 - `Integrator` — object-safe trait implemented by every concrete <!-- rq-78f484d9 -->
   integrator. Owns the core time-stepping algorithm.
 
@@ -502,18 +574,43 @@ successfully.
 
   ```rust
   pub trait Barostat: std::fmt::Debug + Send {
-      /// Apply the barostat's box / position rescale. Reads
+      /// How often this barostat couples to the dynamics. A per-step
+      /// barostat (the default) runs `apply` every step inside the
+      /// captured sequence; a periodic barostat runs `apply_move`
+      /// every `N` steps at a batch boundary and leaves `apply` a
+      /// no-op. See `mc-barostat.md`.
+      fn periodicity(&self) -> BarostatPeriodicity {
+          BarostatPeriodicity::EveryStep
+      }
+
+      /// Apply the per-step barostat's box / position rescale. Reads
       /// virial and kinetic data from `buffers` (already populated
       /// by the integrator's in-step force evaluation), mutates
       /// `buffers.positions_*` and `sim_box`. Never launches the
-      /// force pipeline directly.
+      /// force pipeline directly. A periodic barostat leaves this at
+      /// the no-op default.
       fn apply(
           &mut self,
           buffers: &mut ParticleBuffers,
           sim_box: &mut SimulationBox,
           dt: f32,
           timings: &mut Timings,
-      ) -> Result<(), BarostatError>;
+      ) -> Result<(), BarostatError> { Ok(()) }
+
+      /// Perform a periodic barostat's host-orchestrated move at a
+      /// batch boundary. Unlike `apply`, it receives `&mut ForceField`
+      /// because the move re-evaluates the potential energy at a trial
+      /// configuration (e.g. a Monte-Carlo volume move). The default
+      /// is a no-op; per-step barostats do not override it.
+      fn apply_move(
+          &mut self,
+          force_field: &mut ForceField,
+          buffers: &mut ParticleBuffers,
+          sim_box: &mut SimulationBox,
+          constraint: Option<&mut dyn Constraint>,
+          dt: f32,
+          timings: &mut Timings,
+      ) -> Result<(), BarostatError> { Ok(()) }
 
       fn log_column_names(&self) -> &'static [&'static str] { &[] }
       fn log_column_values(
@@ -524,12 +621,21 @@ successfully.
   }
   ```
 
-  - `apply` returns immediately when
+  - `apply` and `apply_move` each return immediately when
     `buffers.particle_count() == 0`.
+  - A barostat overrides exactly one of `apply` (per-step) or
+    `apply_move` (periodic); the choice is consistent with the
+    `periodicity()` it reports.
   - Mutating `sim_box` bumps its generation counter, which the next
     iteration's force pipeline observes via the existing
     change-detection path (`forces/neighbor-list.md`,
     `forces/spme.md`).
+
+- `BarostatPeriodicity` — closed enum: `EveryStep` (per-step coupling) <!-- inline --> <!-- rq-343a8f18 -->
+  or `EveryNSteps(u32)` (a host-orchestrated move every `N` steps at a
+  batch boundary). The runner reads it to bound replay batches on the
+  move cadence and to keep the per-step scalar requirement off for a
+  periodic barostat (see `cuda-graphs.md`).
 
 - `SlotConfig` — open-shaped parsed slot selection. Lives alongside <!-- rq-1f87880c -->
   the rest of the config types in `crate::io::config`. Its TOML
@@ -568,10 +674,12 @@ successfully.
   trait object on demand.
 
   ```rust
-  pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
-      /// Lookup key used by `IntegratorRegistry` to dispatch a parsed
-      /// `SlotConfig` to this builder. Matches the TOML `kind` field.
-      fn kind_name(&self) -> &'static str;
+  pub trait IntegratorBuilder:
+      KindedBuilder + IntegratorBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` (the TOML `kind` lookup key) is inherited from
+      // `KindedBuilder`; cloning from the generated `…BuilderClone` helper. See
+      // `registry-framework.md`.
 
       /// Validate the kind-specific parameters at config-load time,
       /// before any GPU setup runs. Implementations deserialise the
@@ -597,6 +705,17 @@ successfully.
       /// `false`.
       fn supports_constraints(&self, _params: &toml::Value) -> bool { false }
 
+      /// `true` iff every per-step entry point (`step`, `execute`,
+      /// and any sub-step hook surfaced through `Plan`) consists of
+      /// pure CUDA kernel launches with no host-side state mutation
+      /// between launches and no `dtoh_sync_copy` / `htod_sync_copy`
+      /// calls. Determines whether phases driven by this integrator
+      /// run under CUDA graph mode; see `cuda-graphs.md`. Default
+      /// `true`; integrators that read device scalars into host
+      /// fields between sub-steps (e.g. `mtk-npt`) override to
+      /// `false`.
+      fn graph_compatible(&self, _params: &toml::Value) -> bool { true }
+
       /// Construct the integrator. The caller has already invoked
       /// `validate_params(&params)`, so the builder may unwrap
       /// trusted fields; any failure inside `build` surfaces as
@@ -616,10 +735,16 @@ successfully.
       ) -> Result<Box<dyn Integrator>, IntegratorError>;
   }
 
-  pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
-      fn kind_name(&self) -> &'static str;
+  pub trait ThermostatBuilder:
+      KindedBuilder + ThermostatBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` from `KindedBuilder`; cloning from the generated `…BuilderClone` helper.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
+
+      /// Same contract as `IntegratorBuilder::graph_compatible`.
+      /// Default `true`. `nose-hoover-chain` overrides to `false`.
+      fn graph_compatible(&self, _params: &toml::Value) -> bool { true }
 
       /// `n_constraints` is the total holonomic constraint count of
       /// the run (sum of every constraint group's `constraint_count`,
@@ -636,10 +761,16 @@ successfully.
       ) -> Result<Box<dyn Thermostat>, ThermostatError>;
   }
 
-  pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
-      fn kind_name(&self) -> &'static str;
+  pub trait BarostatBuilder:
+      KindedBuilder + BarostatBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` from `KindedBuilder`; cloning from the generated `…BuilderClone` helper.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
+
+      /// Same contract as `IntegratorBuilder::graph_compatible`.
+      /// Default `true`.
+      fn graph_compatible(&self, _params: &toml::Value) -> bool { true }
 
       /// `n_constraints` is the total holonomic constraint count of
       /// the run (sum of every constraint group's `constraint_count`,
@@ -672,36 +803,25 @@ successfully.
     below) chain the two calls.
 
 - `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` — <!-- rq-4901507f -->
-  parallel host-side registries of builders. Each holds:
-  - `builders: Vec<Box<dyn *Builder>>`
+  `Registry<dyn IntegratorBuilder>` / `Registry<dyn ThermostatBuilder>` /
+  `Registry<dyn BarostatBuilder>` (the generic container; see
+  `registry-framework.md`). All three are named-selection registries:
+  their builder traits carry `KindedBuilder`, so the generic `lookup(kind)`,
+  `with_builtins()`, `register`, `Clone`, and `Default` apply. Per-registry
+  built-in rosters: the integrator registry carries a builder for every
+  `kind` in the slot's "Slots" table; the thermostat registry carries
+  `nose-hoover-chain`, `csvr`, `andersen`, `berendsen`; the barostat
+  registry carries `berendsen`, `c-rescale`, and `monte-carlo`.
 
-  Methods (illustrated for the integrator registry; the thermostat
-  and barostat registries follow the same shape with the
-  corresponding types):
-
-  - `IntegratorRegistry::with_builtins() -> IntegratorRegistry` —
-    constructs a registry pre-populated with builders for every
-    `kind` value in the slot's "Slots" table above.
-    `ThermostatRegistry::with_builtins()` pre-populates
-    `nose-hoover-chain`, `csvr`, `andersen`, `berendsen`.
-    `BarostatRegistry::with_builtins()` pre-populates `berendsen`
-    and `c-rescale`.
-  - `IntegratorRegistry::register(&mut self, builder: Box<dyn
-    IntegratorBuilder>)` — appends a builder. Two builders sharing
-    the same `kind_name()` are not detected at registration; the
-    lookup returns the first match.
-  - `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>`
-    — returns the first registered builder whose `kind_name()`
-    equals `kind`, or `None` when no builder matches. The runner
-    uses this both to query compatibility predicates
-    (`owns_thermostat`, `supports_constraints`) and to drive
-    `validate_params` against the parsed config before any GPU
-    work runs.
-  - `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
-    — looks up the builder whose `kind_name()` equals `slot.kind`
-    and delegates `build(gpu, particle_count, n_constraints, &slot.params)` to it.
-    Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
-    no builder matches.
+  Construction dispatch is subsystem-specific (the build inputs are
+  integrator-side):
+  - `Registry<dyn IntegratorBuilder>::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
+    — looks up the builder whose `kind_name()` equals `slot.kind` and
+    delegates `build(gpu, particle_count, n_constraints, &slot.params)`
+    to it. Returns `IntegratorError::UnknownKind(slot.kind.clone())`
+    when no builder matches. The runner also uses `lookup` directly to
+    query compatibility predicates (`owns_thermostat`,
+    `supports_constraints`) and to drive `validate_params`.
   - The thermostat and barostat registries expose
     `build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`
     (and the corresponding barostat variant): if `slot` is `None`,
@@ -733,6 +853,19 @@ successfully.
   runner as `RunnerError::ForceField(ForceFieldError)` directly; the
   call site is the runner's plan walk, not the integrator's
   `execute()`, so `IntegratorError` does not wrap `ForceFieldError`.
+
+  The runner's `StepError` carries additional variants for the
+  JIT-composed post-force per-particle kernel mechanism (see
+  `jit-composed-post-force.md`):
+  - `MissingPostForcePerParticleFragment { label: &'static str }`
+    — a slot in the runner's active configuration returned `None`
+    from `post_force_per_particle()` when its corresponding
+    configuration is present. Reported from runner construction.
+  - `PostForceFragmentCompileFailed { log: String }` — nvrtc
+    rejected the composed post-force-per-particle kernel source.
+  - `PostForceFragmentLoadFailed(GpuError)` — `load_ptx` rejected
+    the compiled PTX of the composed post-force-per-particle
+    kernel.
 
   The runner's `RunnerError` wraps all three via
   `RunnerError::Integrator(IntegratorError)`,
@@ -816,6 +949,77 @@ successfully.
     `IntegratorError::UnexpectedSubStep { variant: "ForceEval" }`.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
+  - When the integrator exposes a post-force per-particle fragment
+    (see `jit-composed-post-force.md`), the post-force SubStep
+    (the final `KickHalf` or `KickDrift` after `ForceEval`) is
+    handled by the composed kernel rather than by `execute`.
+    Conforming runners detect the post-force SubStep and skip the
+    `execute` call for it; the integrator's `execute` must remain
+    correct when called on its other SubSteps regardless of
+    whether the composed-kernel path is active.
+
+- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>` <!-- rq-277dbeb2 -->
+  - The single free-function plan walker: realises the *Per-Step
+    Interface* for one timestep. Calls `integrator.plan(dt)`, then for
+    each sub-step dispatches `SubStep::ForceEval` to
+    `force_field.step{,_class}(...)` (or their `_no_neighbor_check`
+    variants when `opts.run_neighbor_pre_step == false`) and every
+    other sub-step to `integrator.execute(...)`, skipping the sub-step
+    at `opts.skip_substep_index` when set.
+  - When `opts.install_constraint_hooks` is `true` and `constraint` is
+    `Some`, fires `apply_before_drift` / `apply_after_drift` around each
+    Drift / KickDrift sub-step and `apply_after_kick` after a terminal
+    velocity update. When `constraint` is `None`, or
+    `install_constraint_hooks` is `false`, or the plan has no Drift /
+    KickDrift, the walk reduces to a straight plan walk.
+  - Each `ForceEval`'s aggregate level is
+    `resolve_aggregate_level(sub_step_level, opts.runner_needs_scalars)`.
+  - The runner builds a `RunStepOptions` per step for the ordinary,
+    graph-capture (`run_neighbor_pre_step: false`),
+    composed-post-force-skip (`skip_substep_index: Some(..)`), and
+    scalar-prep (`runner_needs_scalars: true`) combinations, in any
+    mix. The `IntegratorStepExt::step` and
+    `IntegratorStepWithConstraintExt::step_with_constraint` convenience
+    methods (see `constraint-framework.md`) call `run_step` with the
+    appropriate options.
+  - Returns `StepError` (see `constraint-framework.md`).
+
+- `resolve_aggregate_level(sub_step_level: Option<AggregateLevel>, runner_needs_scalars: bool) -> AggregateLevel` <!-- rq-2cd403d5 -->
+  - Returns `AggregateLevel::ForcesAndScalars` when `runner_needs_scalars`
+    is `true` or the sub-step itself requested scalars; otherwise returns
+    `sub_step_level.unwrap_or(AggregateLevel::ForcesOnly)`.
+
+- `Integrator::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-2e33e1b8 -->
+  - Declares whether the integrator contributes a per-thread update
+    to the JIT-composed post-force per-particle kernel (see
+    `jit-composed-post-force.md`). Returns `Some(self)` from an
+    integrator that implements `PostForcePerParticle`, `None` (the
+    default) otherwise. Every built-in integrator participates; a
+    built-in returning `None` is the
+    `StepError::MissingPostForcePerParticleFragment` rejection at
+    runner construction.
+
+- `PostForcePerParticle` — capability trait carrying both an <!-- inline --> <!-- rq-4187d20f -->
+  integrator / thermostat / barostat slot's post-force fragment and
+  its launch-time argument binding, so a slot cannot provide one
+  without the other.
+
+  ```rust
+  pub trait PostForcePerParticle {
+      fn post_force_per_particle_fragment(&self) -> PerParticleFragment;
+      fn bind_post_force_per_particle_args(
+          &self,
+          ctx: &PostForceBindContext<'_>,
+          builder: &mut ForceLaunchBuilder,
+      );
+  }
+  ```
+
+  Neither method has a default. `post_force_per_particle_fragment`
+  returns the per-thread source the composer concatenates at runner
+  construction; `bind_post_force_per_particle_args` pushes the slot's
+  parameters in the order its fragment's `entry_point_args` declares
+  them. See `jit-composed-post-force.md`.
 
 - `Thermostat::apply_pre(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>` <!-- rq-2fe47a86 -->
   - Default implementation returns `Ok(())` without launching any
@@ -828,11 +1032,44 @@ successfully.
   - Every concrete `Thermostat` must implement this method.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
+  - When the thermostat exposes a post-force per-particle fragment
+    (see `jit-composed-post-force.md`), `apply_post` runs every
+    part of its post-force work EXCEPT the per-particle rescale
+    or resample. For CSVR that means the kinetic-energy reduction
+    and the sample-and-factor kernel run; the per-particle
+    rescale runs from the composed kernel. For NHC the chain
+    integration runs but the per-particle rescale does not. For
+    Andersen any Philox-counter bookkeeping runs but the
+    per-particle Maxwell-Boltzmann draw + assignment runs from
+    the composed kernel.
+
+- `Thermostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-b14ac769 -->
+  - Declares the thermostat's per-thread rescale / resample
+    contribution to the composed post-force kernel. Returns
+    `Some(self)` from a thermostat implementing
+    `PostForcePerParticle`, `None` (the default) otherwise. Built-in
+    thermostats participate.
 
 - `Barostat::apply(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, dt: f32, timings: &mut Timings) -> Result<(), BarostatError>` <!-- rq-1179e42f -->
   - Every concrete `Barostat` must implement this method.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
+  - When the barostat exposes a post-force per-particle fragment
+    (see `jit-composed-post-force.md`), `apply` runs every part
+    of its work EXCEPT the per-particle rescale (velocities
+    and/or positions). For c-rescale that means the virial
+    reduction, the mu compute, the box mutation, and the
+    injection-accumulator bookkeeping all run; the per-particle
+    velocity and position rescales run from the composed kernel.
+    For Berendsen barostat, the mu compute and box mutation run
+    but the per-particle position rescale runs from the composed
+    kernel.
+
+- `Barostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-cb31286f -->
+  - Declares the barostat's per-thread rescale contribution to the
+    composed post-force kernel. Returns `Some(self)` from a barostat
+    implementing `PostForcePerParticle`, `None` (the default)
+    otherwise. Built-in barostats participate.
 
 ## Determinism Guarantees <!-- rq-a93a8dc4 -->
 
@@ -1267,5 +1504,56 @@ Feature: Pluggable integration framework
     Given a SubStep::ForceEval with level = Some(AggregateLevel::ForcesAndScalars)
     When runner.resolve_level(level) is called
     Then it returns AggregateLevel::ForcesAndScalars regardless of step counters
+
+  # --- run_step / RunStepOptions ---
+
+  @rq-93c52ca4
+  Scenario: RunStepOptions::default values
+    When RunStepOptions::default() is constructed
+    Then run_neighbor_pre_step is true
+    And skip_substep_index is None
+    And install_constraint_hooks is false
+    And runner_needs_scalars is false
+
+  @rq-d0240417
+  Scenario: run_step with default options walks every sub-step via the neighbour-checked force path
+    Given an integrator whose plan has three sub-steps including one ForceEval
+    When run_step is called with constraint = None and RunStepOptions::default()
+    Then integrator.execute is invoked once for every non-ForceEval sub-step
+    And the ForceEval dispatches force_field.step (the neighbour-checked variant), not step_no_neighbor_check
+
+  @rq-5500596b
+  Scenario: run_neighbor_pre_step = false uses the no-neighbor-check force path
+    Given an integrator with one ForceEval sub-step
+    When run_step is called with RunStepOptions { run_neighbor_pre_step: false, ..default }
+    Then the ForceEval dispatches force_field.step_no_neighbor_check, not force_field.step
+
+  @rq-d64bc1c6
+  Scenario: skip_substep_index skips the integrator's execute for that sub-step
+    Given an integrator whose plan has a trailing KickHalf at index k
+    When run_step is called with RunStepOptions { skip_substep_index: Some(k), ..default }
+    Then integrator.execute is not invoked for the sub-step at index k
+    And integrator.execute is invoked for every other non-ForceEval sub-step
+
+  @rq-f34598ae
+  Scenario: install_constraint_hooks gates constraint-hook insertion
+    Given a constraint slot and an integrator whose plan has a Drift sub-step
+    When run_step is called with Some(constraint) and RunStepOptions { install_constraint_hooks: true, ..default }
+    Then apply_before_drift and apply_after_drift fire around the Drift sub-step
+    When run_step is called with Some(constraint) and RunStepOptions { install_constraint_hooks: false, ..default }
+    Then no constraint hook fires
+
+  @rq-43025b6a
+  Scenario: runner_needs_scalars forces ForcesAndScalars
+    Given an integrator whose ForceEval sub-step requests level = Some(AggregateLevel::ForcesOnly)
+    When run_step is called with RunStepOptions { runner_needs_scalars: true, ..default }
+    Then the ForceEval is evaluated at AggregateLevel::ForcesAndScalars
+
+  @rq-836404c9
+  Scenario: run_step is the only plan-walk free function
+    Given the public API of src/integrator/mod.rs
+    Then the only free plan-walk function is run_step(.., opts: RunStepOptions)
+    And no run_step_no_neighbor_check / run_step_with_skipped_substep /
+      run_step_with_skipped_substep_no_neighbor_check / run_step_no_constraint functions exist
 
 ```

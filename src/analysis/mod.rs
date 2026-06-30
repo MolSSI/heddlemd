@@ -18,6 +18,7 @@ use crate::io::{
     TrajectoryFrame, TrajectoryFrameHeader, TrajectoryReader, TrajectoryReaderError,
 };
 use crate::pbc::SimulationBox;
+use crate::registry::{Builtins, KindedBuilder, Registry};
 
 pub use rdf::RdfBuilder;
 
@@ -115,6 +116,8 @@ pub enum AnalyzeError {
     FrameOutOfRange { requested: u64, available: u64 },
     #[error("phase `{phase}` is not declared in the loaded simulation config; available phases: {available:?}")]
     UnknownPhase { phase: String, available: Vec<String> },
+    #[error("{0}")]
+    Gpu(#[from] crate::gpu::GpuError),
 }
 
 // rq-3825d7c4
@@ -141,9 +144,9 @@ pub struct AnalyzeSummary {
 // =====================================================================
 
 // rq-86f01d20
-pub trait AnalysisBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait AnalysisBuilder:
+    KindedBuilder + AnalysisBuilderClone + std::fmt::Debug + Send + Sync
+{
     fn validate_params(&self, params: &toml::Value) -> Result<(), AnalyzeError>;
 
     fn build(
@@ -152,8 +155,6 @@ pub trait AnalysisBuilder: std::fmt::Debug + Send + Sync {
         header: &TrajectoryFrameHeader,
         sim_config: &Config,
     ) -> Result<Box<dyn Analysis>, AnalysisRuntimeError>;
-
-    fn box_clone(&self) -> Box<dyn AnalysisBuilder>;
 }
 
 // rq-8464775b
@@ -172,47 +173,15 @@ pub trait Analysis: Send {
 }
 
 // rq-e3ba8c3b
-#[derive(Debug)]
-pub struct AnalysisRegistry {
-    pub builders: Vec<Box<dyn AnalysisBuilder>>,
-}
+pub type AnalysisRegistry = Registry<dyn AnalysisBuilder>;
 
-impl Clone for AnalysisRegistry {
-    fn clone(&self) -> Self {
-        AnalysisRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn AnalysisBuilder {
+    fn builtins() -> Vec<Box<dyn AnalysisBuilder>> {
+        vec![Box::new(RdfBuilder)]
     }
 }
 
-impl AnalysisRegistry {
-    pub fn new() -> Self {
-        AnalysisRegistry { builders: Vec::new() }
-    }
-
-    pub fn with_builtins() -> Self {
-        AnalysisRegistry {
-            builders: vec![Box::new(RdfBuilder)],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn AnalysisBuilder>) {
-        self.builders.push(builder);
-    }
-
-    pub fn lookup(&self, kind: &str) -> Option<&dyn AnalysisBuilder> {
-        self.builders
-            .iter()
-            .find(|b| b.kind_name() == kind)
-            .map(|b| b.as_ref())
-    }
-}
-
-impl Default for AnalysisRegistry {
-    fn default() -> Self {
-        AnalysisRegistry::with_builtins()
-    }
-}
+crate::registry_builder_clone!(pub AnalysisBuilderClone for AnalysisBuilder);
 
 // =====================================================================
 // Raw deserialisation types.
@@ -650,16 +619,22 @@ pub fn run_analyses_with_registries(
         }
     }
 
-    // Stage 3: open trajectory.
+    // Stage 3: open trajectory. `SimulationBox` is device-resident, so
+    // analysis runs need a `CudaDevice` to construct one per frame.
+    let gpu = crate::gpu::init_device().map_err(AnalyzeError::Gpu)?;
     let type_names_owned: Vec<String> = sim_config
         .particle_types
         .iter()
         .map(|t| t.name.clone())
         .collect();
     let type_name_refs: Vec<&str> = type_names_owned.iter().map(|s| s.as_str()).collect();
-    let mut reader =
-        TrajectoryReader::open(&analysis.trajectory, sim_config.units, &type_name_refs)
-            .map_err(AnalyzeError::Trajectory)?;
+    let mut reader = TrajectoryReader::open(
+        &gpu.device,
+        &analysis.trajectory,
+        sim_config.units,
+        &type_name_refs,
+    )
+    .map_err(AnalyzeError::Trajectory)?;
 
     // Stage 4: construct analysis slots from the first-frame header.
     let mut slots: Vec<Box<dyn Analysis>> = Vec::with_capacity(analysis.analyses.len());
@@ -849,14 +824,28 @@ pub fn lint_analyses_with_registries(
         },
     });
 
-    // Stage 3: trajectory.
+    // Stage 3: trajectory. `SimulationBox` is device-resident, so the
+    // lint also needs `init_device()` to open the trajectory.
+    let gpu = match crate::gpu::init_device() {
+        Ok(g) => g,
+        Err(e) => {
+            stages.push(LintStage {
+                label: "trajectory",
+                status: LintStatus::Fail {
+                    detail: format!("init_device failed: {e}"),
+                    error: wrap_analyze(AnalyzeError::Gpu(e)),
+                },
+            });
+            return finalise_lint_skips(stages, &["analyses"]);
+        }
+    };
     let type_names_owned: Vec<String> = sim_config
         .particle_types
         .iter()
         .map(|t| t.name.clone())
         .collect();
     let type_name_refs: Vec<&str> = type_names_owned.iter().map(|s| s.as_str()).collect();
-    let reader = match TrajectoryReader::open(&analysis.trajectory, sim_config.units, &type_name_refs) {
+    let reader = match TrajectoryReader::open(&gpu.device, &analysis.trajectory, sim_config.units, &type_name_refs) {
         Ok(r) => {
             let h = &r.first_frame_header;
             stages.push(LintStage {

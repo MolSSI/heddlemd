@@ -127,6 +127,24 @@ fn assert_parse_path_and_field(err: &ConfigError, expected_path: &str, unknown_f
     }
 }
 
+// rq-a77dffe7
+#[test]
+fn fast_math_defaults_true_and_can_be_disabled() {
+    let dir = tmp_path("fast_math_config");
+    // Omitted -> defaults to true.
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.simulation.fast_math);
+    // Explicit false is honored.
+    let body = minimal_config().replace(
+        "temperature = 300.0",
+        "temperature = 300.0\nfast_math = false",
+    );
+    let path = write_config_named(&dir, "nofm.in.toml", &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(!cfg.simulation.fast_math);
+}
+
 // rq-7df1515f rq-993ec182 rq-9ce1bd52
 #[test]
 fn load_valid_minimal_config() {
@@ -1674,8 +1692,7 @@ fn neighbor_list_defaults_to_cell_list_when_section_omitted() {
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
     match cfg.neighbor_list {
-        NeighborListConfig::CellList { max_neighbors, r_skin } => {
-            assert_eq!(max_neighbors, 256);
+        NeighborListConfig::CellList { r_skin } => {
             // cutoff = 1.0e-9, default r_skin = 0.3 * cutoff = 3.0e-10
             assert!((r_skin - 3.0e-10).abs() < 1.0e-20);
         }
@@ -1688,22 +1705,6 @@ fn neighbor_list_defaults_to_cell_list_when_section_omitted() {
 fn neighbor_list_cell_list_explicit_parameters() {
     let dir = tmp_path("nl_explicit");
     let body = format!(
-        "{}\n[neighbor_list]\nmode = \"cell-list\"\nmax_neighbors = 128\nr_skin = 2.0e-10\n",
-        minimal_config()
-    );
-    let path = write_config(&dir, &body);
-    let cfg = load_config(&path).unwrap();
-    assert_eq!(
-        cfg.neighbor_list,
-        NeighborListConfig::CellList { max_neighbors: 128, r_skin: 2.0e-10 }
-    );
-}
-
-// rq-e643b070
-#[test]
-fn neighbor_list_cell_list_default_max_neighbors() {
-    let dir = tmp_path("nl_default_max");
-    let body = format!(
         "{}\n[neighbor_list]\nmode = \"cell-list\"\nr_skin = 2.0e-10\n",
         minimal_config()
     );
@@ -1711,7 +1712,7 @@ fn neighbor_list_cell_list_default_max_neighbors() {
     let cfg = load_config(&path).unwrap();
     assert_eq!(
         cfg.neighbor_list,
-        NeighborListConfig::CellList { max_neighbors: 256, r_skin: 2.0e-10 }
+        NeighborListConfig::CellList { r_skin: 2.0e-10 }
     );
 }
 
@@ -1720,14 +1721,13 @@ fn neighbor_list_cell_list_default_max_neighbors() {
 fn neighbor_list_cell_list_default_r_skin() {
     let dir = tmp_path("nl_default_rskin");
     let body = format!(
-        "{}\n[neighbor_list]\nmode = \"cell-list\"\nmax_neighbors = 128\n",
+        "{}\n[neighbor_list]\nmode = \"cell-list\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     match cfg.neighbor_list {
-        NeighborListConfig::CellList { max_neighbors, r_skin } => {
-            assert_eq!(max_neighbors, 128);
+        NeighborListConfig::CellList { r_skin } => {
             assert!((r_skin - 3.0e-10).abs() < 1.0e-20);
         }
         other => panic!("got {other:?}"),
@@ -1777,6 +1777,11 @@ fn neighbor_list_rejects_unknown_field_for_chosen_mode() {
             "r_skin",
         ),
         (
+            "cell_list_rejects_max_neighbors",
+            "[neighbor_list]\nmode = \"cell-list\"\nmax_neighbors = 64\n",
+            "max_neighbors",
+        ),
+        (
             "cell_list_rejects_stencil",
             "[neighbor_list]\nmode = \"cell-list\"\nstencil = \"huge\"\n",
             "stencil",
@@ -1789,22 +1794,6 @@ fn neighbor_list_rejects_unknown_field_for_chosen_mode() {
         let err = load_config(&path).unwrap_err();
         assert_parse_path_and_field(&err, "neighbor_list", unknown_field);
     }
-}
-
-// rq-fedef74d
-#[test]
-fn neighbor_list_rejects_zero_max_neighbors() {
-    let dir = tmp_path("nl_zero_max");
-    let body = format!(
-        "{}\n[neighbor_list]\nmode = \"cell-list\"\nmax_neighbors = 0\n",
-        minimal_config()
-    );
-    let path = write_config(&dir, &body);
-    let err = load_config(&path).unwrap_err();
-    assert!(matches!(
-        err,
-        ConfigError::InvalidValue { ref field, .. } if field == "neighbor_list.max_neighbors"
-    ), "got {err:?}");
 }
 
 // rq-f7856bcc rq-ec28cbfb

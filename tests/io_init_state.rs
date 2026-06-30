@@ -1,8 +1,13 @@
 use std::path::{Path, PathBuf};
 
+use heddle_md::gpu::init_device;
 use heddle_md::io::{InitStateError, load_init_state};
 use heddle_md::units::UnitSystem;
 use heddle_md::precision::Real;
+
+fn dev() -> std::sync::Arc<cudarc::driver::CudaDevice> {
+    init_device().expect("init_device").device
+}
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -34,7 +39,7 @@ fn load_two_particles_no_velocities() {
     let dir = tmp_path("two_no_velo");
     let body = "2\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0.0 0.0 0.0\nAr 3.4e-10 0.0 0.0\n";
     let path = write_init(&dir, body);
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Atomic).unwrap();
     assert_eq!(state.particle_count, 2);
     assert!((state.sim_box.lx() - 1.0e-9).abs() < 1.0e-18);
     assert!((state.sim_box.ly() - 1.0e-9).abs() < 1.0e-18);
@@ -51,7 +56,7 @@ fn load_with_velocities() {
     let dir = tmp_path("with_velo");
     let body = "2\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3:velo:R:3\nAr 0.0 0.0 0.0 100.0 0.0 0.0\nAr 3.4e-10 0.0 0.0 -100.0 0.0 0.0\n";
     let path = write_init(&dir, body);
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Atomic).unwrap();
     let v = state.velocities.unwrap();
     assert!((v.velocities_x[0] - 100.0).abs() < 1e-3);
     assert!((v.velocities_x[1] - (-100.0)).abs() < 1e-3);
@@ -63,7 +68,7 @@ fn load_empty_file() {
     let dir = tmp_path("empty");
     let body = "0\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\n";
     let path = write_init(&dir, body);
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
     assert_eq!(state.particle_count, 0);
     assert!(state.positions_x.is_empty());
     assert!(state.positions_y.is_empty());
@@ -78,7 +83,7 @@ fn type_indices_reflect_ordering() {
     let dir = tmp_path("type_indices_ordering");
     let body = "2\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nKr 0.0 0.0 0.0\nAr 0.0 0.0 0.0\n";
     let path = write_init(&dir, body);
-    let state = load_init_state(&path, &["Ar", "Kr"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar", "Kr"], UnitSystem::Si).unwrap();
     assert_eq!(state.type_indices, vec![1, 0]);
 }
 
@@ -88,7 +93,7 @@ fn unknown_attributes_ignored() {
     let dir = tmp_path("unknown_attrs");
     let body = "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Time=0.0 Comment=\"hello world\" Properties=species:S:1:pos:R:3\nAr 0.0 0.0 0.0\n";
     let path = write_init(&dir, body);
-    load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
 }
 
 // rq-66233215
@@ -97,7 +102,7 @@ fn quoted_attributes_with_spaces() {
     let dir = tmp_path("quoted_attrs");
     let body = "1\nOrigin=\"0.0 0.0 0.0\" Lattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0.0 0.0 0.0\n";
     let path = write_init(&dir, body);
-    load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
 }
 
 // rq-dad92a8c
@@ -105,7 +110,7 @@ fn quoted_attributes_with_spaces() {
 fn reject_empty_file() {
     let dir = tmp_path("reject_empty");
     let path = write_init(&dir, "");
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::Empty => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -116,7 +121,7 @@ fn reject_empty_file() {
 fn reject_non_integer_count() {
     let dir = tmp_path("non_integer_count");
     let path = write_init(&dir, "abc\nLattice=\"1.0 0 0 0 1.0 0 0 0 1.0\" Properties=species:S:1:pos:R:3\n");
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidParticleCount { line_number, raw } => {
             assert_eq!(line_number, 1);
             assert_eq!(raw, "abc");
@@ -130,7 +135,7 @@ fn reject_non_integer_count() {
 fn reject_negative_count() {
     let dir = tmp_path("neg_count");
     let path = write_init(&dir, "-3\nLattice=\"1.0 0 0 0 1.0 0 0 0 1.0\" Properties=species:S:1:pos:R:3\n");
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidParticleCount { line_number, raw } => {
             assert_eq!(line_number, 1);
             assert_eq!(raw, "-3");
@@ -144,7 +149,7 @@ fn reject_negative_count() {
 fn reject_missing_comment_line() {
     let dir = tmp_path("missing_comment");
     let path = write_init(&dir, "2");
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::MissingCommentLine => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -155,7 +160,7 @@ fn reject_missing_comment_line() {
 fn reject_missing_lattice() {
     let dir = tmp_path("missing_lattice");
     let path = write_init(&dir, "0\nProperties=species:S:1:pos:R:3\n");
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::MissingAttribute { name } => assert_eq!(name, "Lattice"),
         other => panic!("unexpected: {other:?}"),
     }
@@ -169,7 +174,7 @@ fn reject_missing_properties() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\"\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::MissingAttribute { name } => assert_eq!(name, "Properties"),
         other => panic!("unexpected: {other:?}"),
     }
@@ -185,7 +190,7 @@ fn reject_lattice_with_non_zero_upper_triangular_entry() {
         &dir,
         "0\nLattice=\"1.0e-9 0.1e-9 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidLattice(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -199,7 +204,7 @@ fn reject_nonpositive_lattice_diagonal() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 0 0.0 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidLattice(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -213,7 +218,7 @@ fn reject_nonfinite_lattice() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 0 nan 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidLattice(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -227,7 +232,7 @@ fn reject_lattice_wrong_components() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0\" Properties=species:S:1:pos:R:3\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidLattice(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -241,7 +246,7 @@ fn reject_unsupported_properties() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3:mass:R:1\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidProperties(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -255,7 +260,7 @@ fn reject_reordered_properties() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=pos:R:3:species:S:1\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidProperties(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -269,7 +274,7 @@ fn reject_too_few_rows() {
         &dir,
         "3\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 0 0\nAr 1e-10 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::RowCountMismatch { expected, actual } => {
             assert_eq!(expected, 3);
             assert_eq!(actual, 2);
@@ -286,7 +291,7 @@ fn reject_too_many_rows() {
         &dir,
         "2\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 0 0\nAr 1e-10 0 0\nAr 2e-10 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::TrailingContent { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -300,7 +305,7 @@ fn reject_missing_velocity_column() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3:velo:R:3\nAr 0 0 0 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::RowColumnCountMismatch {
             line_number,
             expected,
@@ -322,7 +327,7 @@ fn reject_extra_column() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 0 0 99\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::RowColumnCountMismatch {
             line_number,
             expected,
@@ -344,7 +349,7 @@ fn reject_unknown_species() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nXe 0 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::UnknownType { line_number, name } => {
             assert_eq!(line_number, 3);
             assert_eq!(name, "Xe");
@@ -361,7 +366,7 @@ fn reject_unparseable_position() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr abc 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::InvalidNumber {
             line_number,
             column,
@@ -383,7 +388,7 @@ fn reject_nan_position() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr nan 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::NonFiniteValue {
             line_number,
             column,
@@ -403,7 +408,7 @@ fn reject_infinite_velocity() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3:velo:R:3\nAr 0 0 0 inf 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::NonFiniteValue {
             line_number,
             column,
@@ -423,7 +428,7 @@ fn accept_strictly_inside() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 4.999e-10 0 0\n",
     );
-    load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
 }
 
 // rq-a35ca20b
@@ -434,7 +439,7 @@ fn accept_lower_boundary() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr -5.0e-10 0 0\n",
     );
-    load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
 }
 
 // rq-7a4ed012
@@ -445,7 +450,7 @@ fn reject_upper_boundary() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 5.0e-10 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::PositionOutsideBox {
             line_number,
             direction,
@@ -466,7 +471,7 @@ fn reject_past_upper() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 6.0e-10 0 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::PositionOutsideBox { direction, .. } => {
             assert_eq!(direction, "a")
         }
@@ -482,7 +487,7 @@ fn reject_past_lower_y() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 -6.0e-10 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::PositionOutsideBox { direction, .. } => {
             assert_eq!(direction, "b")
         }
@@ -498,7 +503,7 @@ fn reject_nonblank_trailing() {
         &dir,
         "2\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 0 0\nAr 1e-10 0 0\ngarbage\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::TrailingContent { line_number } => {
             assert_eq!(line_number, 5);
         }
@@ -514,7 +519,7 @@ fn tolerate_blank_trailing() {
         &dir,
         "2\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 0 0\nAr 1e-10 0 0\n\n\n",
     );
-    load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
 }
 
 // rq-965c3b59
@@ -525,7 +530,7 @@ fn implicit_ids_in_row_order() {
         &dir,
         "3\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 0 0\nAr 1e-10 0 0\nAr 2e-10 0 0\n",
     );
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Atomic).unwrap();
     // Positions correspond to row order; atomic mode passes the file
     // values through unchanged.
     assert!(state.positions_x[0].abs() < 1e-30);
@@ -538,7 +543,7 @@ fn implicit_ids_in_row_order() {
 fn file_does_not_exist() {
     let dir = tmp_path("init_missing");
     let path = dir.join("nope.xyz");
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::Io(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -556,7 +561,7 @@ fn file_without_image_property_has_images_none() {
         "1\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3\nAr 0.0 0.0 0.0\n",
     )
     .unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
     assert!(state.images.is_none());
 }
 
@@ -571,7 +576,7 @@ fn file_with_image_property_parses_three_integer_columns() {
          Ar 0.0 0.0 0.0 2 -1 0\nAr 0.0 0.0 0.0 0 0 0\nAr 0.0 0.0 0.0 -3 4 -7\n",
     )
     .unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
     let imgs = state.images.unwrap();
     assert_eq!(imgs.images_x, vec![2, 0, -3]);
     assert_eq!(imgs.images_y, vec![-1, 0, 4]);
@@ -589,7 +594,7 @@ fn file_with_velo_and_image_parses_both_blocks() {
          Ar 0.0 0.0 0.0 1.0 2.0 3.0 4 -5 6\nAr 0.0 0.0 0.0 -1.0 -2.0 -3.0 -4 5 -6\n",
     )
     .unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
     assert!(state.velocities.is_some());
     let imgs = state.images.unwrap();
     assert_eq!(imgs.images_x, vec![4, -4]);
@@ -605,7 +610,7 @@ fn reject_image_column_with_non_integer_value() {
         "1\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3:image:I:3\nAr 0.0 0.0 0.0 1.5 0 0\n",
     )
     .unwrap();
-    let err = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err();
+    let err = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err();
     match err {
         InitStateError::InvalidNumber { column, .. } => assert_eq!(column, "image_x"),
         other => panic!("unexpected: {other:?}"),
@@ -622,7 +627,7 @@ fn reject_image_property_with_wrong_count() {
         "0\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3:image:I:2\n",
     )
     .unwrap();
-    let err = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err();
+    let err = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err();
     match err {
         InitStateError::InvalidProperties(_) => {}
         other => panic!("unexpected: {other:?}"),
@@ -639,7 +644,7 @@ fn reject_image_before_velo_in_properties() {
         "0\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3:image:I:3:velo:R:3\n",
     )
     .unwrap();
-    let err = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err();
+    let err = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err();
     match err {
         InitStateError::InvalidProperties(_) => {}
         other => panic!("unexpected: {other:?}"),
@@ -655,7 +660,7 @@ fn accept_lower_triangular_triclinic_lattice() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 0.2e-9 1.0e-9 0 0.1e-9 -0.3e-9 1.0e-9\" Properties=species:S:1:pos:R:3\n",
     );
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Atomic).unwrap();
     let lat = state.sim_box.lattice();
     let eps = 1.0e-18;
     assert!((lat[0] - 1.0e-9).abs() < eps);
@@ -673,7 +678,7 @@ fn accept_lattice_with_negative_tilts() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 -0.5e-9 1.0e-9 0 -0.1e-9 -0.2e-9 1.0e-9\" Properties=species:S:1:pos:R:3\n",
     );
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
     let lat = state.sim_box.lattice();
     assert!(lat[3] < 0.0);
     assert!(lat[4] < 0.0);
@@ -689,7 +694,7 @@ fn accept_position_inside_primary_parallelepiped_of_triclinic_box() {
         &dir,
         "1\nLattice=\"1.0e-9 0 0 0.2e-9 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0.4e-9 0.3e-9 0\n",
     );
-    load_init_state(&path, &["Ar"], UnitSystem::Si).expect("position should be accepted");
+    load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).expect("position should be accepted");
 }
 
 // rq-9d523d38 rq-6b8e5397 rq-5137c6f5 rq-371ae8cd
@@ -719,8 +724,8 @@ fn atomic_units_rescale_lattice_and_positions() {
     let path_au = dir.join("atomic.in.xyz");
     std::fs::write(&path_au, xyz_au).unwrap();
 
-    let state_si = load_init_state(&path_si, &["Ar"], UnitSystem::Si).unwrap();
-    let state_au = load_init_state(&path_au, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state_si = load_init_state(&dev(), &path_si, &["Ar"], UnitSystem::Si).unwrap();
+    let state_au = load_init_state(&dev(), &path_au, &["Ar"], UnitSystem::Atomic).unwrap();
 
     // f32 round-trip tolerance: position factor LOSES significant
     // digits when narrowing 5.29e-11 * num → f32. Allow ~1e-6 relative.
@@ -762,8 +767,8 @@ fn atomic_units_rescale_velocities() {
     let path_au = dir.join("atomic.in.xyz");
     std::fs::write(&path_au, xyz_au).unwrap();
 
-    let state_si = load_init_state(&path_si, &["Ar"], UnitSystem::Si).unwrap();
-    let state_au = load_init_state(&path_au, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state_si = load_init_state(&dev(), &path_si, &["Ar"], UnitSystem::Si).unwrap();
+    let state_au = load_init_state(&dev(), &path_au, &["Ar"], UnitSystem::Atomic).unwrap();
 
     let vx_si = state_si.velocities.as_ref().unwrap().velocities_x[0];
     let vx_au = state_au.velocities.as_ref().unwrap().velocities_x[0];
@@ -796,8 +801,8 @@ fn position_in_box_check_runs_against_post_conversion_box() {
     let path_si = write_init(&dir, xyz_si);
     let path_au = dir.join("atomic.in.xyz");
     std::fs::write(&path_au, xyz_au).unwrap();
-    let state_si = load_init_state(&path_si, &["Ar"], UnitSystem::Si).unwrap();
-    let state_au = load_init_state(&path_au, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state_si = load_init_state(&dev(), &path_si, &["Ar"], UnitSystem::Si).unwrap();
+    let state_au = load_init_state(&dev(), &path_au, &["Ar"], UnitSystem::Atomic).unwrap();
     // Box matches after the SI conversion lands at the atomic encoding.
     let rel = 1e-5;
     let approx = |a: Real, b: Real| {
@@ -820,8 +825,8 @@ fn position_in_box_check_runs_against_post_conversion_box() {
     let path_au_bad = dir.join("bad_au.in.xyz");
     std::fs::write(&path_si_bad, xyz_si_bad).unwrap();
     std::fs::write(&path_au_bad, xyz_au_bad).unwrap();
-    let err_si = load_init_state(&path_si_bad, &["Ar"], UnitSystem::Si);
-    let err_au = load_init_state(&path_au_bad, &["Ar"], UnitSystem::Atomic);
+    let err_si = load_init_state(&dev(), &path_si_bad, &["Ar"], UnitSystem::Si);
+    let err_au = load_init_state(&dev(), &path_au_bad, &["Ar"], UnitSystem::Atomic);
     assert!(err_si.is_err(), "SI encoding should be rejected");
     assert!(err_au.is_err(), "atomic encoding should be rejected");
 }
@@ -836,7 +841,7 @@ fn reject_position_with_fractional_coord_outside_primary_image() {
         // s_b = 0.5e-9 / 1.0e-9 = 0.5 — exactly the upper bound, rejected.
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0.5e-9 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 5.0e-10 0\n",
     );
-    match load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap_err() {
+    match load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap_err() {
         InitStateError::PositionOutsideBox {
             direction,
             fractional,

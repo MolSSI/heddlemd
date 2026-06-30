@@ -150,4 +150,23 @@ __device__ inline Real philox_gaussian(
   return (Real)(r * cos(theta));
 }
 
+// Same Box-Muller layout as `philox_gaussian` but keeps the result in
+// `double`. Used by the CSVR sample kernel, whose chain math (k_new from
+// (k_old, k_target, c, s, r)) is sensitive to round-off and is kept in
+// double precision regardless of the engine's storage precision.
+__device__ inline double philox_gaussian_f64(
+    unsigned int seed_lo, unsigned int seed_hi,
+    unsigned int ctr0, unsigned int ctr1,
+    unsigned int ctr2, unsigned int ctr3)
+{
+  unsigned int o0, o1, o2, o3;
+  philox4x32_10(seed_lo, seed_hi, ctr0, ctr1, ctr2, ctr3,
+                &o0, &o1, &o2, &o3);
+  double u1 = u32_to_uniform_open(o0);
+  double u2 = u32_to_uniform_open(o1);
+  double r = sqrt(-2.0 * log(u1));
+  double theta = 6.283185307179586 * u2;
+  return r * cos(theta);
+}
+
 #endif // DYNAMICS_PHILOX_CUH

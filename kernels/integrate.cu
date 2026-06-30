@@ -24,21 +24,28 @@ __device__ static inline void wrap_and_count_triclinic(
 template <bool LOSSLESS>
 __device__ inline void vv_kick_drift_body(
     unsigned int i,
-    Real *positions_x, Real *positions_y, Real *positions_z,
+    Real4 *posq,
     int *images_x, int *images_y, int *images_z,
     Real *velocities_x, Real *velocities_y, Real *velocities_z,
     double *positions_x_lo, double *positions_y_lo, double *positions_z_lo,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const Real *forces_x, const Real *forces_y, const Real *forces_z,
     const Real *masses,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   Real m = masses[i];
   Real ax = forces_x[i] / m;
   Real ay = forces_y[i] / m;
   Real az = forces_z[i] / m;
   Real half_dt = dt * R(0.5);
+
+  // Load posq once (one Real4 transaction) and preserve `.w` (the
+  // per-particle charge, set once at framework construction) across
+  // the position update.
+  Real4 pq = posq[i];
 
   if constexpr (LOSSLESS) {
     // Compensated kick: extended-precision (v + v_lo) <- (v + v_lo) + a * half_dt
@@ -70,9 +77,9 @@ __device__ inline void vv_kick_drift_body(
     double dy = ((double)new_vy + new_vy_lo) * (double)dt;
     double dz = ((double)new_vz + new_vz_lo) * (double)dt;
 
-    double ext_x = (double)positions_x[i] + positions_x_lo[i] + dx;
-    double ext_y = (double)positions_y[i] + positions_y_lo[i] + dy;
-    double ext_z = (double)positions_z[i] + positions_z_lo[i] + dz;
+    double ext_x = (double)pq.x + positions_x_lo[i] + dx;
+    double ext_y = (double)pq.y + positions_y_lo[i] + dy;
+    double ext_z = (double)pq.z + positions_z_lo[i] + dz;
 
     Real new_x = (Real)ext_x;
     Real new_y = (Real)ext_y;
@@ -87,9 +94,10 @@ __device__ inline void vv_kick_drift_body(
     wrap_and_count_triclinic(new_x, new_y, new_z, nx, ny, nz,
                              lx, ly, lz, xy, xz, yz);
 
-    positions_x[i] = new_x;
-    positions_y[i] = new_y;
-    positions_z[i] = new_z;
+    pq.x = new_x;
+    pq.y = new_y;
+    pq.z = new_z;
+    posq[i] = pq;
     images_x[i] = nx;
     images_y[i] = ny;
     images_z[i] = nz;
@@ -101,9 +109,9 @@ __device__ inline void vv_kick_drift_body(
     velocities_y[i] = vy;
     velocities_z[i] = vz;
 
-    Real px = positions_x[i] + vx * dt;
-    Real py = positions_y[i] + vy * dt;
-    Real pz = positions_z[i] + vz * dt;
+    Real px = pq.x + vx * dt;
+    Real py = pq.y + vy * dt;
+    Real pz = pq.z + vz * dt;
 
     int nx = images_x[i];
     int ny = images_y[i];
@@ -111,9 +119,10 @@ __device__ inline void vv_kick_drift_body(
     wrap_and_count_triclinic(px, py, pz, nx, ny, nz,
                              lx, ly, lz, xy, xz, yz);
 
-    positions_x[i] = px;
-    positions_y[i] = py;
-    positions_z[i] = pz;
+    pq.x = px;
+    pq.y = py;
+    pq.z = pz;
+    posq[i] = pq;
     images_x[i] = nx;
     images_y[i] = ny;
     images_z[i] = nz;
@@ -161,28 +170,30 @@ __device__ inline void vv_kick_body(
 }
 
 extern "C" __global__ void vv_kick_drift(
-    Real *positions_x, Real *positions_y, Real *positions_z,
+    Real4 *posq,
     int *images_x, int *images_y, int *images_z,
     Real *velocities_x, Real *velocities_y, Real *velocities_z,
     const Real *forces_x, const Real *forces_y, const Real *forces_z,
     const Real *masses,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
   }
   vv_kick_drift_body<false>(
       i,
-      positions_x, positions_y, positions_z,
+      posq,
       images_x, images_y, images_z,
       velocities_x, velocities_y, velocities_z,
       nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr,
       forces_x, forces_y, forces_z,
-      masses, lx, ly, lz, xy, xz, yz, dt);
+      masses, lattice, dt);
 }
 
 extern "C" __global__ void vv_kick(
@@ -205,30 +216,32 @@ extern "C" __global__ void vv_kick(
 }
 
 extern "C" __global__ void vv_kick_drift_lossless(
-    Real *positions_x, Real *positions_y, Real *positions_z,
+    Real4 *posq,
     int *images_x, int *images_y, int *images_z,
     Real *velocities_x, Real *velocities_y, Real *velocities_z,
     double *positions_x_lo, double *positions_y_lo, double *positions_z_lo,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const Real *forces_x, const Real *forces_y, const Real *forces_z,
     const Real *masses,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
   }
   vv_kick_drift_body<true>(
       i,
-      positions_x, positions_y, positions_z,
+      posq,
       images_x, images_y, images_z,
       velocities_x, velocities_y, velocities_z,
       positions_x_lo, positions_y_lo, positions_z_lo,
       velocities_x_lo, velocities_y_lo, velocities_z_lo,
       forces_x, forces_y, forces_z,
-      masses, lx, ly, lz, xy, xz, yz, dt);
+      masses, lattice, dt);
 }
 
 extern "C" __global__ void vv_kick_lossless(

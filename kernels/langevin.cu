@@ -11,20 +11,23 @@
 // --- A step: x <- x + v * (dt / 2), then wrap into the primary image. -------
 
 extern "C" __global__ void lan_drift_half(
-    Real *positions_x, Real *positions_y, Real *positions_z,
+    Real4 *posq,
     int *images_x, int *images_y, int *images_z,
     const Real *velocities_x, const Real *velocities_y, const Real *velocities_z,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
 
   Real half_dt = dt * R(0.5);
-  Real px = positions_x[i] + velocities_x[i] * half_dt;
-  Real py = positions_y[i] + velocities_y[i] * half_dt;
-  Real pz = positions_z[i] + velocities_z[i] * half_dt;
+  Real4 pq = posq[i];
+  Real px = pq.x + velocities_x[i] * half_dt;
+  Real py = pq.y + velocities_y[i] * half_dt;
+  Real pz = pq.z + velocities_z[i] * half_dt;
 
   int nx = images_x[i];
   int ny = images_y[i];
@@ -35,9 +38,10 @@ extern "C" __global__ void lan_drift_half(
   ny += kb;
   nz += kc;
 
-  positions_x[i] = px;
-  positions_y[i] = py;
-  positions_z[i] = pz;
+  pq.x = px;
+  pq.y = py;
+  pq.z = pz;
+  posq[i] = pq;
   images_x[i] = nx;
   images_y[i] = ny;
   images_z[i] = nz;
@@ -49,14 +53,18 @@ extern "C" __global__ void lan_ou_step(
     Real *velocities_x, Real *velocities_y, Real *velocities_z,
     const Real *masses,
     const unsigned int *particle_ids,
+    const unsigned long long *draw_counter,
     unsigned int seed_lo, unsigned int seed_hi,
-    unsigned int draw_counter_lo, unsigned int draw_counter_hi,
     Real alpha,
     Real kt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
+
+  unsigned long long counter = *draw_counter;
+  unsigned int draw_counter_lo = (unsigned int)(counter & 0xFFFFFFFFULL);
+  unsigned int draw_counter_hi = (unsigned int)(counter >> 32);
 
   Real m = masses[i];
   Real sigma_factor = Real_sqrt((R(1.0) - alpha * alpha) * kt / m);

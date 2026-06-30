@@ -1,16 +1,12 @@
 // rq-f606ff6f
 
-use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::CudaSlice;
 use serde::Deserialize;
 
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, rescale_velocities,
 };
-use crate::kernels;
 use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
 
@@ -18,11 +14,11 @@ use super::{Thermostat, ThermostatBuilder, ThermostatError};
 use crate::precision::Real;
 
 // rq-1f87880c
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct NoseHooverChainParams {
-    pub temperature: f64,
-    pub tau: f64,
+    pub temperature: crate::units::Temperature,
+    pub tau: crate::units::Time,
     #[serde(default = "default_chain_length")]
     pub chain_length: u32,
     #[serde(default = "default_yoshida_order")]
@@ -190,6 +186,12 @@ pub struct NoseHooverChainThermostat {
     pub p_xi: Vec<f64>,
     yoshida: &'static [f64],
     ke_scratch: CudaSlice<Real>,
+    /// Single-element device buffer holding the cumulative rescale
+    /// factor produced by `apply_post`'s host-side Yoshida × n_resp
+    /// integration. The JIT-composed post-force per-particle kernel
+    /// reads `factor_device[0]` in NHC's fragment body and multiplies
+    /// velocities by it.
+    factor_device: CudaSlice<Real>,
     most_recent_ke: f64,
 }
 
@@ -218,6 +220,7 @@ impl NoseHooverChainThermostat {
             }
         }
         let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let factor_device = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(NoseHooverChainThermostat {
             temperature,
             tau,
@@ -231,21 +234,30 @@ impl NoseHooverChainThermostat {
             p_xi: vec![0.0_f64; m],
             yoshida: yoshida_weights(yoshida_order),
             ke_scratch,
+            factor_device,
             most_recent_ke: 0.0,
         })
     }
 
-    fn thermostat_half_step(
+    /// Yoshida × `n_resp` chain integration, accumulating the
+    /// per-iteration rescale factors into a single cumulative
+    /// scalar. The cumulative factor is returned alongside the
+    /// updated kinetic energy. No `rescale_velocities` launches
+    /// happen inside this function; the caller is responsible for
+    /// applying the cumulative factor (via `rescale_velocities` on
+    /// the pre-force path, or by writing to `factor_device` for
+    /// the JIT-composed post-force per-particle kernel on the
+    /// post-force path).
+    fn thermostat_half_step_cumulative(
         &mut self,
         dt: Real,
-        buffers: &mut ParticleBuffers,
         mut k: f64,
-        timings: &mut Timings,
-    ) -> Result<f64, ThermostatError> {
+    ) -> (f64, f64) {
         let dt = dt as f64;
         let n_resp = self.n_resp as f64;
         let g_dof = self.g_dof as f64;
         let kt = self.kt;
+        let mut cumulative: f64 = 1.0;
         for w in self.yoshida.to_vec() {
             for _ in 0..self.n_resp {
                 let delta_t = w * dt / (2.0 * n_resp);
@@ -258,17 +270,40 @@ impl NoseHooverChainThermostat {
                     g_dof,
                     kt,
                 );
-                let factor = factor as Real;
-                timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
-                rescale_velocities(buffers, factor)?;
-                timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
-                let factor_f64 = factor as f64;
-                k *= factor_f64 * factor_f64;
+                cumulative *= factor;
+                k *= factor * factor;
             }
         }
-        Ok(k)
+        (cumulative, k)
     }
 }
+
+impl crate::integrator::PostForcePerParticle for NoseHooverChainThermostat {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "nose_hoover_chain",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *nhc_factor_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real nhc_factor = nhc_factor_device[0];\n\
+                 \x20       velocities_x[i] *= nhc_factor;\n\
+                 \x20       velocities_y[i] *= nhc_factor;\n\
+                 \x20       velocities_z[i] *= nhc_factor;",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.factor_device);
+    }}
 
 impl Thermostat for NoseHooverChainThermostat {
     // rq-2fe47a86 rq-a9c46f51
@@ -284,7 +319,10 @@ impl Thermostat for NoseHooverChainThermostat {
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        self.thermostat_half_step(dt, buffers, k, timings)?;
+        let (cumulative, _k_final) = self.thermostat_half_step_cumulative(dt, k);
+        timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
+        rescale_velocities(buffers, cumulative as Real)?;
+        timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
         Ok(())
     }
 
@@ -301,10 +339,21 @@ impl Thermostat for NoseHooverChainThermostat {
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k = self.thermostat_half_step(dt, buffers, k, timings)?;
-        self.most_recent_ke = k;
+        let (cumulative, k_final) = self.thermostat_half_step_cumulative(dt, k);
+        // Write the cumulative rescale factor to `factor_device`; the
+        // JIT-composed post-force per-particle kernel reads it.
+        buffers
+            .device
+            .htod_sync_copy_into(&[cumulative as Real], &mut self.factor_device)
+            .map_err(GpuError::from)?;
+        self.most_recent_ke = k_final;
         Ok(())
     }
+
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
+    }
+
 
     // rq-8a571737
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
@@ -336,15 +385,35 @@ impl Thermostat for NoseHooverChainThermostat {
 #[derive(Debug, Clone)]
 pub struct NoseHooverChainBuilder;
 
-impl ThermostatBuilder for NoseHooverChainBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for NoseHooverChainBuilder {
     fn kind_name(&self) -> &'static str {
         "nose-hoover-chain"
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<NoseHooverChainParams>(units, params)
+    }
+}
+
+impl ThermostatBuilder for NoseHooverChainBuilder {
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        // NHC iterates a Yoshida chain integration over `xi` / `p_xi`
+        // host scalars between sub-step kernel launches and uses
+        // `compute_kinetic_energy` which performs a per-step dtoh of
+        // the kinetic-energy scalar. Neither can be captured in a CUDA
+        // graph.
+        false
     }
 
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite_positive("thermostat.temperature", p.temperature)?;
-        require_finite_positive("thermostat.tau", p.tau)?;
+        require_finite_positive("thermostat.temperature", p.temperature.0)?;
+        require_finite_positive("thermostat.tau", p.tau.0)?;
         if p.chain_length < 1 {
             return Err(invalid(
                 "thermostat.chain_length",
@@ -380,37 +449,43 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
             gpu,
             particle_count,
             n_constraints,
-            p.temperature,
-            p.tau,
+            p.temperature.0,
+            p.tau.0,
             p.chain_length,
             p.yoshida_order,
             p.n_resp,
         )?;
         Ok(Box::new(state))
     }
-
-    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
-        Box::new(self.clone())
-    }
 }
 
 // rq-2093594f rq-f606ff6f
-#[derive(Debug, Clone)]
-pub struct NoseHooverKernels {
-    pub kinetic_energy_reduce: CudaFunction,
-    pub rescale_velocities: CudaFunction,
-}
-
-impl NoseHooverKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::NOSE_HOOVER),
-            "nose_hoover",
-            &["kinetic_energy_reduce", "rescale_velocities"],
-        )?;
-        Ok(NoseHooverKernels {
-            kinetic_energy_reduce: get_func(device, "nose_hoover", "kinetic_energy_reduce")?,
-            rescale_velocities: get_func(device, "nose_hoover", "rescale_velocities")?,
-        })
-    }
+//
+// The `nose_hoover` PTX module backs the kinetic-energy reduction shared
+// by every thermostat and both barostats, and the per-thermostat scalar
+// kernels for the Nosé-Hoover-chain, CSVR, and Berendsen thermostats; the
+// thermostat timing stages are owned here accordingly. rq-5f59fa80
+crate::gpu_kernels! {
+    module: "nose_hoover",
+    ptx: crate::kernels::NOSE_HOOVER,
+    struct: NoseHooverKernels,
+    kernels: [
+        kinetic_energy_reduce,
+        kinetic_energy_reduce_partials,
+        rescale_velocities,
+        rescale_velocities_device_factor,
+        csvr_sample_and_factor,
+        csvr_sample_partials,
+        csvr_finish_from_partials,
+        berendsen_compute_factor,
+        increment_u64,
+    ],
+    stages: {
+        KINETIC_ENERGY_REDUCE        = "kinetic_energy_reduce",
+        NHC_RESCALE_VELOCITIES       = "nhc_rescale_velocities",
+        CSVR_RESCALE_VELOCITIES      = "csvr_rescale_velocities",
+        BERENDSEN_RESCALE_VELOCITIES = "berendsen_rescale_velocities",
+        CSVR_SAMPLE_AND_FACTOR       = "csvr_sample_and_factor",
+        BERENDSEN_COMPUTE_FACTOR     = "berendsen_compute_factor",
+    },
 }

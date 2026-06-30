@@ -25,11 +25,14 @@ The three invariants that make this work:
    documented in `rqm/forces/neighbor-list.md` — so that every particle
    always sees its neighbors in the same order across runs on the same
    GPU.
-2. **No atomic float accumulation.** Force contributions are written to a
-   pre-allocated pair buffer at deterministic offsets, not accumulated with
-   `atomicAdd`.
-3. **Fixed-topology reduction.** Per-particle force sums are computed with a
-   segmented reduction kernel that processes contributions in index order.
+2. **No atomic float accumulation.** Each particle's force is accumulated
+   inside one CUDA warp's registers; no force value is shared between
+   warps and no `atomicAdd` is used.
+3. **Fixed-topology warp reduction.** Per-particle force sums are
+   computed by a deterministic lane-strided sweep over the neighbour
+   list followed by a fixed-shape warp-tree butterfly reduction. The
+   sweep order and tree shape depend only on the neighbour count, not
+   on thread scheduling.
 
 ### Scope of bit-wise reproducibility
 
@@ -52,16 +55,12 @@ each other use exact equality — that is the load-bearing invariant.
  Positions ──> Spatial hash ──> Neighbor lists (sorted)
                                       │
                                       v
-                              Pair force kernel
-                              (one thread per pair,
-                               writes to pair buffer)
-                                      │
-                                      v
-                              Pair buffer [N x max_neighbors x 3]
-                                      │
-                                      v
-                              Segmented reduction kernel
-                              (deterministic per-particle sum)
+                              Fused pair-force kernel
+                              (one warp per particle;
+                               sweeps the neighbour list,
+                               accumulates in registers,
+                               warp-tree reduces to
+                               per-particle net force)
                                       │
                                       v
                               Net forces per particle
@@ -100,34 +99,26 @@ particle_ids: [u32; N]   // stable identifiers, never reordered
 SoA layout maximizes GPU memory coalescing: threads accessing consecutive
 particles read consecutive memory addresses.
 
-## Pair buffer
+## Pair force accumulation
 
-The pair buffer is the key data structure for reproducibility. It is a 2D
-array of shape `[N, max_neighbors]` for each force component (x, y, z):
+Forces stay in per-warp registers from the moment they are computed
+until the per-particle total is written. No per-pair intermediate is
+materialised on the device. Each warp's 32 lanes accumulate their
+assigned per-pair contributions in register-resident scalars and
+combine them through a fixed-shape butterfly tree; lane 0 of the warp
+writes the per-particle net force, potential-energy share, and
+scalar-virial share to the slot output buffer described in
+`rqm/forces/framework.md`.
 
-```
-pair_forces_x: [f32; N * max_neighbors]
-pair_forces_y: [f32; N * max_neighbors]
-pair_forces_z: [f32; N * max_neighbors]
-```
+The `(i, k)` contribution — the force on particle `i` due to its
+`k`-th neighbour — is computed by lane `k mod 32` of the warp
+assigned to particle `i`. Each lane is the sole writer of its own
+accumulator across all sweep iterations; no synchronisation between
+lanes is needed until the final warp-tree butterfly.
 
-The pair force kernel writes the force on particle `i` due to neighbor `j` at
-index `i * max_neighbors + k`, where `k` is the position of `j` in `i`'s
-sorted neighbor list. Each slot is written by exactly one thread, so no
-synchronization is needed.
-
-`max_neighbors` is a simulation parameter. If a particle exceeds this count,
-the simulation halts with an error rather than silently dropping interactions.
-
-### Memory cost
-
-For `N = 100,000` particles and `max_neighbors = 128`:
-
-```
-100,000 * 128 * 3 components * 4 bytes = ~147 MB
-```
-
-This fits comfortably on modern GPUs.
+`max_neighbors` is a simulation parameter that sizes the neighbour
+list. If a particle exceeds this count, the simulation halts with an
+error rather than silently dropping interactions.
 
 ## Neighbor list construction
 
@@ -175,27 +166,25 @@ depends on the system dynamics and density. A typical starting point is
 
 ## CUDA kernels
 
-### Pair force kernel
+### Fused pair-force kernel
 
-- **Grid:** one thread per (particle, neighbor) pair.
-- **Input:** positions, neighbor lists (sorted), interaction parameters.
-- **Output:** pair buffer entries at deterministic offsets.
-- Each thread computes the pairwise force between particle `i` and its `k`-th
-  neighbor, then writes the result to `pair_buffer[i * max_neighbors + k]`.
-- No atomics, no race conditions.
-
-### Segmented reduction kernel
-
-- **Grid:** one thread (or warp) per particle.
-- **Input:** pair buffer, neighbor counts.
-- **Output:** net force arrays.
-- Sums the `neighbor_count[i]` entries in the pair buffer for particle `i`
-  in sequential index order (k = 0, 1, 2, ...).
-- The sequential order is what produces identical floating-point results.
-  For particles with many neighbors, a fixed tree reduction with a
-  deterministic topology (e.g. left-to-right pairwise) may be used instead,
-  as long as the tree shape depends only on the neighbor count, not on
-  thread scheduling.
+- **Grid:** one warp per particle, 8 warps per block, `ceil(N / 8)` blocks.
+- **Input:** positions, neighbor lists (sorted), interaction parameters,
+  per-particle exclusion table.
+- **Output:** per-particle net force (and, on `ForcesAndScalars` calls,
+  per-particle potential-energy share and scalar-virial share) written
+  directly to the slot output buffer.
+- The warp sweeps the particle's neighbour list with lane stride 32.
+  Each lane reads the per-pair inputs for its assigned neighbours,
+  computes the pair functional form, applies the per-pair exclusion
+  scale, and adds the contribution to its register accumulators.
+- After the sweep, a fixed 5-step warp-pairwise butterfly via
+  `__shfl_xor_sync` reduces the 32 lane accumulators to lane 0, which
+  writes the per-particle result.
+- No atomics, no shared memory, no inter-warp synchronisation.
+- The tree shape depends only on the neighbour count, not on thread
+  scheduling — that is what makes the per-particle result bit-exact
+  across runs on the same GPU.
 
 ### Integration kernel
 
@@ -233,8 +222,10 @@ src/
     config.rs          # simulation parameter parsing
 
 kernels/
-  pair_force.cu        # pairwise force computation
-  reduce.cu            # segmented force reduction
+  pair_compute.cuh     # shared warp-per-particle device helper
+  pair_force.cu        # fused LJ pair-force kernels (_f, _fev)
+  coulomb.cu           # fused truncated-Coulomb pair-force kernels
+  spme_real.cu         # fused SPME real-space pair-force kernels
   integrate.cu         # velocity Verlet integration
   neighbor.cu          # spatial hashing, neighbor search, displacement check
 ```
@@ -244,14 +235,12 @@ management (`CudaDevice`), and kernel launches (`LaunchAsync`). The wrapper
 layer in `gpu/kernels.rs` keeps kernel-specific details (function names, grid
 dimensions, parameter ordering) out of the simulation loop.
 
-Most kernel launches go through the device's default `CudaStream`. The SPME
+All kernel launches go through the device's default `CudaStream`. The SPME
 reciprocal pipeline (charge spread, R2C FFT, influence-function multiply,
-C2R FFT) runs on a dedicated stream owned by `SpmeReciprocalState` so it can
-overlap with default-stream work in the same timestep; the two streams write
-to disjoint device buffers and synchronise at deterministic event-based
-boundaries at the entry and exit of the slot's `contribute` / `reduce`
-calls. See `rqm/forces/spme.md` for the topology. Adding further streams
-beyond this requires the same disjoint-buffer + event-boundary contract.
+C2R FFT, virial finalize) shares this default stream with the rest of the
+per-step kernel sequence and relies on CUDA's implicit per-stream ordering
+for producer-consumer correctness. See `rqm/forces/spme.md` for the slot's
+internal topology.
 
 ## Build
 
@@ -320,14 +309,21 @@ box periodicity is selected.
 
 ## Extensibility
 
-New force models (e.g., bonded interactions) follow the same pattern:
+New pair force models (e.g., Buckingham, tabulated) follow the fused
+warp-per-particle pattern specified in `rqm/forces/pair-force-kernel.md`:
 
-1. Compute pairwise (or per-particle) contributions in a dedicated kernel.
-2. Write results to a deterministic buffer.
-3. Reduce with a fixed-order summation.
+1. Compute the per-pair functional form `(factor, energy, virial)` from
+   `(r²)` and per-pair parameters in a `__device__` functor.
+2. Plug the functor into the shared `pair_compute_{f,fev}` helper to
+   obtain the two `extern "C"` kernel variants for the new potential.
+3. Register a `PotentialBuilder` for the slot in
+   `PotentialRegistry::with_builtins()`.
 
-As long as every new kernel writes to pre-indexed buffer slots and avoids
-atomic float accumulation, reproducibility is preserved.
+New bonded force models (e.g., harmonic angles) follow a similar
+pattern but with their own per-bond / per-angle index tables; see
+`rqm/forces/framework.md` and the per-potential files. Reproducibility
+is preserved as long as each warp's accumulation order depends only on
+the neighbour / bond count and on no thread-scheduling decision.
 
 Long-range electrostatics (SPME) uses an inverted iteration pattern — one
 thread per grid cell rather than per-particle — to preserve determinism

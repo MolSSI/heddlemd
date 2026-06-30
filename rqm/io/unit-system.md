@@ -127,11 +127,15 @@ Input-side conversion targets:
 - Every unit-bearing scalar in the loaded `Config` (typed fields under
   `[simulation]`, `[[phase]]`, `[[particle_types]]`,
   `[[pair_interactions]]`, `[[bond_types]]`, `[[angle_types]]`,
-  `[coulomb]`, `[spme]`, `[neighbor_list]`).
+  `[coulomb]`, `[spme]`, `[neighbor_list]`). Each such scalar has a
+  dimensioned newtype (see *Dimensioned Types and the Convert Trait*),
+  and the whole `Config` is rescaled by one recursive `Convert`
+  pass during load.
 - The unit-bearing fields of every open-shaped slot's
-  `params: toml::Value` whose `kind` is recognised by the unit module
-  (`[phase.integrator]`, `[phase.thermostat]`, `[phase.barostat]`,
-  `[[constraint_types]]`, `[minimization.algorithm]`).
+  `params: toml::Value` (`[phase.integrator]`, `[phase.thermostat]`,
+  `[phase.barostat]`, `[[constraint_types]]`, `[minimization.algorithm]`).
+  The matching registered builder converts its own params (see
+  *Builder-Owned Slot-Parameter Conversion*).
 - The `Lattice` attribute, position columns, and velocity columns of
   the `.in.xyz` initial-state file passed to `load_init_state`.
 
@@ -166,23 +170,70 @@ finiteness, or ordering, all of which are preserved by division by a
 strictly positive factor — so the same validation logic catches the
 same errors regardless of which unit system the user wrote.
 
-### Per-slot field-to-dimension mapping <!-- rq-bf5df23e -->
+### Dimensioned Types and the Convert Trait <!-- rq-bf5df23e -->
 
-The unit module owns a static table mapping each known slot `kind`
-string to the list of `(field_name, Dimension)` pairs that carry
-units. The table covers every built-in integrator, thermostat,
-barostat, constraint, and minimizer registered in the default
-registries. When a slot's `kind` is recognised, the listed fields are
-rescaled and every other field of `params` is left untouched. When the
-`kind` is not in the table the entire `params` table is left untouched;
-the kind itself is rejected later by
-`Config::validate_against(&registries)` with
-`ConfigError::UnknownKind`.
+Every unit-bearing scalar in a deserialised input structure is declared
+with a **dimensioned newtype** — `Length`, `InverseLength`, `Mass`,
+`Charge`, `Energy`, `Time`, `InverseTime`, `Force`, `Pressure`,
+`InversePressure`, `Temperature`, `Velocity` — rather than a bare
+`f64`. Each newtype wraps one `f64`, serialises and deserialises
+transparently (a bare TOML number, so `cutoff = 1.0e-9` is unchanged),
+and carries its `Dimension` on the type itself. A scalar that is
+genuinely unit-free (a count, a seed, a dimensionless ratio) stays a
+bare `f64` / integer.
 
-Non-numeric values at a known unit-bearing field name (e.g. a string
-where the loader expects a temperature) are left untouched. The
-builder's `validate_params` then produces the appropriate
-type-mismatch error in its native flow.
+The `Convert` trait performs the I/O-boundary rescaling:
+
+```rust
+pub trait Convert {
+    fn from_user(&mut self, units: UnitSystem);   // user -> atomic (input)
+    fn to_user(&mut self, units: UnitSystem);     // atomic -> user (output)
+}
+```
+
+Each dimensioned newtype implements `Convert` by dividing
+(`from_user`) or multiplying (`to_user`) its inner `f64` by
+`units.factor(D)` for its dimension `D`. Blanket implementations cover
+`Option<T: Convert>`, `Vec<T: Convert>`, and the unit-free leaf types
+(`f64`, integers, `bool`, `String`) as no-ops. The `#[derive(Convert)]`
+macro implements the trait for a struct or enum by calling `from_user`
+/ `to_user` on every field (recursing through nested structs, enum
+variants, `Option`, and `Vec`). Because a unit-bearing field can only
+be declared by giving it a dimensioned type, the derive cannot omit a
+field's conversion — a missing conversion is a type-level impossibility
+rather than a silent runtime gap.
+
+`Config` derives `Convert`. `load_config` deserialises the TOML into a
+`Config` holding raw user-system numbers, then calls
+`config.from_user(units)` exactly once; that single recursive pass
+rescales every typed unit-bearing field to atomic units. The
+conversion is registry-free: it depends only on the field types, not on
+any external table.
+
+### Builder-Owned Slot-Parameter Conversion <!-- rq-db1a6094 -->
+
+Open-shaped slot `params: toml::Value` blocks
+(`[phase.integrator]`, `[phase.thermostat]`, `[phase.barostat]`,
+`[[constraint_types]]`, `[minimization.algorithm]`) are converted by
+the registered builder that owns each kind's schema, not by any
+centralised table. Every named-selection builder converts its own
+params through `KindedBuilder::convert_params` (see
+`registry-framework.md`): the builder deserialises the `params` table
+into its typed parameter struct — which derives `Convert` and so
+declares each field's dimension on the field — applies `from_user`, and
+serialises the converted values back into the `toml::Value`. Nested
+arrays of tables (for example a constraint type's `constraints[k].d`)
+convert through the derive's recursion into `Vec`, with no
+special-casing.
+
+The config-validation pass resolves each slot's builder from the
+registries and invokes `convert_params` before any `validate_params`
+check, so validation always runs on atomic-unit values. A `kind` with
+no registered builder leaves its `params` untouched and is rejected
+downstream by `Config::validate_against(&registries)` with
+`ConfigError::UnknownKind`. A non-numeric value at a unit-bearing field
+fails the builder's typed deserialisation, surfacing the builder's
+native type-mismatch error.
 
 ## Initial-State File <!-- rq-be580c3c -->
 
@@ -266,6 +317,52 @@ Mixing is not supported.
   diagnostic that reports a pure ratio) that flow through the
   conversion pipeline unchanged.
 
+- Dimensioned scalar newtypes — one transparent `f64` wrapper per
+  unit-bearing dimension: `Length`, `InverseLength`, `Mass`, `Charge`,
+  `Energy`, `Time`, `InverseTime`, `Force`, `Pressure`,
+  `InversePressure`, `Temperature`, `Velocity`.
+
+  ```rust
+  #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+  #[serde(transparent)]
+  pub struct Length(pub f64);
+  // … one per dimension.
+  ```
+
+  Each wraps a single `f64`, (de)serialises as a bare number so TOML
+  and extended-XYZ syntax are unaffected, exposes the wrapped value,
+  and carries its `Dimension` on the type. Each implements `Convert`:
+  `from_user` divides the inner value by `factor(D)`, `to_user`
+  multiplies it.
+
+- `Convert` — trait for applying the I/O-boundary rescaling to a value <!-- rq-94e7affd -->
+  or an aggregate of values.
+
+  ```rust
+  pub trait Convert {
+      fn from_user(&mut self, units: UnitSystem);
+      fn to_user(&mut self, units: UnitSystem);
+  }
+  ```
+
+  - Implemented for every dimensioned newtype above (the leaf
+    conversions).
+  - Blanket implementations for `Option<T: Convert>` (converts the
+    inner value when `Some`), `Vec<T: Convert>` (converts each
+    element), and the unit-free leaf types (`f64`, integer types,
+    `bool`, `String`) as no-ops.
+  - For `UnitSystem::Atomic` every implementation is a numerical
+    identity.
+
+- `#[derive(Convert)]` — procedural macro that implements `Convert` <!-- rq-ca197f1c -->
+  for a struct or enum by invoking `from_user` / `to_user` on every
+  field (every variant's fields for an enum), in declaration order. It
+  recurses through nested derived types, `Option`, and `Vec`. A field
+  whose type does not implement `Convert` is a compile error, so a
+  unit-bearing field cannot be declared without a generated
+  conversion. `Config` and every slot builder's typed parameter struct
+  derive it.
+
 ### Functions <!-- rq-1669abef -->
 
 - `UnitSystem::factor(self, dim: Dimension) -> f64` <!-- rq-fb7c4429 -->
@@ -298,22 +395,12 @@ Mixing is not supported.
   - Returns `"si"` or `"atomic"`, the canonical lowercase string
     representation. Round-trips with `from_str`.
 
-- `slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimension)]>` <!-- rq-ecb8aa60 -->
-  - Returns the list of unit-bearing fields for a recognised slot
-    `kind`, or `None` for an unrecognised kind.
-  - A recognised kind with no unit-bearing fields (e.g.
-    `"velocity-verlet"`) returns `Some(&[])`. The presence of the
-    entry is itself the contract that the kind was considered.
-
-- `convert_slot_params(system: UnitSystem, kind: &str, params: &mut toml::Value)` <!-- rq-8f5ebdc1 -->
-  - In-place rescales every unit-bearing field of an open-shaped slot's
-    `params` table to atomic units (i.e. applies the input direction).
-  - No-op when `system == UnitSystem::Atomic`.
-  - No-op when `kind` is not present in `slot_kind_field_dims`.
-  - For each `(field, dimension)` returned by `slot_kind_field_dims`,
-    divides the field's numeric value by `system.factor(dimension)`.
-    Integer-typed values are promoted to floats during the conversion;
-    non-numeric values are left untouched.
+- `Config::from_user` is the single recursive `Convert` pass the loader <!-- rq-0c591e24 -->
+  applies after deserialisation to rescale every typed unit-bearing
+  field to atomic units. Open-shaped slot `params` are converted
+  separately by each kind's builder via
+  `KindedBuilder::convert_params` (defined in `registry-framework.md`),
+  driven by the config-validation pass before validation runs.
 
 ## Out of Scope <!-- rq-f033db03 -->
 
@@ -486,13 +573,52 @@ Feature: Unit-system selector and atomic-units internals
     And `energy_tolerance` is divided by the hartree -> joule factor
 
   @rq-aeee8e44
-  Scenario: Slot kind unknown to the unit module passes through unchanged
+  Scenario: Slot kind with no registered builder passes through unchanged
     Given a TOML file with `units = "si"` and an `[phase.integrator]`
-      block whose `kind` string is not in the slot-kind field-dim table
-    When the parser walks the params via convert_slot_params
-    Then no field of the params table is modified
-    And the kind is rejected downstream by Config::validate_against with
+      block whose `kind` string matches no registered builder
+    When the config-validation pass attempts slot-param conversion
+    Then no field of the params table is modified (there is no builder to
+      convert it)
+    And the kind is rejected by Config::validate_against with
       ConfigError::UnknownKind
+
+  # --- Convert derive, builders, and seam coverage ---
+  @rq-b45b09f9
+  Scenario: The Convert derive recurses into nested struct and Vec fields
+    Given a struct deriving Convert with a Length field, an Option<Energy>
+      field, and a Vec of sub-structs each holding a Length
+    When from_user(UnitSystem::Si) is called on an instance
+    Then the top-level Length is divided by the bohr -> meter factor
+    And the Some(Energy) is divided by the hartree -> joule factor
+    And every sub-struct's Length is divided by the bohr -> meter factor
+    And any bare-f64, integer, or String field is unchanged
+  @rq-901a8f7c
+  Scenario: A registered builder converts its own slot params to atomic units
+    Given the registered "csvr" builder and a raw SI params table
+      { temperature = 300.0, tau = 1.0e-13, seed = 11 }
+    When builder.convert_params(UnitSystem::Si, &mut params) is called
+    Then params["temperature"] equals 300.0 divided by the temperature factor
+    And params["tau"] equals 1.0e-13 divided by the atomic-time factor
+    And params["seed"] is unchanged
+  @rq-57fede98
+  Scenario: Every registered kinded builder converts a representative SI params block
+    Given Registries::with_builtins()
+    And for each registered integrator, thermostat, barostat, constraint,
+      and minimizer kind, a representative params block with at least one
+      unit-bearing field expressed in SI
+    When that kind's builder converts the block from UnitSystem::Si
+    Then at least one field differs from its SI value by the expected
+      atomic-unit factor
+    (this seam test fails the moment a new kind's params type omits a
+     dimensioned field or its conversion)
+  @rq-a0d557f5
+  Scenario: Slot params round-trip equivalently between SI and atomic descriptions
+    Given two TOML files describing the same slot, one with `units = "si"`
+      and one with `units = "atomic"` whose values are the SI values divided
+      by the corresponding atomic-unit factors
+    When load_config is called on each and the slot's params are converted
+    Then the two converted params tables agree on every unit-bearing field
+      to within 1e-12 relative tolerance
 
   # --- Initial-state file ---
 

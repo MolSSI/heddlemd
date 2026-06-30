@@ -176,7 +176,6 @@ constraints = [
 
 [neighbor_list]
 mode = "cell-list"
-max_neighbors = 256
 r_skin = 1.0e-10    # m  (defaults to 0.3 * cutoff when omitted)
 ```
 
@@ -256,9 +255,12 @@ storing it on the returned `Config`. The corresponding atomic-unit
 dimension for each named SI unit is fixed (length → Bohr,
 mass → electron mass, time → atomic time, energy → Hartree,
 temperature → `E_h / k_B`, pressure → `E_h / a_0^3`,
-charge → elementary charge, velocity → `a_0 / (hbar / E_h)`); the
-mapping is enumerated in `unit-system.md`. Fields are validated on
-their post-conversion (atomic-unit) values, but the same positivity
+charge → elementary charge, velocity → `a_0 / (hbar / E_h)`). Each
+unit-bearing field carries its dimension on its type (a dimensioned
+newtype), and the loader's single `Convert` pass rescales the whole
+`Config`; open-shaped slot `params` are converted by the matching
+builder. See `unit-system.md` for the mechanism. Fields are validated
+on their post-conversion (atomic-unit) values, but the same positivity
 and ordering invariants hold regardless of the chosen unit system.
 
 #### Top level <!-- rq-4c42a952 -->
@@ -282,11 +284,11 @@ and ordering invariants hold regardless of the chosen unit system.
 
 #### `[simulation]` <!-- rq-a84e1c76 -->
 
-The `[simulation]` table carries the two settings that apply to the
-**initial-velocity sampling** performed once at phase-0 entry, before
-any integration starts. Per-step settings (timestep, step count,
-integrator/thermostat/barostat composition, output cadences) live in
-the `[[phase]]` array.
+The `[simulation]` table carries the settings that apply to the
+**initial-velocity sampling** performed once at phase-0 entry plus the
+run-wide CUDA graph execution and JIT-compilation knobs. Per-step
+settings (timestep, step count, integrator/thermostat/barostat
+composition, output cadences) live in the `[[phase]]` array.
 
 - `seed: u64` — RNG seed used for Maxwell-Boltzmann velocity
   generation. Required even when the init file supplies explicit
@@ -301,6 +303,30 @@ the `[[phase]]` array.
   validated) when the init file supplies velocities. Must be finite
   and `>= 0.0`. The thermostat's bath temperature is a separate
   per-phase field under `[phase.thermostat]`.
+- `graph_batch_size: u32` — optional. Number of step replays between
+  displacement checks and output-cadence re-evaluations when an MD
+  phase runs under CUDA graph mode. Default `5`. Must be `>= 1`; the
+  loader rejects `0` with
+  `ConfigError::InvalidValue { field: "simulation.graph_batch_size",
+  reason: "value must be >= 1, got 0" }`. See `cuda-graphs.md` for
+  the activation policy and the skin-distance tuning constraint.
+- `cuda_graphs_disable: bool` — optional. When `true`, every MD
+  phase runs the per-step launch loop with full per-kernel
+  `Timings`. Default `false`. Provided as a diagnostic escape hatch;
+  see `cuda-graphs.md`.
+- `fast_math: bool` — optional. When `true`, every JIT-compiled CUDA
+  kernel (the composed pair / bonded / angle / post-force kernels and
+  the SPME reciprocal kernels) is built with `nvcc`'s `--use_fast_math`.
+  Default `true`. Fast-math is **bit-reproducible run-to-run on a fixed
+  GPU** — the reproducibility invariant holds, because the deterministic
+  fixed-point force accumulation does not depend on the per-pair
+  transcendental/division precision. It trades a few ULP in division and
+  the SPME-real `erfc` reciprocal — within the engine's existing f32
+  error class — for roughly 13% faster pair-force evaluation. Set
+  `false` to compile the precise-IEEE kernels. A run with
+  `fast_math = true` follows a different f32 trajectory than one with
+  `fast_math = false`; each is independently reproducible. The setting
+  is applied process-wide before any kernel is compiled.
 
 #### `[[phase]]` (array of tables, >= 1 entry) <!-- rq-18441e33 -->
 
@@ -729,9 +755,9 @@ algorithm's builder to consume:
 - `name: String` — unique identifier within the `[[constraint_types]]`
   array. Empty strings are rejected. Case-sensitive.
 - `kind: String` — selects the algorithm that processes any group
-  declared with this type. The currently registered value is
-  `"shake"` (see `integration/shake.md`). Future values
-  (`"settle"`, `"m-shake"`, `"lincs"`, ...) are added by registering
+  declared with this type. The registered values are `"settle"` (see
+  `integration/settle.md`) and `"shake"` (see `integration/shake.md`).
+  Further values (`"m-shake"`, `"lincs"`, ...) are added by registering
   additional `ConstraintBuilder`s.
 
 Per-kind parameter fields are validated by the matching
@@ -748,6 +774,18 @@ Per-kind parameter fields are validated by the matching
     `(min(i, j), max(i, j))` must be unique across constraints; `i`
     and `j` must differ.
   - `d` is the target distance in metres. Finite and strictly positive.
+
+For `kind = "settle"` (documented in `integration/settle.md`), the type
+declares a symmetric three-atom rigid water shape:
+
+- `d_OH: f64` — apex (oxygen)–hydrogen bond length in metres. Required.
+  Finite and strictly positive.
+- `d_HH: f64` — hydrogen–hydrogen distance in metres. Required. Finite,
+  strictly positive, and strictly less than `2 · d_OH`.
+
+A `[constraints]` row referencing a `"settle"` type lists exactly three
+atoms in canonical order (oxygen, then the two hydrogens); the parser
+synthesises the three water constraints from `d_OH`/`d_HH`.
 
 Names must be unique within the array. Unknown parameter fields for
 the chosen `kind` are rejected by the matching builder's
@@ -832,25 +870,23 @@ for the algorithm.
 
 Fields accepted for `mode = "cell-list"`:
 
-- `max_neighbors: u64` — optional; defaults to `256`. Strictly
-  positive. Upper bound on the number of neighbours retained per
-  particle; a rebuild that finds more than this many neighbours for
-  some atom halts the simulation via
-  `RunnerError::ForceField(NeighborList(NeighborListOverflow))`. The
-  default suits typical liquid-density short-range simulations
-  (≤ ~200 neighbours per atom at cubic-LJ density and 2.5σ cutoff);
-  dense or long-cutoff systems must raise it.
 - `r_skin: f64` — skin distance in metres. Optional; defaults to
   `0.3 * cutoff` where `cutoff` is the maximum cutoff among
   `[[pair_interactions]]` entries. Strictly positive and finite.
 
-Fields accepted for `mode = "all-pairs"`: none. `max_neighbors` and
-`r_skin` are rejected as unknown fields in this mode.
+`max_neighbors` is **not** a valid field. The packed-neighbour
+pair-force architecture (see `forces/packed-neighbour-pair-force.md`)
+sizes its neighbour buffers to the actual interaction count plus a
+growth margin, so there is no per-particle neighbour cap to configure;
+supplying `max_neighbors` in the `[neighbor_list]` table is a load-time
+error.
+
+Fields accepted for `mode = "all-pairs"`: none. `r_skin` is rejected as
+an unknown field in this mode.
 
 Cross-validation:
 
 - `r_skin > 0` and finite.
-- `max_neighbors > 0`.
 - The simulation box's minimum perpendicular width satisfies
   `min_perpendicular_width >= 3 * (cutoff_max + r_skin)` where
   `cutoff_max` is the largest cutoff among `[[pair_interactions]]`
@@ -1153,8 +1189,8 @@ phase failures.
     present in the config, `None` otherwise. Mutually exclusive with
     `coulomb`.
   - `neighbor_list: NeighborListConfig` — defaults to
-    `NeighborListConfig::CellList { max_neighbors: 256, r_skin: 0.3 *
-    max_cutoff }` when the `[neighbor_list]` table is omitted from the
+    `NeighborListConfig::CellList { r_skin: 0.3 * max_cutoff }` when the
+    `[neighbor_list]` table is omitted from the
     config, where `max_cutoff` is the largest cutoff across
     `[[pair_interactions]]`, the `[coulomb]` table, and the `[spme]`
     table's `r_cut_real` (whichever are present).
@@ -1302,11 +1338,12 @@ phase failures.
   SPME real-space) to enumerate non-bonded pairs. Variants:
   - `AllPairs` — selected by `mode = "all-pairs"`. Carries no
     parameters; pair-force slots use the O(N²) kernel.
-  - `CellList { max_neighbors: u32, r_skin: f64 }` — selected by
-    `mode = "cell-list"` (and used as the default when the
-    `[neighbor_list]` table is omitted). `max_neighbors` is the
-    per-particle neighbor capacity; `r_skin` is the skin distance in
-    metres.
+  - `CellList { r_skin: f64 }` — selected by `mode = "cell-list"` (and
+    used as the default when the `[neighbor_list]` table is omitted).
+    `r_skin` is the skin distance in metres. There is no
+    `max_neighbors` field; the packed-neighbour buffers are sized to
+    the actual interaction count (see
+    `forces/packed-neighbour-pair-force.md`).
 
   See `forces/neighbor-list.md` for the runtime semantics of each
   variant.
@@ -1663,6 +1700,15 @@ Feature: TOML simulation config schema
     And config.phases[0].output.log_path equals "/tmp/sim/argon.out.log"
     And config.phases[0].output.log_every equals 100
     And config.phases[0].output.timings_path equals "/tmp/sim/argon.out.timings"
+
+  @rq-a77dffe7
+  Scenario: fast_math defaults to true and can be disabled
+    Given the Background config with no [simulation].fast_math field
+    When load_config is called
+    Then config.simulation.fast_math equals true
+    Given an otherwise-identical config with [simulation].fast_math = false
+    When load_config is called
+    Then config.simulation.fast_math equals false
 
   @rq-0622d4b0
   Scenario: Default output paths drop a single trailing `.in` from the config-file root
@@ -2328,31 +2374,32 @@ Feature: TOML simulation config schema
     Given the Background config with no [neighbor_list] section
     When load_config is called
     Then it returns Ok(config)
-    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 256, r_skin: 3.0e-10 }
+    And config.neighbor_list matches NeighborListConfig::CellList { r_skin: 3.0e-10 }
 
   @rq-b1f33ea4
-  Scenario: neighbor_list cell-list with explicit parameters is accepted
-    Given the Background config plus
-      [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=2.0e-10
-    When load_config is called
-    Then it returns Ok(config)
-    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 128, r_skin: 2.0e-10 }
-
-  @rq-e643b070
-  Scenario: neighbor_list cell-list mode omitting max_neighbors uses default 256
+  Scenario: neighbor_list cell-list with explicit r_skin is accepted
     Given the Background config plus
       [neighbor_list] mode="cell-list" r_skin=2.0e-10
     When load_config is called
     Then it returns Ok(config)
-    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 256, r_skin: 2.0e-10 }
+    And config.neighbor_list matches NeighborListConfig::CellList { r_skin: 2.0e-10 }
+
+  @rq-e643b070
+  Scenario: neighbor_list cell-list mode rejects max_neighbors
+    Given the Background config plus
+      [neighbor_list] mode="cell-list" max_neighbors=256 r_skin=2.0e-10
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "neighbor_list"
+    And message mentions "max_neighbors"
 
   @rq-cde6e114
   Scenario: neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff
     Given the Background config plus
-      [neighbor_list] mode="cell-list" max_neighbors=128
+      [neighbor_list] mode="cell-list"
     When load_config is called
     Then it returns Ok(config)
-    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 128, r_skin: 3.0e-10 }
+    And config.neighbor_list matches NeighborListConfig::CellList { r_skin: 3.0e-10 }
 
   @rq-931f1ab8
   Scenario: neighbor_list all-pairs mode is accepted
@@ -2379,23 +2426,17 @@ Feature: TOML simulation config schema
     # The same rejection applies to every (mode, unknown-field) pair the
     # parameterised unit test enumerates. At minimum the test exercises
     #   (all-pairs, max_neighbors), (all-pairs, r_skin),
-    #   (cell-list, stencil="huge").
-
-  @rq-fedef74d
-  Scenario: neighbor_list rejects zero max_neighbors
-    Given the Background config plus [neighbor_list] mode="cell-list" max_neighbors=0 r_skin=1.0e-10
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.max_neighbors", reason: _ })
+    #   (cell-list, max_neighbors), (cell-list, stencil="huge").
 
   @rq-f7856bcc
   Scenario: neighbor_list rejects non-positive r_skin
-    Given the Background config plus [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=0.0
+    Given the Background config plus [neighbor_list] mode="cell-list" r_skin=0.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.r_skin", reason: _ })
 
   @rq-ec28cbfb
   Scenario: neighbor_list rejects non-finite r_skin
-    Given the Background config plus [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=inf
+    Given the Background config plus [neighbor_list] mode="cell-list" r_skin=inf
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.r_skin", reason: _ })
 

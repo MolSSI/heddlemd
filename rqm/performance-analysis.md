@@ -34,21 +34,20 @@ One CUDA event pair per stage. The runner (or the integrator slot acting
 through the runner) records the start event immediately before each kernel
 launch and the stop event immediately after. Stages:
 
-Lennard-Jones potential slot (always present in the `ForceField`):
+Pair-force evaluation (always present in the `ForceField`):
 
-- `lj_pair_force` — all-pairs kernel; recorded only when
-  `NeighborListConfig::AllPairs` is selected.
-- `lj_pair_force_neighbor` — neighbor-list-driven kernel; recorded
-  only when `NeighborListConfig::CellList` is selected.
-- `reduce_pair_forces`
+- `jit_composed_pair_force` — the JIT-composed packed pair-force kernel
+  that evaluates every active pair potential (Lennard-Jones, Coulomb,
+  SPME real-space, …) in a single fused launch and writes per-particle
+  output directly. Recorded once per force evaluation in both
+  `NeighborListConfig::AllPairs` and `NeighborListConfig::CellList`
+  modes.
 
 Neighbor list (present when `NeighborListConfig::CellList` is selected;
 see `forces/neighbor-list.md`):
 
 - `neighbor_displacement_squared` — per-atom displacement² versus the
   reference positions. Launched once per timestep.
-- `neighbor_list_build` — full cell-list neighbor search. Launched
-  once per rebuild.
 - `copy_positions_into_reference` — refresh of the reference positions
   array. Launched once per rebuild.
 
@@ -78,6 +77,23 @@ see `integration/langevin-baoab.md`):
 - `langevin_drift_half` — the A step (`lan_drift_half` kernel).
 - `langevin_ou_step` — the O step (`lan_ou_step` kernel).
 
+Thermostat / barostat scalar-prep stages (the device scalar kernels each
+active slot's `apply_*` launches; the per-particle rescale itself is
+folded into the JIT-composed post-force kernel and timed under
+`jit_composed_post_force` — see `cuda-graphs.md`):
+
+- `kinetic_energy_reduce` — kinetic-energy reduction (CSVR, Berendsen,
+  Nosé-Hoover-chain thermostats; both barostats).
+- `csvr_sample_and_factor` — CSVR stochastic sample (`Σ ξ_i²`) and
+  rescale factor; see `integration/csvr.md`. The dominant cost at large
+  `N_f`, so omitting it materially undercounts the per-step GPU total.
+- `berendsen_compute_factor` — Berendsen thermostat rescale factor.
+- `virial_sum_reduce` — scalar-virial reduction (both barostats).
+- `c_rescale_compute_mu_and_rescale_lattice` — C-rescale barostat µ and
+  in-place lattice rescale; see `integration/c-rescale-barostat.md`.
+- `berendsen_compute_mu_and_rescale_lattice` — Berendsen barostat µ and
+  in-place lattice rescale; see `integration/berendsen-barostat.md`.
+
 Only the stages corresponding to the chosen integrator have nonzero
 counts; the others are absent from the output file. The velocity-Verlet
 slot also leaves exactly one of `vv_kick_drift` / `vv_kick_drift_lossless`
@@ -87,6 +103,15 @@ and one of `vv_kick` / `vv_kick_lossless` empty, determined by the
 A kernel-launch helper that early-returns (e.g. when `particle_count == 0`)
 does not record any sample. The CUDA event pair for that stage may still
 exist in the runner's `Timings` instance with zero accumulated samples.
+
+When a phase runs under CUDA graph mode (`cuda-graphs.md`), per-kernel
+event records are produced only by the dry capture iteration; every
+subsequent replay step contributes nothing further. Each per-kernel
+`KernelStage` row in such a phase's `.timings` file therefore shows
+exactly one sample regardless of `n_steps`. The per-phase
+`total_runtime` row and the host stages are populated as in non-graph
+mode. To obtain a full per-kernel breakdown across all steps, run with
+`[simulation].cuda_graphs_disable = true`.
 
 ### Host stages (Instant-timed) <!-- rq-36105526 -->
 
@@ -223,40 +248,33 @@ than 92 characters.
 
 ### Row ordering <!-- rq-1b34278b -->
 
-Rows appear in this fixed order, with absent stages skipped:
+Kernel-stage rows come first, then host-stage rows; absent stages (zero
+samples) are skipped.
 
-1. `vv_kick_drift` or `vv_kick_drift_lossless` (whichever is present)
-2. `langevin_kick_half` (B step, pre and post)
-3. `langevin_drift_half` (A step)
-4. `langevin_ou_step` (O step)
-5. `neighbor_displacement_squared`
-6. `copy_positions_into_reference`
-7. `neighbor_list_build`
-8. `lj_pair_force` or `lj_pair_force_neighbor` (whichever is present)
-9. `reduce_pair_forces`
-10. `morse_bond_force`
-11. `reduce_bond_forces`
-12. `accumulate_forces`
-13. `vv_kick` or `vv_kick_lossless` (whichever is present)
-14. `host_to_device_upload`
-15. `device_to_host_download`
-16. `neighbor_list_rebuild`
-17. `trajectory_write`
-18. `log_write`
-19. `velocity_generation`
-20. `config_load`
-21. `init_load`
-22. `gpu_init`
-23. `total_runtime`
+Kernel rows follow `KernelStage::ORDER`, the manifest-order
+concatenation of each subsystem's `STAGES` (see `build-pipeline.md`).
+They are therefore grouped by subsystem, in `define_kernels!` manifest
+order, and within a subsystem in that subsystem's declared stage order.
+The subsystem groups appear in this order:
+
+`fill`, `integrate`, `spme_recip`, `langevin`, `morse`, `angle`,
+`nose_hoover`, `andersen`, `barostat`, `mtk`, `shake`, `settle`,
+`forces`, `neighbor`, `minimize`.
+
+Host rows follow `HostStage::ORDER`:
+
+`host_to_device_upload`, `device_to_host_download`,
+`neighbor_list_rebuild`, `trajectory_write`, `log_write`,
+`velocity_generation`, `config_load`, `init_load`, `gpu_init`,
+`total_runtime`.
 
 ### Example <!-- rq-6289f344 -->
 
 ```
 stage                             count       total_ms       mean_us      min_us      max_us
 vv_kick_drift                       100         2.345          23.5        20.1        28.7
-lj_pair_force                       101        12.467         123.4        98.7       145.2
-reduce_pair_forces                  101         4.612          45.7        38.1        52.4
 vv_kick                             100         2.111          21.1        18.5        25.9
+jit_composed_pair_force             101        12.467         123.4        98.7       145.2
 host_to_device_upload                 1         1.890        1890.0      1890.0      1890.0
 device_to_host_download              20         8.910         445.5       420.3       482.1
 trajectory_write                     10         1.234         123.4       100.5       180.7
@@ -295,8 +313,7 @@ partial timings are discarded).
   - `KernelStage::VV_KICK` → `"vv_kick"`
   - `KernelStage::VV_KICK_DRIFT_LOSSLESS` → `"vv_kick_drift_lossless"`
   - `KernelStage::VV_KICK_LOSSLESS` → `"vv_kick_lossless"`
-  - `KernelStage::LJ_PAIR_FORCE` → `"lj_pair_force"`
-  - `KernelStage::REDUCE_PAIR_FORCES` → `"reduce_pair_forces"`
+  - `KernelStage::JIT_COMPOSED_PAIR_FORCE` → `"jit_composed_pair_force"`
   - `KernelStage::LANGEVIN_KICK_HALF` → `"langevin_kick_half"`
   - `KernelStage::LANGEVIN_DRIFT_HALF` → `"langevin_drift_half"`
   - `KernelStage::LANGEVIN_OU_STEP` → `"langevin_ou_step"`
@@ -304,7 +321,6 @@ partial timings are discarded).
   - `KernelStage::REDUCE_BOND_FORCES` → `"reduce_bond_forces"`
   - `KernelStage::ACCUMULATE_FORCES` → `"accumulate_forces"`
   - `KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED` → `"neighbor_displacement_squared"`
-  - `KernelStage::NEIGHBOR_LIST_BUILD` → `"neighbor_list_build"`
   - `KernelStage::COPY_POSITIONS_INTO_REFERENCE` → `"copy_positions_into_reference"`
   - `KernelStage::POTENTIAL_ENERGY_REDUCE` → `"potential_energy_reduce"` —
     the runner's per-log-row launch of `virial_sum_reduce` against
@@ -313,10 +329,17 @@ partial timings are discarded).
     Distinct from `KernelStage::VIRIAL_SUM_REDUCE`, which counts
     barostat-driven launches of the same kernel binary.
 
-  The associated const `KernelStage::ORDER: &'static [KernelStage]`
-  is the canonical registry of known kernel stages and fixes the row
-  order used by `finalize` and the output file. Adding a stage means
-  declaring a new associated const and appending it to `ORDER`.
+  Each stage const is declared by the owning subsystem's `gpu_kernels!`
+  invocation (see `build-pipeline.md`), which from one `stages` list
+  emits both the consts and that subsystem's `STAGES` slice of exactly
+  those consts. `KernelStage::ORDER: &'static [KernelStage]` is the
+  canonical registry of known kernel stages: the manifest-order
+  concatenation of every subsystem's `STAGES`, assembled by
+  `define_kernels!`. It fixes the row order used by `finalize` and the
+  output file (grouped by subsystem). Adding a stage is one entry in
+  its subsystem's `stages` list — the const, that subsystem's `STAGES`,
+  and `ORDER` update from the same source, so they cannot drift, and
+  `ORDER` holds each stage exactly once.
 
 - `HostStage` — opaque newtype wrapping a `&'static str` stage name. <!-- rq-d29f2811 -->
   `Copy`, `Eq`, `Hash`, `Debug`. Method
@@ -435,15 +458,14 @@ sequence of recorded stages within `run_simulation` is:
 2. `velocity_generation` — `Instant` measurement around the
    `generate_velocities` call. Skipped when explicit velocities are read
    from the init file.
-3. Warm-up: `kernel_start(KernelStage::LJ_PAIR_FORCE)` / launch /
-   `kernel_stop(KernelStage::LJ_PAIR_FORCE)` then
-   `kernel_start(KernelStage::REDUCE_PAIR_FORCES)` / launch /
-   `kernel_stop(KernelStage::REDUCE_PAIR_FORCES)`.
+3. Warm-up: `kernel_start(KernelStage::JIT_COMPOSED_PAIR_FORCE)` / launch /
+   `kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)`.
 4. For each timestep:
    - `kernel_start` / launch / `kernel_stop` for the active kick-drift
      variant.
-   - `kernel_start` / launch / `kernel_stop` for `LJ_PAIR_FORCE`.
-   - `kernel_start` / launch / `kernel_stop` for `REDUCE_PAIR_FORCES`.
+   - `kernel_start` / launch / `kernel_stop` for `JIT_COMPOSED_PAIR_FORCE`
+     (the fused pair-force kernel writes per-particle output directly;
+     there is no separate reduction stage).
    - `kernel_start` / launch / `kernel_stop` for the active kick variant.
    - If a snapshot/log download is happening this step:
      - `Instant` measurement around `frame.download_from(&buffers)`.
@@ -483,10 +505,10 @@ writing the timings file is excluded from every row.
 - Cross-host or cross-GPU timing comparisons. Timings vary by hardware.
 - Reproducibility of timing data; only the *trajectory* and *log* outputs
   are bit-reproducible across runs.
-- A public API for external-crate stage registration. The
-  `KernelStage::ORDER` and `HostStage::ORDER` arrays are the canonical
-  registry; the set of valid stages is fixed at compile time, and adding
-  a stage requires editing those arrays in this crate.
+- A public API for external-crate stage registration. `KernelStage::ORDER`
+  (assembled from each subsystem's `STAGES`) and `HostStage::ORDER` are the
+  canonical registry; the set of valid stages is fixed at compile time, and
+  adding a stage is an in-crate per-subsystem declaration.
 - Streaming the timings file to stdout. Output is to a file only.
 - Compressed (gzip, etc.) timings files.
 - Profile data formats for external tools (Tracy, Perfetto, Chrome
@@ -605,19 +627,17 @@ Feature: Performance analysis and timings output
     Given a valid config with kind="velocity-verlet", N=0 particles, n_steps=5
     When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has no rows whose stage column begins with "vv_"
-      or "langevin_" or "morse_" or "reduce_" or equals "lj_pair_force"
+      or "langevin_" or "morse_" or "reduce_" or equals "jit_composed_pair_force"
       or "accumulate_forces"
     And tmp/sim.out.timings has a row whose stage column equals "gpu_init"
     And tmp/sim.out.timings has a row whose stage column equals "total_runtime"
 
   @rq-62300a18
-  Scenario: All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows
+  Scenario: All-pairs neighbor mode records the pair-force row and omits neighbor-list rows
     Given a valid config with [neighbor_list] mode="all-pairs" and n_steps=5
     When heddlemd run sim.in.toml is invoked
-    Then tmp/sim.out.timings has a row whose stage column equals "lj_pair_force"
-    And tmp/sim.out.timings has no row whose stage column equals "lj_pair_force_neighbor"
+    Then tmp/sim.out.timings has a row whose stage column equals "jit_composed_pair_force"
     And tmp/sim.out.timings has no row whose stage column equals "neighbor_displacement_squared"
-    And tmp/sim.out.timings has no row whose stage column equals "neighbor_list_build"
     And tmp/sim.out.timings has no row whose stage column equals "copy_positions_into_reference"
     And tmp/sim.out.timings has no row whose stage column equals "neighbor_list_rebuild"
 
@@ -625,11 +645,9 @@ Feature: Performance analysis and timings output
   Scenario: Cell-list neighbor mode records the neighbor-list host stages
     Given a valid config with [neighbor_list] mode="cell-list" and n_steps=10
     When heddlemd run sim.in.toml is invoked
-    Then tmp/sim.out.timings has a row whose stage column equals "lj_pair_force"
-      (the single LJ pair-force KernelStage is used in both modes; the
-      "_neighbor" suffix is not a separate stage)
+    Then tmp/sim.out.timings has a row whose stage column equals "jit_composed_pair_force"
+      (a single packed pair-force KernelStage is used in both neighbor modes)
     And tmp/sim.out.timings has a row whose stage column equals "neighbor_displacement_squared"
-    And tmp/sim.out.timings has a row whose stage column equals "neighbor_list_build"
     And tmp/sim.out.timings has a row whose stage column equals "copy_positions_into_reference"
     And tmp/sim.out.timings has a row whose stage column equals "neighbor_list_rebuild"
 
@@ -640,12 +658,11 @@ Feature: Performance analysis and timings output
     Then the row for neighbor_displacement_squared has count = 10
 
   @rq-7f2310ac
-  Scenario: neighbor_list_build and copy_positions_into_reference counts match rebuilds
+  Scenario: copy_positions_into_reference and neighbor_list_rebuild counts match rebuilds
     Given a valid cell-list config with n_steps=10 and r_skin chosen so that exactly
       one rebuild fires after the initial build (i.e. two builds total: warm-up + one)
     When heddlemd run sim.in.toml is invoked
-    Then the row for neighbor_list_build has count = 2
-    And the row for copy_positions_into_reference has count = 2
+    Then the row for copy_positions_into_reference has count = 2
     And the row for neighbor_list_rebuild has count = 2
 
   @rq-3bd5336c
@@ -667,8 +684,8 @@ Feature: Performance analysis and timings output
   Scenario: Kernel-stage counts match the runner's launch counts
     Given a valid lossy config with n_steps=10
     When heddlemd run sim.in.toml is invoked
-    Then the row for lj_pair_force has count = 11 (one warm-up + ten loop)
-    And the row for reduce_pair_forces has count = 11
+    Then the row for jit_composed_pair_force has count = 11 (one warm-up + ten loop)
+    And no row for reduce_pair_forces exists (the fused pair-force kernel writes per-particle output directly)
     And the row for vv_kick_drift has count = 10
     And the row for vv_kick has count = 10
 
@@ -727,11 +744,12 @@ Feature: Performance analysis and timings output
     Given a valid lossy config with n_steps=10, trajectory_every=5, log_every=5
     When heddlemd run sim.in.toml is invoked
     Then the stage column of consecutive data rows of tmp/sim.out.timings reads
-      ["vv_kick_drift", "lj_pair_force", "reduce_pair_forces", "vv_kick",
+      ["vv_kick_drift", "vv_kick", "jit_composed_pair_force",
        "host_to_device_upload", "device_to_host_download", "trajectory_write",
        "log_write", "config_load", "init_load", "gpu_init", "total_runtime"]
-      (omitting any absent stages; "velocity_generation" is absent because
-      explicit velocities are provided)
+      (kernel rows grouped by subsystem in define_kernels! manifest order,
+      then host rows; omitting any absent stages; "velocity_generation" is
+      absent because explicit velocities are provided)
 
   @rq-44dfc3da
   Scenario: Numeric columns have the documented precision
@@ -819,19 +837,19 @@ Feature: Performance analysis and timings output
   @rq-79291197
   Scenario: kernel_start followed by kernel_stop and finalize records one sample
     Given a Timings constructed on a fresh device
-    When timings.kernel_start(KernelStage::LJ_PAIR_FORCE) is called
+    When timings.kernel_start(KernelStage::JIT_COMPOSED_PAIR_FORCE) is called
     And a small kernel is launched
-    And timings.kernel_stop(KernelStage::LJ_PAIR_FORCE) is called
+    And timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE) is called
     And timings.finalize() is called
-    Then the resulting report contains exactly one StageStats entry for lj_pair_force
+    Then the resulting report contains exactly one StageStats entry for jit_composed_pair_force
     And that entry's count equals 1
 
   @rq-56043142
   Scenario: Repeated kernel_start/kernel_stop pairs accumulate
     Given a Timings constructed on a fresh device
-    When ten matched kernel_start/kernel_stop pairs for KernelStage::LJ_PAIR_FORCE are issued around real launches
+    When ten matched kernel_start/kernel_stop pairs for KernelStage::JIT_COMPOSED_PAIR_FORCE are issued around real launches
     And timings.finalize() is called
-    Then the resulting report's lj_pair_force entry has count = 10
+    Then the resulting report's jit_composed_pair_force entry has count = 10
     And the total_ns is non-zero
 
   @rq-2cbe0828
@@ -861,4 +879,24 @@ Feature: Performance analysis and timings output
       name does not appear in HostStage::ORDER
     When timings.record_host(unknown, Duration::from_micros(10)) is called
     Then it panics
+
+  # --- Stage registry assembly ---
+
+  @rq-a2b911fc
+  Scenario: KernelStage::ORDER is the manifest-order concatenation of subsystem STAGES
+    Given the define_kernels! manifest in registration order
+    Then KernelStage::ORDER equals the concatenation, in that order, of
+      every subsystem sub-struct's SubsystemKernels::STAGES
+
+  @rq-4a584e03
+  Scenario: Each subsystem's STAGES is a contiguous run within KernelStage::ORDER
+    Given any subsystem sub-struct T in the manifest
+    Then the elements of <T as SubsystemKernels>::STAGES appear in
+      KernelStage::ORDER as a contiguous slice, in the same order
+
+  @rq-42ee692a
+  Scenario: KernelStage::ORDER contains no duplicate stage
+    Given KernelStage::ORDER
+    Then no two entries have the same stage name
+    And no stage recorded by any launch site is absent from ORDER
 ```

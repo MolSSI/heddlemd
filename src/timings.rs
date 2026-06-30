@@ -27,121 +27,6 @@ impl KernelStage {
         self.name
     }
 
-    pub const VV_KICK_DRIFT: KernelStage = KernelStage::new("vv_kick_drift");
-    pub const VV_KICK: KernelStage = KernelStage::new("vv_kick");
-    pub const VV_KICK_DRIFT_LOSSLESS: KernelStage =
-        KernelStage::new("vv_kick_drift_lossless");
-    pub const VV_KICK_LOSSLESS: KernelStage = KernelStage::new("vv_kick_lossless");
-    pub const LJ_PAIR_FORCE: KernelStage = KernelStage::new("lj_pair_force");
-    pub const COULOMB_PAIR_FORCE: KernelStage = KernelStage::new("coulomb_pair_force");
-    pub const SPME_REAL_PAIR_FORCE: KernelStage =
-        KernelStage::new("spme_real_pair_force");
-    pub const SPME_RECIP_PIPELINE: KernelStage =
-        KernelStage::new("spme_recip_pipeline");
-    pub const SPME_FORCE_GATHER: KernelStage = KernelStage::new("spme_force_gather");
-    pub const REDUCE_PAIR_FORCES: KernelStage = KernelStage::new("reduce_pair_forces");
-    pub const REDUCE_PAIR_ENERGY_VIRIAL: KernelStage =
-        KernelStage::new("reduce_pair_energy_virial");
-    pub const LANGEVIN_KICK_HALF: KernelStage = KernelStage::new("langevin_kick_half");
-    pub const LANGEVIN_DRIFT_HALF: KernelStage = KernelStage::new("langevin_drift_half");
-    pub const LANGEVIN_OU_STEP: KernelStage = KernelStage::new("langevin_ou_step");
-    pub const MORSE_BOND_FORCE: KernelStage = KernelStage::new("morse_bond_force");
-    pub const REDUCE_BOND_FORCES: KernelStage = KernelStage::new("reduce_bond_forces");
-    pub const HARMONIC_ANGLE_FORCE: KernelStage =
-        KernelStage::new("harmonic_angle_force");
-    pub const REDUCE_ANGLE_FORCES: KernelStage =
-        KernelStage::new("reduce_angle_forces");
-    pub const KINETIC_ENERGY_REDUCE: KernelStage =
-        KernelStage::new("kinetic_energy_reduce");
-    pub const NHC_RESCALE_VELOCITIES: KernelStage =
-        KernelStage::new("nhc_rescale_velocities");
-    pub const CSVR_RESCALE_VELOCITIES: KernelStage =
-        KernelStage::new("csvr_rescale_velocities");
-    pub const ANDERSEN_RESAMPLE: KernelStage =
-        KernelStage::new("andersen_resample");
-    pub const BERENDSEN_RESCALE_VELOCITIES: KernelStage =
-        KernelStage::new("berendsen_rescale_velocities");
-    // rq-0d8c8688
-    pub const VIRIAL_SUM_REDUCE: KernelStage =
-        KernelStage::new("virial_sum_reduce");
-    pub const POTENTIAL_ENERGY_REDUCE: KernelStage =
-        KernelStage::new("potential_energy_reduce");
-    pub const BERENDSEN_BAROSTAT_RESCALE_POSITIONS: KernelStage =
-        KernelStage::new("berendsen_barostat_rescale_positions");
-    // rq-11f5dfd1
-    pub const C_RESCALE_BAROSTAT_RESCALE_POSITIONS: KernelStage =
-        KernelStage::new("c_rescale_barostat_rescale_positions");
-    // rq-3b6d5001
-    pub const MTK_NPT_RESCALE_VELOCITIES: KernelStage =
-        KernelStage::new("mtk_npt_rescale_velocities");
-    pub const MTK_NPT_VELOCITY_HALF_KICK: KernelStage =
-        KernelStage::new("mtk_npt_velocity_half_kick");
-    pub const MTK_NPT_POSITION_DRIFT: KernelStage =
-        KernelStage::new("mtk_npt_position_drift");
-    // rq-157e59ad
-    pub const SHAKE_SNAPSHOT: KernelStage = KernelStage::new("shake_snapshot");
-    pub const SHAKE_POSITIONS: KernelStage = KernelStage::new("shake_positions");
-    pub const RATTLE_VELOCITIES: KernelStage = KernelStage::new("rattle_velocities");
-    pub const CONSTRAINT_VIRIAL_SCATTER: KernelStage =
-        KernelStage::new("constraint_virial_scatter");
-    pub const SHAKE_POSITIONS_NO_VELOCITY: KernelStage =
-        KernelStage::new("shake_positions_no_velocity");
-    pub const SD_F_MAX_REDUCTION: KernelStage = KernelStage::new("sd_f_max_reduction");
-    pub const SD_COMPUTE_STEP: KernelStage = KernelStage::new("sd_compute_step");
-    pub const SD_SNAPSHOT: KernelStage = KernelStage::new("sd_snapshot");
-    pub const SD_RESTORE: KernelStage = KernelStage::new("sd_restore");
-    pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
-    pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
-        KernelStage::new("neighbor_displacement_squared");
-    pub const NEIGHBOR_LIST_BUILD: KernelStage = KernelStage::new("neighbor_list_build");
-    pub const COPY_POSITIONS_INTO_REFERENCE: KernelStage =
-        KernelStage::new("copy_positions_into_reference");
-
-    pub const ORDER: &'static [KernelStage] = &[
-        Self::VV_KICK_DRIFT,
-        Self::VV_KICK_DRIFT_LOSSLESS,
-        Self::LANGEVIN_KICK_HALF,
-        Self::LANGEVIN_DRIFT_HALF,
-        Self::LANGEVIN_OU_STEP,
-        Self::NEIGHBOR_DISPLACEMENT_SQUARED,
-        Self::COPY_POSITIONS_INTO_REFERENCE,
-        Self::NEIGHBOR_LIST_BUILD,
-        Self::LJ_PAIR_FORCE,
-        Self::COULOMB_PAIR_FORCE,
-        Self::SPME_REAL_PAIR_FORCE,
-        Self::SPME_RECIP_PIPELINE,
-        Self::SPME_FORCE_GATHER,
-        Self::REDUCE_PAIR_FORCES,
-        Self::REDUCE_PAIR_ENERGY_VIRIAL,
-        Self::MORSE_BOND_FORCE,
-        Self::REDUCE_BOND_FORCES,
-        Self::HARMONIC_ANGLE_FORCE,
-        Self::REDUCE_ANGLE_FORCES,
-        Self::KINETIC_ENERGY_REDUCE,
-        Self::NHC_RESCALE_VELOCITIES,
-        Self::CSVR_RESCALE_VELOCITIES,
-        Self::ANDERSEN_RESAMPLE,
-        Self::BERENDSEN_RESCALE_VELOCITIES,
-        Self::VIRIAL_SUM_REDUCE,
-        Self::POTENTIAL_ENERGY_REDUCE,
-        Self::BERENDSEN_BAROSTAT_RESCALE_POSITIONS,
-        Self::C_RESCALE_BAROSTAT_RESCALE_POSITIONS,
-        Self::MTK_NPT_RESCALE_VELOCITIES,
-        Self::MTK_NPT_VELOCITY_HALF_KICK,
-        Self::MTK_NPT_POSITION_DRIFT,
-        Self::SHAKE_SNAPSHOT,
-        Self::SHAKE_POSITIONS,
-        Self::RATTLE_VELOCITIES,
-        Self::CONSTRAINT_VIRIAL_SCATTER,
-        Self::SHAKE_POSITIONS_NO_VELOCITY,
-        Self::SD_F_MAX_REDUCTION,
-        Self::SD_COMPUTE_STEP,
-        Self::SD_SNAPSHOT,
-        Self::SD_RESTORE,
-        Self::ACCUMULATE_FORCES,
-        Self::VV_KICK,
-        Self::VV_KICK_LOSSLESS,
-    ];
 }
 
 // rq-d29f2811
@@ -261,6 +146,45 @@ impl Accumulator {
         self.count += 1;
         self.total_ns = self.total_ns.saturating_add(ns as u128);
     }
+
+    /// Fold `count` samples that all share the duration `ns` into the
+    /// accumulator in one shot. Used by the graph-replay timing path,
+    /// where one measured replay stands in for a whole batch of identical
+    /// replays: the total and count advance by the full batch while
+    /// min/max see the single representative value once.
+    fn record_ns_bulk(&mut self, ns: u64, count: u64) {
+        if count == 0 {
+            return;
+        }
+        if self.count == 0 {
+            self.min_ns = ns;
+            self.max_ns = ns;
+        } else {
+            if ns < self.min_ns {
+                self.min_ns = ns;
+            }
+            if ns > self.max_ns {
+                self.max_ns = ns;
+            }
+        }
+        self.count += count;
+        self.total_ns = self
+            .total_ns
+            .saturating_add((ns as u128).saturating_mul(count as u128));
+    }
+}
+
+/// Which captured graph a batch of replays came from. The two graphs
+/// differ only in the force evaluation's `AggregateLevel`, so a stage
+/// that runs only under `ForcesAndScalars` (the potential-energy and
+/// virial reductions, the `_fev` pair-force kernel) accrues `.timings`
+/// samples only from `ForcesAndScalars` replays. See `cuda-graphs.md`
+/// *`Timings` Interaction*.
+// rq-9ec19227
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphVariant {
+    ForcesOnly,
+    ForcesAndScalars,
 }
 
 #[derive(Debug)]
@@ -269,6 +193,22 @@ struct KernelStageState {
     stop: CUevent,
     outstanding_stop: bool,
     acc: Accumulator,
+    /// Number of `kernel_stop` calls observed during the active
+    /// capture iteration. Committed to one of the per-variant fields
+    /// below by `end_capture`.
+    captured_stops_per_replay: u32,
+    /// `kernel_stop` count per replay of the forces-only graph,
+    /// committed by `end_capture(GraphVariant::ForcesOnly)`.
+    captured_stops_forces_only: u32,
+    /// `kernel_stop` count per replay of the forces+scalars graph,
+    /// committed by `end_capture(GraphVariant::ForcesAndScalars)`.
+    captured_stops_forces_and_scalars: u32,
+    /// Representative per-replay duration (ns) for this stage under graph
+    /// mode, snapshotted from the instrumented calibration steps the
+    /// runner executes before the replay loop (see
+    /// `snapshot_graph_representatives`). `record_graph_replays` folds
+    /// this value in for every replayed step.
+    representative_ns: u64,
 }
 
 // rq-baf03449
@@ -276,6 +216,12 @@ pub struct Timings {
     device: Arc<CudaDevice>,
     kernel_states: HashMap<KernelStage, KernelStageState>,
     host_acc: HashMap<HostStage, Accumulator>,
+    /// When `true`, the runner is currently in the dry capture
+    /// iteration of a graph-eligible MD phase. `kernel_start` skips
+    /// the prior-stop synchronise, and `kernel_stop` increments each
+    /// stage's `captured_stops_per_replay` instead of setting
+    /// `outstanding_stop`. See `cuda-graphs.md`.
+    in_capture: bool,
 }
 
 impl std::fmt::Debug for Timings {
@@ -303,6 +249,10 @@ impl Timings {
                     stop,
                     outstanding_stop: false,
                     acc: Accumulator::default(),
+                    captured_stops_per_replay: 0,
+                    captured_stops_forces_only: 0,
+                    captured_stops_forces_and_scalars: 0,
+                    representative_ns: 0,
                 },
             );
         }
@@ -315,20 +265,104 @@ impl Timings {
             device,
             kernel_states,
             host_acc,
+            in_capture: false,
         })
+    }
+
+    /// Enter capture mode. `kernel_start` skips the prior-stop
+    /// synchronise; `kernel_stop` accumulates per-stage replay counts
+    /// instead of marking `outstanding_stop`. Per-replay counts reset
+    /// at the start of every capture.
+    pub fn begin_capture(&mut self) {
+        self.in_capture = true;
+        for state in self.kernel_states.values_mut() {
+            state.captured_stops_per_replay = 0;
+        }
+    }
+
+    /// Leave capture mode, committing the per-stage `kernel_stop`
+    /// counts observed during the capture to `variant`'s per-replay
+    /// field. Each captured graph (forces-only, forces+scalars) calls
+    /// this with its own `variant`; `record_graph_replays` then folds in
+    /// the matching counts. See `cuda-graphs.md` *`Timings` Interaction*.
+    // rq-9ec19227
+    pub fn end_capture(&mut self, variant: GraphVariant) {
+        self.in_capture = false;
+        for state in self.kernel_states.values_mut() {
+            match variant {
+                GraphVariant::ForcesOnly => {
+                    state.captured_stops_forces_only = state.captured_stops_per_replay;
+                }
+                GraphVariant::ForcesAndScalars => {
+                    state.captured_stops_forces_and_scalars =
+                        state.captured_stops_per_replay;
+                }
+            }
+        }
+    }
+
+    /// Snapshot each stage's mean accumulated duration as its
+    /// representative per-replay duration for the graph-replay loop.
+    /// Called once after the runner's instrumented calibration steps
+    /// (real per-step launches with live CUDA-event timing) and before
+    /// the batched replay loop, so the mean reflects the calibration
+    /// samples only. A stage with no calibration sample keeps a zero
+    /// representative. See `record_graph_replays` and `cuda-graphs.md`.
+    // rq-9ec19227
+    pub fn snapshot_graph_representatives(&mut self) {
+        for state in self.kernel_states.values_mut() {
+            state.representative_ns = if state.acc.count > 0 {
+                (state.acc.total_ns / state.acc.count as u128) as u64
+            } else {
+                0
+            };
+        }
+    }
+
+    /// Folds the calibrated per-kernel timings into a batch of
+    /// `n_launches` replays of the `variant` graph. CUDA rejects
+    /// `cuEventElapsedTime` on events captured into a graph
+    /// (`CUDA_ERROR_INVALID_VALUE`), so the in-graph events cannot be
+    /// timed by replaying them. Each stage instead carries a
+    /// `representative_ns` measured from the runner's instrumented
+    /// calibration steps (see `snapshot_graph_representatives`); this
+    /// records that value `captured_stops(variant) × n_launches` times in
+    /// one shot. A stage absent from `variant`'s graph has zero captured
+    /// stops there and accrues nothing, so a scalar-only stage's
+    /// `.timings` sample count tracks the number of `ForcesAndScalars`
+    /// replays — the scalar steps — rather than `n_steps`. A stage with no
+    /// calibration sample folds in a zero duration. See `cuda-graphs.md`.
+    // rq-9ec19227
+    pub fn record_graph_replays(&mut self, variant: GraphVariant, n_launches: u32) {
+        for state in self.kernel_states.values_mut() {
+            let stops = match variant {
+                GraphVariant::ForcesOnly => state.captured_stops_forces_only,
+                GraphVariant::ForcesAndScalars => {
+                    state.captured_stops_forces_and_scalars
+                }
+            } as u64;
+            if stops == 0 {
+                continue;
+            }
+            let count = stops * n_launches as u64;
+            state.acc.record_ns_bulk(state.representative_ns, count);
+        }
     }
 
     // rq-58981e16
     pub fn kernel_start(&mut self, stage: KernelStage) -> Result<(), TimingsError> {
+        let in_capture = self.in_capture;
         let state = self
             .kernel_states
             .get_mut(&stage)
             .unwrap_or_else(|| panic!("unknown KernelStage: {:?}", stage.name()));
-        if state.outstanding_stop {
+        let stream = *self.device.cu_stream();
+        if !in_capture && state.outstanding_stop {
+            // Resolving the prior sample requires synchronising on
+            // `stop`. When the runner is capturing this is forbidden;
+            // we skip the resolve path entirely (see `in_capture`).
             let start = state.start;
             let stop = state.stop;
-            // Synchronize on the stop event so cuEventElapsedTime won't return
-            // CUDA_ERROR_NOT_READY.
             unsafe { event::synchronize(stop)? };
             let elapsed_ms = unsafe { event::elapsed(start, stop)? };
             let ns = if elapsed_ms.is_finite() && elapsed_ms > 0.0 {
@@ -339,20 +373,24 @@ impl Timings {
             state.acc.record_ns(ns);
             state.outstanding_stop = false;
         }
-        let stream = *self.device.cu_stream();
         unsafe { event::record(state.start, stream)? };
         Ok(())
     }
 
     // rq-b17e6de6
     pub fn kernel_stop(&mut self, stage: KernelStage) -> Result<(), TimingsError> {
+        let in_capture = self.in_capture;
         let state = self
             .kernel_states
             .get_mut(&stage)
             .unwrap_or_else(|| panic!("unknown KernelStage: {:?}", stage.name()));
         let stream = *self.device.cu_stream();
         unsafe { event::record(state.stop, stream)? };
-        state.outstanding_stop = true;
+        if in_capture {
+            state.captured_stops_per_replay += 1;
+        } else {
+            state.outstanding_stop = true;
+        }
         Ok(())
     }
 
@@ -367,6 +405,45 @@ impl Timings {
             .get_mut(&stage)
             .unwrap_or_else(|| panic!("unknown HostStage: {:?}", stage.name()));
         acc.record_ns(ns_u64);
+    }
+
+    /// Marks every stage's outstanding stop event as already drained
+    /// without synchronising. Used by the CUDA graph capture path to
+    /// invalidate event-record-node references left over from the
+    /// captured iteration; those events fired inside graph execution
+    /// and cannot be measured by the host's `event::elapsed` after
+    /// the graph instance is destroyed.
+    pub fn forget_outstanding(&mut self) {
+        for stage in KernelStage::ORDER {
+            let state = self.kernel_states.get_mut(stage).expect("stage present");
+            state.outstanding_stop = false;
+        }
+    }
+
+    /// Drains every stage's outstanding start/stop event pair into its
+    /// accumulator. Used by the CUDA graph capture path to flush all
+    /// outstanding events before `cuStreamBeginCapture_v2` — the per-
+    /// stage `event::synchronize` call inside `kernel_start` is not
+    /// permitted inside a captured region, so we settle everything
+    /// before capture begins.
+    pub fn drain_outstanding(&mut self) -> Result<(), TimingsError> {
+        for stage in KernelStage::ORDER {
+            let state = self.kernel_states.get_mut(stage).expect("stage present");
+            if state.outstanding_stop {
+                let start = state.start;
+                let stop = state.stop;
+                unsafe { event::synchronize(stop)? };
+                let elapsed_ms = unsafe { event::elapsed(start, stop)? };
+                let ns = if elapsed_ms.is_finite() && elapsed_ms > 0.0 {
+                    (elapsed_ms as f64 * 1_000_000.0).round() as u64
+                } else {
+                    0
+                };
+                state.acc.record_ns(ns);
+                state.outstanding_stop = false;
+            }
+        }
+        Ok(())
     }
 
     // rq-c4845f90

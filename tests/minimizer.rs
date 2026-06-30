@@ -42,7 +42,7 @@ fn two_argon_offset_init() -> &'static str {
 
 fn argon_min_config() -> String {
     r#"schema_version = 1
-units = "atomic"
+units = "si"
 init = "argon.in.xyz"
 
 [simulation]
@@ -56,6 +56,11 @@ name = "min"
 kind = "steepest-descent"
 initial_step = 1.0e-13
 max_step = 1.0e-11
+# Just above the f32 catastrophic-cancellation floor of the LJ
+# functor near the LJ minimum (~7.5e-15 N for this Ar–Ar system).
+# Lower thresholds are unreachable in single-precision regardless of
+# accumulator type.
+force_tolerance = 1.0e-13
 max_iterations = 200
 
 [minimization.output]
@@ -566,8 +571,10 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
     // surface this as IncompatibleConstraint at config-load time.
     #[derive(Debug, Clone)]
     struct NoProjectionBuilder;
+        impl heddle_md::registry::KindedBuilder for NoProjectionBuilder {
+        fn kind_name(&self) -> &'static str { "fictional-cluster" }        }
+
     impl ConstraintBuilder for NoProjectionBuilder {
-        fn kind_name(&self) -> &'static str { "fictional-cluster" }
         fn validate_params(&self, _p: &toml::Value) -> Result<(), ConfigError> { Ok(()) }
         fn supports_position_projection_only(&self, _p: &toml::Value) -> bool { false }
         fn expected_atom_count(&self, _p: &toml::Value) -> usize { 1 }
@@ -589,9 +596,6 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
             _constraint_types: &[NamedSlotConfig],
         ) -> Result<Box<dyn Constraint>, ConstraintError> {
             unreachable!("rejected before construction")
-        }
-        fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
-            Box::new(self.clone())
         }
     }
 
@@ -697,8 +701,10 @@ fn custom_minimizer_builder_is_selectable() {
     }
     #[derive(Debug, Clone)]
     struct StubBuilder;
+        impl heddle_md::registry::KindedBuilder for StubBuilder {
+        fn kind_name(&self) -> &'static str { "test-stub" }        }
+
     impl MinimizerBuilder for StubBuilder {
-        fn kind_name(&self) -> &'static str { "test-stub" }
         fn validate_params(&self, _p: &toml::Value) -> Result<(), heddle_md::io::config::ConfigError> {
             Ok(())
         }
@@ -710,9 +716,6 @@ fn custom_minimizer_builder_is_selectable() {
             _params: &toml::Value,
         ) -> Result<Box<dyn Minimizer>, MinimizerError> {
             Ok(Box::new(StubMinimizer))
-        }
-        fn box_clone(&self) -> Box<dyn MinimizerBuilder> {
-            Box::new(self.clone())
         }
     }
     let mut registry = MinimizerRegistry::with_builtins();
@@ -1001,7 +1004,7 @@ fn build_sd_argon_pair(
 
     let gpu = init_device().unwrap();
     let box_au = 1.0e-7 / len_f;
-    let sim_box = SimulationBox::new(box_au as Real, box_au as Real, box_au as Real, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, box_au as Real, box_au as Real, box_au as Real, 0.0, 0.0, 0.0).unwrap();
     let particle_state = ParticleState::new(
         vec![0.0, r_au as Real],
         vec![0.0, 0.0],
@@ -1115,14 +1118,14 @@ fn sd_step_formula_moves_largest_force_atom_by_exactly_step() {
     // by comparing pre/post via the buffers.
     let (gpu, mut sd, mut ff, mut buffers, sim_box, mut timings) =
         build_sd_argon_pair(1.0e-13, 1.0e-11, 1.2, 0.2, 0.0, 0.0, 3.5e-10);
-    let pre_x: Vec<Real> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let pre_x: Vec<Real> = buffers.download_positions().unwrap().0;
     warm_up_forces(&mut ff, &mut buffers, &sim_box, &mut timings);
     let _ = sd.initial_state(&mut buffers, &mut timings).unwrap();
     let report = sd
         .step(&mut buffers, &sim_box, &mut ff, None, &mut timings)
         .unwrap();
     assert!(report.accepted);
-    let post_x: Vec<Real> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let post_x: Vec<Real> = buffers.download_positions().unwrap().0;
     let dx0 = (post_x[0] - pre_x[0]) as f64;
     let dx1 = (post_x[1] - pre_x[1]) as f64;
     let step = report.step_size;
@@ -1215,14 +1218,14 @@ fn sd_step_halves_and_restores_positions_on_rejection() {
     // At r = 3.5e-10 (compressed), the initial step massively overshoots.
     let (gpu, mut sd, mut ff, mut buffers, sim_box, mut timings) =
         build_sd_argon_pair(init, max, 1.0, step_decrease, 0.0, 0.0, 3.5e-10);
-    let pre_x: Vec<Real> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let pre_x: Vec<Real> = buffers.download_positions().unwrap().0;
     warm_up_forces(&mut ff, &mut buffers, &sim_box, &mut timings);
     let _ = sd.initial_state(&mut buffers, &mut timings).unwrap();
     let r1 = sd
         .step(&mut buffers, &sim_box, &mut ff, None, &mut timings)
         .unwrap();
     assert!(!r1.accepted, "first step should be rejected (initial_step too large)");
-    let post_x: Vec<Real> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let post_x: Vec<Real> = buffers.download_positions().unwrap().0;
     assert_eq!(post_x, pre_x, "positions should be restored byte-for-byte on rejection");
     // The next iteration's step has the decrease applied.
     let r2 = sd

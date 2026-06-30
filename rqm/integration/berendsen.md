@@ -55,22 +55,31 @@ the post-step velocities. For each invocation with timestep `dt`:
    than producing imaginary numbers. Sensible parameters
    (`dt / τ ≤ 0.1`) never hit the floor.
 
-3. Apply the rescale with the shared `rescale_velocities` helper
-   (`nose-hoover-chain.md`):
-   `v_i ← λ · v_i` for every particle `i` and axis.
+The compute of `λ²` and `λ` runs entirely device-side as part of
+step 2's kernel (see *Per-Step Kernel Sequence* below). The host
+never downloads `K_old`.
+
+3. Apply the rescale via the JIT-composed post-force per-particle
+   kernel: `v_i ← λ · v_i` for every particle `i` and axis.
+   `apply_post` itself does not launch a per-particle rescale;
+   Berendsen's source fragment carries the
+   `v *= berendsen_factor_device[0]` body that the composed kernel
+   inlines per thread.
 
 4. Update the running
-   `cumulative_injection += K_old · (λ² − 1)`. The host computes
-   `K_new = λ² · K_old` directly from the kernel-supplied `K_old`
-   and the host-computed `λ`; no second kinetic-energy reduction is
-   needed.
+   `cumulative_injection += K_old · (λ² − 1)`. The accumulator
+   update happens on the device in the same kernel that writes
+   `factor_device`; the host drains the device accumulator on the
+   `flush_pending_injection` cadence the runner imposes before
+   each log row.
 
 When `K_old = 0` on entry (every velocity exactly zero, e.g. a
 freshly-initialised system before the first force-driven kick), the
-formula for `λ²` divides by zero. The thermostat detects this and
-skips both the rescale launch and the `cumulative_injection` update
-for that invocation. The next integrator step's velocity-Verlet kick
-produces non-zero `K` and the thermostat resumes.
+formula for `λ²` divides by zero. The device kernel detects this
+and writes `factor_device = 1` (no rescale) and a zero injection
+delta for that invocation. The next integrator step's
+velocity-Verlet kick produces non-zero `K` and the thermostat
+resumes.
 
 `apply_pre` is the trait default (no-op): Berendsen is a post-only
 weak-coupling formula and never modifies velocities before the
@@ -81,13 +90,20 @@ integrator runs.
 Per timestep the Berendsen thermostat's `apply_post` runs the
 following in fixed order:
 
-| Order | Step      | Kernel / call           | Operation                                  | Stage label                  |
-| ----- | --------- | ----------------------- | ------------------------------------------ | ---------------------------- |
-| 1     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_old`                  | `KineticEnergyReduce`        |
-| 2     | Rescale   | `rescale_velocities`    | host computes λ, scale velocities by λ     | `BerendsenRescaleVelocities` |
+| Order | Step              | Kernel / call                                     | Operation                                                                     | Stage label                  |
+| ----- | ----------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------- |
+| 1     | KE reduce         | `compute_kinetic_energy_on_device`                | writes `ke_scratch` device buffer; no dtoh                                    | `KineticEnergyReduce`        |
+| 2     | Compute factor    | `berendsen_compute_factor`                        | reads `ke_scratch` + slot scalars; writes `factor_device` and accumulator delta | `BerendsenComputeFactor`     |
+| 3     | Velocity rescale  | composed post-force per-particle kernel           | `v ← λ · v` per particle                                                       | `JitComposedPostForce`       |
 
-`kinetic_energy_reduce` and `rescale_velocities` are reused from
-`nose-hoover-chain.md`. No new CUDA kernels.
+Steps 1 and 2 run inside `apply_post`. Step 3 runs from the
+JIT-composed post-force per-particle kernel via Berendsen's source
+fragment. `compute_kinetic_energy_on_device` is reused from
+`csvr.md`. `berendsen_compute_factor` is a single-thread device
+kernel owned by this slot that takes `ke_scratch`, `kT_target`,
+`g_dof`, `dt / τ`, and the cumulative-injection accumulator
+pointer, and writes the rescale factor `λ` plus the injection
+delta.
 
 The host-side work each step is one `f64` `λ` computation; cost is
 negligible. The integrator's own kernels (`vv_kick_drift`, `vv_kick`,

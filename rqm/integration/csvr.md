@@ -66,9 +66,13 @@ the post-step velocities. For each invocation with timestep `dt`, let
    `K_new = K` (no rescale this invocation). This guard keeps the
    thermostat robust for tiny systems.
 
-5. Apply the rescale with the shared `rescale_velocities` helper
-   (documented in `nose-hoover-chain.md`):
-   `v_i ← α · v_i` for every particle `i` and axis.
+5. Apply the rescale via the JIT-composed post-force per-particle
+   kernel (see `jit-composed-post-force.md` and the *Per-Step
+   Kernel Sequence* section below): `v_i ← α · v_i` for every
+   particle `i` and axis. `apply_post` itself does not launch a
+   per-particle rescale; CSVR's source fragment carries the
+   `v *= csvr_factor_device[0]` body that the composed kernel
+   inlines per thread.
 
 The CSVR Markov kernel is exact in the sense that repeated
 application from any non-zero initial `K` converges to the canonical
@@ -85,26 +89,53 @@ integrator runs.
 
 ## Per-Step Kernel Sequence <!-- rq-5f59fa80 -->
 
-Per timestep the CSVR thermostat's `apply_post` runs the following in
-fixed order:
+Per timestep the CSVR thermostat's `apply_post` runs the following
+two device-side steps; the third (the per-particle velocity
+rescale) is dispatched by the JIT-composed post-force per-particle
+kernel (see `jit-composed-post-force.md`).
 
-| Order | Step               | Kernel / call                   | Operation                                          | Stage label             |
-| ----- | ------------------ | ------------------------------- | -------------------------------------------------- | ----------------------- |
-| 1     | KE reduce          | `kinetic_energy_reduce`         | one f32 scalar of `K`                              | `KineticEnergyReduce`   |
-| 2     | Host RNG + rescale | `rescale_velocities` (1 launch) | sample `R`, `S`, compute `α`, scale velocities     | `CsvrRescaleVelocities` |
+| Order | Step               | Kernel / call                                    | Operation                                       | Stage label                  |
+| ----- | ------------------ | ------------------------------------------------ | ----------------------------------------------- | ---------------------------- |
+| 1     | KE reduce          | `kinetic_energy_reduce`                          | one f32 scalar of `K`                           | `KineticEnergyReduce`        |
+| 2     | Sample + factor    | `csvr_sample_and_factor` (small `N_f`) or `csvr_sample_partials` + `csvr_finish_from_partials` (large `N_f`) | device Philox draws + chi-squared sum + `α` to `factor_device` | `CsvrSampleAndFactor`        |
+| 3     | Velocity rescale   | composed post-force per-particle kernel          | `v ← α · v` per particle                        | `JitComposedPostForce`       |
 
-`kinetic_energy_reduce` and `rescale_velocities` are reused from
-`nose-hoover-chain.md`; the timings file labels CSVR's velocity-rescale
-call under `CsvrRescaleVelocities` to distinguish it from
-`NhcRescaleVelocities` and `BerendsenRescaleVelocities`. No new CUDA
-kernels.
+The first two kernels run inside `apply_post`; the third runs from
+the JIT-composed post-force per-particle kernel via CSVR's
+participation through its source fragment. The standalone
+`csvr_rescale_velocities` kernel and the corresponding
+`CsvrRescaleVelocities` timings stage no longer exist; the per-
+particle rescale body lives in CSVR's source fragment described
+below.
 
-The host-side work each invocation is `N_f` Philox-4×32-10
-invocations + a chi-squared sum + the `α` calculation; for `N_f` of
-order 10³ this is < 10 µs on a modern CPU. The integrator's own
-kernels (`vv_kick_drift`, `vv_kick`, the force pipeline) are launched
-separately by `integrator.step()` and are not part of this slot's
-per-step sequence.
+The integrator's own kernels (`vv_kick_drift`, `vv_kick`, the force
+pipeline) are launched separately by `integrator.step()` and are not part
+of this slot's per-step sequence.
+
+**Computing the chi-squared sum `S`.** The `N_f − 1` Gaussian draws and
+their squared sum `S` are the dominant per-step cost at production sizes
+(`N_f` of order 10⁵–10⁶). The sample is dispatched on `N_f`:
+
+- `N_f ≤ 8192`: a single 256-thread block (`csvr_sample_and_factor`)
+  draws every `ξ_i`, reduces `S`, and performs the scalar finish (draw
+  `R`, form `K_new`, write `α`, advance the draw counter).
+- `N_f > 8192`: a **deterministic two-pass** decomposition that
+  parallelises the draw across the whole device. `csvr_sample_partials`
+  launches a fixed 1024 blocks, each owning a contiguous chunk of the
+  `N_f − 1` draw indices and writing its partial `Σ ξ_i²` to one slot of
+  a length-1024 buffer; `csvr_finish_from_partials` (single block)
+  reduces those partials to `S` and performs the scalar finish.
+
+Determinism holds for the multi-block path: `ξ_i = philox(seed, counter,
+i, 0)` depends only on the index `i`, the block→chunk mapping is fixed by
+`(N_f, 1024)`, and both reductions are fixed-shape, so two runs on the
+same GPU produce a byte-identical `S` and `α`. The multi-block summation
+order differs from the single-block kernel, so the `8192` threshold sits
+above every test fixture, leaving their values unchanged. Both kernels
+have constant launch dimensions and are CUDA-graph-capturable; the draw
+counter is read in the partials pass and read-then-incremented once in
+the finish pass, so graph replays advance the Philox sequence exactly as
+the single-block kernel does.
 
 ## Parameters <!-- rq-a8da85cf -->
 
@@ -299,20 +330,54 @@ CSVR introduces no new CUDA kernels. It reuses
 
 ## Launch Configuration <!-- rq-cb0c9d24 -->
 
-Per-step launch counts (per `apply_post` invocation):
+Per-step launch counts (per `apply_post` invocation, excluding
+the per-particle velocity rescale which is dispatched from the
+composed kernel):
 
-- `kinetic_energy_reduce`: 1 launch (single block of 256 threads).
-- `rescale_velocities`: 1 launch (block 256, grid `ceil(n/256)`).
+- kinetic-energy reduction: 1 launch (`kinetic_energy_reduce`, single
+  block) for `n <= SINGLE_BLOCK_REDUCE_MAX`, else 2 launches
+  (`kinetic_energy_reduce_partials` over `REDUCE_PARTIAL_BLOCKS` blocks
+  followed by a single-block `virial_sum_reduce` of the partials). See
+  `nose-hoover-chain.md`.
+- `csvr_sample_and_factor`: 1 launch (single block).
+
+The per-particle velocity rescale (`v ← α · v`) is dispatched once
+per step by the framework's JIT-composed post-force per-particle
+kernel; see *Post-Force Per-Particle Fragment* below.
 
 All launches go through the default stream of
 `ParticleBuffers::device`.
+
+## Post-Force Per-Particle Fragment <!-- rq-062d4d53 -->
+
+`CsvrThermostat::post_force_per_particle_fragment()` returns the
+per-particle velocity rescale as a `PerParticleFragment` (see
+`jit-composed-post-force.md`):
+
+- The per-thread body reads `Real factor = csvr_factor_device[0];`
+  once (the factor scalar is broadcast cheaply across threads via
+  L1 cache) and applies `velocities_x/y/z[i] *= factor`.
+
+- `entry_point_args` declares `const Real *csvr_factor_device`
+  (the device-resident factor scalar populated by
+  `csvr_sample_and_factor`).
+
+- `bind_post_force_per_particle_args` pushes
+  `&self.factor_device` onto the launch builder.
+
+The framework's composed kernel orders CSVR's body AFTER the
+integrator's post-force kick (velocity-Verlet's `KickHalf`), so
+the rescale reads the post-kick velocity and writes the rescaled
+velocity. A subsequent barostat fragment (when configured) reads
+the CSVR-rescaled velocity.
 
 ## Determinism <!-- rq-72a606e3 -->
 
 - `rescale_velocities` is deterministic by construction (see
   `nose-hoover-chain.md`).
-- `kinetic_energy_reduce` uses a single-block deterministic reduction
-  tree (see `nose-hoover-chain.md`).
+- the kinetic-energy reduction uses a deterministic reduction tree —
+  single-block for small `n`, a fixed-mapping two-pass multi-block
+  reduction for large `n` (see `nose-hoover-chain.md`).
 - The host-side Philox stream is pure functional; the chi-squared sum
   proceeds in fixed left-to-right sample-index order in `f64`.
 - The `draw_counter` advances by exactly `+1` per `apply_post`, so

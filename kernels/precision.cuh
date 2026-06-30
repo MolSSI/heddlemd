@@ -19,9 +19,11 @@
 typedef double Real;
 // rq-928da8e4
 typedef double2 Real2;
+typedef double4 Real4;
 #else
 typedef float Real;
 typedef float2 Real2;
+typedef float4 Real4;
 #endif
 
 // rq-4dd1b9e3

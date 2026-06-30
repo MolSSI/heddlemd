@@ -160,15 +160,18 @@ impl ParticleState {
         check_len("particle_ids", n, self.particle_ids.len())?;
 
         let device = &buffers.device;
-        device
-            .dtoh_sync_copy_into(&buffers.positions_x, &mut self.positions_x)
-            .map_err(GpuError::from)?;
-        device
-            .dtoh_sync_copy_into(&buffers.positions_y, &mut self.positions_y)
-            .map_err(GpuError::from)?;
-        device
-            .dtoh_sync_copy_into(&buffers.positions_z, &mut self.positions_z)
-            .map_err(GpuError::from)?;
+        if n > 0 {
+            let posq_host: Vec<crate::precision::Real4> = device
+                .dtoh_sync_copy(&buffers.posq)
+                .map_err(GpuError::from)?;
+            crate::gpu::buffers::split_posq_into(
+                &posq_host,
+                &mut self.positions_x,
+                &mut self.positions_y,
+                &mut self.positions_z,
+                &mut self.charges,
+            );
+        }
         device
             .dtoh_sync_copy_into(&buffers.images_x, &mut self.images_x)
             .map_err(GpuError::from)?;
@@ -204,9 +207,6 @@ impl ParticleState {
             .map_err(GpuError::from)?;
         device
             .dtoh_sync_copy_into(&buffers.masses, &mut self.masses)
-            .map_err(GpuError::from)?;
-        device
-            .dtoh_sync_copy_into(&buffers.charges, &mut self.charges)
             .map_err(GpuError::from)?;
         device
             .dtoh_sync_copy_into(&buffers.type_indices, &mut self.type_indices)

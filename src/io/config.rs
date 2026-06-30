@@ -106,6 +106,8 @@ pub enum ConfigError {
     IncompatibleConstraint { integrator: String, phase: String },
     #[error("constraint type `{name}` is malformed: {reason}")]
     ShakeParamsMalformed { name: String, reason: String },
+    #[error("settle constraint type `{name}` is malformed: {reason}")]
+    SettleParamsMalformed { name: String, reason: String },
     #[error("[{slot}] section's `kind = \"{kind}\"` does not match any registered builder")]
     UnknownKind { slot: &'static str, kind: String },
     #[error("unknown `units` value `{got}`: expected one of `si`, `atomic`")]
@@ -125,6 +127,42 @@ pub enum ConfigError {
 pub struct SimulationConfig {
     pub seed: u64,
     pub temperature: f64,
+    /// Number of step replays between displacement-flag downloads and
+    /// output-cadence re-evaluations when an MD phase runs under CUDA
+    /// graph mode. Default 50. Must be `>= 1`. The displacement-check
+    /// kernel runs every step inside the captured graph regardless of
+    /// this value; raising the batch size lowers the per-batch
+    /// flag-download rate without changing the per-step displacement
+    /// bookkeeping. See `cuda-graphs.md`.
+    #[serde(default = "default_graph_batch_size")]
+    pub graph_batch_size: u32,
+    /// When `true`, every MD phase runs the per-step launch loop with
+    /// full per-kernel `Timings`. Default `true` — Phase 3's CUDA
+    /// graph capture is currently incompatible with the SPME
+    /// reciprocal pipeline's multi-stream + cuFFT topology. Opt in
+    /// with `cuda_graphs_disable = false` only for configurations
+    /// whose force field does not include SPME (or once SPME's
+    /// graph-capture compatibility is in place).
+    #[serde(default)]
+    pub cuda_graphs_disable: bool,
+    /// When `true`, JIT-compiled CUDA kernels are built with
+    /// `--use_fast_math`. Default `true`. Fast-math is bit-reproducible
+    /// run-to-run on a fixed GPU (the load-bearing reproducibility
+    /// invariant still holds); it trades a few ULP of
+    /// transcendental/division precision — within the engine's f32 error
+    /// class — for faster pair-force evaluation. Set `false` to compile
+    /// the precise-IEEE kernels instead. See `precision.md`.
+    #[serde(default = "default_fast_math")]
+    pub fast_math: bool,
+}
+
+// rq-a84e1c76
+fn default_fast_math() -> bool {
+    true
+}
+
+fn default_graph_batch_size() -> u32 {
+    50
 }
 
 // rq-18441e33 — parsed `[[phase]]` entry. The runner walks
@@ -218,6 +256,11 @@ pub struct SlotConfig {
     pub params: toml::Value,
 }
 
+impl crate::units::Convert for SlotConfig {
+    fn from_user(&mut self, _u: crate::units::UnitSystem) {}
+    fn to_user(&mut self, _u: crate::units::UnitSystem) {}
+}
+
 impl SlotConfig {
     pub fn new(kind: impl Into<String>, params: toml::Value) -> Self {
         SlotConfig {
@@ -268,6 +311,11 @@ pub struct NamedSlotConfig {
     pub name: String,
     pub kind: String,
     pub params: toml::Value,
+}
+
+impl crate::units::Convert for NamedSlotConfig {
+    fn from_user(&mut self, _u: crate::units::UnitSystem) {}
+    fn to_user(&mut self, _u: crate::units::UnitSystem) {}
 }
 
 impl NamedSlotConfig {
@@ -418,7 +466,7 @@ impl AngleTypeConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub enum NeighborListConfig {
     AllPairs,
-    CellList { max_neighbors: u32, r_skin: f64 },
+    CellList { r_skin: f64 },
 }
 
 // CoulombConfig — parsed `[coulomb]` table; rq-846bdb8b
@@ -488,9 +536,6 @@ pub struct Config {
 fn default_spline_order() -> u32 {
     4
 }
-fn default_max_neighbors() -> u32 {
-    256
-}
 fn default_trajectory_every() -> u64 {
     100
 }
@@ -510,7 +555,42 @@ fn default_true() -> bool {
 
 const SUPPORTED_SCHEMA_VERSION: u64 = 1;
 
-#[derive(Debug, Deserialize)]
+// Raw (deserialise-time) forms of the structs shared with the public
+// Config: their unit-bearing fields are dimensioned newtypes converted by
+// the `from_user` pass; build_config unwraps them into the f64 public form.
+#[derive(Debug, Deserialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+struct RawSimulationConfig {
+    seed: u64,
+    temperature: crate::units::Temperature,
+    #[serde(default = "default_graph_batch_size")]
+    graph_batch_size: u32,
+    #[serde(default)]
+    cuda_graphs_disable: bool,
+    #[serde(default = "default_fast_math")]
+    fast_math: bool,
+}
+
+#[derive(Debug, Deserialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+struct RawParticleTypeConfig {
+    name: String,
+    mass: crate::units::Mass,
+    #[serde(default)]
+    charge: crate::units::Charge,
+}
+
+#[derive(Debug, Deserialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+struct RawSpmeConfig {
+    alpha: crate::units::InverseLength,
+    r_cut_real: crate::units::Length,
+    grid: [u32; 3],
+    #[serde(default = "default_spline_order")]
+    spline_order: u32,
+}
+
+#[derive(Debug, Deserialize, crate::units::Convert)]
 struct RawConfig {
     schema_version: u64,
     /// Optional `units` selector. Accepts the strings `"si"` (default)
@@ -520,12 +600,12 @@ struct RawConfig {
     init: String,
     #[serde(default)]
     topology: Option<String>,
-    simulation: SimulationConfig,
+    simulation: RawSimulationConfig,
     #[serde(default, rename = "phase")]
     phases: Vec<toml::Spanned<RawPhaseConfig>>,
     #[serde(default, rename = "minimization")]
     minimizations: Vec<toml::Spanned<RawMinimizationConfig>>,
-    particle_types: Vec<ParticleTypeConfig>,
+    particle_types: Vec<RawParticleTypeConfig>,
     #[serde(default)]
     pair_interactions: Vec<RawPairInteraction>,
     #[serde(default)]
@@ -537,12 +617,12 @@ struct RawConfig {
     #[serde(default)]
     coulomb: Option<RawCoulombConfig>,
     #[serde(default)]
-    spme: Option<SpmeConfig>,
+    spme: Option<RawSpmeConfig>,
     #[serde(default)]
     neighbor_list: Option<RawNeighborList>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 struct RawMinimizationConfig {
     name: String,
@@ -551,7 +631,7 @@ struct RawMinimizationConfig {
     output: Option<RawMinimizationOutputConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 struct RawMinimizationOutputConfig {
     #[serde(default)]
@@ -572,12 +652,12 @@ fn default_minlog_every() -> u64 {
     1
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 struct RawPhaseConfig {
     name: String,
     n_steps: u64,
-    dt: f64,
+    dt: crate::units::Time,
     integrator: SlotConfig,
     #[serde(default)]
     thermostat: Option<SlotConfig>,
@@ -587,44 +667,49 @@ struct RawPhaseConfig {
     output: Option<RawOutputConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
 enum RawPairInteraction {
     LennardJones {
         between: [String; 2],
-        cutoff: f64,
+        cutoff: crate::units::Length,
         #[serde(default)]
-        r_switch: Option<f64>,
-        sigma: f64,
-        epsilon: f64,
+        r_switch: Option<crate::units::Length>,
+        sigma: crate::units::Length,
+        epsilon: crate::units::Energy,
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
 enum RawBondType {
     Morse {
         name: String,
-        de: f64,
-        a: f64,
-        re: f64,
+        de: crate::units::Energy,
+        a: crate::units::InverseLength,
+        re: crate::units::Length,
     },
 }
 
 impl From<RawBondType> for BondTypeConfig {
     fn from(r: RawBondType) -> Self {
         match r {
-            RawBondType::Morse { name, de, a, re } => BondTypeConfig::Morse { name, de, a, re },
+            RawBondType::Morse { name, de, a, re } => BondTypeConfig::Morse {
+                name,
+                de: de.0,
+                a: a.0,
+                re: re.0,
+            },
         }
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
 enum RawAngleType {
     Harmonic {
         name: String,
-        k_theta: f64,
+        k_theta: crate::units::Energy,
         theta_0: f64,
     },
 }
@@ -638,22 +723,22 @@ impl From<RawAngleType> for AngleTypeConfig {
                 theta_0,
             } => AngleTypeConfig::Harmonic {
                 name,
-                k_theta,
+                k_theta: k_theta.0,
                 theta_0,
             },
         }
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 struct RawCoulombConfig {
-    cutoff: f64,
+    cutoff: crate::units::Length,
     #[serde(default)]
-    r_switch: Option<f64>,
+    r_switch: Option<crate::units::Length>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(tag = "mode", rename_all = "kebab-case", deny_unknown_fields)]
 enum RawNeighborList {
     // Empty-struct form (`AllPairs {}`) so `deny_unknown_fields` rejects
@@ -662,14 +747,12 @@ enum RawNeighborList {
     // skip the deny check.
     AllPairs {},
     CellList {
-        #[serde(default = "default_max_neighbors")]
-        max_neighbors: u32,
         #[serde(default)]
-        r_skin: Option<f64>,
+        r_skin: Option<crate::units::Length>,
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 struct RawOutputConfig {
     #[serde(default)]
@@ -713,7 +796,7 @@ pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
         .map_err(|e| ConfigError::Io(format!("{}: {}", path.display(), e)))?;
 
     let de = toml::Deserializer::new(&raw_text);
-    let raw_config: RawConfig =
+    let mut raw_config: RawConfig =
         serde_path_to_error::deserialize(de).map_err(serde_error_to_config_error)?;
 
     if raw_config.schema_version != SUPPORTED_SCHEMA_VERSION {
@@ -737,9 +820,61 @@ pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
     };
 
     let base_dir = path.parent().unwrap_or(Path::new("."));
-    let config = build_config(raw_config, path, base_dir, units);
+    // rq-bf5df23e — one recursive Convert pass rescales every typed
+    // unit-bearing field to atomic units before structural assembly.
+    {
+        use crate::units::Convert;
+        raw_config.from_user(units);
+    }
+    let mut config = build_config(raw_config, path, base_dir, units);
+    // Open-shaped slot params are converted to atomic units by the owning
+    // builder's `convert_params`. The built-in registries supply those
+    // builders; an unknown kind is left untouched and rejected later by
+    // `validate_against`. rq-0f6b7b7a
+    convert_all_slot_params(&mut config)?;
     config.validate()?;
     Ok(config)
+}
+
+// rq-0f6b7b7a — drive each open-shaped slot's unit conversion through the
+// builder that owns its kind's schema (see `KindedBuilder::convert_params`).
+fn convert_all_slot_params(config: &mut Config) -> Result<(), ConfigError> {
+    use crate::registry::{KindedBuilder, Registry};
+    let units = config.units;
+    let registries = crate::Registries::with_builtins();
+
+    fn conv<B: KindedBuilder + ?Sized>(
+        reg: &Registry<B>,
+        units: UnitSystem,
+        kind: &str,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        match reg.lookup(kind) {
+            Some(b) => b.convert_params(units, params),
+            None => Ok(()),
+        }
+    }
+
+    for phase in &mut config.phases {
+        match phase {
+            PhaseKind::Md(p) => {
+                conv(&registries.integrators, units, &p.integrator.kind, &mut p.integrator.params)?;
+                if let Some(t) = &mut p.thermostat {
+                    conv(&registries.thermostats, units, &t.kind, &mut t.params)?;
+                }
+                if let Some(b) = &mut p.barostat {
+                    conv(&registries.barostats, units, &b.kind, &mut b.params)?;
+                }
+            }
+            PhaseKind::Minimization(m) => {
+                conv(&registries.minimizers, units, &m.algorithm.kind, &mut m.algorithm.params)?;
+            }
+        }
+    }
+    for ct in &mut config.constraint_types {
+        conv(&registries.constraint_types, units, &ct.kind, &mut ct.params)?;
+    }
+    Ok(())
 }
 
 // Translate a `serde_path_to_error::Error<toml::de::Error>` into the
@@ -902,15 +1037,10 @@ fn build_config(
     base_dir: &Path,
     units: UnitSystem,
 ) -> Config {
-    use crate::units::{convert_slot_params, Dimension};
-    let to_au_length = |v: f64| units.from_user(Dimension::Length, v);
-    let to_au_inv_length = |v: f64| units.from_user(Dimension::InverseLength, v);
-    let to_au_mass = |v: f64| units.from_user(Dimension::Mass, v);
-    let to_au_charge = |v: f64| units.from_user(Dimension::Charge, v);
-    let to_au_energy = |v: f64| units.from_user(Dimension::Energy, v);
-    let to_au_time = |v: f64| units.from_user(Dimension::Time, v);
-    let to_au_temperature = |v: f64| units.from_user(Dimension::Temperature, v);
-
+    // Unit conversion already happened in the single `raw.from_user(units)`
+    // pass before this function; every Raw unit-bearing field is in atomic
+    // units, so build_config only unwraps the dimensioned newtypes (`.0`)
+    // and assembles the public structs.
     let init = resolve_path(base_dir, &raw.init);
     let topology = raw.topology.as_deref().map(|s| resolve_path(base_dir, s));
 
@@ -927,71 +1057,43 @@ fn build_config(
                 sigma,
                 epsilon,
             } => {
-                let cutoff = to_au_length(cutoff);
-                let r_switch = r_switch.map(to_au_length).unwrap_or(0.9 * cutoff);
+                let cutoff = cutoff.0;
+                let r_switch = r_switch.map(|x| x.0).unwrap_or(0.9 * cutoff);
                 PairInteractionConfig {
                     between: normalise_pair(&between[0], &between[1]),
                     cutoff,
                     r_switch,
                     potential: PairPotentialParams::LennardJones {
-                        sigma: to_au_length(sigma),
-                        epsilon: to_au_energy(epsilon),
+                        sigma: sigma.0,
+                        epsilon: epsilon.0,
                     },
                 }
             }
         })
         .collect();
 
-    let bond_types: Vec<BondTypeConfig> = raw
-        .bond_types
-        .into_iter()
-        .map(|b| {
-            let mut bt: BondTypeConfig = b.into();
-            match &mut bt {
-                BondTypeConfig::Morse { name: _, de, a, re } => {
-                    *de = to_au_energy(*de);
-                    *a = to_au_inv_length(*a);
-                    *re = to_au_length(*re);
-                }
-            }
-            bt
-        })
-        .collect();
+    // The `From<Raw…>` impls unwrap the dimensioned newtypes; the values
+    // are already atomic from the `from_user` pass.
+    let bond_types: Vec<BondTypeConfig> =
+        raw.bond_types.into_iter().map(Into::into).collect();
+    let angle_types: Vec<AngleTypeConfig> =
+        raw.angle_types.into_iter().map(Into::into).collect();
 
-    let angle_types: Vec<AngleTypeConfig> = raw
-        .angle_types
-        .into_iter()
-        .map(|a| {
-            let mut at: AngleTypeConfig = a.into();
-            match &mut at {
-                AngleTypeConfig::Harmonic {
-                    name: _,
-                    k_theta,
-                    theta_0: _,
-                } => {
-                    // theta_0 is in radians (dimensionless); k_theta has
-                    // units of energy / radian^2 = energy.
-                    *k_theta = to_au_energy(*k_theta);
-                }
-            }
-            at
-        })
-        .collect();
-
-    // Constraint types: open-shaped params, rescale in place by kind.
-    let mut constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
-    for ct in &mut constraint_types {
-        convert_slot_params(units, &ct.kind, &mut ct.params);
-    }
+    // Open-shaped slot params (constraint types here; integrator /
+    // thermostat / barostat / minimizer below) are carried through in the
+    // user's unit system and converted to atomic units by the owning
+    // builder's `convert_params` in the post-build pass
+    // (`convert_all_slot_params`), so no conversion happens here.
+    let constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
 
     let coulomb: Option<CoulombConfig> = raw.coulomb.map(|r| {
-        let cutoff = to_au_length(r.cutoff);
-        let r_switch = r.r_switch.map(to_au_length).unwrap_or(0.9 * cutoff);
+        let cutoff = r.cutoff.0;
+        let r_switch = r.r_switch.map(|x| x.0).unwrap_or(0.9 * cutoff);
         CoulombConfig { cutoff, r_switch }
     });
     let spme = raw.spme.map(|s| SpmeConfig {
-        alpha: to_au_inv_length(s.alpha),
-        r_cut_real: to_au_length(s.r_cut_real),
+        alpha: s.alpha.0,
+        r_cut_real: s.r_cut_real.0,
         grid: s.grid,
         spline_order: s.spline_order,
     });
@@ -1012,7 +1114,7 @@ fn build_config(
             }
         }
         if let Some(s) = spme.as_ref() {
-            if (s.r_cut_real as f64) > m {
+            if s.r_cut_real > m {
                 m = s.r_cut_real;
             }
         }
@@ -1021,16 +1123,11 @@ fn build_config(
 
     let neighbor_list = match raw.neighbor_list {
         None => NeighborListConfig::CellList {
-            max_neighbors: default_max_neighbors(),
             r_skin: 0.3 * max_cutoff,
         },
         Some(RawNeighborList::AllPairs {}) => NeighborListConfig::AllPairs,
-        Some(RawNeighborList::CellList {
-            max_neighbors,
-            r_skin,
-        }) => NeighborListConfig::CellList {
-            max_neighbors,
-            r_skin: r_skin.map(to_au_length).unwrap_or(0.3 * max_cutoff),
+        Some(RawNeighborList::CellList { r_skin }) => NeighborListConfig::CellList {
+            r_skin: r_skin.map(|x| x.0).unwrap_or(0.3 * max_cutoff),
         },
     };
 
@@ -1125,20 +1222,13 @@ fn build_config(
                             }),
                     },
                 };
-                let mut integrator = p.integrator;
-                convert_slot_params(units, &integrator.kind, &mut integrator.params);
-                let thermostat = p.thermostat.map(|mut t| {
-                    convert_slot_params(units, &t.kind, &mut t.params);
-                    t
-                });
-                let barostat = p.barostat.map(|mut b| {
-                    convert_slot_params(units, &b.kind, &mut b.params);
-                    b
-                });
+                let integrator = p.integrator;
+                let thermostat = p.thermostat;
+                let barostat = p.barostat;
                 PhaseKind::Md(PhaseConfig {
                     name,
                     n_steps: p.n_steps,
-                    dt: to_au_time(p.dt),
+                    dt: p.dt.0,
                     integrator,
                     thermostat,
                     barostat,
@@ -1187,8 +1277,7 @@ fn build_config(
                             }),
                     },
                 };
-                let mut algorithm = m.algorithm;
-                convert_slot_params(units, &algorithm.kind, &mut algorithm.params);
+                let algorithm = m.algorithm;
                 PhaseKind::Minimization(MinimizationConfig {
                     name,
                     algorithm,
@@ -1198,21 +1287,17 @@ fn build_config(
         })
         .collect();
 
-    // Top-level [simulation] is typed: rescale its one unit-bearing
-    // field directly.
     let simulation = SimulationConfig {
         seed: raw.simulation.seed,
-        temperature: to_au_temperature(raw.simulation.temperature),
+        temperature: raw.simulation.temperature.0,
+        graph_batch_size: raw.simulation.graph_batch_size,
+        cuda_graphs_disable: raw.simulation.cuda_graphs_disable,
+        fast_math: raw.simulation.fast_math,
     };
-
     let particle_types: Vec<ParticleTypeConfig> = raw
         .particle_types
         .into_iter()
-        .map(|p| ParticleTypeConfig {
-            name: p.name,
-            mass: to_au_mass(p.mass),
-            charge: to_au_charge(p.charge),
-        })
+        .map(|p| ParticleTypeConfig { name: p.name, mass: p.mass.0, charge: p.charge.0 })
         .collect();
 
     Config {
@@ -1302,6 +1387,12 @@ impl Config {
                 // sees the params, not the entry's name).
                 ConfigError::ShakeParamsMalformed { name: _, reason } => {
                     ConfigError::ShakeParamsMalformed {
+                        name: ct.name.clone(),
+                        reason,
+                    }
+                }
+                ConfigError::SettleParamsMalformed { name: _, reason } => {
+                    ConfigError::SettleParamsMalformed {
                         name: ct.name.clone(),
                         reason,
                     }
@@ -1482,6 +1573,12 @@ fn require_finite(field: &str, value: f64) -> Result<(), ConfigError> {
 
 fn validate_simulation(s: &SimulationConfig) -> Result<(), ConfigError> {
     require_finite_non_negative("simulation.temperature", s.temperature)?;
+    if s.graph_batch_size < 1 {
+        return Err(invalid(
+            "simulation.graph_batch_size",
+            format!("value must be >= 1, got {}", s.graph_batch_size),
+        ));
+    }
     Ok(())
 }
 
@@ -1781,16 +1878,7 @@ fn validate_spme(s: &SpmeConfig) -> Result<(), ConfigError> {
 fn validate_neighbor_list(n: &NeighborListConfig) -> Result<(), ConfigError> {
     match n {
         NeighborListConfig::AllPairs => Ok(()),
-        NeighborListConfig::CellList {
-            max_neighbors,
-            r_skin,
-        } => {
-            if *max_neighbors == 0 {
-                return Err(invalid(
-                    "neighbor_list.max_neighbors",
-                    "max_neighbors must be strictly positive",
-                ));
-            }
+        NeighborListConfig::CellList { r_skin } => {
             require_finite_positive("neighbor_list.r_skin", *r_skin)?;
             Ok(())
         }

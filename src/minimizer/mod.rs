@@ -1,16 +1,13 @@
 // rq-08aba7ee — Minimizer slot framework. See `rqm/minimization/steepest-descent.md`.
 
-use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, DeviceSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaSlice, DeviceSlice};
 
 use crate::forces::{ForceField, ForceFieldError};
-use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::integrator::{Constraint, ConstraintError};
 use crate::io::config::{ConfigError, SlotConfig};
-use crate::kernels;
+use crate::registry::{Builtins, KindedBuilder, Registry};
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
 use crate::precision::Real;
@@ -133,9 +130,9 @@ pub trait Minimizer: std::fmt::Debug + Send {
 }
 
 // rq-dddb8e7a
-pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait MinimizerBuilder:
+    KindedBuilder + MinimizerBuilderClone + std::fmt::Debug + Send + Sync
+{
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
 
     /// `true` iff this minimizer can drive a constraint slot's
@@ -152,51 +149,21 @@ pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Minimizer>, MinimizerError>;
-
-    fn box_clone(&self) -> Box<dyn MinimizerBuilder>;
 }
 
 // rq-d5b07d2a
-#[derive(Debug)]
-pub struct MinimizerRegistry {
-    pub builders: Vec<Box<dyn MinimizerBuilder>>,
-}
+pub type MinimizerRegistry = Registry<dyn MinimizerBuilder>;
 
-impl Clone for MinimizerRegistry {
-    fn clone(&self) -> Self {
-        MinimizerRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+// rq-237b5543
+impl Builtins for dyn MinimizerBuilder {
+    fn builtins() -> Vec<Box<dyn MinimizerBuilder>> {
+        vec![Box::new(SteepestDescentBuilder)]
     }
 }
 
-impl MinimizerRegistry {
-    pub fn new() -> Self {
-        MinimizerRegistry {
-            builders: Vec::new(),
-        }
-    }
+crate::registry_builder_clone!(pub MinimizerBuilderClone for MinimizerBuilder);
 
-    // rq-237b5543
-    pub fn with_builtins() -> Self {
-        MinimizerRegistry {
-            builders: vec![Box::new(SteepestDescentBuilder)],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn MinimizerBuilder>) {
-        self.builders.push(builder);
-    }
-
-    pub fn lookup(&self, kind: &str) -> Option<&dyn MinimizerBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn MinimizerBuilder> {
     pub fn build(
         &self,
         slot: &SlotConfig,
@@ -211,42 +178,20 @@ impl MinimizerRegistry {
     }
 }
 
-impl Default for MinimizerRegistry {
-    fn default() -> Self {
-        MinimizerRegistry::with_builtins()
-    }
-}
-
 // rq-47a5fe0e
 // CUDA kernel handle for the minimizer's per-step kernels. Loaded
 // alongside the other kernel modules at `init_device`.
-#[derive(Debug, Clone)]
-pub struct MinimizeKernels {
-    pub sd_compute_step: CudaFunction,
-    pub sd_snapshot: CudaFunction,
-    pub sd_restore: CudaFunction,
-    pub sd_f_max_reduction: CudaFunction,
-}
-
-impl MinimizeKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::MINIMIZE),
-            "minimize",
-            &[
-                "sd_compute_step",
-                "sd_snapshot",
-                "sd_restore",
-                "sd_f_max_reduction",
-            ],
-        )?;
-        Ok(MinimizeKernels {
-            sd_compute_step: get_func(device, "minimize", "sd_compute_step")?,
-            sd_snapshot: get_func(device, "minimize", "sd_snapshot")?,
-            sd_restore: get_func(device, "minimize", "sd_restore")?,
-            sd_f_max_reduction: get_func(device, "minimize", "sd_f_max_reduction")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "minimize",
+    ptx: crate::kernels::MINIMIZE,
+    struct: MinimizeKernels,
+    kernels: [sd_compute_step, sd_snapshot, sd_restore, sd_f_max_reduction],
+    stages: {
+        SD_F_MAX_REDUCTION = "sd_f_max_reduction",
+        SD_COMPUTE_STEP    = "sd_compute_step",
+        SD_SNAPSHOT        = "sd_snapshot",
+        SD_RESTORE         = "sd_restore",
+    },
 }
 
 // Host-launch wrappers for the minimizer kernels.
@@ -278,9 +223,7 @@ pub(crate) fn sd_compute_step(
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 &buffers.forces_x,
                 &buffers.forces_y,
                 &buffers.forces_z,
@@ -316,9 +259,7 @@ pub(crate) fn sd_snapshot(
         func.launch(
             cfg,
             (
-                &buffers.positions_x,
-                &buffers.positions_y,
-                &buffers.positions_z,
+                &buffers.posq,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,
@@ -352,9 +293,7 @@ pub(crate) fn sd_restore(
         func.launch(
             cfg,
             (
-                &mut buffers.positions_x,
-                &mut buffers.positions_y,
-                &mut buffers.positions_z,
+                &mut buffers.posq,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,

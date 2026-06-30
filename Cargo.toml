@@ -3,6 +3,9 @@ name = "heddle-md"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["heddle-md-derive"]
+
 [[bin]]
 name = "heddlemd"
 path = "src/main.rs"
@@ -20,3 +23,4 @@ serde_path_to_error = "0.1"
 rand = "0.8"
 rand_chacha = "0.3"
 thiserror = "2"
+heddle-md-derive = { path = "heddle-md-derive" }

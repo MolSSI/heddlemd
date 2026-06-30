@@ -4,7 +4,7 @@ use std::time::Duration;
 mod common;
 use common::*;
 
-use heddle_md::gpu::{PairBuffer, ParticleBuffers, init_device};
+use heddle_md::gpu::{ParticleBuffers, init_device};
 use heddle_md::io::{TrajectoryWriterError, load_init_state};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::runner::{RunnerError, run_simulation};
@@ -47,6 +47,7 @@ fn write_pair(
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = {seed}
 temperature = {temperature}
 
@@ -211,6 +212,10 @@ fn timings_pre_flight_refuses_overwrite() {
 }
 
 // rq-a7fdf81f
+// The trailing `vv_kick` half-kick is folded into the JIT-composed
+// post-force per-particle kernel (`jit_composed_post_force`); the
+// standalone `vv_kick` stage no longer appears. The pre-force
+// `vv_kick_drift` SubStep still runs as a standalone kernel.
 #[test]
 fn lossy_includes_lossy_kick_rows() {
     let dir = tmp_path("lossy_kick");
@@ -218,13 +223,17 @@ fn lossy_includes_lossy_kick_rows() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     assert!(stage_row(&body, "vv_kick_drift").is_some());
-    assert!(stage_row(&body, "vv_kick").is_some());
+    assert!(stage_row(&body, "jit_composed_post_force").is_some());
+    assert!(stage_row(&body, "vv_kick").is_none());
     assert!(stage_row(&body, "vv_kick_drift_lossless").is_none());
     assert!(stage_row(&body, "vv_kick_lossless").is_none());
 }
 
 // rq-b2fa4a1f
-// Lossless mode is only available in the default (f32) build.
+// Lossless mode is only available in the default (f32) build. The
+// trailing lossless half-kick is folded into the composed post-force
+// per-particle kernel; the standalone `vv_kick_lossless` stage no
+// longer appears.
 #[cfg(not(feature = "f64"))]
 #[test]
 fn lossless_includes_lossless_kick_rows() {
@@ -233,7 +242,8 @@ fn lossless_includes_lossless_kick_rows() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     assert!(stage_row(&body, "vv_kick_drift_lossless").is_some());
-    assert!(stage_row(&body, "vv_kick_lossless").is_some());
+    assert!(stage_row(&body, "jit_composed_post_force").is_some());
+    assert!(stage_row(&body, "vv_kick_lossless").is_none());
     assert!(stage_row(&body, "vv_kick_drift").is_none());
     assert!(stage_row(&body, "vv_kick").is_none());
 }
@@ -244,6 +254,7 @@ fn write_langevin_config(dir: &Path, n_steps: u64) -> PathBuf {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -306,15 +317,19 @@ fn langevin_includes_langevin_rows_excludes_vv() {
 }
 
 // rq-0c2265eb
+// The trailing langevin `B` half-kick is folded into the
+// `jit_composed_post_force` kernel — only the pre-force `B` SubStep
+// records under `langevin_kick_half` (one per step).
 #[test]
 fn langevin_stage_counts_match() {
     let dir = tmp_path("langevin_counts");
     let path = write_langevin_config(&dir, 10);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    assert_eq!(stage_count(&body, "langevin_kick_half"), Some(20));
+    assert_eq!(stage_count(&body, "langevin_kick_half"), Some(10));
     assert_eq!(stage_count(&body, "langevin_drift_half"), Some(20));
     assert_eq!(stage_count(&body, "langevin_ou_step"), Some(10));
+    assert_eq!(stage_count(&body, "jit_composed_post_force"), Some(10));
 }
 
 // rq-bde625cf
@@ -324,8 +339,7 @@ fn empty_n_zero_omits_kernel_rows() {
     let path = write_pair(&dir, 3, 0, 0, 0.0, false, false, 1, 0);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    assert!(stage_row(&body, "lj_pair_force").is_none());
-    assert!(stage_row(&body, "reduce_pair_forces").is_none());
+    assert!(stage_row(&body, "jit_composed_pair_force").is_none());
     assert!(stage_row(&body, "vv_kick_drift").is_none());
     assert!(stage_row(&body, "vv_kick").is_none());
     assert!(stage_row(&body, "gpu_init").is_some());
@@ -362,23 +376,25 @@ fn kernel_counts_match_runner_launches() {
     let path = write_pair(&dir, 10, 0, 0, 0.0, true, false, 1, 2);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    assert_eq!(stage_count(&body, "lj_pair_force"), Some(11));
-    assert_eq!(stage_count(&body, "reduce_pair_forces"), Some(11));
+    assert_eq!(stage_count(&body, "jit_composed_pair_force"), Some(11));
     assert_eq!(stage_count(&body, "vv_kick_drift"), Some(10));
-    assert_eq!(stage_count(&body, "vv_kick"), Some(10));
-    // rq-62300a18: all-pairs records lj_pair_force and omits every
-    // neighbor-list-related row.
+    // The trailing VV half-kick is folded into the composed post-force
+    // per-particle kernel; the standalone `vv_kick` stage is absent.
+    assert_eq!(stage_count(&body, "jit_composed_post_force"), Some(10));
+    assert!(stage_row(&body, "vv_kick").is_none());
+    // rq-62300a18: all-pairs records jit_composed_pair_force and
+    // omits every neighbor-list-related row.
     assert!(stage_row(&body, "lj_pair_force_neighbor").is_none());
-    assert!(stage_row(&body, "neighbor_displacement_squared").is_none());
+    assert!(stage_row(&body, "neighbor_displacement_check_flag").is_none());
     assert!(stage_row(&body, "neighbor_list_build").is_none());
     assert!(stage_row(&body, "copy_positions_into_reference").is_none());
     assert!(stage_row(&body, "neighbor_list_rebuild").is_none());
-    // rq-c7df5714: no topology → no morse_bond_force or reduce_bond_forces;
-    // accumulate_forces still runs because at least one pair-force slot is
-    // present.
-    assert!(stage_row(&body, "morse_bond_force").is_none());
+    // rq-c7df5714: no topology → no jit_composed_bonded_force or
+    // reduce_bond_forces; combine_class_totals still runs because at
+    // least one pair-force slot is present.
+    assert!(stage_row(&body, "jit_composed_bonded_force").is_none());
     assert!(stage_row(&body, "reduce_bond_forces").is_none());
-    assert!(stage_row(&body, "accumulate_forces").is_some());
+    assert!(stage_row(&body, "combine_class_totals").is_some());
 }
 
 // rq-46c317ef
@@ -491,9 +507,24 @@ fn total_runtime_dominates_other_rows() {
         .unwrap()
         .parse()
         .unwrap();
+    // Pre-phase-0 setup stages (`config_load`, `init_load`, `gpu_init`,
+    // `velocity_generation`, `host_to_device_upload`) are replayed once
+    // into phase 0's Timings but happen *before* the phase's elapsed
+    // clock starts, so they legitimately can exceed `total_runtime` on
+    // short configs. Skip them here.
+    const PRE_PHASE_SETUP_STAGES: &[&str] = &[
+        "config_load",
+        "init_load",
+        "gpu_init",
+        "velocity_generation",
+        "host_to_device_upload",
+    ];
     for line in body.lines().skip(1) {
         let cols: Vec<&str> = line.split_whitespace().collect();
         if cols[0] == "total_runtime" {
+            continue;
+        }
+        if PRE_PHASE_SETUP_STAGES.contains(&cols[0]) {
             continue;
         }
         let row_total_ms: f64 = cols[2].parse().unwrap();
@@ -534,13 +565,18 @@ fn rows_appear_in_documented_order() {
         .skip(1)
         .map(|l| l.split_whitespace().next().unwrap())
         .collect();
+    // Kernel rows are grouped by subsystem in `define_kernels!` manifest
+    // order (integrate, then forces, then neighbor), each in that
+    // subsystem's declared stage order; host rows follow in
+    // `HostStage::ORDER`. See `KernelStage::ORDER`.
     let expected = vec![
         "vv_kick_drift",
-        "lj_pair_force",
-        "reduce_pair_forces",
-        "reduce_pair_energy_virial",
-        "accumulate_forces",
-        "vv_kick",
+        "jit_composed_pair_force",
+        "jit_composed_post_force",
+        "combine_class_totals",
+        "class_accumulator_memset",
+        "scatter_positions_to_tile_order",
+        "finalize_packed_forces",
         "host_to_device_upload",
         "device_to_host_download",
         "trajectory_write",
@@ -651,6 +687,7 @@ fn timings_path_eq_trajectory_rejected() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -699,6 +736,7 @@ fn timings_path_eq_log_rejected() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -747,6 +785,7 @@ fn timings_path_eq_init_rejected() {
 init = "particles.dat"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -845,32 +884,21 @@ fn timings_new_allocates_event_pairs() {
 fn kernel_start_stop_and_finalize_records_one_sample() {
     let gpu = init_device().unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let state = ParticleState::new(
-        vec![0.0, 1.0e-10],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![1.0; 2],
-        vec![0.0; 2],
-        vec![0u32; 2],
-        None,
-            None,
-    )
-    .unwrap();
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut pair_buffer = PairBuffer::new(&gpu, 2, 2).unwrap();
-    let params = single_type_lj_table(&gpu.device, 1.0e-10, 1.0, 1.0e-9);
-    let sim_box = SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
-    timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
-    lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
-    timings.kernel_stop(KernelStage::LJ_PAIR_FORCE).unwrap();
+    // Any real device work between start/stop exercises the CUDA-event
+    // timing path; a sizeable memset is the simplest queueable kernel.
+    let mut buf = gpu.device.alloc_zeros::<u32>(1 << 18).unwrap();
+    timings
+        .kernel_start(KernelStage::CLASS_ACCUMULATOR_MEMSET)
+        .unwrap();
+    gpu.device.memset_zeros(&mut buf).unwrap();
+    timings
+        .kernel_stop(KernelStage::CLASS_ACCUMULATOR_MEMSET)
+        .unwrap();
     let report = timings.finalize().unwrap();
     let entry = report
         .stages
         .iter()
-        .find(|s| s.name == "lj_pair_force")
+        .find(|s| s.name == "class_accumulator_memset")
         .unwrap();
     assert_eq!(entry.count, 1);
 }
@@ -880,34 +908,21 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
 fn repeated_kernel_starts_stops_accumulate() {
     let gpu = init_device().unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let state = ParticleState::new(
-        vec![0.0, 1.0e-10],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![0.0; 2],
-        vec![1.0; 2],
-        vec![0.0; 2],
-        vec![0u32; 2],
-        None,
-            None,
-    )
-    .unwrap();
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut pair_buffer = PairBuffer::new(&gpu, 2, 2).unwrap();
-    let params = single_type_lj_table(&gpu.device, 1.0e-10, 1.0, 1.0e-9);
-    let sim_box = SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
+    let mut buf = gpu.device.alloc_zeros::<u32>(1 << 18).unwrap();
     for _ in 0..10 {
-        timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
-        lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
-        timings.kernel_stop(KernelStage::LJ_PAIR_FORCE).unwrap();
+        timings
+            .kernel_start(KernelStage::CLASS_ACCUMULATOR_MEMSET)
+            .unwrap();
+        gpu.device.memset_zeros(&mut buf).unwrap();
+        timings
+            .kernel_stop(KernelStage::CLASS_ACCUMULATOR_MEMSET)
+            .unwrap();
     }
     let report = timings.finalize().unwrap();
     let entry = report
         .stages
         .iter()
-        .find(|s| s.name == "lj_pair_force")
+        .find(|s| s.name == "class_accumulator_memset")
         .unwrap();
     assert_eq!(entry.count, 10);
     assert!(entry.total_ns > 0);
@@ -968,6 +983,7 @@ fn write_cell_list_pair(
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = {seed}
 temperature = 0.0
 
@@ -1040,39 +1056,44 @@ fn cell_list_records_neighbor_stages() {
     let path = write_cell_list_pair(&dir, 10, 3.0e-10, 1, 4, true);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    // rq-ef918dc6: cell-list adds the four neighbor-list host stages on
-    // top of the regular lj_pair_force kernel stage.
-    assert!(stage_row(&body, "lj_pair_force").is_some());
-    assert!(stage_row(&body, "neighbor_displacement_squared").is_some());
-    assert!(stage_row(&body, "neighbor_list_build").is_some());
+    // rq-ef918dc6: cell-list adds the displacement-check kernel and the
+    // rebuild-driven `copy_positions_into_reference` host stage on top
+    // of the per-step jit_composed_pair_force + finalize_packed_forces
+    // kernel stages. (The packed-neighbour rebuild path replaces the
+    // old `neighbor_list_build` kernel stage with a host-side
+    // multi-kernel pipeline whose individual kernels are not
+    // separately timed.)
+    assert!(stage_row(&body, "jit_composed_pair_force").is_some());
+    assert!(stage_row(&body, "finalize_packed_forces").is_some());
+    assert!(stage_row(&body, "scatter_positions_to_tile_order").is_some());
+    assert!(stage_row(&body, "neighbor_displacement_check_flag").is_some());
     assert!(stage_row(&body, "copy_positions_into_reference").is_some());
     assert!(stage_row(&body, "neighbor_list_rebuild").is_some());
-    // rq-75746f64: with n_steps=10, neighbor_displacement_squared runs
-    // once per loop step (no warm-up displacement check before step 1).
-    assert_eq!(stage_count(&body, "neighbor_displacement_squared"), Some(10));
+    // rq-75746f64: with n_steps=10, neighbor_displacement_check_flag runs
+    // once per `ForceField::step` call. The runner issues one warm-up
+    // step at phase entry plus one step per loop iteration, so the
+    // kernel records 11 launches for an n_steps=10 phase.
+    assert_eq!(stage_count(&body, "neighbor_displacement_check_flag"), Some(11));
 }
 
 // rq-7f2310ac
 #[test]
 fn neighbor_list_build_and_reference_copy_counts_match_rebuilds() {
     // Whatever r_skin we choose, the runner emits one host-stage event
-    // for `neighbor_list_build`, `copy_positions_into_reference`, and
-    // `neighbor_list_rebuild` per rebuild (including the warm-up
-    // build). The architectural contract is that the three counts are
-    // equal — that is the invariant this test exercises. We do not
-    // try to engineer "exactly K rebuilds" via a tuned r_skin; doing so
-    // would couple the test to particle dynamics that aren't part of the
-    // contract.
+    // for `copy_positions_into_reference` and `neighbor_list_rebuild`
+    // per rebuild (including the warm-up build). The architectural
+    // contract is that the two counts are equal — that is the invariant
+    // this test exercises. We do not try to engineer "exactly K rebuilds"
+    // via a tuned r_skin; doing so would couple the test to particle
+    // dynamics that aren't part of the contract.
     let dir = tmp_path("nl_rebuild_counts");
     let path = write_cell_list_pair(&dir, 10, 3.0e-10, 1, 4, true);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    let build = stage_count(&body, "neighbor_list_build").unwrap();
     let copy = stage_count(&body, "copy_positions_into_reference").unwrap();
     let rebuild = stage_count(&body, "neighbor_list_rebuild").unwrap();
-    assert!(build >= 1, "expected at least the warm-up build, got {build}");
-    assert_eq!(build, copy, "neighbor_list_build vs copy_positions_into_reference");
-    assert_eq!(build, rebuild, "neighbor_list_build vs neighbor_list_rebuild");
+    assert!(copy >= 1, "expected at least the warm-up build, got {copy}");
+    assert_eq!(copy, rebuild, "copy_positions_into_reference vs neighbor_list_rebuild");
 }
 
 fn write_morse_bonded(
@@ -1086,6 +1107,7 @@ init = "sim.in.xyz"
 topology = "sim.in.topology"
 
 [simulation]
+cuda_graphs_disable = true
 seed = {seed}
 temperature = 0.0
 
@@ -1145,9 +1167,9 @@ fn morse_bonded_records_bond_force_and_reduction_rows() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     // One warm-up + ten loop iterations = 11.
-    assert_eq!(stage_count(&body, "morse_bond_force"), Some(11));
+    assert_eq!(stage_count(&body, "jit_composed_bonded_force"), Some(11));
     assert_eq!(stage_count(&body, "reduce_bond_forces"), Some(11));
-    assert_eq!(stage_count(&body, "accumulate_forces"), Some(11));
+    assert_eq!(stage_count(&body, "combine_class_totals"), Some(11));
 }
 
 // Silence unused-import warning when individual tests don't reference these.

@@ -1028,6 +1028,106 @@ pub(crate) fn parse_topology_file(
     Ok((bond_list, angle_list, exclusion_list, constraint_list))
 }
 
+// rq-42195e6f — connectivity-derived molecule partition. See
+// `rqm/forces/topology.md` *Molecule grouping*.
+#[derive(Debug, Clone)]
+pub struct MoleculeList {
+    pub mol_atom_offsets: Vec<u32>,
+    pub mol_atom_indices: Vec<u32>,
+    pub particle_count: usize,
+    pub molecule_count: usize,
+}
+
+impl MoleculeList {
+    pub fn molecule_count(&self) -> usize {
+        self.molecule_count
+    }
+
+    /// Every atom is its own molecule. Used when a run has no bonds and
+    /// no constraints (a monatomic fluid).
+    pub fn singletons(particle_count: usize) -> MoleculeList {
+        MoleculeList {
+            mol_atom_offsets: (0..=particle_count as u32).collect(),
+            mol_atom_indices: (0..particle_count as u32).collect(),
+            particle_count,
+            molecule_count: particle_count,
+        }
+    }
+
+    // rq-b0bdc311 — connected components of the combined bond +
+    // constraint graph. Singletons for atoms in no bond and no
+    // constraint. Molecules ordered by minimum particle index; atoms
+    // within each molecule ascending. Pure function of its inputs.
+    pub fn from_topology(
+        particle_count: usize,
+        bonds: &BondList,
+        constraints: &ConstraintList,
+    ) -> MoleculeList {
+        // Union-Find with path halving over the particle set.
+        let mut parent: Vec<usize> = (0..particle_count).collect();
+        fn find(parent: &mut [usize], mut x: usize) -> usize {
+            while parent[x] != x {
+                parent[x] = parent[parent[x]];
+                x = parent[x];
+            }
+            x
+        }
+        fn union(parent: &mut [usize], a: usize, b: usize) {
+            let ra = find(parent, a);
+            let rb = find(parent, b);
+            if ra != rb {
+                // Attach the larger root under the smaller; the final
+                // ordering is re-derived by min atom index regardless.
+                if ra < rb {
+                    parent[rb] = ra;
+                } else {
+                    parent[ra] = rb;
+                }
+            }
+        }
+        for b in &bonds.bonds {
+            union(&mut parent, b.atom_i as usize, b.atom_j as usize);
+        }
+        for g in &constraints.groups {
+            let slice = &constraints.group_atoms
+                [g.atom_offset as usize..(g.atom_offset + g.atom_count) as usize];
+            if let Some((&first, rest)) = slice.split_first() {
+                for &a in rest {
+                    union(&mut parent, first as usize, a as usize);
+                }
+            }
+        }
+        // Collect members per component root. Pushing atoms 0..n in
+        // order leaves each molecule's atom list ascending.
+        let mut members: std::collections::HashMap<usize, Vec<u32>> =
+            std::collections::HashMap::new();
+        for a in 0..particle_count {
+            let r = find(&mut parent, a);
+            members.entry(r).or_default().push(a as u32);
+        }
+        let mut mols: Vec<Vec<u32>> = members.into_values().collect();
+        for m in &mut mols {
+            m.sort_unstable();
+        }
+        // Order molecules by their minimum particle index.
+        mols.sort_by_key(|m| m[0]);
+
+        let mut mol_atom_offsets: Vec<u32> = Vec::with_capacity(mols.len() + 1);
+        let mut mol_atom_indices: Vec<u32> = Vec::with_capacity(particle_count);
+        mol_atom_offsets.push(0);
+        for m in &mols {
+            mol_atom_indices.extend_from_slice(m);
+            mol_atom_offsets.push(mol_atom_indices.len() as u32);
+        }
+        MoleculeList {
+            mol_atom_offsets,
+            mol_atom_indices,
+            particle_count,
+            molecule_count: mols.len(),
+        }
+    }
+}
+
 fn parse_scale(
     line_number: usize,
     column: &'static str,
@@ -1049,5 +1149,104 @@ fn strip_comment(line: &str) -> &str {
     match line.find('#') {
         Some(i) => &line[..i],
         None => line,
+    }
+}
+
+#[cfg(test)]
+mod molecule_tests {
+    use super::*;
+
+    fn bonds_from(particle_count: usize, pairs: &[(u32, u32)]) -> BondList {
+        let bonds = pairs
+            .iter()
+            .map(|&(i, j)| Bond {
+                atom_i: i,
+                atom_j: j,
+                bond_type_index: 0,
+            })
+            .collect();
+        BondList {
+            bonds,
+            atom_bond_offsets: vec![0; particle_count + 1],
+            atom_bond_indices: Vec::new(),
+            particle_count,
+        }
+    }
+
+    fn constraints_from(particle_count: usize, groups: &[&[u32]]) -> ConstraintList {
+        let mut group_atoms: Vec<u32> = Vec::new();
+        let mut gs: Vec<ConstraintGroup> = Vec::new();
+        for g in groups {
+            let atom_offset = group_atoms.len() as u32;
+            group_atoms.extend_from_slice(g);
+            gs.push(ConstraintGroup {
+                atom_offset,
+                atom_count: g.len() as u32,
+                constraint_offset: 0,
+                constraint_count: 0,
+                constraint_type_index: 0,
+            });
+        }
+        ConstraintList {
+            groups: gs,
+            group_atoms,
+            group_constraints: Vec::new(),
+            particle_count,
+        }
+    }
+
+    fn atoms_of(m: &MoleculeList, idx: usize) -> Vec<u32> {
+        let lo = m.mol_atom_offsets[idx] as usize;
+        let hi = m.mol_atom_offsets[idx + 1] as usize;
+        m.mol_atom_indices[lo..hi].to_vec()
+    }
+
+    #[test] // rq-392ac5d3
+    fn each_constraint_group_is_one_molecule() {
+        let bonds = bonds_from(6, &[]);
+        let constraints = constraints_from(6, &[&[0, 1, 2], &[3, 4, 5]]);
+        let m = MoleculeList::from_topology(6, &bonds, &constraints);
+        assert_eq!(m.molecule_count(), 2);
+        assert_eq!(atoms_of(&m, 0), vec![0, 1, 2]);
+        assert_eq!(atoms_of(&m, 1), vec![3, 4, 5]);
+    }
+
+    #[test] // rq-45d384b3
+    fn bonds_join_atoms_into_one_molecule() {
+        let bonds = bonds_from(4, &[(0, 1), (1, 2)]);
+        let constraints = ConstraintList::empty(4);
+        let m = MoleculeList::from_topology(4, &bonds, &constraints);
+        assert_eq!(m.molecule_count(), 2);
+        assert_eq!(atoms_of(&m, 0), vec![0, 1, 2]);
+        assert_eq!(atoms_of(&m, 1), vec![3]);
+    }
+
+    #[test] // rq-763200f7
+    fn lone_atom_is_its_own_molecule() {
+        let bonds = bonds_from(3, &[]);
+        let constraints = ConstraintList::empty(3);
+        let m = MoleculeList::from_topology(3, &bonds, &constraints);
+        assert_eq!(m.molecule_count(), 3);
+        for i in 0..3 {
+            assert_eq!(atoms_of(&m, i).len(), 1);
+        }
+    }
+
+    #[test] // rq-ae8e2b7d
+    fn molecules_ordered_by_min_index() {
+        let bonds = bonds_from(6, &[]);
+        let constraints = constraints_from(6, &[&[3, 4, 5], &[0, 1, 2]]);
+        let m = MoleculeList::from_topology(6, &bonds, &constraints);
+        assert_eq!(atoms_of(&m, 0)[0], 0);
+        assert_eq!(atoms_of(&m, 1)[0], 3);
+    }
+
+    #[test] // rq-ebab7fd7
+    fn atoms_within_molecule_ascending() {
+        let bonds = bonds_from(3, &[(2, 0), (0, 1)]);
+        let constraints = ConstraintList::empty(3);
+        let m = MoleculeList::from_topology(3, &bonds, &constraints);
+        assert_eq!(m.molecule_count(), 1);
+        assert_eq!(atoms_of(&m, 0), vec![0, 1, 2]);
     }
 }

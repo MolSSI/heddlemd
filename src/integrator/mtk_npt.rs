@@ -2,29 +2,25 @@
 //
 // MTK NPT integrator (isotropic, fused thermostat + barostat).
 
-use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::CudaSlice;
 
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, compute_total_virial,
     mtk_position_drift, mtk_velocity_half_kick, rescale_velocities,
 };
-use crate::kernels;
 use crate::io::config::ConfigError;
 use serde::Deserialize;
 use crate::precision::Real;
 
 // rq-1f87880c — typed parameter struct for the "mtk-npt" builder.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct MtkNptParams {
-    pub temperature: f64,
-    pub pressure: f64,
-    pub tau_t: f64,
-    pub tau_p: f64,
+    pub temperature: crate::units::Temperature,
+    pub pressure: crate::units::Pressure,
+    pub tau_t: crate::units::Time,
+    pub tau_p: crate::units::Time,
     #[serde(default = "default_chain_length")]
     pub chain_length: u32,
     #[serde(default = "default_yoshida_order")]
@@ -270,6 +266,46 @@ impl MtkNptIntegrator {
     }
 }
 
+impl crate::integrator::PostForcePerParticle for MtkNptIntegrator {
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> crate::forces::PerParticleFragment {
+        crate::forces::PerParticleFragment {
+            label: "mtk_npt",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    Real mtk_exp_minus_alpha,\n\
+                 \x20   Real mtk_phi_v_dt_half,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real inv_m_mtk = R(1.0) / masses[i];\n\
+                 \x20       velocities_x[i] = mtk_exp_minus_alpha * velocities_x[i]\n\
+                 \x20                       + mtk_phi_v_dt_half * (forces_x[i] * inv_m_mtk);\n\
+                 \x20       velocities_y[i] = mtk_exp_minus_alpha * velocities_y[i]\n\
+                 \x20                       + mtk_phi_v_dt_half * (forces_y[i] * inv_m_mtk);\n\
+                 \x20       velocities_z[i] = mtk_exp_minus_alpha * velocities_z[i]\n\
+                 \x20                       + mtk_phi_v_dt_half * (forces_z[i] * inv_m_mtk);",
+            ),
+        }
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        let dt_f64 = ctx.dt as f64;
+        let nf = self.g_dof as f64;
+        let alpha_v = (1.0 + 3.0 / nf) * (self.p_eps / self.w_cell);
+        let exp_ma_half = (-alpha_v * dt_f64 / 2.0).exp();
+        let phi_v_dt_half = 0.5
+            * dt_f64
+            * sinh_over_x(alpha_v * dt_f64 / 4.0)
+            * (-alpha_v * dt_f64 / 4.0).exp();
+        builder.push_scalar::<Real>(exp_ma_half as Real);
+        builder.push_scalar::<Real>(phi_v_dt_half as Real);
+    }}
+
 impl Integrator for MtkNptIntegrator {
     // rq-aa68f468 rq-8cda2c89
     fn plan(&self, dt: Real) -> StepPlan {
@@ -384,7 +420,7 @@ impl Integrator for MtkNptIntegrator {
                 timings.kernel_stop(KernelStage::MTK_NPT_POSITION_DRIFT)?;
                 self.eps += beta * dt_f64;
                 let mu_box = exp_b_dt as Real;
-                sim_box.rescale_isotropic(mu_box).map_err(|_| {
+                sim_box.multiply_lattice_isotropic(mu_box).map_err(|_| {
                     IntegratorError::Gpu(GpuError(cudarc::driver::DriverError(
                         cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
                     )))
@@ -401,6 +437,14 @@ impl Integrator for MtkNptIntegrator {
                 timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
                 let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
                 timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
+                // Host volume is stale after drift_box's
+                // `multiply_lattice_isotropic`; refresh from device
+                // so `scratch_volume` reflects the post-drift box.
+                sim_box.flush_from_device().map_err(|_| {
+                    IntegratorError::Gpu(GpuError(cudarc::driver::DriverError(
+                        cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
+                    )))
+                })?;
                 self.scratch_volume = sim_box.volume() as f64;
                 self.scratch_pressure =
                     (2.0 * self.scratch_k + w_vir) / (3.0 * self.scratch_volume);
@@ -442,6 +486,17 @@ impl Integrator for MtkNptIntegrator {
         }
     }
 
+    // rq-9c5226e5 — MTK-NPT's post-force per-particle fragment covers
+    // the trailing `vel_kick_post` cell-coupled half-kick. The
+    // surrounding chain integration and rescale `Custom` SubSteps
+    // continue to run as separate kernel launches via `execute(...)`;
+    // only the per-thread `KickHalf` body is folded into the
+    // composed kernel.
+    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
+        Some(self)
+    }
+
+
     // rq-3b6d5001 rq-14a7685e
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         use crate::units::Dimension;
@@ -463,17 +518,36 @@ impl Integrator for MtkNptIntegrator {
 #[derive(Debug, Clone)]
 pub struct MtkNptBuilder;
 
-impl IntegratorBuilder for MtkNptBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for MtkNptBuilder {
     fn kind_name(&self) -> &'static str {
         "mtk-npt"
+    }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<MtkNptParams>(units, params)
+    }
+}
+
+impl IntegratorBuilder for MtkNptBuilder {
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        // MTK-NPT's sub-step executor mutates `self.eps` between
+        // sub-steps and reads `sim_box.volume()` post-drift — both are
+        // host-side scalar operations that a CUDA graph cannot
+        // capture.
+        false
     }
 
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
-        require_finite_positive("integrator.temperature", p.temperature)?;
-        require_finite("integrator.pressure", p.pressure)?;
-        require_finite_positive("integrator.tau_t", p.tau_t)?;
-        require_finite_positive("integrator.tau_p", p.tau_p)?;
+        require_finite_positive("integrator.temperature", p.temperature.0)?;
+        require_finite("integrator.pressure", p.pressure.0)?;
+        require_finite_positive("integrator.tau_t", p.tau_t.0)?;
+        require_finite_positive("integrator.tau_p", p.tau_p.0)?;
         if p.chain_length < 1 {
             return Err(invalid(
                 "integrator.chain_length",
@@ -511,39 +585,27 @@ impl IntegratorBuilder for MtkNptBuilder {
             gpu,
             particle_count,
             n_constraints,
-            p.temperature,
-            p.pressure,
-            p.tau_t,
-            p.tau_p,
+            p.temperature.0,
+            p.pressure.0,
+            p.tau_t.0,
+            p.tau_p.0,
             p.chain_length,
             p.yoshida_order,
             p.n_resp,
         )?;
         Ok(Box::new(state))
     }
-
-    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
-        Box::new(self.clone())
-    }
 }
 
 // rq-2093594f rq-3b6d5001
-#[derive(Debug, Clone)]
-pub struct MtkKernels {
-    pub mtk_velocity_half_kick: CudaFunction,
-    pub mtk_position_drift: CudaFunction,
-}
-
-impl MtkKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::MTK),
-            "mtk",
-            &["mtk_velocity_half_kick", "mtk_position_drift"],
-        )?;
-        Ok(MtkKernels {
-            mtk_velocity_half_kick: get_func(device, "mtk", "mtk_velocity_half_kick")?,
-            mtk_position_drift: get_func(device, "mtk", "mtk_position_drift")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "mtk",
+    ptx: crate::kernels::MTK,
+    struct: MtkKernels,
+    kernels: [mtk_velocity_half_kick, mtk_position_drift],
+    stages: {
+        MTK_NPT_RESCALE_VELOCITIES = "mtk_npt_rescale_velocities",
+        MTK_NPT_VELOCITY_HALF_KICK = "mtk_npt_velocity_half_kick",
+        MTK_NPT_POSITION_DRIFT     = "mtk_npt_position_drift",
+    },
 }

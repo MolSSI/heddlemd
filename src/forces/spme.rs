@@ -10,26 +10,26 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, CudaStream};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, DevicePtrMut, DeviceSlice};
+use cudarc::nvrtc::{CompileOptions, Ptx, compile_ptx_with_opts};
 
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, GpuError, K_COULOMB_F32, PairBuffer, ParticleBuffers,
-    reduce_pair_energy_virial, reduce_pair_forces, spme_charge_spread_on_stream,
-    spme_force_gather, spme_influence_multiply_on_stream, spme_real_pair_force,
+    GpuContext, GpuError, K_COULOMB_F32, ParticleBuffers,
+    spme_atom_sort, spme_force_gather,
 };
-use crate::kernels;
 use crate::io::config::SpmeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::topology::{DeviceExclusionList, ExclusionList};
-use super::neighbor_list::{NeighborListError, NeighborListState};
+use super::neighbor_list::{alloc_scan_block_totals, NeighborListError};
 use super::{
-    AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
-    PotentialBuilder, SlotOutputView,
+    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
+    JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
+    PairForceBindContext, PairForceFragment, PairForcePotential, Potential,
+    PotentialBuildContext, PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
 
@@ -68,6 +68,9 @@ pub enum SpmeError {
     },
     #[error("{0}")]
     Gpu(#[from] GpuError),
+    // rq-ebfa6e1f
+    #[error("SPME order-specialized kernel compilation failed:\n{0}")]
+    KernelCompilation(String),
 }
 
 /// PR 1 scope: owns the FFT grid buffers, cuFFT plans, precomputed
@@ -83,53 +86,142 @@ pub struct SpmeReciprocalGrid {
     pub particle_count: usize,
     pub m: usize,           // n_a * n_b * n_c (real-grid size)
     pub m_complex: usize,   // n_a * n_b * (n_c/2 + 1)
-    pub bin_list: NeighborListState,
+    /// Fixed-point charge-density grid. `spme_spread_fixed_point`
+    /// accumulates per-particle contributions via `atomicAdd<i64>`
+    /// using the scale `2^32`; `spme_spread_finish` converts back to
+    /// f32 `rho` via the inverse scale. Zeroed before each step's
+    /// spread.
+    pub rho_fixed: CudaSlice<i64>,
     pub rho: CudaSlice<Real>,
     pub rho_hat_interleaved: CudaSlice<Real>,
     pub v: CudaSlice<Real>,
     pub influence_g: CudaSlice<Real>,
-    /// Per-cell factor `G[k] · (1 − K²/(2α²))`. Multiplied by
-    /// `|rho_hat[k]|²` and the Hermitian weight by the kernel to produce
-    /// `virial_per_cell`.
+    /// Per-cell factor `G[k] · (1 − K²/(2α²))`. Read per-thread by
+    /// `spme_recip_apply_influence`, multiplied by `|rho_hat[k]|²` and
+    /// the Hermitian weight, and fed into the per-block reduction that
+    /// writes `virial_partials`.
     pub virial_factor: CudaSlice<Real>,
-    /// Scratch buffer holding the per-cell virial contribution after
-    /// `spme_influence_multiply`. Reduced host-side to the scalar
-    /// W_recip during the gather/reduce step.
-    pub virial_per_cell: CudaSlice<Real>,
-    /// Box generation the influence function was computed against.
-    /// Refreshed when the sim_box generation changes.
-    pub cached_box_generation: u64,
+    /// Per-block partial sums of the reciprocal-space virial
+    /// contribution, written one entry per launch block of
+    /// `spme_recip_apply_influence`. Length equals the launch's grid
+    /// size (`ceil(m_complex / 256)`). Reduced on device to the scalar
+    /// `w_per_particle_virial = W_recip / N` by
+    /// `spme_recip_reduce_partials`; never copied to host on the
+    /// per-step path.
+    pub virial_partials: CudaSlice<Real>,
+    /// Per-axis B-spline correction factors. Depend only on
+    /// `(grid, spline_order)`, populated once at construction from the
+    /// host-side Cox-de Boor recursion, never re-uploaded.
+    pub b_factors_a: CudaSlice<Real>,
+    pub b_factors_b: CudaSlice<Real>,
+    pub b_factors_c: CudaSlice<Real>,
     pub forward_plan: Plan3dR2C,
     pub inverse_plan: Plan3dC2R,
-    /// Dedicated stream for the 4-kernel reciprocal pipeline. The cuFFT
-    /// plans above are bound to this stream at construction; the
-    /// charge-spread and influence-multiply kernels are launched via
-    /// `*_on_stream` variants that target it. Cross-stream sync with
-    /// the default stream is handled in `compute` and in
-    /// `SpmeReciprocalState::reduce` via cudarc's
-    /// `CudaStream::wait_for_default` / `CudaDevice::wait_for`.
-    pub recip_stream: SendableStream,
+    /// Device-resident work area shared by the R2C and C2R cuFFT plans.
+    /// Sized to the larger of the two plans' `work_size()` requests;
+    /// both plans bind to this pointer at construction via
+    /// `cufftSetWorkArea`. The fixed pointer makes captured
+    /// `cufftExec*` calls safe to replay inside a CUDA graph.
+    pub workspace: CudaSlice<u8>,
+    /// SPME primary-bin index per atom; written by
+    /// `spme_compute_bin_key` and consumed by the scatter stage.
+    pub atom_bin_key: CudaSlice<u32>,
+    /// Per-bin atom histogram. Zeroed before each sort, accumulated
+    /// via `atomicAdd` inside `spme_compute_bin_key`.
+    pub bin_atom_counts: CudaSlice<u32>,
+    /// Exclusive prefix scan of `bin_atom_counts`; bin `b` occupies
+    /// sorted-index positions `[bin_atom_offsets[b], bin_atom_offsets[b + 1])`.
+    pub bin_atom_offsets: CudaSlice<u32>,
+    /// Per-bin scatter cursor. Zeroed before each sort, incremented
+    /// atomically inside `scatter_atoms_into_cells` (reused).
+    pub bin_atom_cursor: CudaSlice<u32>,
+    /// The sorted permutation. Entry `t` names the original atom index
+    /// processed at sorted slot `t`. Consumed by
+    /// `spme_spread_fixed_point` and `spme_force_gather`. Initialised
+    /// to the identity permutation at construction so the very first
+    /// `compute()` works even before the first sort runs.
+    pub sorted_atom_index: CudaSlice<u32>,
+    /// Multi-level scan-stack buffers consumed by
+    /// `prefix_scan_cell_counts` when operating on a histogram of
+    /// length `M`.
+    pub sort_scan_block_totals: Vec<CudaSlice<u32>>,
+    /// The neighbour-list rebuild generation observed at the last
+    /// sort. The slot re-runs the sort pipeline when the framework
+    /// reports a generation strictly greater than this value.
+    pub cached_neighbor_list_generation: u64,
+    /// Order-specialized charge-spread kernel, NVRTC-compiled at
+    /// construction with `PME_ORDER` fixed at the configured spline
+    /// order (see *Compile-time spline-order specialization*).
+    pub jit_spread: CudaFunction,
+    /// Order-specialized force-gather kernel, NVRTC-compiled alongside
+    /// `jit_spread`.
+    pub jit_gather: CudaFunction,
 }
 
-/// `CudaStream` wraps a raw `CUstream` pointer and cudarc 0.13 does not
-/// mark it `Send`/`Sync`, but CUDA streams are safe to share across
-/// threads as long as the using thread has called
-/// `CudaDevice::bind_to_thread` (which `init_device` and every kernel
-/// launch path ensures). Every other CUDA handle this slot holds
-/// (`CudaSlice`, `CudaFunction`, `Arc<CudaDevice>`) is explicitly
-/// `Send`/`Sync` in cudarc; this wrapper closes the gap so
-/// `SpmeReciprocalState` satisfies the `Potential: Send` bound.
-#[derive(Debug)]
-pub struct SendableStream(pub CudaStream);
+// rq-94bfcb7e
+// Assemble the self-contained NVRTC translation unit for the
+// order-specialized spread/gather: a PME_ORDER define, then the project
+// `precision.cuh` and `pbc.cuh` preambles with their `#include` lines
+// stripped (so NVRTC needs no filesystem), then the kernel source.
+pub(crate) fn assemble_spme_jit_source(spline_order: u32) -> String {
+    let precision =
+        include_str!("../../kernels/precision.cuh").replace("#include <math_constants.h>", "");
+    let pbc = include_str!("../../kernels/pbc.cuh").replace("#include \"precision.cuh\"", "");
+    let kernels_src = include_str!("../../kernels/spme_spread_gather.cuh");
+    format!("#define PME_ORDER {spline_order}\n{precision}\n{pbc}\n{kernels_src}")
+}
 
-unsafe impl Send for SendableStream {}
-unsafe impl Sync for SendableStream {}
-
-impl std::ops::Deref for SendableStream {
-    type Target = CudaStream;
-    fn deref(&self) -> &CudaStream {
-        &self.0
+// NVRTC-compile an assembled SPME source to PTX, with the device's
+// compute architecture and the build's precision define. A compile
+// failure is surfaced as `SpmeError::KernelCompilation` carrying the log.
+pub(crate) fn compile_spme_ptx(
+    device: &Arc<CudaDevice>,
+    source: &str,
+) -> Result<Ptx, SpmeError> {
+    let mut options = vec!["--std=c++17".to_string()];
+    if let Some(a) = crate::forces::jit_composed::detect_arch_option(device) {
+        options.push(a);
     }
+    #[cfg(feature = "f64")]
+    options.push("--define-macro=REAL_F64".to_string());
+    crate::forces::jit_composed::push_jit_fast_math(&mut options);
+    let opts = CompileOptions {
+        options,
+        ..Default::default()
+    };
+    compile_ptx_with_opts(source, opts).map_err(|e| {
+        let log = match e {
+            cudarc::nvrtc::CompileError::CompileError { ref log, .. } => log
+                .to_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| format!("{e:?}")),
+            _ => format!("{e:?}"),
+        };
+        SpmeError::KernelCompilation(log)
+    })
+}
+
+fn compile_order_specialized_kernels(
+    device: &Arc<CudaDevice>,
+    spline_order: u32,
+) -> Result<(CudaFunction, CudaFunction), SpmeError> {
+    let ptx = compile_spme_ptx(device, &assemble_spme_jit_source(spline_order))?;
+
+    // Unique module name per compile so independent slots never collide
+    // in the device's module registry.
+    static MODULE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = MODULE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let module = format!("spme_jit_{id}");
+    device
+        .load_ptx(
+            ptx,
+            &module,
+            &["spme_spread_fixed_point", "spme_force_gather"],
+        )
+        .map_err(GpuError::from)?;
+    let spread = get_func(device, &module, "spme_spread_fixed_point")?;
+    let gather = get_func(device, &module, "spme_force_gather")?;
+    Ok((spread, gather))
 }
 
 impl SpmeReciprocalGrid {
@@ -159,12 +251,9 @@ impl SpmeReciprocalGrid {
         let m_complex = n_a as usize * n_b as usize * (n_c as usize / 2 + 1);
         let device = gpu.device.clone();
 
-        let bin_list = NeighborListState::new_cell_list_only(
-            gpu,
-            sim_box,
-            particle_count,
-            params.grid,
-        )?;
+        // Fixed-point charge-density grid. Zeroed at construction and
+        // cleared via `memset_zeros` before each step's spread.
+        let rho_fixed = device.alloc_zeros::<i64>(m).map_err(GpuError::from)?;
 
         let rho = device.alloc_zeros::<Real>(m).map_err(GpuError::from)?;
         let v = device.alloc_zeros::<Real>(m).map_err(GpuError::from)?;
@@ -172,34 +261,101 @@ impl SpmeReciprocalGrid {
             .alloc_zeros::<Real>(2 * m_complex)
             .map_err(GpuError::from)?;
 
-        // Compute b-factors, influence function, and virial factor on
-        // the host, then upload.
-        let b_factors_a = compute_b_factors(n_a, p);
-        let b_factors_b = compute_b_factors(n_b, p);
-        let b_factors_c = compute_b_factors(n_c, p);
-        let (influence_host, virial_host) = compute_influence_and_virial(
-            sim_box,
-            params,
+        // B-spline correction factors depend only on (grid, spline_order)
+        // — compute on host, upload once, never refresh.
+        let b_factors_a_host = compute_b_factors(n_a, p);
+        let b_factors_b_host = compute_b_factors(n_b, p);
+        let b_factors_c_host = compute_b_factors(n_c, p);
+        let b_factors_a = device
+            .htod_sync_copy(&b_factors_a_host)
+            .map_err(GpuError::from)?;
+        let b_factors_b = device
+            .htod_sync_copy(&b_factors_b_host)
+            .map_err(GpuError::from)?;
+        let b_factors_c = device
+            .htod_sync_copy(&b_factors_c_host)
+            .map_err(GpuError::from)?;
+        let mut influence_g = device
+            .alloc_zeros::<Real>(m_complex)
+            .map_err(GpuError::from)?;
+        let mut virial_factor = device
+            .alloc_zeros::<Real>(m_complex)
+            .map_err(GpuError::from)?;
+        // Sized to the per-step `spme_recip_apply_influence` grid: one
+        // partial per launch block. Block size 256 matches the
+        // shared-memory tree shape inside the kernel.
+        let num_partial_blocks = m_complex.div_ceil(256);
+        let virial_partials = device
+            .alloc_zeros::<Real>(num_partial_blocks)
+            .map_err(GpuError::from)?;
+
+        // Atom spatial pre-sort scratch. `sorted_atom_index` is
+        // initialised to the identity permutation so the very first
+        // `compute()` call can run the spread / gather kernels even
+        // before the first sort completes.
+        let n = particle_count;
+        let atom_bin_key = device.alloc_zeros::<u32>(n.max(1)).map_err(GpuError::from)?;
+        let bin_atom_counts = device.alloc_zeros::<u32>(m).map_err(GpuError::from)?;
+        let bin_atom_offsets = device.alloc_zeros::<u32>(m + 1).map_err(GpuError::from)?;
+        let bin_atom_cursor = device.alloc_zeros::<u32>(m).map_err(GpuError::from)?;
+        let sorted_atom_index = if n == 0 {
+            device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
+        } else {
+            let identity: Vec<u32> = (0..n as u32).collect();
+            device.htod_sync_copy(&identity).map_err(GpuError::from)?
+        };
+        let sort_scan_block_totals = alloc_scan_block_totals(&device, m)?;
+
+        let forward_plan = Plan3dR2C::new_unallocated(&device, n_a, n_b, n_c)?;
+        let inverse_plan = Plan3dC2R::new_unallocated(&device, n_a, n_b, n_c)?;
+
+        // Bind both cuFFT plans to the device's default stream. Without
+        // this, cuFFT runs on the legacy NULL stream — but when
+        // `init_device` uses `CudaDevice::new_with_stream` the device's
+        // default stream is non-NULL, and kernels launching on it
+        // would not be visible to cuFFT (and vice versa).
+        let dev_stream = *device.cu_stream();
+        forward_plan.set_stream(dev_stream)?;
+        inverse_plan.set_stream(dev_stream)?;
+
+        // Allocate a single device-resident work area sized to the
+        // larger of the two plans' requested sizes; bind both plans to
+        // it. The plans share the buffer because their executions are
+        // strictly serialised on the default stream. The pinned
+        // pointer is a prerequisite for the captured `cufftExec*`
+        // calls to be safe across CUDA graph replays.
+        let work_size = forward_plan.work_size()?.max(inverse_plan.work_size()?);
+        let workspace_len = work_size.max(1);
+        let mut workspace = device
+            .alloc_zeros::<u8>(workspace_len)
+            .map_err(GpuError::from)?;
+        let work_ptr = (*workspace.device_ptr_mut()) as *mut std::ffi::c_void;
+        forward_plan.set_work_area(work_ptr)?;
+        inverse_plan.set_work_area(work_ptr)?;
+
+        // Populate `influence_g` and `virial_factor` for the initial
+        // box. The launch is async on the default stream; downstream
+        // consumers in `compute()` read from the same stream and
+        // observe the writes without additional synchronisation.
+        crate::gpu::spme_recip_compute_influence(
+            &gpu.kernels,
             &b_factors_a,
             &b_factors_b,
             &b_factors_c,
-        );
-        debug_assert_eq!(influence_host.len(), m_complex);
-        debug_assert_eq!(virial_host.len(), m_complex);
-        let influence_g = device.htod_sync_copy(&influence_host).map_err(GpuError::from)?;
-        let virial_factor =
-            device.htod_sync_copy(&virial_host).map_err(GpuError::from)?;
-        let virial_per_cell = device
-            .alloc_zeros::<Real>(m_complex)
-            .map_err(GpuError::from)?;
+            &mut influence_g,
+            &mut virial_factor,
+            sim_box,
+            params.grid,
+            K_COULOMB_F32,
+            params.alpha,
+            m_complex as u32,
+        )?;
 
-        let forward_plan = Plan3dR2C::new(&device, n_a, n_b, n_c)?;
-        let inverse_plan = Plan3dC2R::new(&device, n_a, n_b, n_c)?;
-
-        let recip_stream = device.fork_default_stream().map_err(GpuError::from)?;
-        forward_plan.set_stream(recip_stream.stream)?;
-        inverse_plan.set_stream(recip_stream.stream)?;
-        let recip_stream = SendableStream(recip_stream);
+        // Order-specialized charge-spread and force-gather kernels,
+        // NVRTC-compiled once with PME_ORDER fixed at the configured
+        // spline order. rq-94bfcb7e
+        let (jit_spread, jit_gather) =
+            compile_order_specialized_kernels(&device, params.spline_order)?;
 
         Ok(SpmeReciprocalGrid {
             device,
@@ -207,130 +363,154 @@ impl SpmeReciprocalGrid {
             particle_count,
             m,
             m_complex,
-            bin_list,
+            rho_fixed,
             rho,
             rho_hat_interleaved,
             v,
             influence_g,
             virial_factor,
-            virial_per_cell,
-            cached_box_generation: sim_box.generation(),
+            virial_partials,
+            b_factors_a,
+            b_factors_b,
+            b_factors_c,
             forward_plan,
             inverse_plan,
-            recip_stream,
+            workspace,
+            atom_bin_key,
+            bin_atom_counts,
+            bin_atom_offsets,
+            bin_atom_cursor,
+            sorted_atom_index,
+            sort_scan_block_totals,
+            cached_neighbor_list_generation: 0,
+            jit_spread,
+            jit_gather,
         })
     }
 
     /// Run the per-step reciprocal-space pipeline:
-    ///   spread → forward FFT → influence multiply → inverse FFT.
+    ///   sort (when triggered) → spread → forward FFT → influence
+    ///   multiply → inverse FFT.
     /// On return, `self.v` holds the smoothed potential V[g] (with
     /// `k_C/V_box` and `|b|²` baked in via the influence function);
     /// `self.rho` holds the charge density rho[g].
+    ///
+    /// `neighbor_list_generation` is the framework's monotonic
+    /// rebuild-counter value (`NeighborListState::rebuild_generation()`).
+    /// The slot re-runs the atom spatial pre-sort when this value
+    /// strictly exceeds the slot's cached generation; otherwise the
+    /// prior sort permutation is reused.
     pub fn compute(
         &mut self,
         sim_box: &SimulationBox,
         particle_buffers: &ParticleBuffers,
+        neighbor_list_generation: u64,
         timings: &mut Timings,
     ) -> Result<(), SpmeError> {
-        // Refresh influence function (and the virial factor that
-        // tracks it) if the box has changed.
-        if sim_box.generation() != self.cached_box_generation {
-            let n_a = self.params.grid[0];
-            let n_b = self.params.grid[1];
-            let n_c = self.params.grid[2];
-            let p = self.params.spline_order;
-            let b_factors_a = compute_b_factors(n_a, p);
-            let b_factors_b = compute_b_factors(n_b, p);
-            let b_factors_c = compute_b_factors(n_c, p);
-            let (g_host, vf_host) = compute_influence_and_virial(
-                sim_box,
-                self.params,
-                &b_factors_a,
-                &b_factors_b,
-                &b_factors_c,
-            );
-            self.device
-                .htod_sync_copy_into(&g_host, &mut self.influence_g)
-                .map_err(GpuError::from)?;
-            self.device
-                .htod_sync_copy_into(&vf_host, &mut self.virial_factor)
-                .map_err(GpuError::from)?;
-            self.cached_box_generation = sim_box.generation();
-        }
-
-        // 1. Rebuild bin structure (default stream).
-        self.bin_list.pre_step(sim_box, particle_buffers, timings)?;
-
-        // 2. Hand off to the dedicated recip stream. wait_for_default
-        // records an event on the default stream capturing all work
-        // queued so far (integrator + bin_list rebuild + any other
-        // default-stream slot launches that already returned to host)
-        // and makes recip_stream wait on that event.
-        // rq-274db88b
-        self.recip_stream
-            .wait_for_default()
-            .map_err(GpuError::from)?;
-
-        // 3. Charge spreading on recip_stream (writes rho).
-        let cl = self
-            .bin_list
-            .cell_list_data()
-            .expect("SpmeReciprocalGrid bin list must be in cell-list-only mode");
-        spme_charge_spread_on_stream(
-            particle_buffers,
+        // Recompute the influence function (and the virial factor that
+        // tracks it) every step from the live device lattice. Barostats
+        // mutate `sim_box.lattice_device()` in place via a captured
+        // kernel, so launching this unconditionally records it into the
+        // per-step CUDA graph; it then replays every step and tracks the
+        // box. A host-side box-generation guard cannot serve here: graph
+        // capture evaluates the host branch once, before the step's
+        // barostat advances the box, so a gated launch would be skipped
+        // and the captured batch would run on a stale influence. The f32
+        // kernel is memory-bound and cheap enough to run every step (NVT
+        // simply recomputes identical buffers). All recip launches share
+        // the default stream, so downstream consumers see the refreshed
+        // buffers without additional synchronisation. rq-e7b74f7a
+        crate::gpu::spme_recip_compute_influence(
+            &particle_buffers.kernels,
+            &self.b_factors_a,
+            &self.b_factors_b,
+            &self.b_factors_c,
+            &mut self.influence_g,
+            &mut self.virial_factor,
             sim_box,
-            &cl.sorted_particle_ids,
-            &cl.cell_offsets,
             self.params.grid,
-            self.params.spline_order,
-            &mut self.rho,
-            &self.recip_stream,
+            K_COULOMB_F32,
+            self.params.alpha,
+            self.m_complex as u32,
         )?;
 
-        // 4. Forward FFT (rho → rho_hat). cuFFT plan bound to recip_stream
-        // at slot construction.
-        // rq-24e36eba
+        // Atom spatial pre-sort. Triggered when the framework's
+        // neighbour-list rebuild generation advances past the slot's
+        // cached value. Concentrates the spread's atomicAdd writes and
+        // the gather's V[g] reads on neighbouring cache lines.
+        if neighbor_list_generation > self.cached_neighbor_list_generation
+            && self.particle_count > 0
+        {
+            spme_atom_sort(
+                particle_buffers,
+                sim_box,
+                self.params.grid,
+                &mut self.atom_bin_key,
+                &mut self.bin_atom_counts,
+                &mut self.bin_atom_offsets,
+                &mut self.bin_atom_cursor,
+                &mut self.sorted_atom_index,
+                &mut self.sort_scan_block_totals,
+            )?;
+            self.cached_neighbor_list_generation = neighbor_list_generation;
+        }
+
+        // Charge spread (fixed-point atomic-add pipeline).
+        let _ = timings;
+        // Always zero rho_fixed so the per-step atomicAdd<i64> accumulates
+        // a clean state. Particle-count == 0 still produces a correct
+        // all-zero rho via spme_spread_finish.
+        self.device
+            .memset_zeros(&mut self.rho_fixed)
+            .map_err(GpuError::from)?;
+        if self.particle_count > 0 {
+            crate::gpu::spme_spread_fixed_point(
+                &self.jit_spread,
+                particle_buffers,
+                &self.sorted_atom_index,
+                sim_box,
+                self.params.grid,
+                self.params.spline_order,
+                &mut self.rho_fixed,
+            )?;
+        }
+        crate::gpu::spme_spread_finish(
+            &particle_buffers.kernels,
+            &self.rho_fixed,
+            &mut self.rho,
+            self.m as u32,
+        )?;
         self.forward_plan
             .execute(&self.rho, &mut self.rho_hat_interleaved)?;
 
-        // 5. Influence multiply on recip_stream (rho_hat *= G; also
-        //    writes per-cell virial).
         let n_c = self.params.grid[2];
         let n_c_complex = (n_c / 2 + 1) as u32;
-        spme_influence_multiply_on_stream(
+        crate::gpu::spme_recip_apply_influence(
             &particle_buffers.kernels,
             &self.influence_g,
             &self.virial_factor,
             &mut self.rho_hat_interleaved,
-            &mut self.virial_per_cell,
+            &mut self.virial_partials,
             n_c,
             n_c_complex,
             self.m_complex as u32,
-            &self.recip_stream,
         )?;
 
-        // 6. Inverse FFT (rho_hat → V) on recip_stream.
-        // rq-a98abc35
         self.inverse_plan
             .execute(&self.rho_hat_interleaved, &mut self.v)?;
 
-        // Host returns immediately. The default stream's join with
-        // recip_stream happens at the start of SpmeReciprocalState::reduce
-        // via CudaDevice::wait_for(&recip_stream) before any dtoh of
-        // virial_per_cell or any read of V by spme_force_gather.
         Ok(())
     }
 
-    /// Block the device's default stream until the reciprocal pipeline
-    /// queued on `recip_stream` has finished. Production paths call this
-    /// implicitly at the start of `SpmeReciprocalState::reduce`. Tests
-    /// and other direct consumers that read `rho` / `v` / `virial_per_cell`
-    /// straight after `compute` must call this first so the dtoh sees
-    /// finalized buffers.
+    /// Synchronises the device. Production paths do not need to call
+    /// this — the per-stream ordering of the default stream makes
+    /// `rho` / `v` / `virial_partials` visible to any subsequent
+    /// kernel or dtoh on the same stream. Tests that read these
+    /// buffers via the host call this for clarity (a subsequent
+    /// `dtoh_sync_copy` already synchronises, so the call is logically
+    /// redundant but kept as a no-cost diagnostic).
     pub fn sync_recip(&self) -> Result<(), GpuError> {
-        self.device
-            .wait_for(&self.recip_stream.0)
-            .map_err(GpuError::from)
+        self.device.synchronize().map_err(GpuError::from)
     }
 }
 
@@ -340,12 +520,16 @@ impl SpmeReciprocalGrid {
 // and B-spline order p, `b_factors[k] = |b(k)|²` where
 //   b(k) = exp(2π i (p-1) k / N) / Σ_{j=0..p-2} M_p(j+1) · exp(2π i j k / N)
 // and |b(k)|² = 1 / |denominator|².
+// rq-e7b74f7a
 pub fn compute_b_factors(n: u32, p: u32) -> Vec<Real> {
     let n = n as usize;
     let p = p as usize;
-    let mut out = vec![0.0; n];
     let two_pi = 2.0 * std::f64::consts::PI;
     let m_p_samples: Vec<f64> = (1..p).map(|j| cardinal_bspline(p, j as f64)).collect();
+
+    // |Σ_j M_p(j+1) · exp(2π i k j / n)|² — the B-spline structure-factor
+    // modulus squared per grid index. `b_factors_d[k]` is its reciprocal.
+    let mut moduli = vec![0.0_f64; n];
     for k in 0..n {
         let theta = two_pi * (k as f64) / (n as f64);
         let mut sum_re = 0.0_f64;
@@ -355,117 +539,26 @@ pub fn compute_b_factors(n: u32, p: u32) -> Vec<Real> {
             sum_re += m_val * angle.cos();
             sum_im += m_val * angle.sin();
         }
-        let denom2 = sum_re * sum_re + sum_im * sum_im;
-        out[k] = if denom2 > 0.0 {
-            (1.0 / denom2) as Real
-        } else {
-            0.0
-        };
+        moduli[k] = sum_re * sum_re + sum_im * sum_im;
     }
-    out
-}
 
-// rq-9ca00d25
-//
-// Influence function G[k] for the SPME reciprocal pipeline, computed
-// on the host and uploaded once per box-generation refresh. The
-// formula is
-//   G[k] = (k_C / V_box) · (4π / |K|²) · exp(-|K|²/(4α²))
-//          · b_factors_a[k_a] · b_factors_b[k_b] · b_factors_c[k_c]
-// with G[0] = 0 (tinfoil boundary conditions). The reciprocal-lattice
-// wave vector K = 2π · (m_a · b_a_vec + m_b · b_b_vec + m_c · b_c_vec)
-// where b_*_vec are the rows of H^{-T} (the inverse-transpose of the
-// lattice matrix; see `simulation-box.md`).
-//
-// The companion `virial_factor[k] = G[k] · (1 − K²/(2α²))` is
-// precomputed alongside G to support the reciprocal-space scalar
-// virial reduction. virial_factor[0] = 0.
-pub fn compute_influence_and_virial(
-    sim_box: &SimulationBox,
-    params: SpmeParameters,
-    b_factors_a: &[Real],
-    b_factors_b: &[Real],
-    b_factors_c: &[Real],
-) -> (Vec<Real>, Vec<Real>) {
-    let n_a = params.grid[0] as usize;
-    let n_b = params.grid[1] as usize;
-    let n_c = params.grid[2] as usize;
-    let n_c_complex = n_c / 2 + 1;
-    let m_complex = n_a * n_b * n_c_complex;
-    let mut out = vec![0.0; m_complex];
-    let mut vf = vec![0.0; m_complex];
-
-    let lx = sim_box.lx() as f64;
-    let ly = sim_box.ly() as f64;
-    let lz = sim_box.lz() as f64;
-    let xy = sim_box.xy() as f64;
-    let xz = sim_box.xz() as f64;
-    let yz = sim_box.yz() as f64;
-    let v_box = (lx * ly * lz) as f64;
-    let alpha = params.alpha as f64;
-    let four_alpha2 = 4.0 * alpha * alpha;
-    let four_pi = 4.0 * std::f64::consts::PI;
-    let two_pi = 2.0 * std::f64::consts::PI;
-    let k_c = K_COULOMB_F32 as f64;
-    let prefactor = k_c / v_box;
-
-    // Rows of H^{-T} (the reciprocal lattice).
-    // For our lower-triangular H with rows = (a, b, c), the transpose is
-    // upper triangular with the same elements; its inverse is again
-    // upper triangular and has closed-form entries below.
-    let recip_a = [
-        1.0 / lx,
-        -xy / (lx * ly),
-        (xy * yz - xz * ly) / (lx * ly * lz),
-    ];
-    let recip_b = [0.0, 1.0 / ly, -yz / (ly * lz)];
-    let recip_c = [0.0, 0.0, 1.0 / lz];
-
-    for ka in 0..n_a {
-        let ma: f64 = if ka <= n_a / 2 {
-            ka as f64
-        } else {
-            ka as f64 - n_a as f64
-        };
-        let b_a = b_factors_a[ka] as f64;
-        for kb in 0..n_b {
-            let mb: f64 = if kb <= n_b / 2 {
-                kb as f64
-            } else {
-                kb as f64 - n_b as f64
-            };
-            let b_b = b_factors_b[kb] as f64;
-            for kc in 0..n_c_complex {
-                let mc: f64 = if kc <= n_c / 2 {
-                    kc as f64
-                } else {
-                    kc as f64 - n_c as f64
-                };
-                let b_c = b_factors_c[kc] as f64;
-                let kx = two_pi
-                    * (ma * recip_a[0] + mb * recip_b[0] + mc * recip_c[0]);
-                let ky = two_pi
-                    * (ma * recip_a[1] + mb * recip_b[1] + mc * recip_c[1]);
-                let kz = two_pi
-                    * (ma * recip_a[2] + mb * recip_b[2] + mc * recip_c[2]);
-                let k2 = kx * kx + ky * ky + kz * kz;
-                let idx = (ka * n_b + kb) * n_c_complex + kc;
-                if k2 == 0.0 {
-                    out[idx] = 0.0;
-                    vf[idx] = 0.0;
-                } else {
-                    let g = prefactor * (four_pi / k2) * (-k2 / four_alpha2).exp()
-                        * b_a
-                        * b_b
-                        * b_c;
-                    out[idx] = g as Real;
-                    let factor = 1.0 - k2 / (2.0 * alpha * alpha);
-                    vf[idx] = (g * factor) as Real;
-                }
-            }
+    // Odd spline orders produce (near-)zero moduli at certain grid
+    // indices, where the reciprocal `1 / |·|²` would blow up. Replace each
+    // near-zero modulus with the average of its two periodic neighbours
+    // (Essmann et al. 1995).
+    // Even orders have no near-zero moduli, so the pass is a no-op there.
+    for k in 0..n {
+        if moduli[k] < 1.0e-7 {
+            let prev = moduli[(k + n - 1) % n];
+            let next = moduli[(k + 1) % n];
+            moduli[k] = 0.5 * (prev + next);
         }
     }
-    (out, vf)
+
+    moduli
+        .iter()
+        .map(|&d| if d > 0.0 { (1.0 / d) as Real } else { 0.0 })
+        .collect()
 }
 
 // Cardinal B-spline M_p(x) via the Cox-de Boor recursion, host-side.
@@ -494,15 +587,14 @@ fn cardinal_bspline(p: usize, x: f64) -> f64 {
 // rq-f6d45062
 //
 // Real-space `erfc`-screened pair-force slot. Structurally analogous to
-// `LennardJonesState` and `CoulombState`: owns a `PairBuffer` and a
-// `DeviceExclusionList`, contributes via the `spme_real_pair_force`
-// kernel, and reduces via `reduce_pair_forces`.
+// Holds the per-pair-type parameters and exclusion list; the fused
+// pair-force kernel runs directly inside `compute()` and writes the
+// per-particle output to the SlotOutputView.
 // rq-22171569
 #[derive(Debug)]
 pub struct SpmeRealSpaceState {
     #[allow(dead_code)]
     device: Arc<CudaDevice>,
-    pair_buffer: PairBuffer,
     exclusions: DeviceExclusionList,
     alpha: Real,
     r_cut_real: Real,
@@ -515,15 +607,12 @@ impl SpmeRealSpaceState {
         particle_count: usize,
         alpha: Real,
         r_cut_real: Real,
-        max_neighbors: u32,
         exclusion_list: &ExclusionList,
     ) -> Result<Self, NeighborListError> {
         let device = gpu.device.clone();
-        let pair_buffer = PairBuffer::new(gpu, particle_count, max_neighbors)?;
         let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
         Ok(SpmeRealSpaceState {
             device,
-            pair_buffer,
             exclusions,
             alpha,
             r_cut_real,
@@ -534,78 +623,160 @@ impl SpmeRealSpaceState {
 
 impl Potential for SpmeRealSpaceState {
     fn label(&self) -> &'static str {
-        "spme_real"
+        SPME_REAL_LABEL
     }
 
     fn max_cutoff(&self) -> Option<Real> {
         Some(self.r_cut_real)
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
-        cx: &ForceFieldContext<'_>,
-        timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        let nl = cx
-            .neighbor_list
-            .expect("SpmeRealSpaceState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::SPME_REAL_PAIR_FORCE)?;
-        spme_real_pair_force(
-            buffers,
-            &mut self.pair_buffer,
-            sim_box,
-            self.alpha,
-            self.r_cut_real,
-            &self.exclusions.atom_excl_offsets,
-            &self.exclusions.atom_excl_partners,
-            &self.exclusions.atom_excl_coul_scales,
-            &nl.neighbor_list,
-            &nl.neighbor_counts,
-        )?;
-        timings.kernel_stop(KernelStage::SPME_REAL_PAIR_FORCE)?;
-        Ok(())
-    }
-
-    fn reduce(
-        &mut self,
         mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
         level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
-        if self.particle_count == 0 {
-            return Ok(());
+        // SpmeRealSpaceState is always a JIT pair-force participant (see
+        // `jit_participant`); the framework evaluates it through the
+        // composed packed pair-force kernel and skips this slot in the
+        // per-slot `compute` loop, so this method is never invoked. The
+        // SPME reciprocal-space work runs in the separate
+        // `SpmeReciprocalState` slot, which does use `compute`.
+        let _ = (buffers, sim_box, &mut output, cx, &mut *timings, level);
+        unreachable!("SpmeRealSpaceState is JIT-composed; compute() is never invoked")
+    }
+
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::PairForce(self))
+    }
+}
+
+impl PairForcePotential for SpmeRealSpaceState {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        spme_real_pair_force_fragment(self.r_cut_real)
+    }
+
+    fn bind_pair_force_args(
+        &self,
+        _ctx: &PairForceBindContext<'_>,
+        builder: &mut ForceLaunchBuilder,
+    ) {
+        // Validated against `spme_real_arg_schema()` — the same schema
+        // that generates the fragment's entry-point args and
+        // functor-init source — so the binding cannot drift from the
+        // kernel signature.
+        let schema = spme_real_arg_schema();
+        let mut b = KernelArgBinder::new(&schema, SPME_REAL_LABEL, builder);
+        b.scalar_real("spme_real_k_coulomb", K_COULOMB_F32);
+        b.scalar_real("spme_real_alpha", self.alpha);
+        b.scalar_real("spme_real_r_cut", self.r_cut_real);
+        b.buffer("spme_real_excl_offsets", &self.exclusions.atom_excl_offsets);
+        b.buffer("spme_real_excl_partners", &self.exclusions.atom_excl_partners);
+        b.buffer("spme_real_excl_scales", &self.exclusions.atom_excl_coul_scales);
+        b.finish();
+    }
+}
+
+/// The real-space slot's stable label, shared by `Potential::label`,
+/// the fragment, and the argument schema.
+const SPME_REAL_LABEL: &str = "spme_real";
+
+/// Single source of truth for the SPME real-space pair-force kernel
+/// arguments. The fragment's `entry_point_args` and `functor_init_source`
+/// are generated from this list, and `bind_pair_force_args` is validated
+/// against it, so the three pieces cannot drift apart.
+fn spme_real_arg_schema() -> KernelArgSchema {
+    use KernelArgType::{ConstPtrReal, ConstPtrU32, ScalarReal};
+    KernelArgSchema::pair_force(
+        SPME_REAL_LABEL,
+        vec![
+            KernelArg::new("spme_real_k_coulomb", ScalarReal, "k_coulomb"),
+            KernelArg::new("spme_real_alpha", ScalarReal, "alpha"),
+            KernelArg::new("spme_real_r_cut", ScalarReal, "r_cut_real"),
+            KernelArg::new("spme_real_excl_offsets", ConstPtrU32, "excl_offsets"),
+            KernelArg::new("spme_real_excl_partners", ConstPtrU32, "excl_partners"),
+            KernelArg::new("spme_real_excl_scales", ConstPtrReal, "excl_scales"),
+        ],
+    )
+}
+
+/// SPME real-space `erfc`-screened pair force fragment for the
+/// JIT-composed pair-force kernel.
+pub fn spme_real_pair_force_fragment(r_cut_real: Real) -> PairForceFragment {
+    // Single functor source for both precisions. The `erfc` branch is
+    // selected at JIT-compile time via `HEDDLE_REAL_F64`:
+    //   - f32: 5-coefficient Hastings (Abramowitz & Stegun, 1964)
+    //     polynomial. Max error 1.5e-7 over all real α·r, below f32
+    //     round-off.
+    //   - f64: hardware `erfc` via the precision shim. The polynomial
+    //     would inject a 1.5e-7 bias well above f64 round-off.
+    let functor_source = r#"
+struct SpmeRealPairFunctor {
+    Real k_coulomb;
+    Real alpha;
+    Real r_cut_real;
+    const unsigned int *excl_offsets;
+    const unsigned int *excl_partners;
+    const Real *excl_scales;
+
+    __device__ inline Real cutoff_squared(
+        unsigned int, unsigned int, unsigned int, unsigned int) const {
+        return r_cut_real * r_cut_real;
+    }
+
+    __device__ inline void evaluate(
+        Real r2, Real inv_r, Real r,
+        Real qi, Real qj,
+        unsigned int /*i_type*/, unsigned int /*j_type*/,
+        unsigned int i, unsigned int j,
+        Real &factor, Real &energy, Real &virial) const
+    {
+        Real qq = qi * qj;
+        Real inv_r2 = inv_r * inv_r;
+        Real ar = alpha * r;
+        Real gauss = Real_exp(-(ar * ar));
+        Real erfc_ar;
+#ifdef HEDDLE_REAL_F64
+        erfc_ar = Real_erfc(ar);
+#else
+        {
+            Real t = R(1.0) / (R(1.0) + R(0.3275911) * ar);
+            erfc_ar = (R(0.254829592)
+                       + (R(-0.284496736)
+                          + (R(1.421413741)
+                             + (R(-1.453152027) + R(1.061405429) * t) * t) * t) * t)
+                      * t * gauss;
         }
-        let nl = cx
-            .neighbor_list
-            .expect("SpmeRealSpaceState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::REDUCE_PAIR_FORCES)?;
-        reduce_pair_forces(
-            &self.pair_buffer,
-            &nl.neighbor_counts,
-            &mut output.force_x,
-            &mut output.force_y,
-            &mut output.force_z,
-            self.particle_count,
-        )?;
-        timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
-        if level.includes_scalars() {
-            timings.kernel_start(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
-            reduce_pair_energy_virial(
-                &self.pair_buffer,
-                &nl.neighbor_counts,
-                &mut output.energy,
-                &mut output.virial,
-                self.particle_count,
-            )?;
-            timings.kernel_stop(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
-        }
-        Ok(())
+#endif
+        Real one_over_sqrt_pi = R(0.5641895835477563);
+        energy = k_coulomb * qq * erfc_ar * inv_r;
+        factor = k_coulomb * qq * inv_r2
+                 * (erfc_ar * inv_r + R(2.0) * alpha * one_over_sqrt_pi * gauss);
+        virial = factor * r2;
+    }
+
+    __device__ inline Real exclusion_scale(unsigned int i, unsigned int j) const {
+        return heddle_jit_exclusion_scale(i, j, excl_offsets, excl_partners, excl_scales);
+    }
+};
+"#;
+    // `entry_point_args` and `functor_init_source` are generated from
+    // `spme_real_arg_schema()`, the same schema `bind_pair_force_args`
+    // is validated against; the functor field names in `functor_source`
+    // above must match the schema's `functor_field` entries.
+    let schema = spme_real_arg_schema();
+    PairForceFragment {
+        label: SPME_REAL_LABEL,
+        functor_struct_name: "SpmeRealPairFunctor",
+        functor_source: functor_source.to_string(),
+        entry_point_args: schema.entry_point_args(),
+        functor_init_source: schema.functor_init_source(),
+        cutoff: CutoffHandling::Uniform(r_cut_real),
+        // SPME-real has no per-type parameters; it ignores i_type / j_type.
+        consumes_type_index: false,
     }
 }
 
@@ -624,13 +795,10 @@ pub struct SpmeReciprocalState {
     // `u_self_per_particle[i] = k_C · (α/√π) · q_i²`. Subtracted from
     // the per-particle reciprocal energy inside the gather kernel.
     u_self_per_particle: CudaSlice<Real>,
-    // Host scratch for the reciprocal-virial reduction. Reused across
-    // steps to avoid per-step allocation.
-    virial_host_scratch: Vec<Real>,
-    // Reduced per-particle reciprocal virial share, set by `contribute()`
-    // from `virial_per_cell` and consumed by `reduce()` via the gather
-    // kernel argument.
-    w_per_particle_virial: Real,
+    // Reduced per-particle reciprocal virial share, computed by
+    // `spme_recip_reduce_partials` from `SpmeReciprocalGrid::virial_partials`
+    // and read by the force-gather kernel on the same stream.
+    w_per_particle_virial: CudaSlice<Real>,
 }
 
 impl SpmeReciprocalState {
@@ -659,11 +827,12 @@ impl SpmeReciprocalState {
                 .htod_sync_copy(&u_self_host)
                 .map_err(GpuError::from)?
         };
+        let w_per_particle_virial =
+            grid.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(SpmeReciprocalState {
             grid,
             u_self_per_particle,
-            virial_host_scratch: vec![0.0; grid_m_complex_or_zero(&params)],
-            w_per_particle_virial: 0.0,
+            w_per_particle_virial,
         })
     }
 
@@ -672,13 +841,6 @@ impl SpmeReciprocalState {
     pub fn grid(&self) -> &SpmeReciprocalGrid {
         &self.grid
     }
-}
-
-fn grid_m_complex_or_zero(params: &SpmeParameters) -> usize {
-    let n_a = params.grid[0] as usize;
-    let n_b = params.grid[1] as usize;
-    let n_c = params.grid[2] as usize;
-    n_a * n_b * (n_c / 2 + 1)
 }
 
 impl Potential for SpmeReciprocalState {
@@ -697,32 +859,10 @@ impl Potential for SpmeReciprocalState {
         super::ForceClass::Slow
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
-        _cx: &ForceFieldContext<'_>,
-        timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        let n = self.grid.particle_count;
-        if n == 0 {
-            self.w_per_particle_virial = 0.0;
-            return Ok(());
-        }
-        // Launch-only: queues the 4 reciprocal kernels onto
-        // grid.recip_stream and returns. The host does not block on
-        // cuFFT or on virial_per_cell here; the join with the default
-        // stream and the virial dtoh+sum run at the start of reduce().
-        timings.kernel_start(KernelStage::SPME_RECIP_PIPELINE)?;
-        self.grid
-            .compute(sim_box, buffers, timings)
-            .map_err(map_spme_err)?;
-        timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
-        Ok(())
-    }
-
-    fn reduce(
-        &mut self,
         mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
@@ -732,46 +872,38 @@ impl Potential for SpmeReciprocalState {
         if n == 0 {
             return Ok(());
         }
-
-        // SpmeReciprocalState uses spme_force_gather, which writes
-        // forces, energy, and virial in a single kernel call. The
-        // gather cost is small relative to the recip pipeline and
-        // splitting it would yield no measurable saving, so this slot
-        // ignores `level` and always writes all five output rows.
-
-        // Join the default stream with recip_stream so the dtoh below
-        // and the force_gather launch that follows both see finalized
-        // virial_per_cell and V buffers. wait_for records an event on
-        // recip_stream and makes the default stream wait on it.
-        // rq-0d5e76ec
+        // When the framework has a shared neighbour list (the common
+        // case — SPME requires the real-space slot whose r_cut sizes
+        // it), use its rebuild generation as the sort trigger. When
+        // no neighbour list exists, keep the construction-time
+        // identity permutation forever (correct, but no cache-locality
+        // benefit).
+        let neighbor_list_generation = cx
+            .neighbor_list
+            .map(|nl| nl.rebuild_generation())
+            .unwrap_or(0);
+        timings.kernel_start(KernelStage::SPME_RECIP_PIPELINE)?;
         self.grid
-            .device
-            .wait_for(&self.grid.recip_stream)
-            .map_err(GpuError::from)?;
-
-        // Reduce virial_per_cell host-side. The 0.5 factor matches the
-        // Ewald half-sum that defines U_recip in
-        // `docs/long-range-electrostatics.md`.
-        if self.virial_host_scratch.len() != self.grid.m_complex {
-            self.virial_host_scratch.resize(self.grid.m_complex, 0.0);
-        }
-        self.grid
-            .device
-            .dtoh_sync_copy_into(&self.grid.virial_per_cell, &mut self.virial_host_scratch)
-            .map_err(GpuError::from)?;
-        let mut w_recip = 0.0_f64;
-        for &v in &self.virial_host_scratch {
-            w_recip += v as f64;
-        }
-        self.w_per_particle_virial = (0.5 * w_recip / n as f64) as Real;
+            .compute(sim_box, buffers, neighbor_list_generation, timings)
+            .map_err(map_spme_err)?;
+        crate::gpu::spme_recip_reduce_partials(
+            &buffers.kernels,
+            &self.grid.virial_partials,
+            &mut self.w_per_particle_virial,
+            self.grid.virial_partials.len() as u32,
+            n as u32,
+        )?;
+        timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
 
         timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
         spme_force_gather(
-            cx.buffers,
-            cx.sim_box,
+            &self.grid.jit_gather,
+            buffers,
+            &self.grid.sorted_atom_index,
+            sim_box,
             &self.grid.v,
             &self.u_self_per_particle,
-            self.w_per_particle_virial,
+            &self.w_per_particle_virial,
             self.grid.params.grid,
             self.grid.params.spline_order,
             &mut output.force_x,
@@ -800,6 +932,9 @@ fn map_spme_err(e: SpmeError) -> ForceFieldError {
         SpmeError::InvalidGrid { axis, n, required } => panic!(
             "SPME step encountered invalid grid (axis {axis}, n {n}, required {required})"
         ),
+        SpmeError::KernelCompilation(log) => {
+            panic!("SPME step encountered kernel-compilation error: {log}")
+        }
     }
 }
 
@@ -816,20 +951,14 @@ impl PotentialBuilder for SpmeRealBuilder {
             return Ok(None);
         };
         let params = SpmeParameters::from(spme_cfg);
-        let max_neighbors = super::max_neighbors_from(cx.neighbor_list_config, cx.particle_count);
         let state = SpmeRealSpaceState::new(
             cx.gpu,
             cx.particle_count,
             params.alpha,
             params.r_cut_real,
-            max_neighbors,
             cx.exclusion_list,
         )?;
         Ok(Some(Box::new(state)))
-    }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
     }
 }
 
@@ -856,50 +985,125 @@ impl PotentialBuilder for SpmeReciprocalBuilder {
         .map_err(map_spme_err)?;
         Ok(Some(Box::new(state)))
     }
-
-    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-        Box::new(self.clone())
-    }
 }
 
-// rq-2093594f rq-9a512ed1
-#[derive(Debug, Clone)]
-pub struct SpmeRealKernels {
-    pub spme_real_pair_force: CudaFunction,
-}
-
-impl SpmeRealKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::SPME_REAL),
-            "spme_real",
-            &["spme_real_pair_force"],
-        )?;
-        Ok(SpmeRealKernels {
-            spme_real_pair_force: get_func(device, "spme_real", "spme_real_pair_force")?,
-        })
-    }
-}
-
+// The charge-spread and force-gather kernels are not loaded here: they
+// are NVRTC-compiled per run, specialized to the configured spline
+// order (see *Compile-time spline-order specialization*). rq-94bfcb7e
 // rq-2093594f rq-9ca00d25
-#[derive(Debug, Clone)]
-pub struct SpmeRecipKernels {
-    pub spme_charge_spread: CudaFunction,
-    pub spme_influence_multiply: CudaFunction,
-    pub spme_force_gather: CudaFunction,
+crate::gpu_kernels! {
+    module: "spme_recip",
+    ptx: crate::kernels::SPME_RECIP,
+    struct: SpmeRecipKernels,
+    kernels: [
+        spme_recip_compute_influence,
+        spme_compute_bin_key,
+        spme_spread_finish,
+        spme_recip_apply_influence,
+        spme_recip_reduce_partials,
+    ],
+    stages: {
+        SPME_RECIP_PIPELINE = "spme_recip_pipeline",
+        SPME_FORCE_GATHER   = "spme_force_gather",
+    },
 }
 
-impl SpmeRecipKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::SPME_RECIP),
-            "spme_recip",
-            &["spme_charge_spread", "spme_influence_multiply", "spme_force_gather"],
-        )?;
-        Ok(SpmeRecipKernels {
-            spme_charge_spread: get_func(device, "spme_recip", "spme_charge_spread")?,
-            spme_influence_multiply: get_func(device, "spme_recip", "spme_influence_multiply")?,
-            spme_force_gather: get_func(device, "spme_recip", "spme_force_gather")?,
-        })
+#[cfg(test)]
+mod order_specialization_tests {
+    use super::{assemble_spme_jit_source, compute_b_factors, compile_spme_ptx, SpmeError};
+
+    // rq-b3f2381a
+    // The B-spline correction factors must be finite and bounded for odd
+    // spline orders: the near-zero structure-factor moduli odd orders
+    // produce are neighbour-averaged before inversion, so `1 / |·|²` does
+    // not diverge. Pure host computation — no device needed.
+    #[test]
+    fn b_factors_are_finite_for_odd_orders() {
+        for p in [5u32, 7] {
+            let b = compute_b_factors(16, p);
+            assert_eq!(b.len(), 16);
+            for (k, &v) in b.iter().enumerate() {
+                assert!(v.is_finite(), "b_factors[{k}] order {p} not finite: {v}");
+                assert!(
+                    (v as f64) < 1.0e3,
+                    "b_factors[{k}] order {p} exceeds bound: {v}"
+                );
+            }
+        }
+    }
+
+    // rq-3cfebff3
+    // The order-specialized kernels must be register-resident: with
+    // PME_ORDER a compile-time constant the support loops unroll and the
+    // per-axis B-spline arrays are not spilled to local memory. NVRTC
+    // emits a `__local_depot` only when a function carries a local-memory
+    // stack frame, so its absence in the compiled PTX is the assertion.
+    #[test]
+    fn order_specialized_kernels_use_no_local_memory() {
+        let gpu = crate::gpu::init_device().unwrap();
+        let ptx = compile_spme_ptx(&gpu.device, &assemble_spme_jit_source(4))
+            .expect("order-4 SPME module compiles");
+        let src = ptx.to_src();
+        assert!(
+            !src.contains("__local_depot"),
+            "specialized spread/gather must have no local-memory stack frame"
+        );
+    }
+
+    // rq-7fb4b760
+    // An NVRTC compilation failure surfaces as SpmeError::KernelCompilation
+    // carrying a non-empty log.
+    #[test]
+    fn nvrtc_failure_surfaces_as_kernel_compilation() {
+        let gpu = crate::gpu::init_device().unwrap();
+        let bad = "extern \"C\" __global__ void k() { this is not valid cuda ; }";
+        match compile_spme_ptx(&gpu.device, bad) {
+            Err(SpmeError::KernelCompilation(log)) => {
+                assert!(!log.is_empty(), "compilation log must be non-empty")
+            }
+            other => panic!("expected KernelCompilation, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::spme_real_arg_schema;
+
+    // The exact CUDA argument declarations and functor-init assignments
+    // the composer expects for the SPME real-space slot. The
+    // schema-generated output MUST equal these byte-for-byte so the
+    // composed JIT kernel source — and therefore the bit-wise
+    // reproducible result — is unchanged.
+    const EXPECTED_ENTRY_POINT_ARGS: &str = r#"    Real spme_real_k_coulomb,
+    Real spme_real_alpha,
+    Real spme_real_r_cut,
+    const unsigned int *spme_real_excl_offsets,
+    const unsigned int *spme_real_excl_partners,
+    const Real *spme_real_excl_scales,
+"#;
+
+    const EXPECTED_FUNCTOR_INIT_SOURCE: &str = r#"    composite.functor_spme_real.k_coulomb = spme_real_k_coulomb;
+    composite.functor_spme_real.alpha = spme_real_alpha;
+    composite.functor_spme_real.r_cut_real = spme_real_r_cut;
+    composite.functor_spme_real.excl_offsets = spme_real_excl_offsets;
+    composite.functor_spme_real.excl_partners = spme_real_excl_partners;
+    composite.functor_spme_real.excl_scales = spme_real_excl_scales;
+"#;
+
+    #[test]
+    fn generated_entry_point_args_match_expected() {
+        assert_eq!(
+            spme_real_arg_schema().entry_point_args(),
+            EXPECTED_ENTRY_POINT_ARGS
+        );
+    }
+
+    #[test]
+    fn generated_functor_init_source_matches_expected() {
+        assert_eq!(
+            spme_real_arg_schema().functor_init_source(),
+            EXPECTED_FUNCTOR_INIT_SOURCE
+        );
     }
 }

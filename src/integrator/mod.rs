@@ -4,9 +4,10 @@
 // The runner chains the slots `apply_pre → step → apply_post → apply`
 // per timestep (see `simulation-runner.md` and `framework.md`).
 
-use crate::forces::{ForceField, ForceFieldError};
+use crate::forces::{ForceField, ForceFieldError, MoleculeList};
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::io::config::{ConfigError, SlotConfig};
+use crate::registry::{Builtins, KindedBuilder, Registry};
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
 use crate::precision::Real;
@@ -18,9 +19,11 @@ pub mod c_rescale_barostat;
 pub mod constraint;
 pub mod csvr;
 pub mod langevin_baoab;
+pub mod mc_barostat;
 pub mod mtk_npt;
 pub mod nose_hoover_chain;
 pub mod philox;
+pub mod settle;
 pub mod shake;
 pub mod velocity_verlet;
 
@@ -31,11 +34,13 @@ pub use c_rescale_barostat::{CRescaleBarostat, CRescaleBarostatBuilder};
 pub use constraint::{Constraint, ConstraintBuilder, ConstraintError, ConstraintRegistry};
 pub use csvr::{CsvrBuilder, CsvrThermostat};
 pub use langevin_baoab::{LangevinBaoabBuilder, LangevinBaoabState};
+pub use mc_barostat::{McBarostat, McBarostatBuilder};
 pub use mtk_npt::{MtkNptBuilder, MtkNptIntegrator};
 pub use nose_hoover_chain::{
     NoseHooverChainBuilder, NoseHooverChainThermostat, nhc_chain_sub_step,
 };
 pub use philox::{philox_4x32_10, philox_normal};
+pub use settle::{SettleBuilder, SettleConstraintsState, SettleError};
 pub use shake::{ShakeBuilder, ShakeConstraintsState, ShakeError};
 pub use velocity_verlet::{VelocityVerletBuilder, VelocityVerletState};
 
@@ -75,6 +80,18 @@ pub enum StepError {
     /// `reason` is the integrator's verbatim message.
     #[error("integrator rejected constraint hook installation: {reason}")]
     IntegratorRejectsConstraint { reason: &'static str },
+    #[error(
+        "built-in {kind} slot `{label}` did not expose a post-force per-particle \
+         source fragment via post_force_per_particle_fragment"
+    )]
+    MissingPostForcePerParticleFragment {
+        kind: &'static str,
+        label: &'static str,
+    },
+    #[error("JIT-composed post-force per-particle kernel failed to compile: {log}")]
+    PostForceFragmentCompileFailed { log: String },
+    #[error("JIT-composed post-force per-particle kernel failed to load: {0}")]
+    PostForceFragmentLoadFailed(GpuError),
 }
 
 // rq-2ccf40de
@@ -95,6 +112,13 @@ pub enum BarostatError {
     Gpu(#[from] GpuError),
     #[error("{0}")]
     Timings(#[from] TimingsError),
+    /// A force-field evaluation issued by a barostat move (the
+    /// Monte-Carlo barostat's trial energy evaluation) failed.
+    #[error("{0}")]
+    ForceField(#[from] ForceFieldError),
+    /// A simulation-box mutation issued by a barostat move failed.
+    #[error("{0}")]
+    SimulationBox(#[from] crate::pbc::SimulationBoxError),
     #[error("unknown barostat kind `{0}`")]
     UnknownKind(String),
 }
@@ -188,6 +212,23 @@ impl StepPlan {
     }
 }
 
+// rq-4187d20f
+/// Capability trait carrying both an integrator / thermostat / barostat
+/// slot's post-force per-particle fragment and its launch-time argument
+/// binding, so a slot cannot provide one without the other. A slot that
+/// participates returns `Some(self)` from its trait's
+/// `post_force_per_particle` accessor. See
+/// `rqm/integration/jit-composed-post-force.md`.
+pub trait PostForcePerParticle {
+    fn post_force_per_particle_fragment(&self) -> crate::forces::PerParticleFragment;
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    );
+}
+
 // rq-78f484d9
 pub trait Integrator: std::fmt::Debug + Send {
     /// Return the ordered sequence of sub-steps that constitute one
@@ -219,20 +260,86 @@ pub trait Integrator: std::fmt::Debug + Send {
     ) -> Vec<f64> {
         Vec::new()
     }
+
+    /// Declare whether this integrator contributes a per-thread update
+    /// to the JIT-composed post-force per-particle kernel. Returns
+    /// `Some(self)` from an integrator that implements
+    /// `PostForcePerParticle`, `None` (the default) otherwise. Every
+    /// built-in integrator participates; a built-in returning `None` is
+    /// the `StepError::MissingPostForcePerParticleFragment` rejection at
+    /// runner construction. See
+    /// `rqm/integration/jit-composed-post-force.md`.
+    fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
+        None
+    }
+
+    /// Returns the SubStep index in `plan(dt)` whose work is dispatched
+    /// by the composed post-force kernel rather than by `execute`. The
+    /// runner uses this to skip the integrator's per-step
+    /// `execute(<that SubStep>, …)` call when the composed-kernel path
+    /// is active. Default returns the index of the plan's last
+    /// `KickHalf` or `KickDrift` SubStep, which matches the contract
+    /// followed by every built-in integrator. Returns `None` if no
+    /// such SubStep exists.
+    fn post_force_substep_index(&self, dt: Real) -> Option<usize> {
+        let plan = self.plan(dt);
+        plan.steps.iter().enumerate().rev().find_map(|(idx, s)| {
+            matches!(s, SubStep::KickHalf { .. } | SubStep::KickDrift { .. })
+                .then_some(idx)
+        })
+    }
+
 }
 
-/// Walk an integrator's plan for one timestep.
+/// Per-call options for [`run_step`], bundling the four flags that
+/// select among plan-walk modes. Plain `Copy` data; a caller overrides
+/// individual fields against `Default`. See
+/// `rqm/integration/framework.md`.
+// rq-1d366b88
+#[derive(Debug, Clone, Copy)]
+pub struct RunStepOptions {
+    /// `true` runs the neighbour-list pre-step via `force_field.step(...)`
+    /// for each `ForceEval`; `false` calls
+    /// `force_field.step_no_neighbor_check(...)` (CUDA-graph capture
+    /// path). Default `true`.
+    pub run_neighbor_pre_step: bool,
+    /// `Some(i)` skips the integrator's `execute` for sub-step `i` (the
+    /// JIT-composed post-force per-particle kernel handles it). Default
+    /// `None`.
+    pub skip_substep_index: Option<usize>,
+    /// `true` (with a constraint slot passed) fires the constraint
+    /// hooks at the canonical sub-step boundaries. Default `false`.
+    pub install_constraint_hooks: bool,
+    /// `true` resolves every `ForceEval` to
+    /// `AggregateLevel::ForcesAndScalars`. Default `false`.
+    pub runner_needs_scalars: bool,
+}
+
+impl Default for RunStepOptions {
+    fn default() -> Self {
+        RunStepOptions {
+            run_neighbor_pre_step: true,
+            skip_substep_index: None,
+            install_constraint_hooks: false,
+            runner_needs_scalars: false,
+        }
+    }
+}
+
+/// Walk an integrator's plan for one timestep — the single plan-walk
+/// entry point.
 ///
-/// The runner uses this to execute integrator sub-steps and the
-/// force pipeline together, optionally weaving constraint-slot hook
-/// calls around any `Drift` or `KickDrift` sub-step and after the
-/// final velocity update.
+/// Executes the integrator's sub-steps and the force pipeline together,
+/// optionally weaving constraint-slot hook calls around any `Drift` or
+/// `KickDrift` sub-step and after the final velocity update. The
+/// per-step variations (graph-capture neighbour handling, composed
+/// post-force skip, scalar-prep, constraint hooks) are selected by
+/// `opts`; see [`RunStepOptions`].
 ///
-/// `install_constraint_hooks` must be `true` only when both
-/// `constraint.is_some()` and the integrator's
-/// `IntegratorKind::supports_constraints()` predicate would return
-/// `true`. When `false`, no constraint hooks fire regardless of the
-/// `constraint` argument.
+/// `opts.install_constraint_hooks` should be `true` only when both
+/// `constraint.is_some()` and the integrator's builder
+/// `supports_constraints(&params)` would return `true`; otherwise no
+/// hooks fire regardless of the `constraint` argument.
 #[allow(clippy::too_many_arguments)]
 pub fn run_step(
     integrator: &mut dyn Integrator,
@@ -240,14 +347,22 @@ pub fn run_step(
     sim_box: &mut SimulationBox,
     force_field: &mut ForceField,
     mut constraint: Option<&mut dyn Constraint>,
-    install_constraint_hooks: bool,
     dt: Real,
     timings: &mut Timings,
-    runner_needs_scalars: bool,
+    opts: RunStepOptions,
 ) -> Result<(), StepError> {
+    let RunStepOptions {
+        run_neighbor_pre_step,
+        skip_substep_index,
+        install_constraint_hooks,
+        runner_needs_scalars,
+    } = opts;
     let plan = integrator.plan(dt);
     let install = install_constraint_hooks && constraint.is_some();
-    for sub in &plan.steps {
+    for (idx, sub) in plan.steps.iter().enumerate() {
+        if Some(idx) == skip_substep_index {
+            continue;
+        }
         let is_drift = sub.is_drift();
         if install && is_drift {
             if let Some(c) = constraint.as_mut() {
@@ -257,14 +372,26 @@ pub fn run_step(
         match sub {
             SubStep::ForceEval { class: None, level } => {
                 let resolved = resolve_aggregate_level(*level, runner_needs_scalars);
-                force_field.step(buffers, sim_box, timings, resolved)?;
+                if run_neighbor_pre_step {
+                    force_field.step(buffers, sim_box, timings, resolved)?;
+                } else {
+                    force_field.step_no_neighbor_check(
+                        buffers, sim_box, timings, resolved,
+                    )?;
+                }
             }
             SubStep::ForceEval {
                 class: Some(c),
                 level,
             } => {
                 let resolved = resolve_aggregate_level(*level, runner_needs_scalars);
-                force_field.step_class(*c, buffers, sim_box, timings, resolved)?;
+                if run_neighbor_pre_step {
+                    force_field.step_class(*c, buffers, sim_box, timings, resolved)?;
+                } else {
+                    force_field.step_class_no_neighbor_check(
+                        *c, buffers, sim_box, timings, resolved,
+                    )?;
+                }
             }
             other => {
                 integrator.execute(other, buffers, sim_box, timings)?;
@@ -315,30 +442,6 @@ pub fn resolve_aggregate_level(
     }
 }
 
-/// Convenience for tests and callers that don't need constraints.
-/// Always requests `ForcesAndScalars` so tests that read energy / virial
-/// after `run_step_no_constraint` see fresh values regardless of the
-/// integrator's per-step level preference.
-pub fn run_step_no_constraint(
-    integrator: &mut dyn Integrator,
-    buffers: &mut ParticleBuffers,
-    sim_box: &mut SimulationBox,
-    force_field: &mut ForceField,
-    dt: Real,
-    timings: &mut Timings,
-) -> Result<(), StepError> {
-    run_step(
-        integrator,
-        buffers,
-        sim_box,
-        force_field,
-        None,
-        false,
-        dt,
-        timings,
-        true,
-    )
-}
 
 // rq-0e26dde0 rq-1ac78590
 /// Extension trait offering a single-call `step()` convenience method
@@ -374,7 +477,16 @@ impl IntegratorStepExt for dyn Integrator + '_ {
         dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
-        run_step(self, buffers, sim_box, force_field, None, false, dt, timings, true)
+        run_step(
+            self,
+            buffers,
+            sim_box,
+            force_field,
+            None,
+            dt,
+            timings,
+            RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        )
     }
 }
 
@@ -389,7 +501,16 @@ impl<T: Integrator> IntegratorStepExt for T {
         dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
-        run_step(self, buffers, sim_box, force_field, None, false, dt, timings, true)
+        run_step(
+            self,
+            buffers,
+            sim_box,
+            force_field,
+            None,
+            dt,
+            timings,
+            RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        )
     }
 }
 
@@ -459,10 +580,13 @@ impl IntegratorStepWithConstraintExt for dyn ConstraintCapableIntegrator + '_ {
             sim_box,
             force_field,
             Some(constraint),
-            true,
             dt,
             timings,
-            true,
+            RunStepOptions {
+                install_constraint_hooks: true,
+                runner_needs_scalars: true,
+                ..Default::default()
+            },
         )
     }
 }
@@ -488,18 +612,21 @@ impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
             sim_box,
             force_field,
             Some(constraint),
-            true,
             dt,
             timings,
-            true,
+            RunStepOptions {
+                install_constraint_hooks: true,
+                runner_needs_scalars: true,
+                ..Default::default()
+            },
         )
     }
 }
 
 // rq-29e08cb5
-pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait IntegratorBuilder:
+    KindedBuilder + IntegratorBuilderClone + std::fmt::Debug + Send + Sync
+{
     /// Validate the kind-specific parameters of an `[integrator]`
     /// section at config-load time. Implementations deserialise the
     /// `toml::Value` into their typed parameter struct and surface
@@ -526,6 +653,18 @@ pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
         false
     }
 
+    /// `true` iff every per-step entry point (`step`, `execute`, and
+    /// any sub-step surfaced through `Plan`) consists of pure CUDA
+    /// kernel launches with no host-side state mutation between
+    /// launches and no `dtoh_sync_copy` / `htod_sync_copy` calls.
+    /// Determines whether phases driven by this integrator run under
+    /// CUDA graph mode. Default `true`; integrators with host-side
+    /// scalar arithmetic inside the plan executor override to
+    /// `false`.
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        true
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
@@ -533,59 +672,24 @@ pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError>;
-
-    /// Return a clone of `self` boxed as a trait object. Used to
-    /// implement `Clone` for `IntegratorRegistry` (which holds
-    /// `Vec<Box<dyn IntegratorBuilder>>`).
-    fn box_clone(&self) -> Box<dyn IntegratorBuilder>;
 }
 
 // rq-4901507f
-#[derive(Debug)]
-pub struct IntegratorRegistry {
-    pub builders: Vec<Box<dyn IntegratorBuilder>>,
-}
+pub type IntegratorRegistry = Registry<dyn IntegratorBuilder>;
 
-impl Clone for IntegratorRegistry {
-    fn clone(&self) -> Self {
-        IntegratorRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn IntegratorBuilder {
+    fn builtins() -> Vec<Box<dyn IntegratorBuilder>> {
+        vec![
+            Box::new(VelocityVerletBuilder),
+            Box::new(LangevinBaoabBuilder),
+            Box::new(MtkNptBuilder),
+        ]
     }
 }
 
-impl IntegratorRegistry {
-    pub fn new() -> Self {
-        IntegratorRegistry { builders: Vec::new() }
-    }
+crate::registry_builder_clone!(pub IntegratorBuilderClone for IntegratorBuilder);
 
-    // rq-4901507f
-    pub fn with_builtins() -> Self {
-        IntegratorRegistry {
-            builders: vec![
-                Box::new(VelocityVerletBuilder),
-                Box::new(LangevinBaoabBuilder),
-                Box::new(MtkNptBuilder),
-            ],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn IntegratorBuilder>) {
-        self.builders.push(builder);
-    }
-
-    /// Return the first registered builder whose `kind_name()` equals
-    /// `kind`. The runner uses this both to query compatibility
-    /// predicates and to drive `validate_params` at config-load time.
-    pub fn lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn IntegratorBuilder> {
     // rq-24f6b8b9 rq-1e30bbf4
     pub fn build(
         &self,
@@ -598,12 +702,6 @@ impl IntegratorRegistry {
             .lookup(&slot.kind)
             .ok_or_else(|| IntegratorError::UnknownKind(slot.kind.clone()))?;
         b.build(gpu, particle_count, n_constraints, &slot.params)
-    }
-}
-
-impl Default for IntegratorRegistry {
-    fn default() -> Self {
-        IntegratorRegistry::with_builtins()
     }
 }
 
@@ -629,6 +727,19 @@ pub trait Thermostat: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(), ThermostatError>;
 
+    /// Drain any device-side accumulators the thermostat maintains
+    /// (e.g. CSVR's `(k_new - k_old)` delta) into host state so that
+    /// `log_column_values` reflects every step since the last flush.
+    /// Default implementation is a no-op for thermostats that maintain
+    /// no device-side accumulator. The runner calls this once before
+    /// each log row is emitted.
+    fn flush_pending_injection(
+        &mut self,
+        _device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    ) -> Result<(), ThermostatError> {
+        Ok(())
+    }
+
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         &[]
     }
@@ -640,15 +751,35 @@ pub trait Thermostat: std::fmt::Debug + Send {
     ) -> Vec<f64> {
         Vec::new()
     }
+
+    /// Declare whether this thermostat contributes a per-thread rescale
+    /// / resample to the JIT-composed post-force per-particle kernel.
+    /// Returns `Some(self)` from a thermostat that implements
+    /// `PostForcePerParticle`, `None` (the default) otherwise. Built-in
+    /// thermostats participate. See
+    /// `rqm/integration/jit-composed-post-force.md`.
+    fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
+        None
+    }
+
 }
 
 // rq-29e08cb5
-pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait ThermostatBuilder:
+    KindedBuilder + ThermostatBuilderClone + std::fmt::Debug + Send + Sync
+{
     /// Validate the kind-specific parameters of a `[thermostat]`
     /// section at config-load time.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
+
+    /// `true` iff every thermostat entry point (`apply_pre`,
+    /// `apply_post`) consists of pure CUDA kernel launches with no
+    /// host-side state mutation between launches. Determines whether
+    /// phases using this thermostat run under CUDA graph mode. Default
+    /// `true`.
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        true
+    }
 
     fn build(
         &self,
@@ -657,55 +788,25 @@ pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError>;
-
-    fn box_clone(&self) -> Box<dyn ThermostatBuilder>;
 }
 
 // rq-4901507f
-#[derive(Debug)]
-pub struct ThermostatRegistry {
-    pub builders: Vec<Box<dyn ThermostatBuilder>>,
-}
+pub type ThermostatRegistry = Registry<dyn ThermostatBuilder>;
 
-impl Clone for ThermostatRegistry {
-    fn clone(&self) -> Self {
-        ThermostatRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn ThermostatBuilder {
+    fn builtins() -> Vec<Box<dyn ThermostatBuilder>> {
+        vec![
+            Box::new(NoseHooverChainBuilder),
+            Box::new(CsvrBuilder),
+            Box::new(AndersenBuilder),
+            Box::new(BerendsenBuilder),
+        ]
     }
 }
 
-impl ThermostatRegistry {
-    pub fn new() -> Self {
-        ThermostatRegistry { builders: Vec::new() }
-    }
+crate::registry_builder_clone!(pub ThermostatBuilderClone for ThermostatBuilder);
 
-    // rq-4901507f
-    pub fn with_builtins() -> Self {
-        ThermostatRegistry {
-            builders: vec![
-                Box::new(NoseHooverChainBuilder),
-                Box::new(CsvrBuilder),
-                Box::new(AndersenBuilder),
-                Box::new(BerendsenBuilder),
-            ],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn ThermostatBuilder>) {
-        self.builders.push(builder);
-    }
-
-    // rq-c44b25af
-    pub fn lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn ThermostatBuilder> {
     // rq-678c233d
     pub fn build_optional(
         &self,
@@ -722,24 +823,88 @@ impl ThermostatRegistry {
     }
 }
 
-impl Default for ThermostatRegistry {
-    fn default() -> Self {
-        ThermostatRegistry::with_builtins()
-    }
-}
-
 // --- Barostat trait, builder, registry --------------------------------
+
+// rq-343a8f18 — how often a barostat couples to the dynamics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarostatPeriodicity {
+    /// Couples every step inside the captured per-step sequence
+    /// (Berendsen, C-rescale).
+    EveryStep,
+    /// Runs a host-orchestrated move every `N` steps at a batch
+    /// boundary (Monte-Carlo); `apply` is a no-op.
+    EveryNSteps(u32),
+}
 
 // rq-076617ab
 pub trait Barostat: std::fmt::Debug + Send {
-    // rq-1179e42f
+    // rq-343a8f18 — declares per-step vs periodic coupling. Default
+    // per-step; the Monte-Carlo barostat returns `EveryNSteps`.
+    fn periodicity(&self) -> BarostatPeriodicity {
+        BarostatPeriodicity::EveryStep
+    }
+
+    // rq-1179e42f — per-step coupling. A periodic barostat leaves this
+    // at the no-op default and implements `apply_move` instead.
     fn apply(
         &mut self,
-        buffers: &mut ParticleBuffers,
-        sim_box: &mut SimulationBox,
-        dt: Real,
-        timings: &mut Timings,
-    ) -> Result<(), BarostatError>;
+        _buffers: &mut ParticleBuffers,
+        _sim_box: &mut SimulationBox,
+        _dt: Real,
+        _timings: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
+
+    /// Perform a periodic barostat's host-orchestrated move at a batch
+    /// boundary. Receives `&mut ForceField` (unlike `apply`) because the
+    /// move re-evaluates the potential energy at a trial configuration.
+    /// Default no-op; per-step barostats do not override it.
+    ///
+    /// Contract: the caller (the runner) guarantees that
+    /// `buffers.potential_energies` and `buffers.forces_*` hold the
+    /// current configuration's values on entry — i.e. the force
+    /// evaluation on the step immediately preceding the move ran at
+    /// `AggregateLevel::ForcesAndScalars`. A periodic barostat relies on
+    /// this to obtain the current-configuration energy without a
+    /// redundant force evaluation. See `rqm/integration/mc-barostat.md`.
+    fn apply_move(
+        &mut self,
+        _force_field: &mut ForceField,
+        _buffers: &mut ParticleBuffers,
+        _sim_box: &mut SimulationBox,
+        _constraint: Option<&mut dyn Constraint>,
+        _dt: Real,
+        _timings: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
+
+    /// One-time per-run initialisation invoked by the runner after
+    /// construction, once the simulation box and the connectivity-derived
+    /// molecule partition are available. Default no-op; the Monte-Carlo
+    /// barostat uploads its molecule tables and resolves its default
+    /// volume step here.
+    fn init_run(
+        &mut self,
+        _sim_box: &SimulationBox,
+        _molecules: &MoleculeList,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
+
+    /// Drain any device-side accumulators the barostat maintains
+    /// (e.g. C-rescale's `P_target · (v_post - v_pre)` delta) into host
+    /// state so that `log_column_values` reflects every step since the
+    /// last flush. Default implementation is a no-op for barostats that
+    /// maintain no device-side accumulator. The runner calls this once
+    /// before each log row is emitted.
+    fn flush_pending_injection(
+        &mut self,
+        _device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
 
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         &[]
@@ -752,15 +917,34 @@ pub trait Barostat: std::fmt::Debug + Send {
     ) -> Vec<f64> {
         Vec::new()
     }
+
+    /// Declare whether this barostat contributes a per-thread rescale
+    /// to the JIT-composed post-force per-particle kernel. Returns
+    /// `Some(self)` from a barostat that implements
+    /// `PostForcePerParticle`, `None` (the default) otherwise. Built-in
+    /// barostats participate. See
+    /// `rqm/integration/jit-composed-post-force.md`.
+    fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
+        None
+    }
+
 }
 
 // rq-29e08cb5
-pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
-    fn kind_name(&self) -> &'static str;
-
+pub trait BarostatBuilder:
+    KindedBuilder + BarostatBuilderClone + std::fmt::Debug + Send + Sync
+{
     /// Validate the kind-specific parameters of a `[barostat]`
     /// section at config-load time.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
+
+    /// `true` iff `Barostat::apply` consists of pure CUDA kernel
+    /// launches with no host-side state mutation between launches.
+    /// Determines whether phases using this barostat run under CUDA
+    /// graph mode. Default `true`.
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        true
+    }
 
     fn build(
         &self,
@@ -769,53 +953,24 @@ pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Barostat>, BarostatError>;
-
-    fn box_clone(&self) -> Box<dyn BarostatBuilder>;
 }
 
 // rq-4901507f
-#[derive(Debug)]
-pub struct BarostatRegistry {
-    pub builders: Vec<Box<dyn BarostatBuilder>>,
-}
+pub type BarostatRegistry = Registry<dyn BarostatBuilder>;
 
-impl Clone for BarostatRegistry {
-    fn clone(&self) -> Self {
-        BarostatRegistry {
-            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
-        }
+impl Builtins for dyn BarostatBuilder {
+    fn builtins() -> Vec<Box<dyn BarostatBuilder>> {
+        vec![
+            Box::new(BerendsenBarostatBuilder),
+            Box::new(CRescaleBarostatBuilder),
+            Box::new(McBarostatBuilder),
+        ]
     }
 }
 
-impl BarostatRegistry {
-    pub fn new() -> Self {
-        BarostatRegistry { builders: Vec::new() }
-    }
+crate::registry_builder_clone!(pub BarostatBuilderClone for BarostatBuilder);
 
-    // rq-4901507f
-    pub fn with_builtins() -> Self {
-        BarostatRegistry {
-            builders: vec![
-                Box::new(BerendsenBarostatBuilder),
-                Box::new(CRescaleBarostatBuilder),
-            ],
-        }
-    }
-
-    pub fn register(&mut self, builder: Box<dyn BarostatBuilder>) {
-        self.builders.push(builder);
-    }
-
-    // rq-acbb6d0e
-    pub fn lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder> {
-        for b in &self.builders {
-            if b.kind_name() == kind {
-                return Some(b.as_ref());
-            }
-        }
-        None
-    }
-
+impl Registry<dyn BarostatBuilder> {
     // rq-9548bc1a
     pub fn build_optional(
         &self,
@@ -829,12 +984,6 @@ impl BarostatRegistry {
             .lookup(&slot.kind)
             .ok_or_else(|| BarostatError::UnknownKind(slot.kind.clone()))?;
         Ok(Some(b.build(gpu, particle_count, n_constraints, &slot.params)?))
-    }
-}
-
-impl Default for BarostatRegistry {
-    fn default() -> Self {
-        BarostatRegistry::with_builtins()
     }
 }
 

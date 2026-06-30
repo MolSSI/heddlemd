@@ -142,9 +142,10 @@ accepted)` so the descent is easy to inspect post hoc.
   `τ = 100 fs`.
 - Barostat: c-rescale (Bernetti-Bussi), `P = 1.013 × 10⁵ Pa`,
   `τ = 1 ps`, `β = 4.5 × 10⁻¹⁰ Pa⁻¹`.
-- Cell list: `max_neighbors = 1024` (liquid-density water with a
-  1.1 nm shell needs ~560 neighbours per atom; 1024 leaves headroom),
-  `r_skin = 1 Å`.
+- Cell list: `r_skin = 3 Å` (= 0.3 · r_cut). The packed-neighbour
+  pair-force pipeline (see `rqm/forces/packed-neighbour-pair-force.md`)
+  sizes its entry list to the actual interaction count, so no
+  user-supplied per-atom cap is required.
 
 ## What you should see in the RDFs
 

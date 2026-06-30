@@ -1,39 +1,58 @@
-# Feature: Shared Neighbor List Service <!-- rq-693ce6fa -->
+# Feature: Cell-List Spatial Pre-Step <!-- rq-693ce6fa -->
 
-The `ForceField` owns a single `NeighborListState` shared by every
-short-range pair potential in the slot list. Each consuming potential
-declares its maximum interaction cutoff through the `Potential` trait
-(see `framework.md`); the framework aggregates these into one search
-radius and builds a single neighbor list once per timestep cluster.
-Per-pair cutoff filtering happens inside each consumer's kernel — the
-shared list is sized to the largest cutoff so it captures every
-candidate for every consumer.
+The `ForceField` owns a single `NeighborListState` that provides the
+spatial pre-step consumed by the fast-class pair-force pipeline (the
+packed-neighbour architecture described in
+`packed-neighbour-pair-force.md`) and by the SPME reciprocal-space
+slot's atom binning (see `spme.md`). Its job is to produce a
+deterministic spatial sort of the atoms — `sorted_particle_ids` and
+per-cell `cell_offsets` — plus the displacement-driven rebuild
+trigger that controls when the packed-neighbour list is reconstructed.
 
-The shared state exists in one of two construction modes determined by
-the parsed `NeighborListConfig`:
+The packed-neighbour pair-force kernel reads `sorted_particle_ids` to
+partition atoms into 32-atom blocks and to translate block-position
+indices into original atom IDs; it does not consume any other output
+of this pre-step. The per-particle padded neighbour list and the
+`max_neighbors` configuration knob are not part of this architecture.
 
-- **`CellList`** — the spatial-hash-filtered list described in this
-  file. Built lazily on the first step and rebuilt on demand when an
-  atom's reference displacement exceeds `r_skin / 2`. The cell layout
-  (number of cells per lattice direction, total cell count) is cached at
-  construction from the simulation box's lattice parameters and refreshed
-  whenever the box's `generation` counter changes; a refresh forces a
-  rebuild only when the refreshed `n_cells_total` differs from the
-  cached value (see *Box Generation Tracking* below). Plain
-  barostat-driven generation ticks that leave `n_cells_total`
-  unchanged let the displacement check govern rebuild timing.
-- **`Trivial`** — every particle's neighbor list contains every
-  particle (including itself; consumers handle the self slot). The list
-  is materialised once at construction and never rebuilt. Used when the
-  config selects `[neighbor_list].mode = "all-pairs"`.
+The state exists in one of three construction modes determined by the
+parsed `NeighborListConfig` and by which slots are active:
 
-When no slot in the `ForceField` reports a `max_cutoff` (a bonded-only
-or zero-slot configuration), no `NeighborListState` is built at all and
-no displacement-check kernel runs.
+- **`CellList`** — the spatial-hash sort described in this file. Used
+  by the packed-neighbour pair-force pipeline whenever
+  `[neighbor_list].mode = "cell-list"` and at least one fast-class
+  pair-force slot is active. Built lazily on the first step and
+  rebuilt on demand when an atom's reference displacement exceeds
+  `r_skin / 2`. The cell layout (number of cells per lattice
+  direction, total cell count) is cached at construction from the
+  simulation box's lattice parameters and refreshed whenever the
+  box's `generation` counter changes; a refresh forces a rebuild only
+  when the refreshed `n_cells_total` differs from the cached value
+  (see *Box Generation Tracking* below). Plain barostat-driven
+  generation ticks that leave `n_cells_total` unchanged let the
+  displacement check govern rebuild timing.
+- **`CellListOnly`** — the cell-list bin output (sorted IDs +
+  per-cell offsets) only, without driving the displacement-check
+  rebuild trigger. Used by the SPME reciprocal-space slot when SPME
+  is active without any fast-class pair-force slot consuming the
+  cell list. Rebuilt every step unconditionally.
+- **`Trivial`** — `sorted_particle_ids` is the identity permutation;
+  no cell list, no displacement check, no rebuild. Used when the
+  config selects `[neighbor_list].mode = "all-pairs"`. The
+  packed-neighbour pair-force pipeline enumerates every interacting
+  block pair in this mode.
 
-This file specifies both modes, the per-step displacement check and
-rebuild policy that governs `CellList`, the trivial construction path
-used by `Trivial`, and the `NeighborListState` API the framework drives.
+When no slot in the `ForceField` reports a `max_cutoff` and SPME is
+inactive (a bonded-only or zero-slot configuration), no
+`NeighborListState` is built and no spatial-sort or displacement-check
+kernel runs.
+
+This file specifies the three modes, the cell-list construction
+pipeline that produces `sorted_particle_ids` and `cell_offsets`, the
+per-step displacement check and rebuild policy that governs
+`CellList`, and the `NeighborListState` API the framework drives.
+The packed-neighbour list itself — the entries the force kernel
+consumes — is specified by `packed-neighbour-pair-force.md`.
 
 ## Cell Layout <!-- rq-dfad7218 -->
 
@@ -140,87 +159,127 @@ host work per rebuild is the three per-atom / per-cell kernel launches
 `O(log(n_cells_total))` launches, and one device memset (zeroing
 `write_cursors`).
 
-## Neighbor List Construction <!-- rq-33aa3e1d -->
+## Packed-Neighbour List Construction <!-- rq-33aa3e1d -->
 
-Once the cell list is populated (see *Cell List Construction*), one
-device kernel builds the per-atom neighbor list. The kernel maps one
-thread block to each **home cell** — the cell whose resident atoms have
-their neighbor lists computed by that block — and within each block,
-threads cooperate so the 27 neighbour-cell position loads are issued
-once per block rather than once per atom.
+The packed neighbour list consumed by the fast-class pair-force
+kernel is constructed by the pipeline specified in
+`packed-neighbour-pair-force.md` (the `scatter_positions_to_tile_order`,
+`compute_block_bbox`, volume-sort, and
+`find_blocks_with_interactions` kernels). That pipeline is invoked
+from `NeighborListState::rebuild` after the cell-list sort completes
+and before `copy_positions_into_reference` records the
+displacement-check baseline. The output is `interacting_tiles`,
+`interacting_atoms`, `single_pairs`, and `interaction_count`, all
+described in detail in that file.
 
-For each home cell `(ca, cb, cc)`:
-
-1. The block iterates the 27 adjacent cells `(ca + da, cb + db, cc + dc)`
-   for `(da, db, dc) ∈ {-1, 0, +1}³`, wrapping each per-axis cell index
-   modulo `n_cells_d`. Cell iteration order is **a outer, b middle,
-   c inner** (`da` slowest, `dc` fastest).
-2. For each visited cell `c'`, the block's threads cooperatively load
-   the candidate positions `sorted_particle_ids[cell_offsets[c'] ..
-   cell_offsets[c' + 1]]` into shared memory in a single coalesced pass:
-   thread `t` loads candidate `t` (and additional candidates with a
-   `blockDim.x` stride when the cell occupancy exceeds the block size).
-3. Threads synchronize. Each active thread is responsible for one home
-   atom `i` whose particle index it reads from
-   `sorted_particle_ids[cell_offsets[(ca, cb, cc)] + threadIdx.x]`. Each
-   such thread walks the shared-memory candidates in their stored order,
-   skips `j == i`, computes the minimum-image displacement between `i`
-   and `j`, and — if `r² <= (r_cut + r_skin)²` — appends `j` to atom
-   `i`'s neighbor list at the next free slot.
-
-The block's threads synchronize between successive cells; the
-shared-memory cache holds one neighbour cell at a time, so total shared
-memory use scales with the largest single cell occupancy, not with
-27× that.
-
-The neighbor list produced by this procedure orders each atom's
-partners by **cell-sweep order**: the outer ordering follows the
-deterministic (a, b, c) cell-iteration order above, and within each
-visited cell partners appear in ascending particle-index order (the
-order Sort 1 imposes on `sorted_particle_ids`). The neighbor list is
-not globally sorted by partner index. The order is bit-identical
-across runs given identical inputs on the same GPU and is the source
-of deterministic pair-buffer slot assignments in
-`pair-reduction.md`.
-
-The neighbor list is stored as:
-
-- `neighbor_list: CudaSlice<u32>` of length `N * max_neighbors`. Slot
-  `i * max_neighbors + k` is the `k`-th partner of atom `i`.
-- `neighbor_counts: CudaSlice<u32>` of length `N`. Entry `i` is atom
-  `i`'s neighbor count (`<= max_neighbors`).
-
-When an atom's neighbor count would exceed `max_neighbors`, the kernel
-sets an overflow flag in a device-side scalar and ceases appending for
-that atom. The host detects the flag after the kernel returns and
-returns `NeighborListOverflow { max: max_neighbors }` from
-`NeighborListState::rebuild` (see *Feature API* below).
+`NeighborListState` does not allocate a per-particle padded neighbour
+list and does not run a per-particle neighbour-build kernel. The
+`max_neighbors` configuration knob is not present.
 
 ## Displacement Check <!-- rq-1f38d78a -->
 
-Every timestep (after the integrator's pre-force step has updated
-positions), the runner runs a *displacement-check* kernel:
+`CellListData` carries a one-element device buffer
+`neighbor_status: CudaSlice<u32>` and three reference-position
+buffers `reference_positions_{x,y,z}: CudaSlice<Real>` of length `N`.
+The reference positions are written immediately after every rebuild,
+recording the positions used during that rebuild. `neighbor_status`
+is a packed status word whose bits are reset to `0` at the start of
+every rebuild and are otherwise set only by the displacement-check
+kernel (bit 0) and the packed-neighbour construction kernel (bits
+1–4, see `packed-neighbour-pair-force.md` *Capacity*):
 
-1. Per atom `i`, compute `disp² = (x_i - x_i_ref)² + (y_i - y_i_ref)² +
-   (z_i - z_i_ref)²` using the minimum-image-wrapped displacement (so an
-   atom that moved through a PBC boundary still reports a small
-   displacement rather than `L - epsilon`).
-2. Write `disp²` to a per-atom buffer of length `N`.
+| Bit | Name | Writer |
+|---|---|---|
+| 0 | `displacement_tripped` | displacement-check kernel, every step |
+| 1 | `tiles_high_water` | construction kernel |
+| 2 | `single_pairs_high_water` | construction kernel |
+| 3 | `tiles_overflow` | construction kernel |
+| 4 | `single_pairs_overflow` | construction kernel |
 
-The host downloads the per-atom buffer (one f32 each), computes
-`max_disp = sqrt(max_i disp²_i)` in f64, and compares against
-`r_skin / 2`. If `max_disp > r_skin / 2`, the host sets a
-`needs_rebuild` flag.
+The displacement-check kernel `neighbor_displacement_check_flag(posq,
+reference_x, reference_y, reference_z, lattice, threshold_sq,
+neighbor_status, n)` runs once per physical timestep as the last
+device-visible action in the per-step force-evaluation pipeline. One
+thread per atom:
 
-`x_i_ref` / `y_i_ref` / `z_i_ref` are reference positions captured at
-the time of the last rebuild and held in three device buffers of
-length `N`. They are updated immediately after each rebuild to the
-positions used during that rebuild.
+1. Computes `disp² = dx² + dy² + dz²` from
+   `(posq[i].xyz − reference_*[i])` with the minimum-image wrap
+   applied to the displacement vector (so an atom that crossed a PBC
+   boundary still reports a small `disp²` rather than ≈ `L²`).
+2. When `disp² > threshold_sq`, issues `atomicOr(neighbor_status, 1u)`,
+   setting bit 0 only.
 
-Host-side max instead of a device max-reduction keeps the implementation
-small for v1; the per-step download is one f32 per particle (40 KB at
-N = 10000, ~4 µs over PCIe), well below the rebuild interval cost the
-displacement check is amortising.
+`threshold_sq` is `(r_skin / 2)²`, a per-`NeighborListState` scalar set
+once at construction time and re-derived only if `r_skin` changes (it
+does not change across the lifetime of a phase). The kernel is
+launched on the device's default stream from
+`ForceField::step` and `ForceField::step_no_neighbor_check` so the
+launch sits in the same default-stream sequence as the force kernels
+and is recorded into the captured graph when capture is active.
+
+`NeighborListState::pre_step(sim_box, buffers, timings)` consumes the
+word as follows:
+
+1. If the cell-layout cache reports a box-generation mismatch (see
+   *Box Generation Tracking*) and the refresh changes `n_cells_total`,
+   the status read is skipped and a rebuild is forced.
+2. Otherwise, the host issues `dtoh_sync_copy(&neighbor_status)` —
+   a single-word blocking download on the default stream that surfaces
+   the displacement, high-water, and overflow bits together. The
+   download ordering against earlier kernel writes is guaranteed by the
+   default-stream sequence. This one read is the only device-to-host
+   transfer the neighbour path performs per batch; the rebuild itself
+   copies nothing.
+3. Decode the word:
+   - An overflow bit (`tiles_overflow` or `single_pairs_overflow`)
+     means the most recent build dropped within-`r_search` entries.
+     `pre_step` returns
+     `Err(NeighborListError::PackedNeighborOverflow { buffer })` and the
+     run halts (see `packed-neighbour-pair-force.md` *Capacity*).
+   - A high-water bit (`tiles_high_water` or `single_pairs_high_water`)
+     requests a geometric capacity grow and forces a rebuild this call,
+     even when bit 0 is clear. The build that set the bit was complete,
+     so the current list stays correct until the grow-and-rebuild runs.
+   - Bit 0 (`displacement_tripped`) alone forces a rebuild with no
+     capacity change.
+4. If a rebuild is required, the host zeros `neighbor_status` via
+   `device.memset_zeros(&mut cl.neighbor_status)` **before** the
+   cell-list and construction kernels run, grows any high-water-flagged
+   capacity to `ceil(capacity · tile_pair_growth_factor)` and
+   reallocates it, runs the rebuild (cell-list pipeline plus
+   packed-neighbour construction), and writes the current positions
+   into `reference_positions_*`. When the rebuild reallocates a
+   packed-neighbour buffer, `pre_step` returns
+   `PreStepOutcome.reallocated = true` so the batched graph-replay loop
+   re-captures the phase graph (see `cuda-graphs.md` *Neighbor-List
+   Pre-Step Decomposition*).
+
+Inside a `pre_step` that does not rebuild, `neighbor_status` is left in
+whatever state the kernels wrote it (every bit is sticky across
+multiple captured steps; only the start of the next rebuild clears the
+word). The high-water and overflow bits set by the most recent
+construction therefore persist until the next batch boundary reads
+them, which is what lets a near-full build observed at one boundary
+drive a proactive grow at the next.
+
+Because bit 0 is written every step but cleared only on rebuild, the
+value the host reads at the end of a batched replay reflects "any
+step in the batch tripped `r_skin / 2`" rather than "the current
+state at the end of the last step". This is the conservative
+direction: a rebuild fires whenever at least one step inside the
+window saw an over-threshold particle, even if subsequent particle
+motion would have brought the maximum back under the threshold.
+
+When a phase runs under CUDA graph mode (`cuda-graphs.md`), the
+runner moves the `NeighborListState::pre_step` call out of
+`ForceField::step` and into the batched-replay outer loop. The
+displacement-check *kernel* still runs every step (it is part of the
+captured graph), but the host's per-batch consumption of the flag
+runs once per `graph_batch_size` physical steps rather than every
+step. The skin-distance contract holds as long as
+`graph_batch_size * max_step_displacement < r_skin / 2`. See
+`cuda-graphs.md`'s *Skin-distance contract under batched replay* for
+the analysis.
 
 ## Box Generation Tracking <!-- rq-282af621 -->
 
@@ -249,10 +308,9 @@ state:
    to `n_cells_total + 1`; `cell_counts` and `write_cursors` to
    `n_cells_total`) if `n_cells_total` differs from the previous value,
    and rebuilds the prefix scan's block-totals stack to match the new
-   `n_cells_total`. Other device buffers (`neighbor_list`,
-   `neighbor_counts`, `reference_positions_*`, `disp_sq`,
-   `overflow_flag`, `cell_indices`) are sized by `particle_count` or are
-   scalar and are not reallocated.
+   `n_cells_total`. Other device buffers (`reference_positions_*`,
+   `neighbor_status`, `cell_indices`) are sized by `particle_count` or
+   are scalar and are not reallocated.
 5. Stores the new `n_cells`, `n_cells_total`, and the cached lattice
    parameters used by the spatial-hash and build kernels, and replaces
    `cached_generation` with `sim_box.generation()`.
@@ -291,31 +349,65 @@ The runner holds one host-side `bool` flag `needs_rebuild`. Its initial
 value is `true` so the warm-up force evaluation triggers the first
 rebuild.
 
-Per timestep, after the integrator's pre-force step:
+Per `pre_step` call (every timestep in non-graph mode; once per
+`graph_batch_size` physical steps in graph mode):
 
 1. If `sim_box.generation() != cached_generation`, refresh the cell-layout
    cache (see *Box Generation Tracking*). The refresh sets
-   `needs_rebuild = true` and skips the displacement-check kernel for
-   this step only when the refreshed `n_cells_total` differs from the
-   prior cached value. When `n_cells_total` is unchanged the refresh
-   updates the cached lattice parameters and `cached_generation` only
-   and falls through to the displacement-check step below. The refresh
-   may return `BoxTooSmallForCells`, in which case `pre_step` aborts and
-   the error propagates.
-2. Run the displacement-check kernel, download the per-atom
-   buffer, compute `max_disp`, and set `needs_rebuild = true` if
-   `max_disp > r_skin / 2`. The displacement check is skipped when
-   `needs_rebuild` is already true.
+   `needs_rebuild = true` and bypasses the displacement-flag download
+   for this call only when the refreshed `n_cells_total` differs from
+   the prior cached value. When `n_cells_total` is unchanged the
+   refresh updates the cached lattice parameters and
+   `cached_generation` only and falls through to the flag-download step
+   below. The refresh may return `BoxTooSmallForCells`, in which case
+   `pre_step` aborts and the error propagates.
+2. Download `neighbor_status` (a single `u32`) via `dtoh_sync_copy` —
+   the only device-to-host transfer the neighbour path performs this
+   call. Decode the bits:
+   - If `tiles_overflow` or `single_pairs_overflow` is set, return
+     `Err(NeighborListError::PackedNeighborOverflow { buffer })`; the
+     run halts (a build dropped within-`r_search` entries — see
+     `packed-neighbour-pair-force.md` *Capacity*).
+   - If `tiles_high_water` or `single_pairs_high_water` is set, mark
+     the matching capacity for a geometric grow and set
+     `needs_rebuild = true`.
+   - If bit 0 (`displacement_tripped`) is set, set
+     `needs_rebuild = true`.
+   The download is skipped when `needs_rebuild` is already true.
 3. If `needs_rebuild`:
-   a. Run the on-device cell-list pipeline (see *Cell List Construction*)
+   a. Zero `neighbor_status` via `device.memset_zeros(&mut
+      cl.neighbor_status)` so the construction kernel's high-water and
+      overflow bits for this build start clean.
+   b. Grow and reallocate any capacity marked in step 2 to
+      `ceil(capacity · tile_pair_growth_factor)`; record that a buffer
+      was reallocated.
+   c. Run the on-device cell-list pipeline (see *Cell List Construction*)
       to repopulate `cell_indices`, `cell_counts`, `cell_offsets`, and
       `sorted_particle_ids` from the current positions.
-   b. Run the neighbor-list-build kernel.
-   c. Check the overflow flag; fail-loud if set.
-   d. Copy current positions into the reference-positions buffers.
-   e. Set `needs_rebuild = false`.
+   d. Run the packed-neighbour construction (see
+      `packed-neighbour-pair-force.md`), which leaves the live counts
+      and the high-water/overflow bits device-resident for the next
+      batch boundary to observe. No count is copied to the host.
+   e. Copy current positions into the reference-position buffers.
+   f. Set `needs_rebuild = false`; report `reallocated = true` through
+      `PreStepOutcome` if step 3b reallocated a buffer.
 4. Run downstream contribution kernels (see `framework.md`), which read
    the neighbor list.
+
+The probe rebuild — the warm-up rebuild the runner performs before
+CUDA-graph capture — is the one exception to the dtoh-free steady
+state: it reads `neighbor_status` synchronously after construction and
+repeats step 3b–3d, growing geometrically until neither a high-water
+nor an overflow bit is set, so it sizes the initial capacities with
+headroom. It runs once per phase and is outside the captured replay
+loop.
+
+The displacement-check *kernel* itself runs every physical timestep
+(it is queued by `ForceField::step` and `ForceField::step_no_neighbor_check`
+as the last device-visible action of the step). Bit 0 is sticky across
+steps until the next rebuild clears the word, so the value read in
+step 2 above reflects "any timestep since the last rebuild tripped
+`r_skin / 2`".
 
 In `CellListOnly` mode, `pre_step` skips the displacement check
 entirely and runs the cell-list pipeline (cell indexing, prefix scan,
@@ -330,28 +422,42 @@ Selected from the config's optional `[neighbor_list]` table; see
 
 - `mode: String` — `"cell-list"` (default) or `"all-pairs"`.
 - For `mode = "cell-list"`:
-  - `max_neighbors: u64` — required. Strictly positive.
   - `r_skin: f64` — optional, defaults to `0.3 * max_cutoff` where
     `max_cutoff` is the largest cutoff reported by any
     neighbor-list-consuming potential. Strictly positive.
+- For both modes (packed-neighbour list sizing — see
+  `packed-neighbour-pair-force.md`):
+  - `tile_pair_growth_factor: f64` — optional, defaults to `1.5`.
+    Strictly greater than `1.0`.
+  - `interacting_tiles_initial_capacity: u32` — optional; defaults
+    derived from `n_blocks`.
+  - `single_pairs_initial_capacity: u32` — optional; defaults
+    derived from `n_blocks`.
 
 Validation at config load:
 
 - `r_skin > 0` and finite.
-- `max_neighbors > 0`.
+- `tile_pair_growth_factor > 1.0` and finite.
+- `max_neighbors` is not a valid field. If the config text contains
+  `max_neighbors`, the loader reports an explicit error explaining
+  that the packed-neighbour pair-force architecture (see
+  `packed-neighbour-pair-force.md`) sizes the neighbour-list buffers
+  to the actual interaction count plus a growth margin, with no
+  user-supplied per-atom cap.
 - For every cutoff `c` reported by a consuming potential, the box's
   minimum perpendicular width satisfies `min_perpendicular_width >= 3 *
   (c + r_skin)` (see `simulation-box.md`). For an orthorhombic box this
   reduces to `min(lx, ly, lz) >= 3 * (c + r_skin)`. The init file holds
   the box; validation therefore happens after the init file is loaded
   and the effective `r_skin` and `max_cutoff` are known.
-- In `mode = "all-pairs"`, `max_neighbors` and `r_skin` are rejected.
+- In `mode = "all-pairs"`, `r_skin` is rejected; the packed-neighbour
+  sizing fields are accepted.
 
-The maximum cutoff used to size the neighbor list is the largest
-`max_cutoff` reported by any consuming potential in the `ForceField`
-slot list (see `framework.md`). With one or more consumers, the
-neighbor search radius is `max_cutoff + r_skin` in cell-list mode. The
-trivial mode does not use a search radius.
+The maximum cutoff used to size the cell-list search radius is the
+largest `max_cutoff` reported by any consuming potential in the
+`ForceField` slot list (see `framework.md`). With one or more
+consumers, the cell-list search radius is `max_cutoff + r_skin` in
+cell-list mode. The trivial mode does not use a search radius.
 
 ## Empty State <!-- rq-5cbab27f -->
 
@@ -359,26 +465,27 @@ When `particle_count == 0`:
 
 - Cell-list construction produces empty `sorted_particle_ids` and
   `cell_offsets` of length `n_cells_total + 1` filled with zeros.
-- The neighbor-list build kernel does not launch.
+- The packed-neighbour construction pipeline does not launch.
 - The displacement-check kernel does not launch.
 - `needs_rebuild` stays `true` forever but no rebuild work happens.
-- Trivial construction produces empty `neighbor_list` and
-  `neighbor_counts` buffers.
+- Trivial construction produces an empty `sorted_particle_ids` and
+  empty packed-neighbour buffers.
 
 When `particle_count == 1`:
 
 - Cell-list construction works trivially.
-- The neighbor-list build kernel runs for one atom and finds zero
-  partners.
-- Trivial construction produces a single-element `neighbor_counts`
-  buffer with value `1`, and a single-element `neighbor_list` buffer
-  containing the self index `0`. Consumers handle the self slot at
-  evaluation time (the LJ kernel zeroes self slots).
+- The packed-neighbour construction pipeline runs and produces zero
+  interacting tiles and zero single pairs (a single atom has no
+  partners under any cutoff).
+- Trivial construction produces a single-element
+  `sorted_particle_ids` containing `[0]`. No pair-force kernel work
+  runs because no partners exist; the force kernel's diagonal
+  exclusion-tile path covers the self-self case as a skip.
 
-When the `ForceField` has zero neighbor-list-consuming potentials, no
-`NeighborListState` is built; the framework's `Option<NeighborListState>`
-is `None` and no displacement-check or build kernel runs over the
-lifetime of the run.
+When the `ForceField` has zero pair-force consumers and SPME is
+inactive, no `NeighborListState` is built; the framework's
+`Option<NeighborListState>` is `None` and no spatial-sort or
+displacement-check kernel runs over the lifetime of the run.
 
 ## Feature API <!-- rq-3e744fed -->
 
@@ -387,7 +494,18 @@ lifetime of the run.
 - `NeighborListConfig` — value of the parsed `[neighbor_list]` table. <!-- rq-060b1fab -->
   Variants:
   - `AllPairs`
-  - `CellList { max_neighbors: u32, r_skin: f64 }`
+  - `CellList { r_skin: f64 }`
+
+- `PreStepOutcome` — value returned by `NeighborListState::pre_step`. <!-- rq-b22e871e -->
+  Fields:
+  - `rebuilt: bool` — `true` when the call ran a rebuild.
+  - `reallocated: bool` — `true` when that rebuild grew (reallocated)
+    a packed-neighbour buffer (`interacting_tiles`,
+    `interacting_atoms`, or `single_pair_atoms`). The batched
+    graph-replay loop re-captures the phase graph when this is `true`
+    (see `cuda-graphs.md` *Neighbor-List Pre-Step Decomposition*).
+    Both fields are `false` in `Trivial` mode and on a `pre_step`
+    that performs no rebuild.
 
 - `NeighborListState` — host-side wrapper carrying the device buffers <!-- rq-b2d68288 -->
   and parameters that make up the shared neighbor list. The state is in
@@ -396,10 +514,11 @@ lifetime of the run.
   Fields present in both modes:
   - `device: Arc<CudaDevice>`
   - `particle_count: usize`
-  - `max_neighbors: u32`
-  - `neighbor_list: CudaSlice<u32>` (length `N * max_neighbors`)
-  - `neighbor_counts: CudaSlice<u32>` (length `N`)
   - `mode: NeighborListMode` — discriminator (`Trivial` or `CellList`).
+
+  There is no per-particle `neighbor_list` / `neighbor_counts` buffer
+  and no `max_neighbors` field; the partner data lives entirely in the
+  packed-neighbour buffers enumerated below.
 
   Fields present only in `CellList` mode:
   - `n_cells: [u32; 3]` — number of cells along each lattice direction
@@ -437,32 +556,41 @@ lifetime of the run.
     `n_cells_total` changes.
   - `sorted_particle_ids: CudaSlice<u32>` (length `N`)
   - `reference_positions_x/y/z: CudaSlice<f32>` (length `N`)
-  - `disp_sq: CudaSlice<f32>` (length `N`) — scratch for the
-    displacement-check kernel.
-  - `overflow_flag: CudaSlice<u32>` (length `1`) — set non-zero by the
-    build kernel when any atom exceeds `max_neighbors`.
+  - `neighbor_status: CudaSlice<u32>` (length `1`) — single-word
+    packed status: bit 0 (`displacement_tripped`) written by the
+    displacement-check kernel, bits 1–4 (`tiles_high_water`,
+    `single_pairs_high_water`, `tiles_overflow`,
+    `single_pairs_overflow`) written by the packed-neighbour
+    construction kernel, read once per batch by `pre_step`. See
+    *Displacement Check*.
+  - `threshold_sq: f32` — host-side cache of `(r_skin / 2)²`, passed
+    as a kernel argument by the displacement-check kernel launch.
   - `needs_rebuild: bool` — initial value `true`.
 
-  In `Trivial` mode the cell-list-specific fields are absent; the
-  `neighbor_list` and `neighbor_counts` buffers are populated once at
-  construction and never modified.
+  The packed-neighbour buffers (`tile_sorted_positions_*`,
+  `block_centre`, `block_bbox`, `sorted_blocks`, `interacting_tiles`,
+  `interacting_atoms`, `single_pairs`, `interaction_count`,
+  `tile_atom_count`, `tile_lane_mask`) are part of `NeighborListState`
+  in both `CellList` and `Trivial` modes; their schema is specified
+  in `packed-neighbour-pair-force.md`.
+
+  In `Trivial` mode the cell-list-specific fields are absent;
+  `sorted_particle_ids` is the identity permutation, populated once at
+  construction.
 
 - `NeighborListMode` — discriminator. Variants: <!-- inline --> <!-- inline --> <!-- rq-ff424773 -->
   - `Trivial`
-  - `CellList` — the cell-list-mode state described above; produces both
-    the cell-list output (sorted particle IDs and per-cell offsets) and a
-    neighbor list.
-  - `CellListOnly` — same cell-list output, no neighbor list. Used by
-    the SPME reciprocal-space slot (see `spme.md`); the spread and
-    gather kernels read `sorted_particle_ids` and `cell_offsets` but do
-    not consult `neighbor_list` or `neighbor_counts`.
+  - `CellList` — the cell-list-mode state described above; produces
+    the cell-list output (sorted particle IDs and per-cell offsets)
+    that feeds the packed-neighbour construction pipeline (see
+    `packed-neighbour-pair-force.md`).
+  - `CellListOnly` — the same cell-list output, without driving the
+    displacement-check rebuild trigger. Used by the SPME
+    reciprocal-space slot (see `spme.md`); the spread and gather
+    kernels read `sorted_particle_ids` and `cell_offsets` only.
 
 - `NeighborListError` — error type. Variants: <!-- rq-d8e4407a -->
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
-  - `NeighborListOverflow { max: u32 }` — the build kernel detected an
-    atom whose neighbor count would exceed `max_neighbors`. The
-    simulation halts; the user must raise `max_neighbors` or reduce
-    density.
   - `BoxTooSmallForCells { direction: &'static str, width: f32, required: f32 }`
     — the simulation box's perpendicular width is smaller than
     `3 * (r_cut + r_skin)` along the named lattice direction.
@@ -481,7 +609,7 @@ lifetime of the run.
 
 ### Functions <!-- rq-3553aab2 -->
 
-- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>` <!-- rq-14033af1 -->
+- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, r_skin: f32, tile_pair_config: TilePairCapacityConfig) -> Result<NeighborListState, NeighborListError>` <!-- rq-14033af1 -->
   - Constructs a `CellList`-mode state.
   - Computes `n_cells` per lattice direction from
     `floor(w_d / (r_cut + r_skin))` where `w_d` is the box's perpendicular
@@ -498,6 +626,12 @@ lifetime of the run.
     largest cutoff across every consumer of the shared list; the framework
     computes this as the maximum of every `Potential::max_cutoff()` value
     it observes.
+  - `tile_pair_config: TilePairCapacityConfig` carries
+    `tile_pair_growth_factor` only. The packed-neighbour buffers are
+    allocated at a small seed length here; their working capacity is
+    set by the first (probe) rebuild and grown on demand, so there is
+    no initial-capacity argument (see
+    `forces/packed-neighbour-pair-force.md` *Capacity*).
   - Records `cached_generation = sim_box.generation()`.
 
 - `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>` <!-- rq-d47caa3d -->
@@ -512,9 +646,8 @@ lifetime of the run.
   - Allocates the cell-list scratch buffers (`cell_indices`,
     `cell_counts`, `write_cursors`, `scan_block_totals`,
     `sorted_particle_ids`, `cell_offsets`) sized to `n_cells_total`.
-    Does **not** allocate `neighbor_list`, `neighbor_counts`,
-    `reference_positions_*`, `disp_sq`, or `overflow_flag` (these
-    fields are absent from `CellListOnly`-mode states).
+    Does **not** allocate `reference_positions_*` or `neighbor_status`
+    (these fields are absent from `CellListOnly`-mode states).
   - `r_cut`, `r_skin`, `r_search_sq` are not stored.
   - The state's `pre_step` rebuilds the cell list on every call,
     unconditionally; the displacement-check kernel is never launched
@@ -528,39 +661,47 @@ lifetime of the run.
 - `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline --> <!-- rq-c96fd9d2 -->
   - Constructs a `Trivial`-mode state. The `sim_box` argument is accepted
     for API uniformity; `Trivial` mode does not consult it.
-  - `max_neighbors = particle_count`.
-  - Allocates `neighbor_list` of length `particle_count *
-    particle_count` and `neighbor_counts` of length `particle_count`.
-  - Fills the buffers on the host so that
-    `neighbor_list[i * particle_count + k] == k` for every `(i, k)` in
-    `[0, particle_count) × [0, particle_count)`, and
-    `neighbor_counts[i] == particle_count` for every `i`. Uploads both
-    buffers once.
-  - When `particle_count == 0`, both buffers have length zero.
+  - Sets `sorted_particle_ids` to the identity permutation `[0, 1, …,
+    particle_count)` so every atom-block is dense in particle-id order,
+    then runs the packed-neighbour construction (see *Packed-Neighbour
+    List Construction*) over the whole system. No per-particle
+    `neighbor_list` / `neighbor_counts` buffer is allocated; the partner
+    data lives in the packed-neighbour buffers.
+  - When `particle_count == 0`, `sorted_particle_ids` and the
+    packed-neighbour buffers have length zero.
 
-- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>` <!-- rq-c49b2fe6 -->
-  - Launches the displacement-check kernel against current positions and
-    the stored reference positions, using `(lx, ly, lz)` from `sim_box`
-    for the minimum-image PBC wrap.
-  - Downloads the per-atom buffer and returns the maximum displacement.
-  - Returns `0.0` when `particle_count == 0`.
-  - Returns `0.0` when the state is in `Trivial` mode (no rebuild
+- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<bool, NeighborListError>` <!-- rq-c49b2fe6 -->
+  - Issues a single-word `dtoh_sync_copy` of `neighbor_status` and
+    returns `true` when bit 0 (`displacement_tripped`) is set — i.e. the
+    displacement-check kernel has signalled, on any step since the last
+    rebuild, that an atom moved more than `r_skin / 2` (see
+    *Displacement Check*). The per-step displacement-check kernel itself
+    is launched from the force pipeline, not from this method.
+  - Returns `false` when `particle_count == 0`.
+  - Returns `false` when the state is in `Trivial` mode (no rebuild
     machinery exists).
 
-- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-7db97132 -->
+- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<bool, NeighborListError>` <!-- rq-7db97132 -->
   - Runs the device-side cell-list pipeline (see *Cell List
-    Construction*) followed by the neighbor-list-build pipeline (see
-    *Neighbor List Construction*), using `(lx, ly, lz)` from `sim_box`
-    throughout. Updates reference positions.
+    Construction*) followed by the packed-neighbour construction
+    pipeline (see *Packed-Neighbour List Construction*), using
+    `(lx, ly, lz)` from `sim_box` throughout. Updates reference
+    positions. Returns `true` when the construction grew (reallocated)
+    a packed-neighbour buffer.
   - Performs no host-device transfers of particle data; all
     intermediates (`cell_indices`, `cell_counts`, `cell_offsets`,
     `write_cursors`, `sorted_particle_ids`) are populated on the device.
-  - Returns `NeighborListOverflow` when the build kernel set the
-    overflow flag.
+  - Grows the packed-neighbour buffers and re-runs the construction
+    when the build kernel reports an overflow, as described in
+    `forces/packed-neighbour-pair-force.md` *Capacity*, retrying until
+    the build fits.
+  - Records whether any packed-neighbour buffer was reallocated during
+    the rebuild so the caller (`pre_step`) can surface it through
+    `PreStepOutcome.reallocated`.
   - Returns `Ok(())` immediately when `particle_count == 0` or when the
     state is in `Trivial` mode.
 
-- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-1217c816 -->
+- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<PreStepOutcome, NeighborListError>` <!-- rq-1217c816 -->
   - Called by `ForceField::step` once per timestep before any slot's
     `contribute` runs. In `CellList` mode:
     1. Compares `sim_box.generation()` against `cached_generation`. On
@@ -571,59 +712,71 @@ lifetime of the run.
        refresh updates `cached_generation` and the cached lattice
        parameters and falls through to step 2. May return
        `BoxTooSmallForCells`.
-    2. If `!needs_rebuild`, runs the displacement check and sets
-       `needs_rebuild = true` if `max_disp > r_skin / 2`.
-    3. If `needs_rebuild`, runs the rebuild and clears the flag.
+    2. If `!needs_rebuild`, downloads `neighbor_status` (a single
+       `u32`) and sets `needs_rebuild = true` when the value is
+       non-zero.
+    3. If `needs_rebuild`, runs the rebuild, refreshes the reference
+       positions, and zeros `neighbor_status`.
     In `Trivial` mode this is a no-op.
+  - Returns a `PreStepOutcome { rebuilt: bool, reallocated: bool }`.
+    `rebuilt` is `true` when step 3 ran. `reallocated` is `true` when
+    that rebuild grew (and therefore reallocated) any packed-neighbour
+    buffer (`interacting_tiles`, `interacting_atoms`, or
+    `single_pair_atoms`); the batched graph-replay loop consumes this
+    flag to decide whether to re-capture the phase graph (see
+    `cuda-graphs.md` *Neighbor-List Pre-Step Decomposition*). Both
+    fields are `false` in `Trivial` mode and on a `pre_step` that does
+    not rebuild.
 
 ### CUDA Kernels <!-- rq-0469400b -->
 
 `kernels/neighbor.cu` declares the following `extern "C"` kernels.
 
-Neighbor-list-build pipeline:
+Displacement-check and reference kernels:
 
 ```c
-extern "C" __global__ void neighbor_displacement_squared(
-    const float *positions_x, const float *positions_y, const float *positions_z,
+extern "C" __global__ void neighbor_displacement_check_flag(
+    const float4 *posq,
     const float *reference_x, const float *reference_y, const float *reference_z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float *disp_sq,
-    unsigned int n);
-
-extern "C" __global__ void neighbor_list_build(
-    const float *positions_x, const float *positions_y, const float *positions_z,
-    const unsigned int *sorted_particle_ids,
-    const unsigned int *cell_offsets,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
-    float r_search_sq,
-    unsigned int max_neighbors,
-    unsigned int *neighbor_list,
-    unsigned int *neighbor_counts,
-    unsigned int *overflow_flag,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
+    float threshold_sq,             // (r_skin / 2)²
+    unsigned int *neighbor_status,// length 1; bit 0 set via atomicOr on first
+                                    //   atom that exceeds threshold
     unsigned int n);
 
 extern "C" __global__ void copy_positions_into_reference(
-    const float *positions_x, const float *positions_y, const float *positions_z,
+    const float4 *posq,
     float *reference_x, float *reference_y, float *reference_z,
     unsigned int n);
 ```
 
+Both kernels above read only `.xyz` from `posq`; they ignore the
+per-atom charge in `.w`. The reference-position arrays remain SoA:
+they store only positions (no charges), and the displacement-check
+kernel only consults them as scalar x/y/z.
+`copy_positions_into_reference` splits `posq.xyz` into the three
+scalar reference buffers at every neighbour-list rebuild.
+
+`neighbor_displacement_check_flag` writes nothing when every atom is
+within `r_skin / 2` of its reference position. When at least one
+atom exceeds the threshold, the first such thread issues
+`atomicOr(neighbor_status, 1u)`, setting bit 0. The word's bits are
+otherwise set by the packed-neighbour construction kernel (bits 1–4)
+and cleared only by the host-side `memset_zeros` at the start of a
+rebuild (see *Displacement Check*).
+
 The six lattice parameters `(lx, ly, lz, xy, xz, yz)` carry the box's
-lower-triangular form (see `simulation-box.md`). Both
-`neighbor_displacement_squared` and `neighbor_list_build` compute their
-minimum-image displacements via the triclinic *Wrap Algorithm* defined in
-`simulation-box.md`. The neighbor-list-build kernel also computes its
-own and its neighbor-cell indices in fractional coordinates from these
-six values (no separate `cell_size_x/y/z` argument; `1.0f / n_cells_d` is
-computed on the fly).
+lower-triangular form (see `simulation-box.md`).
+`neighbor_displacement_check_flag` computes its minimum-image
+displacements via the triclinic *Wrap Algorithm* defined in
+`simulation-box.md`.
 
 Spatial-hash pipeline (cell-list construction):
 
 ```c
 extern "C" __global__ void compute_cell_indices_and_histogram(
-    const float *positions_x, const float *positions_y, const float *positions_z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float4 *posq,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int *cell_indices,
     unsigned int *cell_counts,
@@ -686,9 +839,20 @@ Each is a no-op when `particle_count == 0`.
 
 Neighbor-list-build pipeline:
 
-- `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>` <!-- rq-884b5cd6 -->
-- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>` <!-- rq-a1262872 -->
+- `neighbor_displacement_check_flag(particle_buffers, reference_x, reference_y, reference_z, sim_box, threshold_sq, neighbor_status) -> Result<(), GpuError>` <!-- rq-884b5cd6 -->
+  — launches the per-atom displacement-check kernel; sets bit 0 of
+  `neighbor_status` via `atomicOr(_, 1u)` if any atom's minimum-image
+  displacement from its reference position exceeds `sqrt(threshold_sq)`,
+  leaving the construction kernel's bits 1–4 untouched. Called
+  once per physical timestep from `ForceField::step` /
+  `ForceField::step_no_neighbor_check` so the launch sits inside the
+  captured graph when capture is active.
 - `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>` <!-- rq-344f7af0 -->
+
+The packed-neighbour construction kernels (`scatter_positions_to_tile_order`,
+`compute_block_bbox`, the volume sort, `find_blocks_with_interactions`,
+and the i-block histogram / scan / scatter) are specified in
+`packed-neighbour-pair-force.md`.
 
 Spatial-hash pipeline:
 
@@ -720,59 +884,32 @@ Spatial-hash pipeline:
   where `len_0 = n_cells_total` and `len_{l+1} = ceil(len_l / 256)`; the
   recursion terminates at the level whose input fits in a single block.
   `prefix_scan_finalize_offsets` runs a single thread.
-- Block size and grid: `neighbor_list_build` launches **one block per
-  home cell with `blockDim.x = 256`**, total grid `n_cells_total`. Each
-  block iterates the home cell's resident atoms with stride
-  `blockDim.x` — thread `t` handles home-cell atom positions
-  `t`, `t + blockDim.x`, … until the home cell's atom slice is
-  exhausted, so a single block correctly services arbitrarily dense
-  cells. Home cells with zero atoms exit immediately.
 - Shared memory: `prefix_scan_local_blocks` uses one
   `unsigned int[2 * block_size]` for the double-buffered local scan.
-  `neighbor_list_build` uses `3 × max_cell_occupancy × sizeof(float)`
-  for the cached `(x, y, z)` of one neighbour cell at a time, where
-  `max_cell_occupancy` is computed by the host as `ceil(particle_count
-  / n_cells_total) × cell_occupancy_safety_factor` (safety factor 4 in
-  v1, accommodating density fluctuations). Other kernels use no shared
-  memory.
+  Other cell-list kernels use no shared memory. The packed-neighbour
+  construction kernels' launch configuration is specified in
+  `packed-neighbour-pair-force.md`.
 - Stream: the default stream carried by `particle_buffers.device`.
 
 ## Determinism <!-- rq-c62bb861 -->
 
-The cell-list build canonicalises within-cell order, and the
-neighbour-list build inherits that canonical order via its
-deterministic cell sweep. Together these two stages produce a
-neighbour list that is bit-identical across runs given identical
-inputs on the same GPU.
+The cell-list build canonicalises within-cell order, producing a
+`sorted_particle_ids` that is bit-identical across runs given identical
+inputs on the same GPU. The packed-neighbour construction consumes that
+ordering, so its output is likewise deterministic (the construction's
+own determinism invariants are in `packed-neighbour-pair-force.md`
+*Determinism*).
 
-1. **Per-cell sort within `sorted_particle_ids`.** The spatial-hash
-   pipeline places atoms into cells with an `atomicAdd`-based scatter
-   whose within-cell order is non-deterministic, then runs a per-cell
-   insertion sort over `sorted_particle_ids` keyed on particle index.
-   Atomic integer addition is associative so the histogram and the
-   write-cursor counts are run-to-run identical even though atomic
-   ordering is not; the per-cell sort canonicalises the scatter output.
-   The end-to-end result is identical to a stable lexicographic sort
-   on `(cell_index, particle_id)`. **Required for run-to-run
-   reproducibility.**
-
-2. **Cell-sweep ordering of each atom's neighbour list.** The
-   build kernel walks the 27 neighbour cells in
-   `(da, db, dc) ∈ {-1, 0, +1}³` lexicographic order (a outer, b middle,
-   c inner) and within each cell appends partners in
-   `sorted_particle_ids` order — which is ascending particle-ID order
-   because of (1). Appends happen at the next free slot of the home
-   atom's row of `neighbor_list`; the slot index is the per-thread
-   running count, never an atomic. Each home atom is owned by exactly
-   one thread, so its row is written by exactly one thread in a
-   deterministic order.
-
-This ordering is **not** sorted by partner index globally — it is sorted
-by `(cell-sweep position, partner index within cell)`. Downstream
-consumers (pair-force kernels and `pair-reduction.md`) require a
-deterministic slot assignment but are commutative with respect to
-neighbour order, so the change of ordering is invisible to physics and
-to bit-exact reproducibility.
+**Per-cell sort within `sorted_particle_ids`.** The spatial-hash
+pipeline places atoms into cells with an `atomicAdd`-based scatter
+whose within-cell order is non-deterministic, then runs a per-cell
+insertion sort over `sorted_particle_ids` keyed on particle index.
+Atomic integer addition is associative so the histogram and the
+write-cursor counts are run-to-run identical even though atomic
+ordering is not; the per-cell sort canonicalises the scatter output.
+The end-to-end result is identical to a stable lexicographic sort on
+`(cell_index, particle_id)`. **Required for run-to-run
+reproducibility.**
 
 ## Performance Notes <!-- rq-54a28837 -->
 
@@ -782,54 +919,27 @@ to bit-exact reproducibility.
   launches — a small constant, at most six up to ~16 M cells. Total
   work is `O(N)` for the per-atom kernels (cell index, histogram,
   scatter), `O(N · d)` for the per-cell sort at average cell density
-  `d`, and `O(n_cells_total)` for the prefix scan.
-- `neighbor_list_build` total work is `O(N · d_cell · 27)` where
-  `d_cell` is the average per-cell occupancy: each home cell scans 27
-  neighbour cells against its own atoms. Position loads from the
-  global `positions_x/y/z` arrays are coalesced (one block tile-loads
-  one neighbour cell into shared memory at a time and amortises that
-  load across all atoms in the home cell). The distance-check inner
-  loop reads exclusively from shared memory. There is no per-atom
-  sort: neighbours are written in the cell-sweep / within-cell order
-  documented in *Neighbor List Construction*, which carries no
-  superlinear cost in the per-atom partner count.
+  `d`, and `O(n_cells_total)` for the prefix scan. The packed-neighbour
+  construction that follows is analysed in
+  `packed-neighbour-pair-force.md`.
 - Atomic-add contention: each cell sees on the order of `d` serialised
   `atomicAdd`s in the histogram and `d` in the scatter. Negligible at
   liquid density (`d` ≈ 5–20).
-- Displacement check: one f32 per atom downloaded each step, a host max
-  reduction. Sub-ms at N = 10⁴.
-- The neighbor-list build kernel walks ~27 × density particles per atom
-  (about 100–200 per atom for liquid-density systems); per-step force
-  evaluation drops from `O(N²)` to `O(N · avg_neighbors)`.
+- Displacement check: one `u32` status word downloaded once per batch
+  boundary (see *Displacement Check*), not a per-atom download.
 
 ## Out of Scope <!-- rq-58acf788 -->
 
-- Device-side parallel displacement-max reduction. Future work when the
-  N-length per-step download becomes a bottleneck.
-- Auto-growing `max_neighbors` on overflow. The current v1 contract is
-  fail-loud and require the user to raise the value.
 - Coulomb-style long-range force, which would require a non-cell-list
   decomposition (Ewald / PME). The neighbor-list framework here is
   short-range only.
 - Half-neighbor-list (Newton's-third-law optimisation that lists each
-  pair once instead of twice). Doubles the build complexity and would
-  also force a different reduction strategy.
+  pair once instead of twice).
 - Constant or adaptive `r_skin`. v1 is constant.
-- A per-atom sort that imposes partner-ID ordering across the whole
-  neighbour list. The build kernel emits partners in cell-sweep order
-  only (see *Determinism* above); no global per-atom sort is
-  performed. Consumers that want partner-ID order must sort in their
-  own host-side test harness.
-- Auto-tuning the shared-memory cell capacity. The v1 implementation
-  uses a fixed safety factor over `ceil(particle_count /
-  n_cells_total)`. A future feature may compute the empirical
-  `max(cell_occupancy)` from the cell-counts pass and size the cache
-  to that, dropping the static safety factor.
-- Per-pair-of-consumers cutoff filtering inside the neighbor-list build
-  itself. The shared list is built once at the maximum cutoff across
-  consumers; each consumer applies its own per-pair cutoff at force
-  evaluation time, reading the list but discarding entries beyond its
-  own cutoff.
+- Per-pair-of-consumers cutoff filtering. The shared packed list is
+  built once at the maximum cutoff across consumers; each consumer
+  applies its own per-pair cutoff at force-evaluation time, reading the
+  list but discarding entries beyond its own cutoff.
 - Detecting a box mutation that bypasses `SimulationBox::set_lattice`
   (e.g. two `SimulationBox` values constructed independently that happen
   to share a `generation`, or a future API that mutates the lattice
@@ -937,63 +1047,101 @@ Feature: Cell-list neighbor list
     Then atom 0's neighbor list contains atom 1
     And the displacement used was the minimum-image dx = +0.2 (not lx - 0.2)
 
-  @rq-2bc559ec
-  Scenario: Each atom's neighbor list is emitted in cell-sweep order
-    Given any non-empty system
-    When NeighborListState::rebuild is called
-    Then for every atom i, neighbor_list[i * max_neighbors .. i * max_neighbors + neighbor_counts[i]]
-      is the concatenation of the 27 visited neighbour-cell slices walked in
-      (da, db, dc) ∈ {-1, 0, +1}³ order (a outer, b middle, c inner), with
-      each cell's atoms enumerated in `sorted_particle_ids` order
-      (ascending particle index within the cell), the home atom itself
-      filtered out, and any partner further than r_cut + r_skin filtered
-      out
-    And within each per-cell slice the partner indices are strictly
-      ascending (inherited from the per-cell sort in `sorted_particle_ids`)
-
-  @rq-b5289acc
-  Scenario: Neighbour list is not globally partner-ID sorted across cells
-    Given a system with atoms in distinct cells whose 27-cell sweep visits
-      partner A's cell before partner B's cell, but where A's particle
-      index is greater than B's
-    When NeighborListState::rebuild is called
-    Then atom i's neighbour list lists A before B
-    And the global sequence is therefore not strictly ascending in
-      partner index
-
-  @rq-0181787c
-  Scenario: Build kernel signals overflow when an atom exceeds max_neighbors
-    Given a dense configuration where atom 0 has 257 partners within r_cut + r_skin
-    And max_neighbors = 256
-    When NeighborListState::rebuild is called
-    Then it returns Err(NeighborListError::NeighborListOverflow { max: 256 })
-
   @rq-6bf3709c
   Scenario: Two independent rebuilds with identical positions produce identical lists
     Given two NeighborListStates built from identical configurations and identical positions
     When each is rebuilt
-    Then their neighbor_list, neighbor_counts, sorted_particle_ids, and cell_offsets agree byte-for-byte
+    Then their sorted_particle_ids, cell_offsets, interacting_tiles,
+      interacting_atoms, and interaction_count agree byte-for-byte
 
   # --- Displacement check ---
 
-  @rq-53ae77a4
-  Scenario: Displacement check on reference positions equal to current returns 0
+  @rq-837c85d3
+  Scenario: Displacement-check kernel on reference positions equal to current leaves the flag clear
     Given a NeighborListState immediately after a rebuild
-    When displacement_check is called
-    Then it returns 0.0 (to within f32 round-off)
+    When neighbor_displacement_check_flag runs
+    Then neighbor_status remains 0u
 
-  @rq-b39d3be7
-  Scenario: Displacement check uses minimum-image displacement
+  @rq-6e1f04f3
+  Scenario: Displacement-check kernel uses minimum-image displacement
     Given a particle whose reference position is x = lx/2 - 0.05
     And whose current position is x = -lx/2 + 0.05 (wrapped across the boundary)
-    When displacement_check is called
-    Then the reported max displacement is approximately 0.1, not lx - 0.1
+    And threshold_sq = 0.15² (i.e., r_skin / 2 = 0.15)
+    When neighbor_displacement_check_flag runs
+    Then neighbor_status remains 0u (the wrapped displacement is ≈ 0.1, below threshold)
 
-  @rq-f94ee5cd
-  Scenario: Displacement check returns the maximum across all particles
-    Given particle 7 has moved 0.5 from its reference and all others have moved less
-    When displacement_check is called
-    Then the result equals 0.5
+  @rq-c43dd1ab
+  Scenario: Displacement-check kernel sets the flag when any particle exceeds threshold
+    Given particle 7 has moved 0.5 from its reference and all other particles have moved less than r_skin / 2
+    When neighbor_displacement_check_flag runs
+    Then neighbor_status equals 1u
+
+  @rq-c9f970fe
+  Scenario: Displacement-check kernel is sticky across captured replays
+    Given a captured graph that runs neighbor_displacement_check_flag every step
+    And the graph is replayed for K = 50 steps in a single batch
+    And on the third replay particle 7 exceeds threshold but on the fiftieth replay every particle is back within threshold
+    When the host downloads neighbor_status at the batch boundary
+    Then the downloaded value equals 1u
+
+  @rq-46d72444
+  Scenario: A rebuild clears the displacement flag
+    Given neighbor_status holds 1u and pre_step decides to rebuild
+    When the rebuild completes
+    Then reference_positions_{x,y,z} equal the current posq.xyz componentwise
+    And neighbor_status has been zeroed via memset_zeros before pre_step returns
+
+  @rq-5d2e8748
+  Scenario: pre_step downloads exactly one u32 per call
+    Given a NeighborListState in CellList mode with N = 24576 particles
+    When pre_step is called
+    Then exactly one dtoh_sync_copy of length 1 (u32) is issued against neighbor_status
+    And no other host-device particle transfer is issued by pre_step
+
+  @rq-75f86ce3
+  Scenario: pre_step reports no reallocation when a rebuild reuses the buffers
+    Given a NeighborListState in CellList mode whose rebuild fits the current
+      packed-neighbour capacity
+    When pre_step runs a rebuild
+    Then pre_step returns PreStepOutcome { rebuilt: true, reallocated: false }
+
+  @rq-1ca7df49
+  Scenario: pre_step reports reallocation when a high-water build grows a buffer
+    Given a NeighborListState in CellList mode whose previous build set the
+      tiles_high_water bit of neighbor_status
+    When pre_step reads neighbor_status, grows interacting_tiles geometrically,
+      and runs the rebuild
+    Then pre_step returns PreStepOutcome { rebuilt: true, reallocated: true }
+
+  @rq-f867ab96
+  Scenario: A high-water bit forces a rebuild even when the displacement bit is clear
+    Given a NeighborListState in CellList mode with no box-generation change
+    And neighbor_status with the tiles_high_water bit set and bit 0 clear
+    When pre_step is called
+    Then pre_step grows interacting_tiles to ceil(capacity * tile_pair_growth_factor)
+    And pre_step runs a rebuild and returns PreStepOutcome { rebuilt: true, reallocated: true }
+
+  @rq-8142fff7
+  Scenario: An overflow bit makes pre_step halt with PackedNeighborOverflow
+    Given a NeighborListState in CellList mode past its pre-capture probe rebuild
+    And neighbor_status with the tiles_overflow bit set
+    When pre_step reads neighbor_status
+    Then pre_step returns Err(NeighborListError::PackedNeighborOverflow { buffer: "interacting_tiles" })
+    And no further rebuild is attempted on this call
+
+  @rq-a39234ba
+  Scenario: A steady-state rebuild copies no interaction count to the host
+    Given a NeighborListState in CellList mode past its pre-capture probe rebuild
+    And a pre_step that runs a rebuild
+    Then the only dtoh_sync_copy issued by pre_step is the single neighbor_status word
+    And interaction_count is never copied to the host
+
+  @rq-623447db
+  Scenario: pre_step that performs no rebuild reports neither flag
+    Given a NeighborListState in CellList mode with no box-generation change
+      and neighbor_status holding 0u
+    When pre_step is called
+    Then pre_step returns PreStepOutcome { rebuilt: false, reallocated: false }
 
   # --- Rebuild policy ---
 
@@ -1032,7 +1180,7 @@ Feature: Cell-list neighbor list
   Scenario: NeighborListState with particle_count = 1 produces an empty neighbor list
     When a single particle is in the system
     And NeighborListState::rebuild is called
-    Then neighbor_counts[0] equals 0
+    Then interaction_count equals [0, 0] (no interacting tiles, no single pairs)
 
   # --- Determinism ---
 
@@ -1048,23 +1196,26 @@ Feature: Cell-list neighbor list
   @rq-789fcec9
   Scenario: Trivial-mode contents
     Given a NeighborListState built via new_trivial with particle_count = 3
-    When neighbor_list and neighbor_counts are downloaded
-    Then neighbor_counts equals [3, 3, 3]
-    And neighbor_list equals [0, 1, 2, 0, 1, 2, 0, 1, 2]
+    When the state is built
+    Then sorted_particle_ids equals [0, 1, 2] (the identity permutation)
+    And the packed-neighbour buffers list every distinct atom pair among
+      the three atoms exactly once (across interacting_tiles /
+      single_pair_atoms)
 
   @rq-bb3773aa
   Scenario: Trivial-mode pre_step does no work
     Given a NeighborListState in Trivial mode
     When pre_step is called
     Then timings report zero samples for KernelStage::NeighborDisplacementSquared
-    And timings report zero samples for KernelStage::NeighborListBuild
+    And pre_step returns PreStepOutcome { rebuilt: false, reallocated: false }
 
   @rq-30f85829
   Scenario: Trivial-mode state has no cell-list fields
     Given a NeighborListState built via new_trivial
     Then state.mode equals NeighborListMode::Trivial
-    And the cell-list-specific buffers (sorted_particle_ids, cell_offsets,
-      reference_positions_*, disp_sq, overflow_flag) are absent
+    And the cell-list-specific buffers (cell_indices, cell_counts,
+      cell_offsets, write_cursors, reference_positions_*, neighbor_status)
+      are absent
 
   # --- Shared-service ownership ---
 
@@ -1189,8 +1340,7 @@ Feature: Cell-list neighbor list
     When box.set_lattice is called bumping the generation, with the new lattice
       yielding the same n_cells_total as before
     And pre_step is called with the updated box
-    Then the displacement-check kernel was launched
-    And max_disp > 0.5
+    Then pre_step downloads neighbor_status and observes 1u
     And state.needs_rebuild was set to true and a rebuild was performed
     And state.cached_generation equals the new box generation after the call
 
@@ -1203,9 +1353,9 @@ Feature: Cell-list neighbor list
       that ticks the generation and scales the box by 1.0e-4 (so n_cells_total
       stays constant) and a small physical-coord atom drift
     Then the number of rebuilds performed across the K pre_step calls equals
-      the number of pre_step calls on which max_disp first crossed r_skin / 2
-      (the same set that would have triggered in a no-barostat NVT run with
-      the same atom drifts)
+      the number of pre_step calls on which the downloaded neighbor_status
+      first reads 1u (the same set that would have triggered in a no-barostat
+      NVT run with the same atom drifts)
     And no pre_step call triggers a rebuild solely from the generation tick
 
   @rq-72aae589
@@ -1281,7 +1431,7 @@ Feature: Cell-list neighbor list
   Scenario: NeighborListState rebuild performs no host-device particle transfers
     Given a NeighborListState in CellList mode
     When NeighborListState::rebuild is called
-    Then no host-side download of positions_x/y/z occurs
+    Then no host-side download of posq occurs
     And no host-side upload of sorted_particle_ids or cell_offsets occurs
 
   @rq-6fd5167a
@@ -1319,7 +1469,7 @@ Feature: Cell-list neighbor list
     And cell_indices is NOT reallocated (its length particle_count is unchanged)
 
   @rq-2303ee2e
-  Scenario: Per-cell sort yields ascending partner indices inside every cell
+  Scenario: Per-cell sort yields ascending particle indices inside every cell
     Given any non-empty system
     When NeighborListState::rebuild is called
     Then for every cell c with occupancy k,

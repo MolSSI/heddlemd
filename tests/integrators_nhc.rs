@@ -47,9 +47,9 @@ fn small_state(n: usize, mass: Real) -> ParticleState {
     .unwrap()
 }
 
-fn box_large() -> SimulationBox {
+fn box_large(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     let l = (1.0e6 / LEN_F) as Real;
-    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -57,7 +57,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_large(),
+        &box_large(&gpu),
         &[],
         &[],
         &[],
@@ -150,9 +150,9 @@ fn registry_builds_nhc_with_particle_count_zero() {
 fn kinetic_energy_reduce_zero_velocity_returns_zero() {
     let gpu = init_device().unwrap();
     let state = small_state(4, 1.0);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
+    let ke = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap();
     assert_eq!(ke, 0.0);
 }
 
@@ -179,9 +179,9 @@ fn kinetic_energy_reduce_matches_host_formula() {
         None,
     )
     .unwrap();
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
+    let ke = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap();
     let mut expected = 0.0;
     for i in 0..n {
         expected += 0.5 * masses[i] * (vx[i] * vx[i] + vy[i] * vy[i] + vz[i] * vz[i]);
@@ -213,12 +213,12 @@ fn kinetic_energy_reduce_is_deterministic() {
         None,
     )
     .unwrap();
-    let buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
-    let buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch_a = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let mut scratch_b = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let ke_a = compute_kinetic_energy(&buffers_a, &mut scratch_a).unwrap();
-    let ke_b = compute_kinetic_energy(&buffers_b, &mut scratch_b).unwrap();
+    let ke_a = compute_kinetic_energy(&mut buffers_a, &mut scratch_a).unwrap();
+    let ke_b = compute_kinetic_energy(&mut buffers_b, &mut scratch_b).unwrap();
     assert_eq!(ke_a.to_bits(), ke_b.to_bits());
 }
 
@@ -227,9 +227,9 @@ fn kinetic_energy_reduce_is_deterministic() {
 fn kinetic_energy_reduce_empty_state_returns_zero() {
     let gpu = init_device().unwrap();
     let state = small_state(0, 1.0);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
+    let ke = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap();
     assert_eq!(ke, 0.0);
 }
 
@@ -328,8 +328,13 @@ fn nhc_apply_pre_and_apply_post_launch_expected_kernels() {
     };
     // Two KE reductions per step (one per half-step).
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 2);
-    // Yoshida 3 × n_resp 1 × 2 halves = 6 rescale launches per step.
-    assert_eq!(count_for(KernelStage::NHC_RESCALE_VELOCITIES), 6);
+    // apply_pre's cumulative-factor refactor collapses Yoshida × n_resp
+    // per-iteration rescales into one `rescale_velocities` launch.
+    // apply_post's rescale is dispatched by the JIT-composed post-force
+    // per-particle kernel via NHC's source fragment, not by a
+    // standalone rescale; the standalone `NHC_RESCALE_VELOCITIES`
+    // stage records the one apply_pre launch only.
+    assert_eq!(count_for(KernelStage::NHC_RESCALE_VELOCITIES), 1);
     // The thermostat does NOT launch VV kernels.
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
@@ -492,7 +497,7 @@ fn nhc_preserves_com_momentum_to_round_off() {
     let state = atomic_state(n);
     let mass = 1.66e-27;
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_large();
+    let mut sim_box = box_large(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = heddle_md::integrator::IntegratorRegistry::with_builtins()
@@ -546,10 +551,7 @@ fn rescale_velocities_does_not_modify_positions_masses_or_forces() {
     let snap_pz = state.positions_z.clone();
     let snap_masses = state.masses.clone();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    rescale_velocities(&mut buffers, 0.5).unwrap();
-    let px = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
-    let py = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
-    let pz = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    rescale_velocities(&mut buffers, 0.5).unwrap();    let (px, py, pz) = buffers.download_positions().unwrap();
     let masses = gpu.device.dtoh_sync_copy(&buffers.masses).unwrap();
     let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let fy = gpu.device.dtoh_sync_copy(&buffers.forces_y).unwrap();

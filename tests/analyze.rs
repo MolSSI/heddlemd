@@ -834,10 +834,12 @@ fn a_custom_analysis_builder_composes_with_the_built_ins() {
 
     #[derive(Debug, Clone)]
     struct MyAnalysisBuilder;
-    impl AnalysisBuilder for MyAnalysisBuilder {
+        impl heddle_md::registry::KindedBuilder for MyAnalysisBuilder {
         fn kind_name(&self) -> &'static str {
             "my-analysis"
-        }
+        }        }
+
+    impl AnalysisBuilder for MyAnalysisBuilder {
         fn validate_params(&self, _params: &toml::Value) -> Result<(), AnalyzeError> {
             Ok(())
         }
@@ -866,9 +868,6 @@ fn a_custom_analysis_builder_composes_with_the_built_ins() {
                 }
             }
             Ok(Box::new(MyAnalysis))
-        }
-        fn box_clone(&self) -> Box<dyn AnalysisBuilder> {
-            Box::new(self.clone())
         }
     }
 

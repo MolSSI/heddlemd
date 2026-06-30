@@ -2,18 +2,15 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaDevice, CudaSlice};
 
 use serde::Deserialize;
 
 use crate::forces::{ConstraintList, GroupConstraint};
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, constraint_virial_scatter, rattle_velocities,
     shake_positions, shake_positions_no_velocity, shake_snapshot,
 };
-use crate::kernels;
 use crate::io::config::{ConfigError, NamedSlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
@@ -25,16 +22,16 @@ pub const MAX_GROUP_ATOMS: u32 = 8;
 pub const MAX_GROUP_CONSTRAINTS: u32 = 12;
 
 // rq-f17b858f rq-811ba2a0
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct ShakeConstraintSpec {
     pub i: u32,
     pub j: u32,
-    pub d: f64,
+    pub d: crate::units::Length,
 }
 
 // rq-55f60603
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct ShakeParams {
     pub atoms: u32,
@@ -97,12 +94,12 @@ fn validate_shake_params(name: &str, p: &ShakeParams) -> Result<(), ConfigError>
                 reason: format!("constraint atoms must differ (i = j = {})", c.i),
             });
         }
-        if !c.d.is_finite() || c.d <= 0.0 {
+        if !c.d.0.is_finite() || c.d.0 <= 0.0 {
             return Err(ConfigError::ShakeParamsMalformed {
                 name: name.to_string(),
                 reason: format!(
                     "target distance must be strictly positive and finite, got {}",
-                    c.d
+                    c.d.0
                 ),
             });
         }
@@ -194,6 +191,9 @@ pub struct ShakeConstraintsState {
     pub group_count: usize,
     pub particle_count: usize,
     pub atom_slot_count: usize,
+    /// Largest atom count of any constraint group. Sizes the dynamic
+    /// shared-memory staging buffer in `rattle_velocities`. rq-53800cef
+    pub max_group_atoms: u32,
     pub group_atoms: CudaSlice<u32>,
     pub group_atom_offset: CudaSlice<u32>,
     pub group_atom_count: CudaSlice<u32>,
@@ -298,7 +298,7 @@ impl ShakeConstraintsState {
             for c in &params.constraints {
                 group_constraints_local_i_host.push(c.i as u8);
                 group_constraints_local_j_host.push(c.j as u8);
-                let d = c.d as Real;
+                let d = c.d.0 as Real;
                 group_constraints_r2_host.push(d * d);
             }
 
@@ -309,6 +309,7 @@ impl ShakeConstraintsState {
         }
 
         let atom_slot_count = group_atoms_host.len();
+        let max_group_atoms = group_atom_count_host.iter().copied().max().unwrap_or(0);
 
         // Per-atom mass array of length particle_count. Atoms not
         // referenced by any group are populated harmlessly with their
@@ -363,6 +364,7 @@ impl ShakeConstraintsState {
             group_count: n_groups,
             particle_count: list.particle_count,
             atom_slot_count,
+            max_group_atoms,
             group_atoms,
             group_atom_offset,
             group_atom_count,
@@ -446,6 +448,7 @@ impl Constraint for ShakeConstraintsState {
             dt,
             &mut self.constraint_virial,
             self.group_count,
+            self.max_group_atoms,
         )?;
         timings.kernel_stop(KernelStage::SHAKE_POSITIONS)?;
         Ok(())
@@ -476,6 +479,7 @@ impl Constraint for ShakeConstraintsState {
             dt,
             &mut self.constraint_virial,
             self.group_count,
+            self.max_group_atoms,
         )?;
         timings.kernel_stop(KernelStage::RATTLE_VELOCITIES)?;
         timings.kernel_start(KernelStage::CONSTRAINT_VIRIAL_SCATTER)?;
@@ -513,6 +517,7 @@ impl Constraint for ShakeConstraintsState {
             0.0,
             &mut self.constraint_virial,
             self.group_count,
+            self.max_group_atoms,
         )?;
         timings.kernel_stop(KernelStage::RATTLE_VELOCITIES)?;
         Ok(())
@@ -555,11 +560,22 @@ impl Constraint for ShakeConstraintsState {
 #[derive(Debug, Clone)]
 pub struct ShakeBuilder;
 
-impl ConstraintBuilder for ShakeBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for ShakeBuilder {
     fn kind_name(&self) -> &'static str {
         "shake"
     }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<ShakeParams>(units, params)
+    }
+}
 
+impl ConstraintBuilder for ShakeBuilder {
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         // Use a placeholder name; the registry-level error path
@@ -587,7 +603,7 @@ impl ConstraintBuilder for ShakeBuilder {
             .map(|c| GroupConstraint {
                 local_i: c.i as u8,
                 local_j: c.j as u8,
-                r0: c.d as Real,
+                r0: c.d.0 as Real,
             })
             .collect())
     }
@@ -657,49 +673,25 @@ impl ConstraintBuilder for ShakeBuilder {
         let state = ShakeConstraintsState::new(device, list, masses, constraint_types)?;
         Ok(Box::new(state))
     }
-
-    fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
-        Box::new(self.clone())
-    }
 }
 
 // rq-2093594f
-#[derive(Debug, Clone)]
-pub struct ShakeKernels {
-    pub shake_snapshot: CudaFunction,
-    pub shake_positions: CudaFunction,
-    pub rattle_velocities: CudaFunction,
-    pub constraint_virial_scatter: CudaFunction,
-    pub shake_positions_no_velocity: CudaFunction,
-}
-
-impl ShakeKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::SHAKE),
-            "shake",
-            &[
-                "shake_snapshot",
-                "shake_positions",
-                "rattle_velocities",
-                "constraint_virial_scatter",
-                "shake_positions_no_velocity",
-            ],
-        )?;
-        Ok(ShakeKernels {
-            shake_snapshot: get_func(device, "shake", "shake_snapshot")?,
-            shake_positions: get_func(device, "shake", "shake_positions")?,
-            rattle_velocities: get_func(device, "shake", "rattle_velocities")?,
-            constraint_virial_scatter: get_func(
-                device,
-                "shake",
-                "constraint_virial_scatter",
-            )?,
-            shake_positions_no_velocity: get_func(
-                device,
-                "shake",
-                "shake_positions_no_velocity",
-            )?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "shake",
+    ptx: crate::kernels::SHAKE,
+    struct: ShakeKernels,
+    kernels: [
+        shake_snapshot,
+        shake_positions,
+        rattle_velocities,
+        constraint_virial_scatter,
+        shake_positions_no_velocity,
+    ],
+    stages: {
+        SHAKE_SNAPSHOT              = "shake_snapshot",
+        SHAKE_POSITIONS             = "shake_positions",
+        RATTLE_VELOCITIES           = "rattle_velocities",
+        CONSTRAINT_VIRIAL_SCATTER   = "constraint_virial_scatter",
+        SHAKE_POSITIONS_NO_VELOCITY = "shake_positions_no_velocity",
+    },
 }

@@ -41,6 +41,7 @@ fn write_pair(
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = {seed}
 temperature = {temperature}
 
@@ -480,6 +481,7 @@ fn lossy_is_default() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -525,6 +527,7 @@ fn langevin_runs_end_to_end() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -583,6 +586,7 @@ fn switching_integrator_kind_changes_trajectory() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -644,6 +648,7 @@ fn refuse_multi_type() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -770,22 +775,22 @@ use heddle_md::runner::run_simulation_with_registries;
 #[test]
 fn registries_new_starts_every_inner_registry_empty() {
     let registries = Registries::new();
-    assert!(registries.integrators.builders.is_empty());
-    assert!(registries.thermostats.builders.is_empty());
-    assert!(registries.barostats.builders.is_empty());
-    assert!(registries.constraint_types.builders.is_empty());
-    assert!(registries.potentials.builders.is_empty());
+    assert!(registries.integrators.builders().is_empty());
+    assert!(registries.thermostats.builders().is_empty());
+    assert!(registries.barostats.builders().is_empty());
+    assert!(registries.constraint_types.builders().is_empty());
+    assert!(registries.potentials.builders().is_empty());
 }
 
 // rq-5f8f7d00
 #[test]
 fn registries_with_builtins_populates_every_inner_registry() {
     let registries = Registries::with_builtins();
-    assert!(!registries.integrators.builders.is_empty());
-    assert!(!registries.thermostats.builders.is_empty());
-    assert!(!registries.barostats.builders.is_empty());
-    assert!(!registries.constraint_types.builders.is_empty());
-    assert!(!registries.potentials.builders.is_empty());
+    assert!(!registries.integrators.builders().is_empty());
+    assert!(!registries.thermostats.builders().is_empty());
+    assert!(!registries.barostats.builders().is_empty());
+    assert!(!registries.constraint_types.builders().is_empty());
+    assert!(!registries.potentials.builders().is_empty());
 }
 
 // rq-bbb25583
@@ -803,15 +808,12 @@ fn register_potential_appends_to_potentials() {
         ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
             Ok(None)
         }
-        fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-            Box::new(self.clone())
-        }
     }
     let mut registries = Registries::with_builtins();
-    let before = registries.potentials.builders.len();
+    let before = registries.potentials.builders().len();
     registries.register_potential(Box::new(NoopBuilder));
-    assert_eq!(registries.potentials.builders.len(), before + 1);
-    let last = &registries.potentials.builders[before];
+    assert_eq!(registries.potentials.builders().len(), before + 1);
+    let last = &registries.potentials.builders()[before];
     assert_eq!(format!("{last:?}"), "NoopBuilder");
 }
 
@@ -844,6 +846,7 @@ fn custom_kind_with_run_simulation_fails_with_unknown_kind() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -888,7 +891,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
     use std::sync::Arc;
     use heddle_md::gpu::{GpuContext, ParticleBuffers};
     use heddle_md::integrator::{
-        Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep,
+        Integrator, IntegratorBuilder, IntegratorError, PostForcePerParticle, StepPlan, SubStep,
     };
     use heddle_md::pbc::SimulationBox;
     use heddle_md::timings::Timings;
@@ -911,15 +914,43 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
         ) -> Result<(), IntegratorError> {
             Ok(())
         }
+        // K's strict policy requires every active integrator to
+        // participate in the post-force per-particle kernel. The stub
+        // participates with a no-op fragment so the runner accepts it.
+        fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
+            Some(self)
+        }
+        fn post_force_substep_index(&self, _dt: Real) -> Option<usize> {
+            None
+        }
+    }
+
+    impl PostForcePerParticle for CountingStubIntegrator {
+        fn post_force_per_particle_fragment(&self) -> heddle_md::forces::PerParticleFragment {
+            heddle_md::forces::PerParticleFragment {
+                label: "custom_stub",
+                helper_source: String::new(),
+                entry_point_args: String::new(),
+                per_thread_body: String::from("        (void)i;"),
+            }
+        }
+        fn bind_post_force_per_particle_args(
+            &self,
+            _ctx: &heddle_md::forces::PostForceBindContext<'_>,
+            _builder: &mut heddle_md::forces::ForceLaunchBuilder,
+        ) {
+        }
     }
     #[derive(Debug, Clone)]
     struct CountingStubBuilder {
         plan_calls: Arc<AtomicU64>,
     }
-    impl IntegratorBuilder for CountingStubBuilder {
+        impl heddle_md::registry::KindedBuilder for CountingStubBuilder {
         fn kind_name(&self) -> &'static str {
             "custom-stub"
-        }
+        }        }
+
+    impl IntegratorBuilder for CountingStubBuilder {
         fn validate_params(
             &self,
             _params: &toml::Value,
@@ -937,9 +968,6 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
                 plan_calls: self.plan_calls.clone(),
             }))
         }
-        fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
-            Box::new(self.clone())
-        }
     }
 
     let dir = tmp_path("custom_kind_user_registered");
@@ -947,6 +975,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -1036,6 +1065,7 @@ fn coulomb_cutoff_participates_in_box_too_small_check() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -1105,23 +1135,16 @@ fn run_simulation_with_registries_dispatches_user_registered_potential() {
         fn max_cutoff(&self) -> Option<Real> {
             None
         }
-        fn contribute(
+        fn compute(
             &mut self,
             _buffers: &ParticleBuffers,
             _sim_box: &SimulationBox,
-            _cx: &ForceFieldContext<'_>,
-            _timings: &mut Timings,
-        ) -> Result<(), ForceFieldError> {
-            self.contribute_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-        fn reduce(
-            &mut self,
             _output: SlotOutputView<'_>,
             _cx: &ForceFieldContext<'_>,
             _timings: &mut Timings,
             _level: AggregateLevel,
         ) -> Result<(), ForceFieldError> {
+            self.contribute_calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
@@ -1137,9 +1160,6 @@ fn run_simulation_with_registries_dispatches_user_registered_potential() {
             Ok(Some(Box::new(CountingStubPotential {
                 contribute_calls: self.contribute_calls.clone(),
             })))
-        }
-        fn box_clone(&self) -> Box<dyn PotentialBuilder> {
-            Box::new(self.clone())
         }
     }
 

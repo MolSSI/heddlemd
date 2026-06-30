@@ -42,6 +42,34 @@ __device__ static inline void triclinic_min_image(
   dz -= kc * lz;
 }
 
+// In-place shift of (x, y, z) to the periodic image closest to
+// (cx, cy, cz). After the call, the fractional coordinates of
+// (x - cx, y - cy, z - cz) lie in [-1/2, 1/2)³. Used by the SPC
+// fast-path of the packed-neighbour pair-force kernel to wrap both
+// i-atom and j-atom positions against the i-block centre once
+// outside the inner loop, so the per-pair dx = pi - pj already
+// equals the min-image displacement. See
+// `rqm/forces/packed-neighbour-pair-force.md` *Single-Periodic-
+// Copy Fast Path*.
+__device__ static inline void triclinic_wrap_against_center(
+    Real &x, Real &y, Real &z,
+    Real cx, Real cy, Real cz,
+    Real lx, Real ly, Real lz,
+    Real xy, Real xz, Real yz)
+{
+  Real dx = x - cx;
+  Real dy = y - cy;
+  Real dz = z - cz;
+  Real s_a, s_b, s_c;
+  triclinic_cart_to_frac(dx, dy, dz, lx, ly, lz, xy, xz, yz, s_a, s_b, s_c);
+  Real ka = Real_floor(s_a + R(0.5));
+  Real kb = Real_floor(s_b + R(0.5));
+  Real kc = Real_floor(s_c + R(0.5));
+  x -= ka * lx + kb * xy + kc * xz;
+  y -= kb * ly + kc * yz;
+  z -= kc * lz;
+}
+
 // In-place wrap returning the integer image counts (k_a, k_b, k_c).
 __device__ static inline void triclinic_wrap_with_image(
     Real &x, Real &y, Real &z,

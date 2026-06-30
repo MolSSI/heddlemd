@@ -11,13 +11,22 @@ makes no thermostat or barostat decisions and does not own its
 thermostat (the `"velocity-verlet"` builder's
 `IntegratorBuilder::owns_thermostat(&params)` returns `false`).
 
-The per-particle arithmetic is split across two CUDA kernels: `vv_kick_drift`
-performs the first half-velocity update followed by the position update, and
-`vv_kick` performs the second half-velocity update. The integrator declares a
-three-element `StepPlan` (`KickDrift`, `ForceEval`, `KickHalf`) and the runner
-walks it, dispatching `KickDrift` and `KickHalf` to `execute()` (which launches
-the corresponding kernel) and `ForceEval` directly to `force_field.step(...)`
-(see `framework.md`).
+The per-particle arithmetic is split across the pre-force `vv_kick_drift`
+CUDA kernel and a post-force half-kick. The pre-force kernel performs the
+first half-velocity update followed by the position update. The post-force
+half-kick is contributed by the integrator's
+`post_force_per_particle_fragment()` and is dispatched by the
+JIT-composed post-force per-particle kernel
+(`heddle_jit_composed_post_force_per_particle`); see
+`rqm/integration/jit-composed-post-force.md`. The integrator declares a
+three-element `StepPlan` (`KickDrift`, `ForceEval`, `KickHalf`). The runner
+dispatches `KickDrift` to `execute()` (which launches `vv_kick_drift`),
+dispatches `ForceEval` to `force_field.step(...)` (see `framework.md`),
+and skips the trailing `KickHalf` `execute()` call because the composed
+kernel handles the trailing half-kick.
+
+No standalone `vv_kick` or `vv_kick_lossless` kernel is declared. The
+trailing half-kick lives only in the integrator's source fragment.
 
 The integrator ships in two modes:
 
@@ -149,7 +158,8 @@ positions so they do not require their own residuals.
 
 ### CUDA Kernels <!-- rq-10cc8ddf -->
 
-`kernels/integrate.cu` declares four `extern "C"` kernels:
+`kernels/integrate.cu` declares two `extern "C"` kernels (the
+pre-force drift variants only):
 
 ```c
 extern "C" __global__ void vv_kick_drift(
@@ -158,14 +168,7 @@ extern "C" __global__ void vv_kick_drift(
     float *velocities_x, float *velocities_y, float *velocities_z,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float dt,
-    unsigned int n);
-
-extern "C" __global__ void vv_kick(
-    float *velocities_x, float *velocities_y, float *velocities_z,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     unsigned int n);
 
@@ -177,24 +180,25 @@ extern "C" __global__ void vv_kick_drift_lossless(
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float dt,
-    unsigned int n);
-
-extern "C" __global__ void vv_kick_lossless(
-    float *velocities_x, float *velocities_y, float *velocities_z,
-    double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     unsigned int n);
 ```
 
-`vv_kick` and `vv_kick_lossless` update only velocities and so do not
-touch `images_*` or take any lattice parameters. `vv_kick_drift` and
-`vv_kick_drift_lossless` are the drift-bearing kernels that wrap
-positions (via the triclinic *Wrap Algorithm* defined in
-`simulation-box.md`) and advance image counts.
+The post-force half-kick is **not** a standalone kernel. It is the
+integrator's `post_force_per_particle_fragment` body, composed into the
+JIT post-force per-particle kernel
+(`heddle_jit_composed_post_force_per_particle`) at phase setup. The
+lossy fragment performs `v += (F / m) · (dt / 2)`. The lossless
+fragment carries the same compensated-sum extended-precision update
+documented below for the drift variant, applied to velocities only;
+it reads and writes the `velocities_{x,y,z}_lo` buffers as additional
+fragment kernel parameters bound by
+`VelocityVerletState::bind_post_force_per_particle_args`.
+
+`vv_kick_drift` and `vv_kick_drift_lossless` are the drift-bearing
+kernels that wrap positions (via the triclinic *Wrap Algorithm*
+defined in `simulation-box.md`) and advance image counts.
 
 Each thread computes its global index as `blockIdx.x * blockDim.x + threadIdx.x`.
 If the index is `>= n` the thread returns without touching any buffer.
@@ -385,14 +389,44 @@ dispatches:
   `*_LOSSLESS` stage names — see `performance-analysis.md`). Applies
   the first half-kick using the cached `F(t)` and drifts positions
   to `x(t+dt)`.
-- `SubStep::KickHalf { dt, .. }` → launches `vv_kick` (lossy) or
-  `vv_kick_lossless` (lossless) with matching timing bracketing.
-  Applies the second half-kick using `F(t+dt)`.
+- `SubStep::KickHalf { dt, .. }` → handled by the JIT-composed
+  post-force per-particle kernel (see `jit-composed-post-force.md`).
+  `execute()` is not invoked for this SubStep by a conforming
+  runner.
 - Any other variant → returns
   `IntegratorError::UnexpectedSubStep { variant: <name> }`. A
   conforming runner never produces this case: `ForceEval` is
   dispatched directly by the runner, and Velocity Verlet's plan
   contains no `Drift` or `Custom` sub-steps.
+
+### Post-Force Per-Particle Fragment <!-- rq-0034617f -->
+
+`VelocityVerletState::post_force_per_particle_fragment()` returns
+the `KickHalf` per-thread body as a `PerParticleFragment`:
+
+- The functor body reads
+  `velocities_x/y/z[i]`, `forces_x/y/z[i]`, `masses[i]`, computes
+  `v ← v + (F / m) · (dt / 2)`, and writes back to
+  `velocities_x/y/z[i]`. The `dt` value is read from a per-fragment
+  scalar argument.
+
+- The `lossless` variant's body additionally reads
+  `velocities_x/y/z_lo[i]` and applies the compensated-summation
+  update described in *Algorithm*. `VelocityVerletBuilder` selects
+  the lossy or lossless fragment based on the `lossless` config
+  flag; both fragments expose the same `velocity_verlet` label.
+
+- `entry_point_args` declares `Real vv_dt` plus (lossless variant
+  only) `double *vv_velocities_x_lo, *vv_velocities_y_lo,
+  *vv_velocities_z_lo`. The slot's
+  `bind_post_force_per_particle_args` pushes these onto the launch
+  builder.
+
+The per-particle-shape standalone kernels `vv_kick` and
+`vv_kick_lossless` no longer exist; their bodies live in the
+fragment. The pre-force-shape standalone kernels `vv_kick_drift`
+and `vv_kick_drift_lossless` remain — pre-force composition is out
+of J3's scope.
 
 ### Runner-Driven Constraint Hooks <!-- rq-9b03044f -->
 
@@ -451,7 +485,7 @@ carries no per-call counter.
   force-evaluation pipeline. The lossless integrator kernels are
   reversibility-correct in isolation; whole-pipeline reversibility is the
   responsibility of a future end-to-end reversibility test that drives
-  `lj_pair_force` and `reduce_pair_forces` between integrator calls.
+  the composed pair-force kernel between integrator calls.
 
 ---
 

@@ -18,30 +18,30 @@ use super::{
 use crate::precision::Real;
 
 // rq-0a2ca9ac — `[minimization.algorithm]` schema fields
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
 pub struct SteepestDescentParams {
     #[serde(default = "default_initial_step")]
-    pub initial_step: f64,
+    pub initial_step: crate::units::Length,
     #[serde(default = "default_max_step")]
-    pub max_step: f64,
+    pub max_step: crate::units::Length,
     #[serde(default = "default_step_increase")]
     pub step_increase: f64,
     #[serde(default = "default_step_decrease")]
     pub step_decrease: f64,
     #[serde(default = "default_force_tolerance")]
-    pub force_tolerance: f64,
+    pub force_tolerance: crate::units::Force,
     #[serde(default = "default_energy_tolerance")]
-    pub energy_tolerance: f64,
+    pub energy_tolerance: crate::units::Energy,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u64,
 }
 
-fn default_initial_step() -> f64 {
-    1.0e-12
+fn default_initial_step() -> crate::units::Length {
+    crate::units::Length(1.0e-12)
 }
-fn default_max_step() -> f64 {
-    1.0e-10
+fn default_max_step() -> crate::units::Length {
+    crate::units::Length(1.0e-10)
 }
 fn default_step_increase() -> f64 {
     1.2
@@ -49,11 +49,11 @@ fn default_step_increase() -> f64 {
 fn default_step_decrease() -> f64 {
     0.2
 }
-fn default_force_tolerance() -> f64 {
-    1.0e-10
+fn default_force_tolerance() -> crate::units::Force {
+    crate::units::Force(1.0e-10)
 }
-fn default_energy_tolerance() -> f64 {
-    1.0e-7
+fn default_energy_tolerance() -> crate::units::Energy {
+    crate::units::Energy(1.0e-7)
 }
 fn default_max_iterations() -> u64 {
     1000
@@ -100,14 +100,14 @@ impl SteepestDescentMinimizer {
         let f_max_scratch = gpu.device.alloc_zeros::<Real>(1)?;
         let pe_scratch = gpu.device.alloc_zeros::<Real>(1)?;
         Ok(SteepestDescentMinimizer {
-            initial_step: params.initial_step as Real,
-            max_step: params.max_step as Real,
+            initial_step: params.initial_step.0 as Real,
+            max_step: params.max_step.0 as Real,
             step_increase: params.step_increase as Real,
             step_decrease: params.step_decrease as Real,
-            force_tolerance: params.force_tolerance,
-            energy_tolerance: params.energy_tolerance,
+            force_tolerance: params.force_tolerance.0,
+            energy_tolerance: params.energy_tolerance.0,
             max_iterations: params.max_iterations,
-            current_step: params.initial_step as Real,
+            current_step: params.initial_step.0 as Real,
             last_accepted_energy: 0.0,
             snapshot_x,
             snapshot_y,
@@ -311,28 +311,39 @@ impl Minimizer for SteepestDescentMinimizer {
 #[derive(Debug, Clone)]
 pub struct SteepestDescentBuilder;
 
-impl MinimizerBuilder for SteepestDescentBuilder {
+use crate::registry::KindedBuilder;
+
+impl KindedBuilder for SteepestDescentBuilder {
     fn kind_name(&self) -> &'static str {
         "steepest-descent"
     }
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        crate::registry::convert_params_in_place::<SteepestDescentParams>(units, params)
+    }
+}
 
+impl MinimizerBuilder for SteepestDescentBuilder {
     // rq-e2bb500b — schema cross-validation: domain checks on every algorithm field.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite_positive(
             "minimization.algorithm.initial_step",
-            p.initial_step,
+            p.initial_step.0,
         )?;
         require_finite_positive(
             "minimization.algorithm.max_step",
-            p.max_step,
+            p.max_step.0,
         )?;
-        if p.max_step < p.initial_step {
+        if p.max_step.0 < p.initial_step.0 {
             return Err(ConfigError::InvalidValue {
                 field: "minimization.algorithm.max_step".to_string(),
                 reason: format!(
                     "max_step ({}) must be >= initial_step ({})",
-                    p.max_step, p.initial_step
+                    p.max_step.0, p.initial_step.0
                 ),
             });
         }
@@ -356,21 +367,21 @@ impl MinimizerBuilder for SteepestDescentBuilder {
                 ),
             });
         }
-        if !p.force_tolerance.is_finite() || p.force_tolerance < 0.0 {
+        if !p.force_tolerance.0.is_finite() || p.force_tolerance.0 < 0.0 {
             return Err(ConfigError::InvalidValue {
                 field: "minimization.algorithm.force_tolerance".to_string(),
                 reason: format!(
                     "force_tolerance must be finite and >= 0.0, got {}",
-                    p.force_tolerance
+                    p.force_tolerance.0
                 ),
             });
         }
-        if !p.energy_tolerance.is_finite() || p.energy_tolerance < 0.0 {
+        if !p.energy_tolerance.0.is_finite() || p.energy_tolerance.0 < 0.0 {
             return Err(ConfigError::InvalidValue {
                 field: "minimization.algorithm.energy_tolerance".to_string(),
                 reason: format!(
                     "energy_tolerance must be finite and >= 0.0, got {}",
-                    p.energy_tolerance
+                    p.energy_tolerance.0
                 ),
             });
         }
@@ -395,10 +406,6 @@ impl MinimizerBuilder for SteepestDescentBuilder {
         })?;
         let m = SteepestDescentMinimizer::new(gpu, particle_count, &p)?;
         Ok(Box::new(m))
-    }
-
-    fn box_clone(&self) -> Box<dyn MinimizerBuilder> {
-        Box::new(self.clone())
     }
 }
 

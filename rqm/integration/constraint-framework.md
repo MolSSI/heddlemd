@@ -12,11 +12,12 @@ callers invoke an integrator with a constraint slot is split so that
 only constraint-capable integrators expose it; see *Convenience Trait
 Surface* below.
 
-The default registry exposes one constraint algorithm:
+The default registry exposes two constraint algorithms:
 
-| `kind` value | Implementation                                                                                         | File       |
-| ------------ | ------------------------------------------------------------------------------------------------------ | ---------- |
-| `shake`      | iterative SHAKE position projection + iterative RATTLE velocity projection on arbitrary rigid groups (compile-time caps `MAX_GROUP_ATOMS = 8`, `MAX_GROUP_CONSTRAINTS = 12`) | `shake.md` |
+| `kind` value | Implementation                                                                                         | File        |
+| ------------ | ------------------------------------------------------------------------------------------------------ | ----------- |
+| `settle`     | analytical (non-iterative) SETTLE position + velocity reset for symmetric three-atom rigid water (Miyamoto-Kollman 1992) | `settle.md` |
+| `shake`      | iterative SHAKE position projection + iterative RATTLE velocity projection on arbitrary rigid groups (compile-time caps `MAX_GROUP_ATOMS = 8`, `MAX_GROUP_CONSTRAINTS = 12`) | `shake.md`  |
 
 The slot is selectable in any simulation whose declared integrator
 returns `IntegratorBuilder::supports_constraints(&params) == true`. In the default
@@ -60,7 +61,7 @@ The four hook positions are:
 | `apply_before_drift`              | Immediately before every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                                |
 | `apply_after_drift`               | Immediately after every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
 | `apply_after_kick`                | Once per timestep, after the final sub-step in the plan, iff that sub-step is a `SubStep::KickHalf` or `SubStep::KickDrift` | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.                     |
-| `apply_position_projection_only`  | After each trial position update inside an energy-minimization phase (see `rqm/minimization/steepest-descent.md`) | Projects positions back onto the constraint manifold without modifying velocities or virials. Does not consume `dt`. |
+| `apply_position_projection_only`  | After each trial position update inside an energy-minimization phase (see `rqm/minimization/steepest-descent.md`) | Applies a minimal-displacement, descent-compatible projection (a retraction) that moves the current positions back onto the constraint manifold without modifying velocities or virials. Does not consume `dt`. |
 
 The first three hooks fire only during the integrator's plan walk in
 MD phases. The fourth hook fires only during minimization phases and
@@ -102,10 +103,11 @@ minimum-image distance evaluation; none mutates the box.
 ## Convenience Trait Surface <!-- rq-0e26dde0 -->
 
 The runner walks an integrator's plan via the free function
-[`run_step`] in `src/integrator/mod.rs`, threading the runner-side
-`install_constraint_hooks` flag from
-`IntegratorBuilder::supports_constraints(&params)` explicitly. Tests
-and direct library consumers use a convenience layer instead. That
+[`run_step`] (see `integration/framework.md`'s *Feature API* for the
+full signature), passing a `RunStepOptions` whose
+`install_constraint_hooks` field it sets from
+`IntegratorBuilder::supports_constraints(&params)`. Tests and direct
+library consumers use a convenience layer instead. That
 layer is split into two traits so that the `&mut dyn Constraint`
 argument is reachable only from a type that has statically opted in to
 constraint-hook insertion:
@@ -114,14 +116,14 @@ constraint-hook insertion:
   for every type that implements `Integrator`. Its single method
   `step(...)` walks the integrator's plan without installing any
   constraint hooks. The method takes no `Constraint` argument and
-  the runner-side `install_constraint_hooks` flag is hard-wired to
-  `false`. Available on every `Integrator` (`velocity-verlet`,
+  calls `run_step` with `RunStepOptions { install_constraint_hooks:
+  false, .. }`. Available on every `Integrator` (`velocity-verlet`,
   `langevin-baoab`, `mtk-npt`, …).
 - **`IntegratorStepWithConstraintExt`** — a convenience trait whose
   blanket impl is bounded on `Self: ConstraintCapableIntegrator`. Its
   single method `step_with_constraint(..., &mut dyn Constraint, ...)`
-  walks the plan with `install_constraint_hooks = true`. Available
-  only on types that statically declare themselves
+  walks the plan with `RunStepOptions { install_constraint_hooks: true,
+  .. }`. Available only on types that statically declare themselves
   constraint-capable; calling it on a non-marker type is a compile
   error.
 
@@ -221,7 +223,9 @@ The atoms of group `g` are
 order within a group is the order in which atoms appear in the
 `[constraints]` row that declared the group; the named constraint
 type's `[[constraint_types]]` entry references atoms by their position
-in this order via its `constraints` table. The constraint-row order
+in this order through its per-kind constraint specification (the
+`constraints` table for `shake`; the canonical water pattern derived
+from `d_OH`/`d_HH` for `settle`). The constraint-row order
 is preserved verbatim so that algorithms can rely on it; the per-group
 sort within `groups` (see *Group Ordering* below) is separate.
 
@@ -389,8 +393,18 @@ second receives an empty index set and contributes no slot.
           timings: &mut Timings,
       ) -> Result<(), ConstraintError>;
 
-      /// Project positions back onto the constraint manifold without
-      /// modifying velocities, virials, or any other buffer.
+      /// Apply a minimal-displacement, descent-compatible projection
+      /// (a retraction) that moves the current positions back onto the
+      /// constraint manifold without modifying velocities, virials, or
+      /// any other buffer. Pure function of the current
+      /// `buffers.positions_*` and the slot's own constraint data: it
+      /// relies on no `apply_before_drift` snapshot and keeps no mutable
+      /// state across calls. Must be a bit-exact identity when the input
+      /// already satisfies every constraint to tolerance, and the
+      /// per-atom displacement it applies must be bounded by the
+      /// constraint residual (so the move shrinks continuously to zero
+      /// as the residual does). An algorithm may use a different
+      /// internal method here than on its MD `apply_after_drift` path.
       /// Driven by the minimization runner (see
       /// `rqm/minimization/steepest-descent.md`); never called from the
       /// integration plan walk.
@@ -426,10 +440,38 @@ second receives an empty index set and contributes no slot.
     `buffers.positions_*`. It does not touch `buffers.velocities_*`,
     `buffers.virials`, `buffers.forces_*`, or `sim_box`, and it does
     not consume `dt` (minimization has no physical time scale). It
-    is permitted to read and write slot-private scratch buffers. The
-    runner invokes it after each trial position update inside the
-    SD loop (see `rqm/minimization/steepest-descent.md`'s *Algorithm*
-    step 2); the integrator plan walk never calls it.
+    is permitted to read and write slot-private scratch buffers as
+    transient compute scratch within a single call, but it carries no
+    state between calls and reads no buffer populated by an earlier
+    hook: the projection is a pure function of the current positions
+    and the slot's constraint data. In particular it does not rely on
+    the `apply_before_drift` snapshot, which is meaningful only on the
+    MD path. This statelessness is what lets the minimizer's
+    snapshot/restore line-search roll a rejected trial step back
+    cleanly. The projection is a retraction onto the constraint
+    manifold, with three load-bearing properties:
+    - **Identity on the manifold.** When the input positions already
+      satisfy every owned constraint to tolerance, the call leaves
+      `buffers.positions_*` byte-identical. It does not re-derive a
+      global configuration that perturbs an already-satisfied group.
+    - **Residual-bounded displacement.** The per-atom displacement the
+      call applies is bounded by the constraint residual of the input,
+      so the move shrinks continuously to zero as the residual does.
+      An input perturbed off the manifold by `ε` moves by `O(ε)`, not
+      by a step whose size is independent of how far off-manifold the
+      input was. This is what keeps the projected energy a descent
+      direction and prevents the SD line search from collapsing.
+    - **Idempotence.** Projecting an already-projected configuration is
+      a no-op to tolerance: a second consecutive call leaves the
+      positions on the manifold and applies no further displacement.
+    An algorithm whose MD `apply_after_drift` path re-derives state in
+    a way that would violate these properties (for example a global
+    re-orientation that is not minimal-displacement) must implement a
+    distinct minimal-displacement method for this hook rather than
+    reusing its MD path. The runner invokes it after each trial
+    position update inside the SD loop (see
+    `rqm/minimization/steepest-descent.md`'s *Algorithm* step 2); the
+    integrator plan walk never calls it.
 
 - `ConstraintGroup` — `Debug, Clone, Copy`. Fields: `atom_offset: u32`, <!-- rq-0faddd62 -->
   `atom_count: u32`, `constraint_offset: u32`, `constraint_count: u32`,
@@ -467,25 +509,16 @@ second receives an empty index set and contributes no slot.
   `constraint_types[group.constraint_type_index].kind` (the
   `NamedSlotConfig`'s `kind` string), not stored on the list itself.
 
-- `ConstraintRegistry` — host-side registry of constraint builders. <!-- rq-3cca2cb1 -->
-  Holds `builders: Vec<Box<dyn ConstraintBuilder>>`.
-
-  Methods:
-
-  - `ConstraintRegistry::with_builtins() -> ConstraintRegistry` —
-    constructs a registry pre-populated with the builders for every
-    `kind` value in the table above. In v1 this is the single `shake`
-    builder.
-  - `ConstraintRegistry::register(&mut self, builder: Box<dyn ConstraintBuilder>)`
-    — appends a builder. Two builders sharing the same `kind_name()`
-    are not detected at registration; the lookup returns the first
-    match.
-  - `ConstraintRegistry::lookup(&self, kind: &str) -> Option<&dyn ConstraintBuilder>`
-    — returns the first registered builder whose `kind_name()` equals
-    `kind`. The topology parser uses this to call
-    `expected_atom_count(&params)` per constraint-type entry; the
-    runner uses it to drive `validate_params` and
-    `validate_group_shape` at config-validation time.
+- `ConstraintRegistry` — `Registry<dyn ConstraintBuilder>` (the generic <!-- rq-3cca2cb1 -->
+  container; see `registry-framework.md`). A named-selection registry
+  (each `[[constraint_types]]` entry names its `kind`), so the generic
+  `new`, `register`, `lookup(kind)`, `Clone`, and `Default` apply.
+  `with_builtins()` pre-populates the builders for every `kind` in the
+  table above — the `settle` and `shake` builders. The topology
+  parser uses `lookup` to call `expected_atom_count(&params)` per
+  constraint-type entry; the runner uses it to drive `validate_params`
+  and `validate_group_shape` at config-validation time. Construction
+  dispatch is subsystem-specific:
   - `ConstraintRegistry::build_optional(&self, list: &ConstraintList, gpu: &GpuContext, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`
     — when `list.is_empty()`, returns `Ok(None)`. Otherwise verifies
     that every group's algorithm has a registered builder (returns
@@ -502,10 +535,12 @@ second receives an empty index set and contributes no slot.
   construction time.
 
   ```rust
-  pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
-      /// Lookup key used by ConstraintRegistry to dispatch a
-      /// `NamedSlotConfig`'s `kind` string to this builder.
-      fn kind_name(&self) -> &'static str;
+  pub trait ConstraintBuilder:
+      KindedBuilder + ConstraintBuilderClone + std::fmt::Debug + Send + Sync
+  {
+      // `kind_name()` (the `NamedSlotConfig` `kind` lookup key) is
+      // inherited from `KindedBuilder`; cloning from the generated `ConstraintBuilderClone` helper. See
+      // `registry-framework.md`.
 
       /// Validate the kind-specific parameters of a
       /// `[[constraint_types]]` entry at config-load time. Called by
@@ -513,18 +548,33 @@ second receives an empty index set and contributes no slot.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
 
-      /// `true` iff the algorithm implements
-      /// `Constraint::apply_position_projection_only` non-trivially
-      /// (i.e., can participate in minimization phases). The default
-      /// returns `true`. Algorithms that cannot project positions
-      /// without a paired velocity / virial update override this to
-      /// return `false`; configs that pair such an algorithm with a
-      /// `[[minimization]]` phase are rejected at config load via
+      /// `true` iff the algorithm provides an
+      /// `apply_position_projection_only` that satisfies the retraction
+      /// contract documented on that hook — a stateless,
+      /// minimal-displacement projection that is a bit-exact identity
+      /// on the manifold and whose per-atom displacement is bounded by
+      /// the constraint residual — and can therefore participate in
+      /// minimization phases. The default returns `true`. An algorithm
+      /// that cannot offer such a projection (for example one that can
+      /// only correct positions jointly with a velocity / virial
+      /// update, or whose only position correction is a non-minimal
+      /// global re-derivation) overrides this to return `false`;
+      /// configs that pair such an algorithm with a `[[minimization]]`
+      /// phase are rejected at config load via
       /// `Config::validate_constraint_compatibility`.
       fn supports_position_projection_only(
           &self,
           _params: &toml::Value,
       ) -> bool { true }
+
+      /// `true` iff every constraint hook entry point
+      /// (`apply_before_drift`, `apply_after_drift`,
+      /// `apply_after_kick`) consists of pure CUDA kernel launches
+      /// with no host-side state mutation between launches and no
+      /// `dtoh_sync_copy` / `htod_sync_copy`. Determines whether
+      /// phases using this constraint algorithm run under CUDA graph
+      /// mode; see `cuda-graphs.md`. Default `true`.
+      fn graph_compatible(&self, _params: &toml::Value) -> bool { true }
 
       /// Number of atoms a single `[constraints]` topology row of
       /// this kind must declare. The topology parser uses this value
@@ -653,9 +703,11 @@ second receives an empty index set and contributes no slot.
   impl<T: Integrator + ?Sized> IntegratorStepExt for T { /* … */ }
   ```
 
-  `step` calls `run_step(self, …, install_constraint_hooks: false,
-  …)` with no `Constraint` slot. The runner uses the lower-level
-  `run_step` directly and does not depend on this trait.
+  `step` calls `run_step(self, …, constraint = None, …,
+  RunStepOptions { install_constraint_hooks: false,
+  runner_needs_scalars: true, ..Default::default() })`. The runner
+  uses the lower-level `run_step` directly and does not depend on this
+  trait.
 
 - `IntegratorStepWithConstraintExt` — convenience trait whose blanket <!-- rq-f71ff87f -->
   impl is bounded on `Self: ConstraintCapableIntegrator`. Drives a
@@ -684,8 +736,9 @@ second receives an empty index set and contributes no slot.
   `Err(reason)`, the method returns
   `StepError::IntegratorRejectsConstraint { reason }` without
   dispatching `plan()`, `execute()`, or any kernel. Otherwise it
-  calls `run_step(self, …, install_constraint_hooks: true,
-  Some(constraint), …)`.
+  calls `run_step(self, …, constraint = Some(constraint), …,
+  RunStepOptions { install_constraint_hooks: true,
+  runner_needs_scalars: true, ..Default::default() })`.
 
 - `StepError` — unified error type returned by `run_step` and both <!-- rq-52e52d7b -->
   convenience-trait methods. Defined in `src/integrator/mod.rs`.
@@ -783,13 +836,15 @@ algorithm individually guarantees:
 
 ## Out of Scope <!-- rq-acb86c9b -->
 
-- Concrete constraint algorithms other than SHAKE. Analytical SETTLE
-  (Miyamoto-Kollman) for three-atom rigid water and M-SHAKE for
-  rigid clusters above the SHAKE per-group caps are the targets of
-  follow-up constraint features and share this framework's data
-  layout, trait, and dispatch. LINCS-class global constraint solvers
-  require a different layout and are not anticipated by this
-  framework.
+- Concrete constraint algorithms beyond the two in the default
+  registry. The default registry exposes analytical SETTLE
+  (`settle.md`, for symmetric three-atom rigid water) and iterative
+  SHAKE/RATTLE (`shake.md`, for arbitrary rigid groups within the
+  per-group caps). M-SHAKE for rigid clusters above the SHAKE caps is
+  the target of a follow-up constraint feature and shares this
+  framework's data layout, trait, and dispatch. LINCS-class global
+  constraint solvers require a different layout and are not anticipated
+  by this framework.
 - Composing constraints with `velocity-verlet { lossless: true }`,
   with `langevin-baoab`, or with `mtk-npt`. Each is rejected at
   config load via the
@@ -979,6 +1034,39 @@ Feature: Constraint slot framework
     Then positions_x, positions_y, positions_z lie on the constraint manifold (every constraint distance equals its r0 within relative tolerance 1e-6)
     And velocities_x, velocities_y, velocities_z are byte-identical to the snapshot
     And virials and forces_x, forces_y, forces_z are byte-identical to their snapshots
+
+  # Framework-level obligations every constraint slot that reports
+  # supports_position_projection_only() == true must satisfy. Each
+  # registered such builder is exercised against the three scenarios
+  # below.
+
+  @rq-7d63f689
+  Scenario: apply_position_projection_only is a bit-exact identity on the manifold
+    Given a constraint slot whose builder reports supports_position_projection_only(&params) == true
+    And a ParticleBuffers whose positions already satisfy every owned constraint to tolerance (each constraint distance equals its r0 within relative tolerance 1e-7)
+    And a byte snapshot of positions_x, positions_y, positions_z
+    When constraint.apply_position_projection_only(&mut buffers, &sim_box, &mut timings) is called
+    Then positions_x, positions_y, positions_z are byte-identical to the snapshot
+
+  @rq-78f1f153
+  Scenario: apply_position_projection_only displacement is residual-bounded and idempotent
+    Given a constraint slot whose builder reports supports_position_projection_only(&params) == true
+    And an on-manifold reference configuration
+    And a ParticleBuffers whose positions are the reference perturbed by a displacement of magnitude epsilon (small relative to every r0)
+    When constraint.apply_position_projection_only(&mut buffers, &sim_box, &mut timings) is called
+    Then positions_x, positions_y, positions_z lie on the constraint manifold within relative tolerance 1e-6
+    And the maximum per-atom displacement from the perturbed input is O(epsilon) (bounded by a slot-independent constant times epsilon, not by a constraint-scale step)
+    When apply_position_projection_only is called a second consecutive time
+    Then the maximum per-atom displacement applied by the second call is within tolerance 1e-7 of zero
+
+  @rq-a861d13f
+  Scenario: steepest-descent minimization with a constraint slot converges without line-search collapse
+    Given a [[minimization]] steepest-descent phase paired with a constraint slot whose builder reports supports_position_projection_only(&params) == true
+    And an initial configuration that is on the constraint manifold but not at a force minimum
+    When the minimization runner executes until its convergence criterion is met or its step cap is reached
+    Then the run reaches its convergence criterion before the step cap
+    And no minimization step is rejected for failing to decrease the energy on account of the projection (the line search does not collapse to a zero-length step)
+    And every reported configuration lies on the constraint manifold within relative tolerance 1e-6
 
   @rq-833d83a9
   Scenario: apply_position_projection_only on empty state is a no-op

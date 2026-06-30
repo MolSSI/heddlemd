@@ -1,4 +1,5 @@
 use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::registry::KindedBuilder;
 use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::integrator::{
@@ -46,8 +47,8 @@ fn langevin_kind(seed: u64) -> SlotConfig {
     )
 }
 
-fn box_10() -> SimulationBox {
-    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
+fn box_10(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -55,7 +56,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[],
         &[],
         &[],
@@ -88,7 +89,7 @@ fn construct_vv_lossless_via_registry() {
     let registry = IntegratorRegistry::with_builtins();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = registry.build(&vv_kind(true), &gpu, 4, 0).unwrap();
@@ -136,13 +137,15 @@ struct StubBuilder;
 #[derive(Debug)]
 struct StubIntegrator;
 
-impl IntegratorBuilder for StubBuilder {
+    impl heddle_md::registry::KindedBuilder for StubBuilder {
     fn kind_name(&self) -> &'static str {
         // Use "velocity-verlet" so a real IntegratorKind can route to us; the
         // built-in builder is added later and therefore shadowed by the stub
         // when the stub is first in the builders Vec.
         "velocity-verlet"
-    }
+    }    }
+
+impl IntegratorBuilder for StubBuilder {
     fn validate_params(&self, _params: &toml::Value) -> Result<(), heddle_md::io::ConfigError> {
         Ok(())
     }
@@ -154,9 +157,6 @@ impl IntegratorBuilder for StubBuilder {
         _params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         Ok(Box::new(StubIntegrator))
-    }
-    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
-        Box::new(self.clone())
     }
 }
 
@@ -187,7 +187,7 @@ fn custom_builder_registered_takes_priority_over_builtin() {
     // Stub appears first, so velocity-verlet routes to it.
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
@@ -214,7 +214,7 @@ fn step_on_empty_state_is_noop() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 0);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
@@ -237,7 +237,7 @@ fn vv_step_launches_kick_drift_force_and_kick() {
     let mut state = small_state(n);
     state.velocities_x = (0..n).map(|i| 0.5 + i as Real * 0.1).collect();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
@@ -273,7 +273,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
@@ -299,7 +299,7 @@ fn integrator_owns_force_evaluation_inside_step() {
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
@@ -337,9 +337,8 @@ fn integrator_owns_force_evaluation_inside_step() {
             .map(|s| s.count)
             .unwrap_or(0)
     };
-    assert_eq!(count("lj_pair_force"), 1);
-    assert_eq!(count("reduce_pair_forces"), 1);
-    assert_eq!(count("accumulate_forces"), 1);
+    assert_eq!(count("jit_composed_pair_force"), 1);
+    assert_eq!(count("combine_class_totals"), 1);
 }
 
 // rq-009bbbdc
@@ -348,7 +347,7 @@ fn two_consecutive_langevin_steps_produce_different_velocities() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 2);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
@@ -375,8 +374,8 @@ fn two_independent_runs_byte_identical() {
 
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box_a = box_10();
-    let mut sim_box_b = box_10();
+    let mut sim_box_a = box_10(&gpu);
+    let mut sim_box_b = box_10(&gpu);
     let mut ff_a = empty_force_field(&gpu, 4);
     let mut ff_b = empty_force_field(&gpu, 4);
     let mut timings_a = Timings::new(&gpu).unwrap();
@@ -411,15 +410,10 @@ fn langevin_draw_counter_starts_at_zero_and_increments_per_step() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 2);
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut integrator = LangevinBaoabState {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 42,
-        draw_counter: 0,
-    };
+    let mut integrator = LangevinBaoabState::new(&gpu, 1.0e12, 300.0, 42, 0).unwrap();
     assert_eq!(integrator.draw_counter, 0);
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
@@ -438,24 +432,14 @@ fn langevin_states_at_same_draw_counter_and_seed_produce_identical_draws() {
     let state = small_state(4);
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box_a = box_10();
-    let mut sim_box_b = box_10();
+    let mut sim_box_a = box_10(&gpu);
+    let mut sim_box_b = box_10(&gpu);
     let mut ff_a = empty_force_field(&gpu, 4);
     let mut ff_b = empty_force_field(&gpu, 4);
     let mut timings_a = Timings::new(&gpu).unwrap();
     let mut timings_b = Timings::new(&gpu).unwrap();
-    let mut a = LangevinBaoabState {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 7,
-        draw_counter: 5,
-    };
-    let mut b = LangevinBaoabState {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 7,
-        draw_counter: 5,
-    };
+    let mut a = LangevinBaoabState::new(&gpu, 1.0e12, 300.0, 7, 5).unwrap();
+    let mut b = LangevinBaoabState::new(&gpu, 1.0e12, 300.0, 7, 5).unwrap();
     a.step(&mut buffers_a, &mut sim_box_a, &mut ff_a, 1.0e-15, &mut timings_a)
         .unwrap();
     b.step(&mut buffers_b, &mut sim_box_b, &mut ff_b, 1.0e-15, &mut timings_b)
@@ -533,7 +517,7 @@ fn barostat_with_builtins_contains_berendsen() {
     let registry = BarostatRegistry::with_builtins();
     assert!(
         registry
-            .builders
+            .builders()
             .iter()
             .any(|b| b.kind_name() == "berendsen")
     );
@@ -642,7 +626,7 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let log = CallLog::default();
@@ -676,7 +660,7 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
 // =============================================================================
 
 use heddle_md::integrator::{
-    ConstraintError, run_step, run_step_no_constraint, StepPlan, SubStep,
+    ConstraintError, RunStepOptions, run_step, StepPlan, SubStep,
 };
 
 /// A configurable stub Integrator whose plan and execute() behaviour
@@ -763,7 +747,7 @@ fn fixture() -> (
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = box_10();
+    let sim_box = box_10(&gpu);
     let ff = empty_force_field(&gpu, 4);
     let timings = Timings::new(&gpu).unwrap();
     (gpu, buffers, sim_box, ff, timings)
@@ -788,10 +772,10 @@ fn plan_returns_same_shape_across_repeated_calls() {
 fn plan_is_pure_does_not_launch_kernels_or_touch_buffers() {
     let registry = IntegratorRegistry::with_builtins();
     let (gpu, buffers, _sim_box, _ff, _timings) = fixture();
-    let pre_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let pre_x = buffers.download_positions().unwrap().0;
     let integ = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
     let _plan = integ.plan(0.1);
-    let post_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let post_x = buffers.download_positions().unwrap().0;
     assert_eq!(pre_x, post_x);
 }
 
@@ -805,8 +789,7 @@ fn empty_plan_walks_as_a_noop() {
         plan: StepPlan::empty(),
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(
-        &mut stub,
+    stub.step(
         &mut buffers,
         &mut sim_box,
         &mut ff,
@@ -838,8 +821,7 @@ fn plan_with_multiple_force_evals_dispatches_each() {
         },
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(
-        &mut stub,
+    stub.step(
         &mut buffers,
         &mut sim_box,
         &mut ff,
@@ -912,10 +894,13 @@ fn plan_with_one_drift_fires_before_after_drift() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        true,
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -951,10 +936,13 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        true,
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -996,10 +984,13 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        true,
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1028,10 +1019,13 @@ fn custom_substep_alone_fires_no_constraint_hooks() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        true,
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1064,10 +1058,13 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
-        false, // install_constraint_hooks == false
         0.1,
         &mut timings,
-    true,
+        RunStepOptions {
+            install_constraint_hooks: false,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1236,7 +1233,7 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = ForceField::new(
         &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,
@@ -1275,16 +1272,15 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
         },
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+    stub.step( &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_of = |name: &str| {
         report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
     };
-    // The Fast LJ slot's kernels fire; the accumulator fires once.
-    assert_eq!(count_of("lj_pair_force"), 1);
-    assert_eq!(count_of("reduce_pair_forces"), 1);
-    assert_eq!(count_of("accumulate_forces"), 1);
+    // The Fast LJ slot's kernel fires; the accumulator fires once.
+    assert_eq!(count_of("jit_composed_pair_force"), 1);
+    assert_eq!(count_of("combine_class_totals"), 1);
 }
 
 #[test]
@@ -1295,7 +1291,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = ForceField::new(
         &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,
@@ -1334,7 +1330,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
         },
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+    stub.step( &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     assert!(
@@ -1353,7 +1349,7 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = ForceField::new(
         &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,
@@ -1392,14 +1388,14 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
         },
         log: CallLog { events: log.events.clone() },
     };
-    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+    stub.step( &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_of = |name: &str| {
         report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
     };
-    assert_eq!(count_of("accumulate_forces"), 1);
-    assert_eq!(count_of("lj_pair_force"), 1);
+    assert_eq!(count_of("combine_class_totals"), 1);
+    assert_eq!(count_of("jit_composed_pair_force"), 1);
 }
 
 // --- resolve_aggregate_level + integrator-plan level preferences -------

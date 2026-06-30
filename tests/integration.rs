@@ -76,7 +76,7 @@ fn init_device_loads_integrate_module_with_both_kernels() {
 #[test]
 fn vv_kick_drift_advances_position_when_force_zero() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         vec![1.0],
         vec![2.0],
@@ -109,7 +109,7 @@ fn vv_kick_drift_advances_position_when_force_zero() {
 #[test]
 fn vv_kick_drift_exact_half_step_under_constant_force() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let mut state = ParticleState::new(
         vec![0.0],
         vec![0.0],
@@ -179,7 +179,7 @@ fn vv_kick_leaves_velocity_unchanged_when_force_zero() {
 #[test]
 fn full_step_matches_constant_acceleration_kinematics() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let mut state = ParticleState::new(
         vec![0.0],
         vec![0.0],
@@ -221,7 +221,7 @@ fn full_step_matches_constant_acceleration_kinematics() {
 #[test]
 fn acceleration_scales_inversely_with_mass() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let mut state = ParticleState::new(
         vec![0.0, 0.0],
         vec![0.0, 0.0],
@@ -251,7 +251,7 @@ fn acceleration_scales_inversely_with_mass() {
 #[test]
 fn particles_evolve_independently() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let mut state = ParticleState::new(
         vec![0.0, 1.0, -2.0],
         vec![0.0, 0.0, 0.0],
@@ -292,7 +292,7 @@ fn particles_evolve_independently() {
 #[test]
 fn dt_zero_leaves_state_unchanged_for_kick_drift() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = diverse_state(8);
     let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     let snapshot = snapshot_via_download(&buffers);
@@ -341,7 +341,7 @@ fn dt_zero_leaves_state_unchanged_for_kick() {
 #[test]
 fn vv_kick_drift_on_empty_state_is_noop() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         vec![],
         vec![],
@@ -359,7 +359,7 @@ fn vv_kick_drift_on_empty_state_is_noop() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     assert_eq!(buffers.particle_count(), 0);
-    assert_eq!(buffers.positions_x.len(), 0);
+    assert_eq!(buffers.particle_count(), 0);
 }
 
 // rq-386cfae3
@@ -390,7 +390,7 @@ fn vv_kick_on_empty_state_is_noop() {
 #[test]
 fn block_non_aligned_particle_count_is_handled() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 1000;
     let positions_x: Vec<Real> = (0..n).map(|i| i as Real).collect();
     let state = ParticleState::new(
@@ -436,7 +436,7 @@ fn block_non_aligned_particle_count_is_handled() {
 #[test]
 fn vv_kick_drift_does_not_modify_forces_or_masses() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = diverse_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     let snapshot = snapshot_via_download(&buffers);
@@ -474,7 +474,7 @@ fn vv_kick_does_not_modify_forces_masses_or_positions() {
 #[test]
 fn two_independent_runs_produce_byte_identical_outputs() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = diverse_state(128);
 
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).expect("buffers a");
@@ -504,7 +504,7 @@ fn two_independent_runs_produce_byte_identical_outputs() {
 #[test]
 fn nan_force_propagates_to_velocity_and_position() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let mut state = ParticleState::new(
         vec![1.0],
         vec![2.0],
@@ -539,7 +539,7 @@ fn nan_force_propagates_to_velocity_and_position() {
 #[test]
 fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     // Free particles: F=0, m=1, arbitrary nonzero positions and velocities.
     let positions_x = vec![1.0, -2.0, 3.5, 0.25];
     let positions_y = vec![0.5, 1.25, -0.75, 2.0];
@@ -584,7 +584,7 @@ fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
 #[test]
 fn vv_kick_drift_wraps_positions_back_into_primary_image() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         vec![4.9],
         vec![0.0],
@@ -612,7 +612,7 @@ fn vv_kick_drift_wraps_positions_back_into_primary_image() {
 #[test]
 fn vv_kick_drift_wraps_in_negative_x() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         vec![-4.9],
         vec![0.0],
@@ -638,7 +638,7 @@ fn vv_kick_drift_wraps_in_negative_x() {
 #[test]
 fn vv_kick_drift_handles_multi_period_crossings() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         vec![0.0],
         vec![0.0],

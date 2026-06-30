@@ -202,6 +202,57 @@ the constraint slot is composable with the SPME `recip_stream` without
 extra synchronisation (the constraint slot writes only to
 particle-state buffers that the default stream owns).
 
+## SHAKE/RATTLE Shared-Memory Staging <!-- rq-115e5926 -->
+
+Both `rattle_velocities` and `shake_positions` run one thread per
+constraint group, grouped into fixed-size blocks. Because
+`group_atom_offset` is cumulative, a block of consecutive groups owns a
+*contiguous* slice `[atom_base, atom_base + n_block_atoms)` of
+`group_atoms`. Each kernel:
+
+1. **Stages** the block's per-atom data into dynamic shared memory with
+   coalesced global loads — for each block-atom slot `t`, thread
+   `t mod blockDim` reads `group_atoms[atom_base + t]` and loads that
+   atom's per-kernel inputs. For a molecule-ordered topology
+   (`group_atoms` an identity-like permutation) these global reads are
+   fully coalesced. (The snapshot arrays are indexed by atom slot, which
+   already equals `atom_base + t`, so they stage contiguously too.)
+2. **Solves** each group's SHAKE/RATTLE iteration on the shared-resident
+   per-atom state (each thread owns a disjoint atom range, so no
+   intra-block synchronisation is needed during the solve), and computes
+   the final per-atom outputs into shared.
+3. **Writes back** the results to global memory with the same coalesced
+   block-cooperative pattern.
+
+Per-kernel sizing of the dynamic shared allocation
+(`block × max_group_atoms × fields × sizeof(Real)`, sized by the host
+from the largest group's atom count; `n_block_atoms` never exceeds that
+bound):
+
+| Kernel | block | per-atom shared fields |
+|---|---|---|
+| `rattle_velocities` | 128 | 11 — position `x/y/z`, velocity `x/y/z`, velocity-correction `x/y/z`, mass, inverse mass |
+| `shake_positions` | 64 | 16 — raw/final position `x/y/z`, charge, snapshot `x/y/z`, constrained `x/y/z`, velocity `x/y/z`, mass, inverse mass, virial |
+
+`shake_positions` uses the smaller block so its larger per-atom
+footprint stays within the 48 KB default shared budget even at
+`MAX_GROUP_ATOMS = 8`. It stages the raw post-drift positions (for the
+delta-style image-preserving write-back of atoms `1..n-1`), updates the
+half-step velocities and the position-level constraint virial in shared,
+and stores the final lab-frame positions, velocities, and virial back
+coalesced. The per-group constraint metadata (`local_i/j`, direction,
+squared length, inverse reduced mass) and, for `shake_positions`, the
+small image-aligned unconstrained-position scratch remain in per-thread
+storage.
+
+This staging replaces a per-thread stride-`group_size` gather of the
+SoA particle arrays (and the per-group working set's local-memory
+spill). It is a pure memory-layout change: the floating-point operation
+sequence per group is **identical** to the per-thread gather, so SHAKE
+and RATTLE results are bit-identical and the *Reproducibility* guarantee
+above is preserved. `shake_snapshot` and `shake_positions_no_velocity`
+retain the per-thread-gather form.
+
 ## Group-Size Caps <!-- rq-81ce46b3 -->
 
 `MAX_GROUP_ATOMS = 8` and `MAX_GROUP_CONSTRAINTS = 12` are kernel
@@ -211,7 +262,12 @@ registers: each atom carries six floats (post-drift constrained
 `1/m`); each constraint carries an integer pair `(local_i, local_j)`
 and a target squared distance `d_k²`. Total per-thread state at the
 caps is `8 × 7 × 4 + 12 × (2 + 4) = 296 B`, well inside the per-thread
-register budget of contemporary GPUs.
+register budget of contemporary GPUs. This per-thread figure applies to
+the gather-form kernels (`shake_snapshot`, `shake_positions_no_velocity`);
+`shake_positions` and `rattle_velocities` hold the per-atom portion in
+shared memory instead (see *SHAKE/RATTLE Shared-Memory Staging*), keeping
+only the per-group constraint metadata (and, for `shake_positions`, a
+small image-aligned position scratch) per thread.
 
 Groups whose atom count exceeds `MAX_GROUP_ATOMS` or whose constraint
 count exceeds `MAX_GROUP_CONSTRAINTS` are rejected at slot
@@ -373,7 +429,7 @@ extern "C" __global__ void shake_positions(
     const unsigned char *group_constraints_local_j,
     const float *group_constraints_r2,
     const float *atom_inv_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     float *constraint_virial,
     unsigned int n_groups);
@@ -393,7 +449,7 @@ extern "C" __global__ void rattle_velocities(
     const unsigned char *group_constraints_local_i,
     const unsigned char *group_constraints_local_j,
     const float *atom_inv_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     float *constraint_virial,
     unsigned int n_groups);
@@ -417,7 +473,7 @@ extern "C" __global__ void shake_positions_no_velocity(
     const unsigned char *group_constraints_local_j,
     const float *group_constraints_r2,
     const float *atom_inv_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_groups);
 ```
 

@@ -17,6 +17,7 @@
 // byte-identical inputs on the same GPU produce a byte-identical
 // `partial_out[0]`.
 #include "precision.cuh"
+#include "philox.cuh"
 
 extern "C" __global__ void kinetic_energy_reduce(
     const Real *velocities_x,
@@ -52,6 +53,55 @@ extern "C" __global__ void kinetic_energy_reduce(
   }
 }
 
+// Pass 1 of the deterministic multi-block kinetic-energy reduction (the
+// large-N path; see `rqm/integration/nose-hoover-chain.md`). Block b reduces
+// the fixed contiguous chunk `[b*chunk, (b+1)*chunk)` of the input
+// (chunk = ceil(n / gridDim.x)) and writes its partial sum to
+// `partials_out[b]`. Pass 2 reduces `partials_out[0..gridDim.x)` with the
+// single-block `virial_sum_reduce`. The block→chunk mapping and the
+// in-block tree are fixed, so the result is bit-reproducible across runs.
+// rq-1727d6bd
+extern "C" __global__ void kinetic_energy_reduce_partials(
+    const Real *velocities_x,
+    const Real *velocities_y,
+    const Real *velocities_z,
+    const Real *masses,
+    Real *partials_out,   // length >= gridDim.x; block b writes slot b
+    unsigned int n)
+{
+  __shared__ Real partial[256];
+
+  unsigned int chunk = (n + gridDim.x - 1u) / gridDim.x;
+  unsigned int start = blockIdx.x * chunk;
+  unsigned int end = start + chunk;
+  if (end > n) {
+    end = n;
+  }
+
+  unsigned int tid = threadIdx.x;
+  Real sum = R(0.0);
+  for (unsigned int i = start + tid; i < end; i += blockDim.x) {
+    Real vx = velocities_x[i];
+    Real vy = velocities_y[i];
+    Real vz = velocities_z[i];
+    Real m = masses[i];
+    sum += R(0.5) * m * (vx * vx + vy * vy + vz * vz);
+  }
+  partial[tid] = sum;
+  __syncthreads();
+
+  for (unsigned int stride = 1; stride < blockDim.x; stride *= 2) {
+    if ((tid % (2u * stride)) == 0u && (tid + stride) < blockDim.x) {
+      partial[tid] += partial[tid + stride];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0u) {
+    partials_out[blockIdx.x] = partial[0];
+  }
+}
+
 // Uniform per-particle velocity rescale: v_i ← factor · v_i for every
 // component of every particle. One thread per particle, no inter-thread
 // interaction.
@@ -69,4 +119,312 @@ extern "C" __global__ void rescale_velocities(
   velocities_x[i] *= factor;
   velocities_y[i] *= factor;
   velocities_z[i] *= factor;
+}
+
+// Same as `rescale_velocities` but reads the rescale factor from a
+// single-element device buffer. Used when the factor is computed on
+// device (e.g. by `csvr_sample_and_factor`) and the host never
+// downloads it.
+extern "C" __global__ void rescale_velocities_device_factor(
+    Real *velocities_x,
+    Real *velocities_y,
+    Real *velocities_z,
+    const Real *factor,        // length 1
+    unsigned int n)
+{
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) {
+    return;
+  }
+  Real f = factor[0];
+  velocities_x[i] *= f;
+  velocities_y[i] *= f;
+  velocities_z[i] *= f;
+}
+
+// Single-block CSVR (Bussi-Donadio-Parrinello) sampling kernel.
+//
+// Computes the velocity rescale factor for one CSVR step entirely on
+// device. Reads `k_old[0]` (the current kinetic energy in Hartrees,
+// produced by `kinetic_energy_reduce`), draws `g_dof` standard-normal
+// samples from Philox-4×32-10, evaluates the CSVR chain
+//
+//   k_new = c · k_old + (k_target / nf) · (1 - c) · (s + r²)
+//         + 2 r · √(c · (1 - c) · k_old · k_target / nf)
+//
+// in double precision, and writes
+//
+//   factor_out[0] = √(k_new / k_old)        (or 1.0 in the
+//                                            edge cases the host
+//                                            code also handles)
+//   cumulative_injection_delta[0] += (k_new - k_old)
+//
+// for the runner to consume at log-write cadence.
+//
+// Reduction shape: one block of 256 threads. Thread `t` accumulates
+// xi² for sample indices `t + 1, t + 1 + 256, …` (the host code's
+// `1..g_dof` loop, partitioned by lane), then a deterministic
+// left-to-right pairwise tree in shared memory reduces the 256
+// partials. Thread 0 of block 0 draws the lone `r` sample (counter
+// `(seed, draw_counter, sample_index=0, 0)`, matching the host's
+// `philox_normal(..., 0, 0)`), assembles k_new, and writes the
+// outputs.
+//
+// Determinism: the parallel-reduction order is fixed by (block size,
+// g_dof) and identical across runs with the same seed and
+// draw_counter; two runs on the same GPU produce a byte-identical
+// `factor_out[0]`. The reduction order differs from the host's
+// `for sample_index in 1..g_dof` serial sum, so the new factor does
+// not bit-match the legacy host-side CSVR; the trajectory remains
+// statistically equivalent and the equilibrium NVT distribution is
+// preserved.
+extern "C" __global__ void csvr_sample_and_factor(
+    const Real *k_old,                       // length 1; Real (matches kinetic_energy_reduce output)
+    Real *factor_out,                        // length 1
+    double *cumulative_injection_delta,      // length 1; atomic-not-required (only lane 0 writes)
+    unsigned long long *draw_counter,        // length 1; read at entry, incremented by 1 at exit
+    unsigned int seed_lo,
+    unsigned int seed_hi,
+    unsigned int g_dof,
+    double c,                                // exp(-dt / tau)
+    double one_minus_c,                      // 1 - c
+    double k_target_over_nf)                 // k_target / nf  where  k_target = (nf/2) · kt_target
+{
+  __shared__ double partial[256];
+  __shared__ unsigned long long counter_shared;
+
+  unsigned int tid = threadIdx.x;
+
+  if (tid == 0u) {
+    counter_shared = *draw_counter;
+  }
+  __syncthreads();
+  unsigned long long counter = counter_shared;
+  unsigned int draw_counter_lo = (unsigned int)(counter & 0xFFFFFFFFULL);
+  unsigned int draw_counter_hi = (unsigned int)(counter >> 32);
+
+  // Accumulate s = Σ_{i=1..g_dof - 1} xi_i² in parallel.
+  double s = 0.0;
+  for (unsigned int i = tid + 1u; i < g_dof; i += blockDim.x) {
+    double xi = philox_gaussian_f64(
+        seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, i, 0u);
+    s += xi * xi;
+  }
+  partial[tid] = s;
+  __syncthreads();
+
+  // Deterministic left-to-right pairwise tree, identical in shape to
+  // `kinetic_energy_reduce` above.
+  for (unsigned int stride = 1u; stride < blockDim.x; stride *= 2u) {
+    if ((tid % (2u * stride)) == 0u && (tid + stride) < blockDim.x) {
+      partial[tid] += partial[tid + stride];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0u) {
+    double s_total = partial[0];
+    double r = philox_gaussian_f64(
+        seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, 0u, 0u);
+    double k_old_val = (double)k_old[0];
+
+    double cross = 0.0;
+    if (k_old_val > 0.0) {
+      cross = 2.0 * r * sqrt(c * one_minus_c * k_old_val * k_target_over_nf);
+    }
+    double k_new = c * k_old_val
+                 + k_target_over_nf * one_minus_c * (s_total + r * r)
+                 + cross;
+    if (!isfinite(k_new) || k_new <= 0.0) {
+      k_new = k_old_val;
+    }
+
+    double f = 1.0;
+    if (k_old_val > 0.0) {
+      double diff = k_new - k_old_val;
+      if (diff < 0.0) diff = -diff;
+      if (diff > 0.0) {
+        f = sqrt(k_new / k_old_val);
+      }
+    }
+    factor_out[0] = (Real)f;
+    cumulative_injection_delta[0] += (k_new - k_old_val);
+    *draw_counter = counter + 1ULL;
+  }
+}
+
+// rq-5f59fa80
+//
+// Multi-block CSVR sample. The single-block `csvr_sample_and_factor`
+// above draws all `g_dof - 1` Gaussian variates `xi_i` in one 256-thread
+// block — on a single SM, this dominates the per-step GPU cost at large
+// `g_dof`. This kernel parallelises the draw + sum `s = Σ xi_i²` across
+// the whole device: a fixed `gridDim.x` blocks each own a contiguous
+// chunk of the `m = g_dof - 1` draw indices and write their partial sum
+// to `partials_out[blockIdx.x]`. `csvr_finish_from_partials` reduces the
+// partials and performs the scalar finish.
+//
+// Determinism: `xi_i = philox_gaussian_f64(seed, counter, i, 0)` depends
+// only on the index `i`, not on which block/thread evaluates it; the
+// block→chunk mapping, the lane-strided sweep, and the warp-tree
+// reduction are all fixed by `(g_dof, gridDim.x)` alone. Two runs on the
+// same GPU produce a byte-identical `s`. The draw counter is read but
+// not modified here (the finish kernel increments it once).
+extern "C" __global__ void csvr_sample_partials(
+    const unsigned long long *draw_counter,  // length 1; read only
+    double *partials_out,                     // length >= gridDim.x
+    unsigned int seed_lo,
+    unsigned int seed_hi,
+    unsigned int g_dof)
+{
+  __shared__ double partial[256];
+
+  unsigned long long counter = *draw_counter;
+  unsigned int draw_counter_lo = (unsigned int)(counter & 0xFFFFFFFFULL);
+  unsigned int draw_counter_hi = (unsigned int)(counter >> 32);
+
+  // Draw indices run over i in [1, g_dof); index them as j in [0, m).
+  unsigned int m = (g_dof > 0u) ? (g_dof - 1u) : 0u;
+  unsigned int chunk = (m + gridDim.x - 1u) / gridDim.x;
+  unsigned int start = blockIdx.x * chunk;
+  unsigned int end = start + chunk;
+  if (end > m) {
+    end = m;
+  }
+
+  unsigned int tid = threadIdx.x;
+  double s = 0.0;
+  for (unsigned int j = start + tid; j < end; j += blockDim.x) {
+    unsigned int i = j + 1u;
+    double xi = philox_gaussian_f64(
+        seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, i, 0u);
+    s += xi * xi;
+  }
+  partial[tid] = s;
+  __syncthreads();
+
+  for (unsigned int stride = 1u; stride < blockDim.x; stride *= 2u) {
+    if ((tid % (2u * stride)) == 0u && (tid + stride) < blockDim.x) {
+      partial[tid] += partial[tid + stride];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0u) {
+    partials_out[blockIdx.x] = partial[0];
+  }
+}
+
+// rq-5f59fa80
+//
+// Single-block finish for the multi-block CSVR sample. Deterministically
+// reduces `partials[0..num_partials)` to `s_total`, then performs the
+// same scalar chain math and outputs as `csvr_sample_and_factor`'s
+// `tid == 0` branch: draws `r`, forms `k_new`, writes the rescale factor,
+// accumulates the injection delta, and increments the draw counter once.
+extern "C" __global__ void csvr_finish_from_partials(
+    const Real *k_old,                       // length 1
+    Real *factor_out,                        // length 1
+    double *cumulative_injection_delta,      // length 1
+    unsigned long long *draw_counter,        // length 1; read + increment
+    const double *partials,                  // length num_partials
+    unsigned int num_partials,
+    unsigned int seed_lo,
+    unsigned int seed_hi,
+    double c,
+    double one_minus_c,
+    double k_target_over_nf)
+{
+  __shared__ double partial[256];
+
+  unsigned int tid = threadIdx.x;
+  double s = 0.0;
+  for (unsigned int i = tid; i < num_partials; i += blockDim.x) {
+    s += partials[i];
+  }
+  partial[tid] = s;
+  __syncthreads();
+
+  for (unsigned int stride = 1u; stride < blockDim.x; stride *= 2u) {
+    if ((tid % (2u * stride)) == 0u && (tid + stride) < blockDim.x) {
+      partial[tid] += partial[tid + stride];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0u) {
+    double s_total = partial[0];
+    unsigned long long counter = *draw_counter;
+    unsigned int draw_counter_lo = (unsigned int)(counter & 0xFFFFFFFFULL);
+    unsigned int draw_counter_hi = (unsigned int)(counter >> 32);
+    double r = philox_gaussian_f64(
+        seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, 0u, 0u);
+    double k_old_val = (double)k_old[0];
+
+    double cross = 0.0;
+    if (k_old_val > 0.0) {
+      cross = 2.0 * r * sqrt(c * one_minus_c * k_old_val * k_target_over_nf);
+    }
+    double k_new = c * k_old_val
+                 + k_target_over_nf * one_minus_c * (s_total + r * r)
+                 + cross;
+    if (!isfinite(k_new) || k_new <= 0.0) {
+      k_new = k_old_val;
+    }
+
+    double f = 1.0;
+    if (k_old_val > 0.0) {
+      double diff = k_new - k_old_val;
+      if (diff < 0.0) diff = -diff;
+      if (diff > 0.0) {
+        f = sqrt(k_new / k_old_val);
+      }
+    }
+    factor_out[0] = (Real)f;
+    cumulative_injection_delta[0] += (k_new - k_old_val);
+    *draw_counter = counter + 1ULL;
+  }
+}
+
+// Reads the kinetic-energy scalar from `k_old` (length 1; written by
+// `kinetic_energy_reduce`), computes the Berendsen rescale factor
+// λ = sqrt(max(0, 1 + (dt/τ) · (K_target/K_old − 1))) on the device,
+// writes it to `factor_out[0]`, and accumulates the per-step
+// injection delta `K_old · (λ² − 1)` into
+// `cumulative_injection_delta[0]`. Single-thread launch: 1 block of 1
+// thread. Stays graph-capturable (no dtoh, no host arithmetic between
+// launches). When `k_old <= 0` (degenerate freshly-initialised state)
+// the kernel writes `factor_out[0] = 1` and a zero injection delta.
+extern "C" __global__ void berendsen_compute_factor(
+    const Real *k_old,                       // length 1
+    Real *factor_out,                        // length 1
+    double *cumulative_injection_delta,      // length 1
+    double k_target,                         // (g_dof / 2) · kT_target
+    double dt_over_tau)                      // dt / τ
+{
+  if (threadIdx.x != 0u || blockIdx.x != 0u) return;
+  double k_old_val = (double)k_old[0];
+  if (!(k_old_val > 0.0)) {
+    factor_out[0] = R(1.0);
+    return;
+  }
+  double lambda_sq = 1.0 + dt_over_tau * (k_target / k_old_val - 1.0);
+  if (!(lambda_sq > 0.0)) {
+    lambda_sq = 0.0;
+  }
+  double lambda = sqrt(lambda_sq);
+  factor_out[0] = (Real)lambda;
+  cumulative_injection_delta[0] += k_old_val * (lambda_sq - 1.0);
+}
+
+// Increments a single u64 device counter by 1. Used by multi-block
+// Philox kernels (where read+increment cannot safely happen in the
+// same kernel because blocks have no synchronisation order) — the
+// launcher follows the RNG kernel with this one so that every launch
+// advances the counter by exactly one. Captured as a graph node so a
+// replayed graph advances the counter on each replay.
+extern "C" __global__ void increment_u64(unsigned long long *value) {
+  if (threadIdx.x == 0u && blockIdx.x == 0u) {
+    *value += 1ULL;
+  }
 }

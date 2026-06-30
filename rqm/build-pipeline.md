@@ -92,11 +92,42 @@ per-subsystem nested handle to every kernel function.
   (`particle_buffers.kernels.<subsystem>.<kernel_name>`) rather than a
   string-keyed lookup. A reference to a non-existent kernel is a
   compile error, and a kernel missing from its PTX module is caught
-  once, by `init_device`, rather than on first launch. Adding a new
-  kernel to an existing subsystem is a one-line edit to the
-  subsystem's own kernel struct, and adding a new subsystem is a
-  one-line edit to `Kernels` (plus the new subsystem file). `device.rs`
-  does not name any individual kernel.
+  once, by `init_device`, rather than on first launch.
+
+  `Kernels`, `Kernels::load`, and the `KernelStage::ORDER` registry
+  (see `performance-analysis.md`) are expanded from one central
+  manifest by the `define_kernels!` macro, so the three cannot drift
+  apart:
+
+  ```rust
+  define_kernels! {
+      fill:        FillKernels,
+      integrate:   IntegrateKernels,
+      spme_recip:  SpmeRecipKernels,
+      langevin:    LangevinKernels,
+      morse:       MorseKernels,
+      angle:       AngleKernels,
+      nose_hoover: NoseHooverKernels,
+      andersen:    AndersenKernels,
+      barostat:    BarostatKernels,
+      mtk:         MtkKernels,
+      shake:       ShakeKernels,
+      settle:      SettleKernels,
+      forces:      ForcesKernels,
+      neighbor:    NeighborKernels,
+      minimize:    MinimizeKernels,
+  }
+  ```
+
+  The macro emits the `Kernels` struct (one field per entry, of the
+  named sub-struct type), `Kernels::load` (each sub-struct's `load` in
+  manifest order, short-circuiting on the first failure), and
+  `KernelStage::ORDER` (the manifest-order concatenation of every
+  sub-struct's `STAGES`). Adding a kernel to an existing subsystem is a
+  one-line edit to that subsystem's `gpu_kernels!` invocation; adding a
+  whole subsystem is one manifest line plus the subsystem's own file.
+  `device.rs` names no individual kernel and carries no per-subsystem
+  stage list.
 
   The subsystem field set is:
 
@@ -104,10 +135,6 @@ per-subsystem nested handle to every kernel function.
   | ---           | ---                  | ---                                            | ---             | ---                                                                                              |
   | `fill`        | `FillKernels`        | `src/gpu/fill.rs`                              | `fill`          | `fill`                                                                                            |
   | `integrate`   | `IntegrateKernels`   | `src/integrator/velocity_verlet.rs`            | `integrate`     | `vv_kick_drift`, `vv_kick`, `vv_kick_drift_lossless`, `vv_kick_lossless`                          |
-  | `reduce`      | `ReduceKernels`      | `src/gpu/pair_buffer.rs`                       | `reduce`        | `reduce_pair_forces`                                                                              |
-  | `lj`          | `LjKernels`          | `src/forces/lj.rs`                             | `pair_force`    | `lj_pair_force`                                                                                   |
-  | `coulomb`     | `CoulombKernels`     | `src/forces/coulomb.rs`                        | `coulomb`       | `coulomb_pair_force`                                                                              |
-  | `spme_real`   | `SpmeRealKernels`    | `src/forces/spme.rs`                           | `spme_real`     | `spme_real_pair_force`                                                                            |
   | `spme_recip`  | `SpmeRecipKernels`   | `src/forces/spme.rs`                           | `spme_recip`    | `spme_charge_spread`, `spme_influence_multiply`, `spme_force_gather`                              |
   | `langevin`    | `LangevinKernels`    | `src/integrator/langevin_baoab.rs`             | `langevin`      | `lan_drift_half`, `lan_ou_step`                                                                   |
   | `morse`       | `MorseKernels`       | `src/forces/morse.rs`                          | `morse`         | `morse_bond_force`, `reduce_bond_forces`                                                          |
@@ -117,24 +144,80 @@ per-subsystem nested handle to every kernel function.
   | `barostat`    | `BarostatKernels`    | `src/gpu/barostat_kernels.rs`                  | `barostat`      | `virial_sum_reduce`, `rescale_positions`                                                          |
   | `mtk`         | `MtkKernels`         | `src/integrator/mtk_npt.rs`                    | `mtk`           | `mtk_velocity_half_kick`, `mtk_position_drift`                                                    |
   | `shake`       | `ShakeKernels`       | `src/integrator/shake.rs`                      | `shake`         | `shake_snapshot`, `shake_positions`, `rattle_velocities`, `constraint_virial_scatter`, `shake_positions_no_velocity`                                                                                                                                              |
+  | `settle`      | `SettleKernels`      | `src/integrator/settle.rs`                     | `settle`        | `settle_snapshot`, `settle_positions`, `settle_velocities`, `settle_virial_scatter`, `settle_positions_no_velocity`                                                                                                                                              |
   | `forces`      | `ForcesKernels`      | `src/forces/mod.rs`                            | `forces`        | `accumulate_forces`                                                                               |
-  | `neighbor`    | `NeighborKernels`    | `src/forces/neighbor_list.rs`                  | `neighbor`      | `neighbor_displacement_squared`, `neighbor_list_build`, `copy_positions_into_reference`, `compute_cell_indices_and_histogram`, `prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`, `prefix_scan_finalize_offsets`, `scatter_atoms_into_cells`, `sort_cells_by_particle_id` |
+  | `neighbor`    | `NeighborKernels`    | `src/forces/neighbor_list.rs`                  | `neighbor`      | `neighbor_displacement_squared`, `copy_positions_into_reference`, `compute_cell_indices_and_histogram`, `prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`, `prefix_scan_finalize_offsets`, `scatter_atoms_into_cells`, `sort_cells_by_particle_id` |
+  | `minimize`    | `MinimizeKernels`    | `src/minimizer/mod.rs`                         | `minimize`      | `sd_compute_step`, `sd_snapshot`, `sd_restore`, `sd_f_max_reduction`                              |
 
-  Each subsystem's sub-struct carries one `pub <name>: CudaFunction`
-  field per kernel listed in its row, and provides an associated
-  function `pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError>`
-  that loads the PTX module and pulls the function handles. The struct
-  derives `Debug + Clone` (a `CudaFunction` is itself cheap to clone).
+  Each subsystem's sub-struct is expanded by a `gpu_kernels!`
+  invocation in the sub-struct's home file, from one list of the
+  subsystem's kernel function names and one list of the stages it
+  times:
+
+  ```rust
+  gpu_kernels! {
+      module: "settle",
+      struct: SettleKernels,
+      kernels: [
+          settle_snapshot, settle_positions, settle_velocities,
+          settle_virial_scatter, settle_positions_no_velocity,
+      ],
+      stages: {
+          SETTLE_SNAPSHOT              = "settle_snapshot",
+          SETTLE_POSITIONS             = "settle_positions",
+          SETTLE_VELOCITIES            = "settle_velocities",
+          SETTLE_VIRIAL_SCATTER        = "settle_virial_scatter",
+          SETTLE_POSITIONS_NO_VELOCITY = "settle_positions_no_velocity",
+      },
+  }
+  ```
+
+  From that single declaration the macro emits:
+  - the `pub struct` with one `pub <name>: CudaFunction` field per
+    `kernels` entry, deriving `Debug + Clone` (a `CudaFunction` is
+    itself cheap to clone);
+  - `pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError>`,
+    which loads the named PTX `module` once with `CudaDevice::load_ptx`
+    and pulls each field with `get_func` — the kernel-name list is
+    written exactly once and feeds both the `load_ptx` name array and
+    the per-field `get_func` calls;
+  - the `KernelStage` consts named in `stages` (inherent consts on
+    `KernelStage`; see `performance-analysis.md`) and a `STAGES` slice
+    holding exactly those consts, in launch order;
+  - an `impl SubsystemKernels` exposing `MODULE`, `STAGES`, and `load`.
+
+  Because a subsystem's stage consts and its `STAGES` slice come from
+  the one `stages` list, a stage const can never be absent from the
+  subsystem's registry contribution, and the registry can never name a
+  stage no subsystem declares. A subsystem that times no stages (a
+  thermostat or barostat reusing another subsystem's kernels) gives an
+  empty `stages` list and contributes an empty `STAGES`.
 
   Cross-subsystem reads follow the home rule: a kernel lives in the
   sub-struct named after its `.cu` file, and consumers in other
   subsystems reach into that sub-struct directly. For example, the
-  pair-reduction kernel lives in `kernels.reduce.reduce_pair_forces`
-  and is consumed by `lj_pair_force`, `coulomb_pair_force`, and
-  `spme_real_pair_force` launch wrappers; the
   `kinetic_energy_reduce` and `rescale_velocities` kernels live in
   `kernels.nose_hoover.*` and are consumed by NHC, CSVR, and the MTK
   barostat substep. No kernel handle is duplicated across sub-structs.
+
+- `SubsystemKernels` — trait implemented by every per-subsystem
+  sub-struct (via `gpu_kernels!`). Carries `const MODULE: &'static str`
+  (the `.cu` stem / PTX module name), `const STAGES: &'static
+  [KernelStage]` (the subsystem's timed stages in launch order; empty
+  when it records none), and `fn load(device: &Arc<CudaDevice>) ->
+  Result<Self, GpuError>`. `define_kernels!` is generic over this
+  trait: it builds `Kernels::load` from each field's `load` and
+  `KernelStage::ORDER` from each field's `STAGES`.
+
+- `gpu_kernels!` — declarative `macro_rules!` macro (no external
+  dependency) invoked once per subsystem in its home file. Expands one
+  kernel-name list and one stage list into the sub-struct, its `load`,
+  the `KernelStage` consts, the `STAGES` slice, and the
+  `SubsystemKernels` impl described above.
+
+- `define_kernels!` — declarative `macro_rules!` macro invoked once, in
+  `device.rs`, over the central subsystem manifest. Expands it into the
+  `Kernels` struct, `Kernels::load`, and `KernelStage::ORDER`.
 
 ## Fill Kernel <!-- rq-599b2eb4 -->
 
@@ -193,10 +276,12 @@ Cargo.toml                # depends on cudarc
 ```
 
 Subsystem `*Kernels` sub-structs live next to the code that owns each
-PTX module (see the *Types* table above for the full home list).
-`src/gpu/device.rs` carries `init_device`, `GpuContext`, `GpuError`,
-and the central `Kernels` struct whose fields are typed sub-structs —
-it does not name any individual kernel.
+PTX module (see the *Types* table above for the full home list), each
+expanded by a `gpu_kernels!` invocation in that file. `src/gpu/device.rs`
+carries `init_device`, `GpuContext`, `GpuError`, and the single
+`define_kernels!` manifest from which the `Kernels` struct,
+`Kernels::load`, and `KernelStage::ORDER` are generated — it names no
+individual kernel.
 
 ## Dependencies <!-- rq-93367a8f -->
 
@@ -257,19 +342,36 @@ Feature: CUDA build pipeline and smoke test kernel
   @rq-6211a82f
   Scenario: Kernels is composed of per-subsystem sub-structs
     Given a GpuContext obtained from init_device()
-    Then gpu_context.kernels has fields named after each subsystem
-      in the Types table: fill, integrate, reduce, lj, coulomb,
-      spme_real, spme_recip, langevin, morse, angle, nose_hoover,
-      andersen, barostat, mtk, settle, forces, neighbor
+    Then gpu_context.kernels has one field per entry in the
+      define_kernels! manifest: fill, integrate, spme_recip, langevin,
+      morse, angle, nose_hoover, andersen, barostat, mtk, shake, settle,
+      forces, neighbor, minimize
     And each field is the matching subsystem's typed kernel struct
 
   @rq-6745e7c5
   Scenario: Each subsystem's XKernels::load returns its kernel handle
     Given a CUDA-capable GPU initialized via CudaDevice::new(0)
-    When LjKernels::load(&device) is called
-    Then it returns Ok(LjKernels) whose `pair_force` field is a
-      launchable CudaFunction
-    And the PTX module `pair_force` is now loaded on the device
+    When SpmeRecipKernels::load(&device) is called
+    Then it returns Ok(SpmeRecipKernels) whose `spme_charge_spread` field
+      is a launchable CudaFunction
+    And the PTX module `spme_recip` is loaded on the device
+
+  # --- Macro-generated declarations ---
+
+  @rq-73a85df1
+  Scenario: A subsystem's STAGES holds exactly the stages it declares
+    Given the gpu_kernels! invocation for SettleKernels whose `stages`
+      list names SETTLE_SNAPSHOT, SETTLE_POSITIONS, SETTLE_VELOCITIES,
+      SETTLE_VIRIAL_SCATTER, SETTLE_POSITIONS_NO_VELOCITY
+    Then <SettleKernels as SubsystemKernels>::STAGES equals exactly that
+      list, in that order
+    And SettleKernels::MODULE equals "settle"
+
+  @rq-0919ff0a
+  Scenario: A subsystem that times no stages contributes an empty STAGES
+    Given a gpu_kernels! invocation whose `stages` list is empty
+    Then the generated sub-struct's SubsystemKernels::STAGES is empty
+    And that sub-struct contributes no rows to KernelStage::ORDER
 
   @rq-cfc89131
   Scenario: A subsystem load that names a missing kernel surfaces as GpuError at init_device
@@ -283,12 +385,11 @@ Feature: CUDA build pipeline and smoke test kernel
   @rq-7b651edb
   Scenario: Cross-subsystem reads pull from the kernel's home sub-struct
     Given a GpuContext obtained from init_device()
-    Then the LJ pair-force launch wrapper reads
-      `particle_buffers.kernels.lj.pair_force` for its own kernel
-    And reads `particle_buffers.kernels.reduce.reduce_pair_forces` for
-      the shared pair-reduction kernel
-    And the same `reduce_pair_forces` handle is used by the Coulomb
-      and SPME-real launch wrappers
+    Then the Nose-Hoover launch wrapper reads
+      `particle_buffers.kernels.nose_hoover.kinetic_energy_reduce` for
+      the shared kinetic-energy reduction kernel
+    And the same `kinetic_energy_reduce` handle is used by the CSVR
+      thermostat launch wrapper
 
   # --- Fill kernel correctness ---
 

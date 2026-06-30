@@ -123,145 +123,195 @@ impl UnitSystem {
     }
 }
 
-// rq-ecb8aa60
-/// Look up the unit-bearing fields of a slot kind. Returns `None` for
-/// kinds this module doesn't know about — the slot will pass through
-/// unchanged, and the builder registry will reject it later if the
-/// kind is genuinely invalid.
-///
-/// Kinds that exist but carry no unit-bearing fields (e.g.
-/// `velocity-verlet`) return `Some(&[])` so a maintainer adding a new
-/// slot can spot at a glance that the entry was considered.
-///
-/// The table below mirrors the kinds registered by
-/// `Registries::with_builtins()` (see `src/registries.rs`) and by
-/// each `XRegistry::with_builtins()` (in `src/integrator/mod.rs` and
-/// `src/minimizer/mod.rs`). When adding a new built-in builder, add
-/// the matching arm here. The `convert_slot_params` special-case
-/// block immediately below this function handles nested-array shapes
-/// (`shake`'s `constraints[k].d`) that the flat table can't express.
-pub fn slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimension)]> {
-    use Dimension::*;
-    match kind {
-        // Integrators
-        "velocity-verlet" => Some(&[]),
-        "langevin-baoab" => Some(&[
-            ("friction", InverseTime),
-            ("temperature", Temperature),
-        ]),
-        "nose-hoover-chain" => Some(&[
-            ("temperature", Temperature),
-            ("tau", Time),
-        ]),
-        "mtk-npt" => Some(&[
-            ("temperature", Temperature),
-            ("pressure", Pressure),
-            ("tau_t", Time),
-            ("tau_p", Time),
-        ]),
+// The `#[derive(Convert)]` macro (macro namespace) shares its name with
+// the `Convert` trait below (type namespace), the same way `serde`'s
+// `Serialize` is both a derive and a trait.
+pub use heddle_md_derive::Convert;
 
-        // Thermostats
-        "berendsen" => Some(&[
-            ("temperature", Temperature),
-            ("tau", Time),
-        ]),
-        "csvr" => Some(&[
-            ("temperature", Temperature),
-            ("tau", Time),
-        ]),
-        "andersen" => Some(&[
-            ("temperature", Temperature),
-            ("collision_rate", InverseTime),
-        ]),
-
-        // Barostats
-        "berendsen-barostat" => Some(&[
-            ("pressure", Pressure),
-            ("tau", Time),
-            ("compressibility", InversePressure),
-        ]),
-        "c-rescale" => Some(&[
-            ("pressure", Pressure),
-            ("temperature", Temperature),
-            ("tau", Time),
-            ("compressibility", InversePressure),
-        ]),
-
-        // Constraints — the SHAKE entry is special-cased by
-        // `convert_slot_params` (its `constraints` field is a nested
-        // array of tables) and therefore declares an empty top-level
-        // field set here.
-        "shake" => Some(&[]),
-
-        // Minimizers
-        "steepest-descent" => Some(&[
-            ("initial_step", Length),
-            ("max_step", Length),
-            ("force_tolerance", Force),
-            ("energy_tolerance", Energy),
-        ]),
-
-        _ => None,
-    }
+// rq-bf5df23e
+/// Applies the I/O-boundary unit rescaling to a value or an aggregate of
+/// values: `from_user` rescales user → atomic (input), `to_user`
+/// rescales atomic → user (output). The dimensioned newtypes below are
+/// the leaves; `#[derive(Convert)]` recurses over the fields of a struct
+/// or enum.
+pub trait Convert {
+    fn from_user(&mut self, units: UnitSystem);
+    fn to_user(&mut self, units: UnitSystem);
 }
 
-// rq-8f5ebdc1
-/// Rescale every unit-bearing field of a slot's `params` table in-place,
-/// converting the user-supplied values into engine-side atomic units.
-/// No-op when `system` is `Atomic` (identity) or when the kind is
-/// unknown.
-pub fn convert_slot_params(system: UnitSystem, kind: &str, params: &mut toml::Value) {
-    if system == UnitSystem::Atomic {
-        return;
-    }
-    // Kinds whose params include nested arrays of tables (e.g. the
-    // SHAKE `constraints` array) cannot be rescaled by the
-    // table-driven `slot_kind_field_dims` path. They are converted
-    // explicitly here before the regular field walk.
-    if kind == "shake" {
-        if let Some(table) = params.as_table_mut() {
-            if let Some(arr) = table.get_mut("constraints").and_then(|v| v.as_array_mut()) {
-                for entry in arr.iter_mut() {
-                    let Some(sub) = entry.as_table_mut() else {
-                        continue;
-                    };
-                    let Some(d_slot) = sub.get_mut("d") else {
-                        continue;
-                    };
-                    if let Some(f) = d_slot.as_float() {
-                        *d_slot = toml::Value::Float(system.from_user(Dimension::Length, f));
-                    } else if let Some(i) = d_slot.as_integer() {
-                        *d_slot = toml::Value::Float(
-                            system.from_user(Dimension::Length, i as f64),
-                        );
-                    }
+// rq-bf5df23e
+/// Dimensioned scalar newtypes — one transparent `f64` wrapper per
+/// unit-bearing dimension. Each (de)serialises as a bare number, so TOML
+/// and extended-XYZ syntax are unchanged, and carries its `Dimension` on
+/// the type.
+macro_rules! dimensioned_scalars {
+    ($($name:ident => $dim:ident),* $(,)?) => {
+        $(
+            #[derive(Clone, Copy, Debug, PartialEq, Default, serde::Deserialize, serde::Serialize)]
+            #[serde(transparent)]
+            pub struct $name(pub f64);
+
+            impl Convert for $name {
+                fn from_user(&mut self, units: UnitSystem) {
+                    self.0 = units.from_user(Dimension::$dim, self.0);
+                }
+                fn to_user(&mut self, units: UnitSystem) {
+                    self.0 = units.to_user(Dimension::$dim, self.0);
                 }
             }
+        )*
+    };
+}
+
+dimensioned_scalars! {
+    Length => Length,
+    InverseLength => InverseLength,
+    Mass => Mass,
+    Charge => Charge,
+    Energy => Energy,
+    Time => Time,
+    InverseTime => InverseTime,
+    Force => Force,
+    Pressure => Pressure,
+    InversePressure => InversePressure,
+    Temperature => Temperature,
+    Velocity => Velocity,
+}
+
+// rq-bf5df23e
+/// Unit-free leaf types convert as no-ops, so a derived struct may hold
+/// counts, seeds, flags, and names alongside its dimensioned fields.
+macro_rules! convert_noop {
+    ($($t:ty),* $(,)?) => {
+        $(
+            impl Convert for $t {
+                fn from_user(&mut self, _units: UnitSystem) {}
+                fn to_user(&mut self, _units: UnitSystem) {}
+            }
+        )*
+    };
+}
+
+convert_noop!(f64, f32, i64, u64, u32, usize, i32, bool, String);
+
+// rq-bf5df23e — aggregate blanket impls.
+impl<T: Convert> Convert for Option<T> {
+    fn from_user(&mut self, units: UnitSystem) {
+        if let Some(v) = self {
+            v.from_user(units);
         }
     }
-    let Some(fields) = slot_kind_field_dims(kind) else {
-        return;
-    };
-    let Some(table) = params.as_table_mut() else {
-        return;
-    };
-    for (name, dim) in fields {
-        let Some(slot) = table.get_mut(*name) else {
-            continue;
-        };
-        if let Some(f) = slot.as_float() {
-            *slot = toml::Value::Float(system.from_user(*dim, f));
-        } else if let Some(i) = slot.as_integer() {
-            *slot = toml::Value::Float(system.from_user(*dim, i as f64));
+    fn to_user(&mut self, units: UnitSystem) {
+        if let Some(v) = self {
+            v.to_user(units);
         }
-        // else: leave non-numeric values alone — the builder's
-        // validate_params will produce the right error message.
     }
 }
+
+impl<T: Convert> Convert for Vec<T> {
+    fn from_user(&mut self, units: UnitSystem) {
+        for v in self.iter_mut() {
+            v.from_user(units);
+        }
+    }
+    fn to_user(&mut self, units: UnitSystem) {
+        for v in self.iter_mut() {
+            v.to_user(units);
+        }
+    }
+}
+
+impl<T: Convert, const N: usize> Convert for [T; N] {
+    fn from_user(&mut self, units: UnitSystem) {
+        for v in self.iter_mut() {
+            v.from_user(units);
+        }
+    }
+    fn to_user(&mut self, units: UnitSystem) {
+        for v in self.iter_mut() {
+            v.to_user(units);
+        }
+    }
+}
+
+// A `toml::Spanned<T>` (used for source-ordered phase entries) converts
+// through its inner value.
+impl<T: Convert> Convert for toml::Spanned<T> {
+    fn from_user(&mut self, units: UnitSystem) {
+        self.get_mut().from_user(units);
+    }
+    fn to_user(&mut self, units: UnitSystem) {
+        self.get_mut().to_user(units);
+    }
+}
+
+// An open-shaped `toml::Value` carries slot params that are converted by
+// the owning builder's `convert_params`, not by the typed-field pass, so
+// the typed pass treats it as a no-op leaf.
+impl Convert for toml::Value {
+    fn from_user(&mut self, _units: UnitSystem) {}
+    fn to_user(&mut self, _units: UnitSystem) {}
+}
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Convert)]
+    struct Sub {
+        d: Length,
+    }
+
+    #[derive(Convert)]
+    struct Outer {
+        len: Length,
+        maybe_e: Option<Energy>,
+        subs: Vec<Sub>,
+        name: String,
+        count: u64,
+        flag: bool,
+    }
+
+    // rq-b45b09f9 — the Convert derive recurses into nested struct, Option,
+    // and Vec fields, and leaves unit-free leaf fields untouched.
+    #[test]
+    fn convert_derive_recurses_into_nested_fields() {
+        let bohr = LENGTH_BOHR_TO_M;
+        let hartree = ENERGY_HARTREE_TO_J;
+        let mut o = Outer {
+            len: Length(1.0e-9),
+            maybe_e: Some(Energy(2.0e-21)),
+            subs: vec![Sub { d: Length(3.0e-10) }, Sub { d: Length(4.0e-10) }],
+            name: "water".to_string(),
+            count: 7,
+            flag: true,
+        };
+        o.from_user(UnitSystem::Si);
+        assert!((o.len.0 - 1.0e-9 / bohr).abs() < 1e-6);
+        assert!((o.maybe_e.unwrap().0 - 2.0e-21 / hartree).abs() < 1e-30);
+        assert!((o.subs[0].d.0 - 3.0e-10 / bohr).abs() < 1e-6);
+        assert!((o.subs[1].d.0 - 4.0e-10 / bohr).abs() < 1e-6);
+        assert_eq!(o.name, "water");
+        assert_eq!(o.count, 7);
+        assert!(o.flag);
+        // Atomic mode is the identity.
+        let mut a = Outer {
+            len: Length(1.5),
+            maybe_e: None,
+            subs: vec![],
+            name: String::new(),
+            count: 0,
+            flag: false,
+        };
+        a.from_user(UnitSystem::Atomic);
+        assert_eq!(a.len.0, 1.5);
+        // Round-trip: to_user undoes from_user.
+        let mut r = Length(2.5e-10);
+        r.from_user(UnitSystem::Si);
+        r.to_user(UnitSystem::Si);
+        assert!((r.0 - 2.5e-10).abs() < 1e-24);
+    }
 
     // rq-4c40f859
     #[test]
@@ -348,38 +398,10 @@ mod tests {
         assert!((back - value).abs() < 1e-12 * value);
     }
 
-    #[test]
-    fn convert_slot_params_rescales_si_csvr_temperature_and_tau() {
-        let mut params: toml::Value = toml::from_str(
-            "temperature = 300.0\ntau = 1.0e-13\nseed = 11\n",
-        )
-        .unwrap();
-        convert_slot_params(UnitSystem::Si, "csvr", &mut params);
-        let t = params["temperature"].as_float().unwrap();
-        let tau = params["tau"].as_float().unwrap();
-        let seed = params["seed"].as_integer().unwrap();
-        let expected_t = 300.0 / 315775.0248040668;
-        let expected_tau = 1.0e-13 / 2.4188843265857195e-17;
-        assert!((t - expected_t).abs() < 1e-12);
-        assert!((tau - expected_tau).abs() < 1e-3); // tau is ~4e3
-        assert_eq!(seed, 11);
-    }
 
-    #[test]
-    fn convert_slot_params_no_op_for_atomic() {
-        let mut params: toml::Value =
-            toml::from_str("temperature = 9.5e-4\n").unwrap();
-        convert_slot_params(UnitSystem::Atomic, "csvr", &mut params);
-        assert_eq!(params["temperature"].as_float().unwrap(), 9.5e-4);
-    }
+    // rq-eecd4961 — SETTLE's d_OH / d_HH must be rescaled SI->atomic so
 
-    // rq-aeee8e44
-    #[test]
-    fn convert_slot_params_no_op_for_unknown_kind() {
-        let mut params: toml::Value = toml::from_str("temperature = 300.0\n").unwrap();
-        convert_slot_params(UnitSystem::Si, "no-such-kind", &mut params);
-        assert_eq!(params["temperature"].as_float().unwrap(), 300.0);
-    }
+
 
     #[test]
     fn from_str_round_trips() {

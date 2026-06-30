@@ -28,9 +28,9 @@ const TIME_F: f64 = 2.4188843265857195e-17;
 const TEMP_F: f64 = 315775.0248040668;
 const VEL_F: f64 = 2187691.2636411153;
 
-fn box_large() -> SimulationBox {
+fn box_large(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     let l = (1.0e6 / LEN_F) as Real;
-    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -38,7 +38,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_large(),
+        &box_large(&gpu),
         &[],
         &[],
         &[],
@@ -164,7 +164,10 @@ fn host_philox_matches_device_philox() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers, seed, draw, 0.0, kt).unwrap();
+    let mut counter: cudarc::driver::CudaSlice<u64> =
+        gpu.device.alloc_zeros::<u64>(1).unwrap();
+    gpu.device.htod_sync_copy_into(&[draw], &mut counter).unwrap();
+    lan_ou_step(&mut buffers, &mut counter, seed, 0.0, kt).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
     let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
@@ -234,9 +237,61 @@ fn csvr_apply_post_launches_expected_kernels() {
             .unwrap_or(0)
     };
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
-    assert_eq!(count_for(KernelStage::CSVR_RESCALE_VELOCITIES), 1);
+    // The stochastic sample + factor kernel is now instrumented. rq-5f59fa80
+    assert_eq!(count_for(KernelStage::CSVR_SAMPLE_AND_FACTOR), 1);
+    // The per-particle velocity rescale is dispatched by the
+    // JIT-composed post-force per-particle kernel; the standalone
+    // `CSVR_RESCALE_VELOCITIES` stage is not recorded.
+    assert_eq!(count_for(KernelStage::CSVR_RESCALE_VELOCITIES), 0);
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
+}
+
+// rq-5f59fa80
+// Multi-block CSVR path (g_dof > SINGLE_BLOCK_CSVR_MAX = 8192): the
+// parallel draw + deterministic two-pass reduction must produce a
+// byte-identical rescale factor across two independent runs with
+// identical inputs.
+#[test]
+fn csvr_multi_block_sample_is_deterministic() {
+    let gpu = init_device().unwrap();
+    let n = 4000usize; // g_dof = 3n - 3 = 11997 > 8192 -> multi-block
+    let mass = 1.0 as Real;
+    // Non-zero velocities so k_old > 0 and the factor depends on the
+    // sampled s = Σ xi².
+    let vx: Vec<Real> = (0..n).map(|i| 0.001 + (i as Real) * 1.0e-7).collect();
+    let make_state = || {
+        ParticleState::new(
+            vec![0.0; n],
+            vec![0.0; n],
+            vec![0.0; n],
+            vx.clone(),
+            vec![0.002 as Real; n],
+            vec![0.003 as Real; n],
+            vec![mass; n],
+            vec![0.0; n],
+            vec![0u32; n],
+            None,
+            None,
+        )
+        .unwrap()
+    };
+    let dt = (1.0e-15 / TIME_F) as Real;
+    let run = || -> u32 {
+        let state = make_state();
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut timings = Timings::new(&gpu).unwrap();
+        let mut therm = unbox_csvr(build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 7)));
+        therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
+        let f = gpu.device.dtoh_sync_copy(&therm.factor_device).unwrap();
+        f[0].to_bits()
+    };
+    let a = run();
+    let b = run();
+    assert_eq!(
+        a, b,
+        "multi-block CSVR factor must be byte-identical across runs"
+    );
 }
 
 // rq-a2454a72
@@ -288,10 +343,12 @@ fn csvr_draw_counter_increments_per_apply_post() {
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
+    therm.flush_pending_injection(&gpu.device).unwrap();
     assert_eq!(therm.draw_counter, 1);
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
+    therm.flush_pending_injection(&gpu.device).unwrap();
     assert_eq!(therm.draw_counter, 2);
 }
 
@@ -352,13 +409,22 @@ fn csvr_cumulative_injection_tracks_kinetic_energy_changes() {
     let state = atomic_state(n);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
+    use heddle_md::gpu::rescale_velocities_device_factor;
     let mut therm = unbox_csvr(build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1)));
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let k_before = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
-    let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    // The composed post-force per-particle kernel applies the rescale
+    // in production. Tests that bypass the composed kernel dispatch
+    // the standalone equivalent against `factor_device`.
+    rescale_velocities_device_factor(&mut buffers, &therm.factor_device).unwrap();
+    // Device-side `(k_new - k_old)` accumulator is updated by
+    // `apply_post`. Drain it into `therm.cumulative_injection` before
+    // reading; the runner does the same before each log row.
+    therm.flush_pending_injection(&gpu.device).unwrap();
+    let k_after = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     let expected = k_after - k_before;
     let rel = (therm.cumulative_injection - expected).abs() / expected.abs().max(1.0e-30);
     assert!(rel < 1.0e-4);
@@ -400,13 +466,15 @@ fn csvr_different_seeds_produce_different_trajectories() {
     let state = atomic_state(8);
 
     fn run_once(gpu: &GpuContext, state: &ParticleState, seed: u64) -> Vec<Real> {
+        use heddle_md::gpu::rescale_velocities_device_factor;
         let n = state.particle_count();
         let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
         let mut timings = Timings::new(gpu).unwrap();
-        let mut therm = build_csvr(gpu, n, &csvr_kind(300.0, 1.0e-13, seed));
+        let mut therm = unbox_csvr(build_csvr(gpu, n, &csvr_kind(300.0, 1.0e-13, seed)));
         let dt = (1.0e-15 / TIME_F) as Real;
         for _ in 0..3 {
             therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
+            rescale_velocities_device_factor(&mut buffers, &therm.factor_device).unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
     }
@@ -472,7 +540,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_large();
+    let mut sim_box = box_large(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = heddle_md::integrator::IntegratorRegistry::with_builtins()
@@ -501,7 +569,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
         therm
             .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
-        sum += compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+        sum += compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     }
     let k_avg = sum / (n_samples as f64);
     let rel = (k_avg - k_target).abs() / k_target;
@@ -510,7 +578,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
 
 // rq-efea1b70
 #[test]
-fn csvr_skips_rescale_when_k_zero() {
+fn csvr_leaves_velocities_unchanged_when_k_zero() {
     let gpu = init_device().unwrap();
     let n = 4usize;
     // All-zero velocities → K = 0.
@@ -534,14 +602,17 @@ fn csvr_skips_rescale_when_k_zero() {
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
-    let report = timings.finalize().unwrap();
-    let count = report
-        .stages
-        .iter()
-        .find(|r| r.name == heddle_md::timings::KernelStage::CSVR_RESCALE_VELOCITIES.name())
-        .map(|r| r.count)
-        .unwrap_or(0);
-    assert_eq!(count, 0, "csvr should not launch rescale kernel when K=0");
+    // The GPU-side `csvr_sample_and_factor` kernel writes factor = 1.0
+    // when k_old == 0 (the k_old > 0 guard suppresses the cross term and
+    // the rescale-factor computation), so the rescale kernel runs but
+    // leaves velocities at zero. The host can no longer skip the kernel
+    // launch because k_old is never downloaded.
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
+    let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
+    assert!(vx.iter().all(|&v| v == 0.0));
+    assert!(vy.iter().all(|&v| v == 0.0));
+    assert!(vz.iter().all(|&v| v == 0.0));
 }
 
 // rq-70a46202

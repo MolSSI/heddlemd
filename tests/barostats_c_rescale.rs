@@ -6,6 +6,7 @@
 // `SimulationBox::rescale_isotropic` convenience are covered in
 // `tests/barostats_berendsen.rs` and not re-tested here.
 
+use heddle_md::registry::KindedBuilder;
 use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::integrator::IntegratorStepExt;
@@ -35,10 +36,10 @@ const TIME_F: f64 = 2.4188843265857195e-17;
 const PRESSURE_F: f64 = 29421015696522.1;
 const TEMP_F: f64 = 315775.0248040668;
 
-fn box_small() -> SimulationBox {
+fn box_small(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     // 1 nm cubic box, expressed in atomic units (~18.9 Bohr per side).
     let l = (1.0e-9 / LEN_F) as Real;
-    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -46,7 +47,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_small(),
+        &box_small(&gpu),
         &[],
         &[],
         &[],
@@ -186,13 +187,13 @@ fn barostat_registry_exposes_berendsen_and_c_rescale() {
     let registry = BarostatRegistry::with_builtins();
     assert!(
         registry
-            .builders
+            .builders()
             .iter()
             .any(|b| b.kind_name() == "berendsen")
     );
     assert!(
         registry
-            .builders
+            .builders()
             .iter()
             .any(|b| b.kind_name() == "c-rescale")
     );
@@ -208,7 +209,7 @@ fn apply_launches_expected_kernel_set() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
     baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
@@ -224,9 +225,16 @@ fn apply_launches_expected_kernel_set() {
     };
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
     assert_eq!(count_for(KernelStage::VIRIAL_SUM_REDUCE), 1);
+    // The compute-mu + lattice-rescale scalar kernel is instrumented. rq-5f59fa80
+    assert_eq!(count_for(KernelStage::C_RESCALE_COMPUTE_MU), 1);
+    // The per-particle position rescale is dispatched by the
+    // JIT-composed post-force per-particle kernel via c-rescale's
+    // source fragment, not by `apply`. The standalone
+    // `C_RESCALE_BAROSTAT_RESCALE_POSITIONS` stage is never
+    // recorded.
     assert_eq!(
         count_for(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS),
-        1
+        0
     );
     // The Berendsen-barostat label must not be touched.
     assert_eq!(
@@ -243,7 +251,7 @@ fn apply_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
     let state = make_state(Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let g_before = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, 0, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
@@ -266,7 +274,7 @@ fn draw_counter_starts_at_zero_and_increments_per_apply() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro =
         unbox_c_rescale(build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1)));
@@ -288,8 +296,8 @@ fn two_barostats_at_same_seed_and_counter_produce_identical_outputs() {
     let state = make_state(px, vx, masses, virials);
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box_a = box_small();
-    let mut sim_box_b = box_small();
+    let mut sim_box_a = box_small(&gpu);
+    let mut sim_box_b = box_small(&gpu);
     let mut timings_a = Timings::new(&gpu).unwrap();
     let mut timings_b = Timings::new(&gpu).unwrap();
     let mut baro_a = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 7));
@@ -300,8 +308,8 @@ fn two_barostats_at_same_seed_and_counter_produce_identical_outputs() {
     baro_b
         .apply(&mut buffers_b, &mut sim_box_b, (1.0e-15 / TIME_F as Real), &mut timings_b)
         .unwrap();
-    let px_a = gpu.device.dtoh_sync_copy(&buffers_a.positions_x).unwrap();
-    let px_b = gpu.device.dtoh_sync_copy(&buffers_b.positions_x).unwrap();
+    let (px_a, _, _) = buffers_a.download_positions().unwrap();
+    let (px_b, _, _) = buffers_b.download_positions().unwrap();
     assert_eq!(px_a, px_b);
     assert_eq!(sim_box_a.lattice(), sim_box_b.lattice());
 }
@@ -321,7 +329,7 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let v_pre = sim_box.volume() as f64;
     let dt_si = 1.0e-13_f64;
     let dt = (dt_si / TIME_F) as Real;
@@ -333,6 +341,7 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, temperature, tau, beta, seed));
     baro.apply(&mut buffers, &mut sim_box, dt, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
 
@@ -340,7 +349,10 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     // `c_rescale_kind` already converts the SI inputs above; the
     // expected formula must therefore use the matching atomic-unit
     // values, and the Boltzmann constant collapses to 1 (kt = T).
-    let r = philox_normal(seed as u32, (seed >> 32) as u32, 1, 0, 0, 0);
+    // The device-resident draw counter starts at 0; the kernel reads
+    // it, draws Philox, then increments. The first kernel call therefore
+    // uses counter = 0.
+    let r = philox_normal(seed as u32, (seed >> 32) as u32, 0, 0, 0, 0);
     let temperature_au = temperature / TEMP_F;
     let p_target_au = p_target / PRESSURE_F;
     let p_current_au = (p_target / 2.0) / PRESSURE_F;
@@ -372,7 +384,7 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let v_pre = sim_box.volume() as f64;
     let dt_si = 1.0e-13_f64;
     let dt = (dt_si / TIME_F) as Real;
@@ -382,6 +394,7 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 1.0e-30, tau, beta, 1));
     baro.apply(&mut buffers, &mut sim_box, dt, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
     // Expected Berendsen μ³ = 1 − β·(dt/τ)·(P_target − P) in atomic units
@@ -401,20 +414,31 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
 // rq-3b9e9550
 #[test]
 fn fractional_coordinates_invariant_under_apply() {
+    use heddle_md::gpu::rescale_positions_device_factor;
     let gpu = init_device().unwrap();
     let p_target = 1.0e6_f64;
     let (px, vx, masses, virials) = system_with_pressure(p_target / 2.0);
     let n = px.len();
     let state = make_state(px.clone(), vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let lx_pre = sim_box.lx();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1));
+    let mut baro = unbox_c_rescale(build_c_rescale(
+        &gpu,
+        n,
+        &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1),
+    ));
     baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as Real), &mut timings)
         .unwrap();
+    // The composed post-force per-particle kernel applies the
+    // position rescale in production. Tests that bypass the composed
+    // kernel dispatch the standalone equivalent against
+    // `mu_device` to keep the post-apply state covered.
+    rescale_positions_device_factor(&mut buffers, &baro.mu_device).unwrap();
+    sim_box.flush_from_device().unwrap();
     let lx_post = sim_box.lx();
-    let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let (px_post, _, _) = buffers.download_positions().unwrap();
     for (i, (a, b)) in px_post.iter().zip(px.iter()).enumerate() {
         let f_pre = (b / lx_pre) as f64;
         let f_post = (a / lx_post) as f64;
@@ -433,7 +457,7 @@ fn triclinic_shape_preserved_under_apply() {
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box =
-        SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.1e-9, 0.2e-9, 0.3e-9).unwrap();
+        SimulationBox::new(&gpu.device, 1.0e-9, 1.0e-9, 1.0e-9, 0.1e-9, 0.2e-9, 0.3e-9).unwrap();
     let [lx_pre, _, _, xy_pre, xz_pre, yz_pre] = sim_box.lattice();
     let r_xy_pre = (xy_pre / lx_pre) as f64;
     let r_xz_pre = (xz_pre / lx_pre) as f64;
@@ -461,7 +485,7 @@ fn generation_advances_after_apply() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let g_pre = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
@@ -528,7 +552,7 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
         vec![0.0; n],
     );
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = IntegratorRegistry::with_builtins()
@@ -563,6 +587,7 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
         baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
             .unwrap();
     }
+    sim_box.flush_from_device().unwrap();
     let v_final = sim_box.volume();
     assert!(v_final.is_finite() && v_final > 0.0);
 }
@@ -592,14 +617,14 @@ fn two_runs_with_same_seed_are_byte_identical() {
             virials.to_vec(),
         );
         let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
-        let mut sim_box = box_small();
+        let mut sim_box = box_small(&gpu);
         let mut timings = Timings::new(gpu).unwrap();
         let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
         for _ in 0..5 {
             baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
                 .unwrap();
         }
-        let positions_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+        let (positions_x, _, _) = buffers.download_positions().unwrap();
         (positions_x, sim_box.lattice())
     }
 
@@ -626,6 +651,7 @@ fn different_seeds_produce_different_trajectories() {
         virials: &[Real],
         seed: u64,
     ) -> Vec<Real> {
+        use heddle_md::gpu::rescale_positions_device_factor;
         let n = px.len();
         let state = make_state(
             px.to_vec(),
@@ -634,14 +660,19 @@ fn different_seeds_produce_different_trajectories() {
             virials.to_vec(),
         );
         let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
-        let mut sim_box = box_small();
+        let mut sim_box = box_small(&gpu);
         let mut timings = Timings::new(gpu).unwrap();
-        let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
+        let mut baro = unbox_c_rescale(build_c_rescale(
+            gpu,
+            n,
+            &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed),
+        ));
         for _ in 0..5 {
             baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
                 .unwrap();
+            rescale_positions_device_factor(&mut buffers, &baro.mu_device).unwrap();
         }
-        gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap()
+        buffers.download_positions().unwrap().0
     }
 
     let a = run_once(&gpu, &px, &vx, &masses, &virials, 1);

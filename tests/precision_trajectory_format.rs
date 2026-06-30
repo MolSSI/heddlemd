@@ -8,10 +8,15 @@
 use std::fs;
 use std::io::Read;
 
+use heddle_md::gpu::init_device;
 use heddle_md::io::trajectory::TrajectoryWriter;
 use heddle_md::pbc::SimulationBox;
 use heddle_md::precision::{REAL_FMT_DIGITS, Real};
 use heddle_md::units::UnitSystem;
+
+fn dev() -> std::sync::Arc<cudarc::driver::CudaDevice> {
+    init_device().expect("init_device").device
+}
 
 fn make_tempdir() -> std::path::PathBuf {
     let mut p = std::env::temp_dir();
@@ -26,7 +31,7 @@ fn make_tempdir() -> std::path::PathBuf {
 }
 
 fn write_one_frame(path: &std::path::Path, positions: Vec<Real>) -> String {
-    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).expect("box");
+    let sim_box = SimulationBox::new(&dev(), 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).expect("box");
     let type_names = vec!["Ar".to_string()];
     let mut writer = TrajectoryWriter::open(
         path,

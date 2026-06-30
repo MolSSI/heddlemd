@@ -193,10 +193,12 @@ struct StubBuilder {
     recorder: Arc<Mutex<Recorder>>,
 }
 
-impl ConstraintBuilder for StubBuilder {
+    impl heddle_md::registry::KindedBuilder for StubBuilder {
     fn kind_name(&self) -> &'static str {
         self.kind
-    }
+    }    }
+
+impl ConstraintBuilder for StubBuilder {
     fn validate_params(&self, _params: &toml::Value) -> Result<(), ConfigError> {
         Ok(())
     }
@@ -234,10 +236,6 @@ impl ConstraintBuilder for StubBuilder {
             group_count,
         }))
     }
-
-    fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
-        Box::new(self.clone())
-    }
 }
 
 fn stub_type(name: &str, kind: &str) -> NamedSlotConfig {
@@ -263,8 +261,8 @@ fn one_atom_state() -> ParticleState {
     .unwrap()
 }
 
-fn big_box() -> SimulationBox {
-    SimulationBox::new(1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap()
+fn big_box(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn list_of_kinds(kinds: &[(usize, &str)], constraint_types: &[NamedSlotConfig]) -> ConstraintList {
@@ -359,7 +357,7 @@ fn two_registered_kinds_on_mixed_topology_fan_out() {
     drop(r);
     // Composite forwards hooks to every inner slot.
     let mut buffers = ParticleBuffers::new(&gpu, &one_atom_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     slot.apply_before_drift(&mut buffers, &sb, 1.0, &mut t).unwrap();
     let r2 = recorder.lock().unwrap();
@@ -405,7 +403,7 @@ fn slot_firing_order_matches_registration_order_and_reverses_when_registration_r
             .unwrap()
             .unwrap();
         let mut buffers = ParticleBuffers::new(&gpu, &one_atom_state()).unwrap();
-        let sb = big_box();
+        let sb = big_box(&gpu);
         let mut t = Timings::new(&gpu).unwrap();
         slot.apply_after_drift(&mut buffers, &sb, 1.0, &mut t).unwrap();
         recorder
@@ -470,7 +468,7 @@ fn composite_short_circuits_on_first_inner_error() {
         .unwrap()
         .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &one_atom_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     let err = slot
         .apply_after_drift(&mut buffers, &sb, 1.0, &mut t)
@@ -564,7 +562,7 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &particle_state).unwrap();
-    let sim_box = SimulationBox::new(1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap();
     let mut sim_box = sim_box;
     let mut ff = ForceField::new(
         &PotentialRegistry::with_builtins(),
@@ -653,7 +651,7 @@ fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &particle_state).unwrap();
-    let mut sim_box = SimulationBox::new(1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap();
+    let mut sim_box = SimulationBox::new(&gpu.device, 1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap();
     let mut ff = ForceField::new(
         &PotentialRegistry::with_builtins(),
         &gpu,
@@ -724,7 +722,7 @@ fn apply_before_drift_on_empty_state_is_a_noop() {
     let gpu = init_device().unwrap();
     let mut slot = empty_shake_slot(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     assert_eq!(buffers.particle_count(), 0);
     use heddle_md::integrator::Constraint;
@@ -739,7 +737,7 @@ fn apply_after_drift_on_empty_state_is_a_noop() {
     let gpu = init_device().unwrap();
     let mut slot = empty_shake_slot(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     use heddle_md::integrator::Constraint;
     slot.apply_after_drift(&mut buffers, &sb, 0.1, &mut t).unwrap();
@@ -753,7 +751,7 @@ fn apply_after_kick_on_empty_state_is_a_noop() {
     let gpu = init_device().unwrap();
     let mut slot = empty_shake_slot(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     use heddle_md::integrator::Constraint;
     slot.apply_after_kick(&mut buffers, &sb, 0.1, &mut t).unwrap();
@@ -767,7 +765,7 @@ fn apply_position_projection_only_on_empty_state_is_a_noop() {
     let gpu = init_device().unwrap();
     let mut slot = empty_shake_slot(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     use heddle_md::integrator::Constraint;
     slot.apply_position_projection_only(&mut buffers, &sb, &mut t).unwrap();
@@ -893,5 +891,404 @@ mode = "all-pairs"
     fs::write(&path, cfg).unwrap();
     load_config(&path)
         .expect("empty [constraints] with langevin-baoab should load (no constraint slot)");
+}
+
+// =====================================================================
+// Framework-level position-projection obligations
+//
+// Every registered constraint builder that reports
+// `supports_position_projection_only(&params) == true` must provide an
+// `apply_position_projection_only` that is (1) a bit-exact identity on
+// the manifold, (2) a residual-bounded, idempotent retraction, and (3)
+// usable as the projection step of a converging steepest-descent
+// minimization. The three tests below exercise every such builtin
+// (settle, shake) against one of these obligations each. A coverage
+// guard forces a newly registered constraint kind to declare a fixture
+// here, so the obligations cannot be silently bypassed.
+// =====================================================================
+
+// Atomic units. SPC/E water geometry: r_OH = 1.0 Å = 1.88973 a₀;
+// r_HH = 1.633 Å = 3.08593 a₀.
+const PROJ_R_OH: Real = 1.889_726_1;
+const PROJ_R_HH: Real = 3.085_926_4;
+const PROJ_M_O: Real = 29_167.43;
+const PROJ_M_H: Real = 1_837.47;
+
+// Representative single-water `[[constraint_types]]` entry for each
+// supporting kind, expressed in atomic units (matching the internal
+// pipeline; the slot constructors consume atomic-unit params directly).
+fn settle_water_type() -> NamedSlotConfig {
+    NamedSlotConfig::from_params_str(
+        "W",
+        "settle",
+        &format!("d_OH = {}\nd_HH = {}\n", PROJ_R_OH as f64, PROJ_R_HH as f64),
+    )
+}
+
+fn shake_water_type() -> NamedSlotConfig {
+    NamedSlotConfig::from_params_str(
+        "W",
+        "shake",
+        &format!(
+            "atoms = 3\nconstraints = [\n  {{ i = 0, j = 1, d = {} }},\n  {{ i = 0, j = 2, d = {} }},\n  {{ i = 1, j = 2, d = {} }},\n]\n",
+            PROJ_R_OH as f64, PROJ_R_OH as f64, PROJ_R_HH as f64,
+        ),
+    )
+}
+
+/// `(kind, constraint_types)` fixture for every registered constraint
+/// kind. Cross-checked against the registry by
+/// [`assert_fixtures_cover_registry`] so a new kind is forced to declare
+/// one.
+fn projection_fixtures() -> Vec<(&'static str, Vec<NamedSlotConfig>)> {
+    vec![
+        ("settle", vec![settle_water_type()]),
+        ("shake", vec![shake_water_type()]),
+    ]
+}
+
+/// Every builder in the default registry must have a fixture, so adding a
+/// constraint kind without exercising its projection obligations fails.
+fn assert_fixtures_cover_registry() {
+    let registry = ConstraintRegistry::with_builtins();
+    let fixtures = projection_fixtures();
+    for b in registry.builders() {
+        assert!(
+            fixtures.iter().any(|(k, _)| *k == b.kind_name()),
+            "registered constraint kind `{}` has no projection fixture; \
+             add one to projection_fixtures() (and mark whether it supports \
+             position-only projection)",
+            b.kind_name()
+        );
+    }
+}
+
+/// One SPC/E water at the exact canonical geometry: atom 0 = O at
+/// `(d_oh, 0, 0)`, atoms 1,2 = H at `(0, ∓r_hh/2, 0)`. Satisfies every
+/// canonical constraint exactly.
+fn rigid_water_state() -> ParticleState {
+    let d_oh = (PROJ_R_OH * PROJ_R_OH - (PROJ_R_HH * 0.5) * (PROJ_R_HH * 0.5)).sqrt();
+    ParticleState::new(
+        vec![d_oh, 0.0, 0.0],
+        vec![0.0, -PROJ_R_HH * 0.5, PROJ_R_HH * 0.5],
+        vec![0.0, 0.0, 0.0],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![PROJ_M_O, PROJ_M_H, PROJ_M_H],
+        vec![0.0; 3],
+        vec![0u32; 3],
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+fn water_constraint_list() -> ConstraintList {
+    ConstraintList {
+        groups: vec![ConstraintGroup {
+            atom_offset: 0,
+            atom_count: 3,
+            constraint_offset: 0,
+            constraint_count: 3,
+            constraint_type_index: 0,
+        }],
+        group_atoms: vec![0, 1, 2],
+        group_constraints: vec![
+            GroupConstraint { local_i: 0, local_j: 1, r0: PROJ_R_OH },
+            GroupConstraint { local_i: 0, local_j: 2, r0: PROJ_R_OH },
+            GroupConstraint { local_i: 1, local_j: 2, r0: PROJ_R_HH },
+        ],
+        particle_count: 3,
+    }
+}
+
+/// Build the registered slot for `kind` over one rigid water, or `None`
+/// if the builder does not support position-only projection.
+fn build_supporting_water_slot(
+    gpu: &GpuContext,
+    kind: &str,
+    cts: &[NamedSlotConfig],
+) -> Option<Box<dyn Constraint>> {
+    let registry = ConstraintRegistry::with_builtins();
+    let builder = registry.lookup(kind).expect("fixture kind is registered");
+    if !builder.supports_position_projection_only(&cts[0].params) {
+        return None;
+    }
+    let list = water_constraint_list();
+    let state = rigid_water_state();
+    registry
+        .build_optional(&list, gpu, 3, &state.masses, cts)
+        .unwrap()
+}
+
+/// Min-image-free distance between two atoms, reconstructed in f64 so the
+/// assertion error is dominated by the kernel's own f32 convergence, not
+/// by host-side f32 round-off.
+fn pdist(px: &[Real], py: &[Real], pz: &[Real], a: usize, b: usize) -> f64 {
+    let dx = (px[a] - px[b]) as f64;
+    let dy = (py[a] - py[b]) as f64;
+    let dz = (pz[a] - pz[b]) as f64;
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+/// Largest per-atom Euclidean displacement between two position sets.
+fn max_atom_displacement(
+    ax: &[Real],
+    ay: &[Real],
+    az: &[Real],
+    bx: &[Real],
+    by: &[Real],
+    bz: &[Real],
+) -> f64 {
+    (0..ax.len())
+        .map(|i| {
+            let dx = (ax[i] - bx[i]) as f64;
+            let dy = (ay[i] - by[i]) as f64;
+            let dz = (az[i] - bz[i]) as f64;
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        })
+        .fold(0.0, f64::max)
+}
+
+fn assert_water_on_manifold(px: &[Real], py: &[Real], pz: &[Real], ctx: &str) {
+    let rel = |d: f64, r: f64| (d - r).abs() / r;
+    let r_oh = PROJ_R_OH as f64;
+    let r_hh = PROJ_R_HH as f64;
+    let tol = 1.0e-6;
+    assert!(rel(pdist(px, py, pz, 0, 1), r_oh) < tol, "{ctx}: O-H1 off manifold");
+    assert!(rel(pdist(px, py, pz, 0, 2), r_oh) < tol, "{ctx}: O-H2 off manifold");
+    assert!(rel(pdist(px, py, pz, 1, 2), r_hh) < tol, "{ctx}: H-H off manifold");
+}
+
+// rq-7d63f689
+#[test]
+fn projection_is_bit_exact_identity_on_manifold_for_every_supporting_kind() {
+    assert_fixtures_cover_registry();
+    let gpu = init_device().unwrap();
+    for (kind, cts) in projection_fixtures() {
+        let Some(mut slot) = build_supporting_water_slot(&gpu, kind, &cts) else {
+            continue;
+        };
+        let state = rigid_water_state();
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let sb = big_box(&gpu);
+        let mut t = Timings::new(&gpu).unwrap();
+        // The water is already at the exact canonical geometry, so the
+        // projection must leave every coordinate byte-identical.
+        let (bx, by, bz) = buffers.download_positions().unwrap();
+        slot.apply_position_projection_only(&mut buffers, &sb, &mut t).unwrap();
+        let (ax, ay, az) = buffers.download_positions().unwrap();
+        assert_eq!(bx, ax, "{kind}: x perturbed by projecting an on-manifold molecule");
+        assert_eq!(by, ay, "{kind}: y perturbed by projecting an on-manifold molecule");
+        assert_eq!(bz, az, "{kind}: z perturbed by projecting an on-manifold molecule");
+    }
+}
+
+// rq-78f1f153
+#[test]
+fn projection_displacement_is_residual_bounded_and_idempotent_for_every_supporting_kind() {
+    assert_fixtures_cover_registry();
+    let gpu = init_device().unwrap();
+    // Small off-manifold perturbation. Distinct per-atom directions so
+    // every constraint is broken, not just one.
+    let eps: Real = 2.0e-3;
+    let dirs = [(1.0, -0.5, 0.3), (-0.7, 1.0, -0.4), (0.4, -0.8, 1.0)];
+    for (kind, cts) in projection_fixtures() {
+        let Some(mut slot) = build_supporting_water_slot(&gpu, kind, &cts) else {
+            continue;
+        };
+        let state = rigid_water_state();
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let sb = big_box(&gpu);
+        let mut t = Timings::new(&gpu).unwrap();
+
+        // Perturb off-manifold by O(eps).
+        let (mut px, mut py, mut pz) = buffers.download_positions().unwrap();
+        for (i, (dx, dy, dz)) in dirs.iter().enumerate() {
+            px[i] += eps * dx;
+            py[i] += eps * dy;
+            pz[i] += eps * dz;
+        }
+        buffers.upload_positions(&px, &py, &pz).unwrap();
+        let (ix, iy, iz) = (px.clone(), py.clone(), pz.clone());
+
+        slot.apply_position_projection_only(&mut buffers, &sb, &mut t).unwrap();
+        let (qx, qy, qz) = buffers.download_positions().unwrap();
+        assert_water_on_manifold(&qx, &qy, &qz, &format!("{kind} after projection"));
+
+        // Residual-bounded: the move is O(eps), not a constraint-scale
+        // step (~r0 ≈ 1.9 a₀, ~1000× eps). A 10× margin keeps the bound
+        // discriminating while tolerating mass-weighting and geometry.
+        let disp = max_atom_displacement(&ix, &iy, &iz, &qx, &qy, &qz);
+        let bound = 10.0 * eps as f64;
+        assert!(
+            disp < bound,
+            "{kind}: projection moved an atom {disp} a₀, exceeding O(eps) bound {bound}"
+        );
+
+        // Idempotent: re-projecting an already-on-manifold configuration
+        // applies no further displacement.
+        slot.apply_position_projection_only(&mut buffers, &sb, &mut t).unwrap();
+        let (rx, ry, rz) = buffers.download_positions().unwrap();
+        let second = max_atom_displacement(&qx, &qy, &qz, &rx, &ry, &rz);
+        assert!(
+            second < 1.0e-7,
+            "{kind}: second projection moved an atom {second} a₀ (not idempotent)"
+        );
+    }
+}
+
+/// SI-unit `[[constraint_types]]` block for the end-to-end minimization
+/// config (water with d_OH = 1.0 Å, d_HH = 1.633 Å).
+fn sd_constraint_types_block(kind: &str) -> String {
+    match kind {
+        "settle" => "[[constraint_types]]\nname = \"W\"\nkind = \"settle\"\n\
+                     d_OH = 1.0e-10\nd_HH = 1.633e-10\n"
+            .to_string(),
+        "shake" => "[[constraint_types]]\nname = \"W\"\nkind = \"shake\"\natoms = 3\n\
+                    constraints = [\n  { i = 0, j = 1, d = 1.0e-10 },\n  \
+                    { i = 0, j = 2, d = 1.0e-10 },\n  { i = 1, j = 2, d = 1.633e-10 },\n]\n"
+            .to_string(),
+        other => panic!(
+            "no steepest-descent constraint_types block for supporting kind `{other}`; add one"
+        ),
+    }
+}
+
+// rq-a861d13f
+#[test]
+fn sd_minimization_with_constraint_converges_for_every_supporting_kind() {
+    use std::fs;
+    let registry = ConstraintRegistry::with_builtins();
+    for (kind, cts) in projection_fixtures() {
+        // Only kinds that report support participate in minimization.
+        if !registry
+            .lookup(kind)
+            .unwrap()
+            .supports_position_projection_only(&cts[0].params)
+        {
+            continue;
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "heddlemd-proj-min-{}-{}-{}",
+            kind,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        if dir.exists() {
+            let _ = fs::remove_dir_all(&dir);
+        }
+        fs::create_dir_all(&dir).unwrap();
+
+        // Two rigid SPC/E waters with their oxygens 3.0 Å apart (a real
+        // repulsive O–O force to minimize). Each water starts at the
+        // exact canonical geometry, so every trial-step projection starts
+        // from an on-manifold molecule — the case the identity property
+        // must keep from collapsing the line search.
+        let init = "6\n\
+            Lattice=\"5.0e-9 0 0 0 5.0e-9 0 0 0 5.0e-9\" Properties=species:S:1:pos:R:3\n\
+            O  -1.500000000e-10 0.000000000e0 0.000000000e0\n\
+            H  -0.500000000e-10 0.000000000e0 0.000000000e0\n\
+            H  -1.833800000e-10 9.426400000e-11 0.000000000e0\n\
+            O   1.500000000e-10 0.000000000e0 0.000000000e0\n\
+            H   2.500000000e-10 0.000000000e0 0.000000000e0\n\
+            H   1.166200000e-10 9.426400000e-11 0.000000000e0\n";
+        fs::write(dir.join("water.in.xyz"), init).unwrap();
+        fs::write(
+            dir.join("water.in.topology"),
+            "[constraints]\n0 1 2 W\n3 4 5 W\n",
+        )
+        .unwrap();
+
+        let cfg = format!(
+            r#"schema_version = 1
+units = "si"
+init = "water.in.xyz"
+topology = "water.in.topology"
+
+[simulation]
+seed = 1
+temperature = 0.0
+
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+initial_step = 1.0e-13
+max_step = 1.0e-11
+force_tolerance = 1.0e-11
+energy_tolerance = 1.0e-6
+max_iterations = 500
+
+[minimization.output]
+minlog_every = 1
+trajectory_every = 0
+
+[[particle_types]]
+name = "O"
+mass = 2.6566e-26
+charge = 0.0
+
+[[particle_types]]
+name = "H"
+mass = 1.6735e-27
+charge = 0.0
+
+[[pair_interactions]]
+between = ["O", "O"]
+potential = "lennard-jones"
+sigma = 3.166e-10
+epsilon = 1.080e-21
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[pair_interactions]]
+between = ["H", "H"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[pair_interactions]]
+between = ["H", "O"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+{constraints}
+[neighbor_list]
+mode = "all-pairs"
+"#,
+            constraints = sd_constraint_types_block(kind),
+        );
+        let cfg_path = dir.join("water.in.toml");
+        fs::write(&cfg_path, cfg).unwrap();
+
+        let summary = match heddle_md::runner::run_simulation(&cfg_path) {
+            Ok(s) => s,
+            Err(e) => panic!("{kind}: run_simulation failed (line search likely collapsed): {e:?}"),
+        };
+        assert_eq!(summary.phases.len(), 1, "{kind}: expected one phase");
+        let ps = &summary.phases[0];
+        assert_eq!(ps.kind, "minimization", "{kind}: wrong phase kind");
+        assert!(
+            ps.n_steps > 0 && ps.n_steps <= 500,
+            "{kind}: iters = {} (out of range)",
+            ps.n_steps
+        );
+        assert!(
+            ps.convergence.is_some(),
+            "{kind}: minimization did not converge before the step cap"
+        );
+    }
 }
 
