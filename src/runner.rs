@@ -2222,6 +2222,18 @@ fn barostat_couples_per_step(
     )
 }
 
+/// Packed-neighbour buffer capacities, used to detect whether a barostat
+/// move's trial force evaluation grew (and so reallocated) a buffer —
+/// which invalidates the captured graph's device pointers. A move that
+/// leaves the capacities unchanged needs no graph re-capture.
+fn packed_capacities(force_field: &ForceField) -> Option<(u32, u32)> {
+    force_field
+        .neighbor_list
+        .as_ref()
+        .and_then(|nl| nl.packed.as_ref())
+        .map(|p| (p.interacting_tiles_capacity, p.single_pairs_capacity))
+}
+
 // rq-766c88fb rq-e35fa835
 /// Captures the phase's executable graphs: the forces+scalars graph
 /// always, and the forces-only graph unless a barostat is active. Both
@@ -2798,13 +2810,15 @@ fn run_batched_graph_loop(
         // rq-03a5a290 — a periodic (Monte-Carlo) barostat runs its
         // host-orchestrated move at the move boundary, before the
         // neighbour pre-step so that the moved box is rebuilt against. The
-        // move's trial force evaluations may grow a packed-neighbour
-        // buffer, which would invalidate the captured graph's device
-        // pointers, so a move forces a re-capture below.
-        let mut move_happened = false;
+        // captured graph reads the box from the persistent lattice device
+        // buffer (pointer stable), so a move alone needs no re-capture;
+        // only a move whose trial force evaluation grew a packed-neighbour
+        // buffer invalidates the captured device pointers and forces one.
+        let mut move_reallocated = false;
         if let Some(f) = move_frequency {
             if f > 0 && step % f == 0 && step <= n_steps {
                 if let Some(b) = barostat.as_mut() {
+                    let caps_before = packed_capacities(&setup.force_field);
                     b.apply_move(
                         &mut setup.force_field,
                         &mut setup.buffers,
@@ -2814,7 +2828,7 @@ fn run_batched_graph_loop(
                         timings,
                     )
                     .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
-                    move_happened = true;
+                    move_reallocated = caps_before != packed_capacities(&setup.force_field);
                 }
             }
         }
@@ -2832,7 +2846,7 @@ fn run_batched_graph_loop(
         // graph against the new buffers before the next batch. On a
         // re-capture driver error, finish the phase on the per-step
         // launch loop from the next un-run step. rq-67a09135 rq-1217c816
-        if (reallocated || move_happened) && step < n_steps {
+        if (reallocated || move_reallocated) && step < n_steps {
             match capture_phase_graph(
                 &mut setup.buffers,
                 &mut setup.sim_box,
