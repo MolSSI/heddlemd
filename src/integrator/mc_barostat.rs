@@ -92,6 +92,13 @@ pub struct McBarostat {
     mol_atom_offsets: CudaSlice<u32>,
     mol_atom_indices: CudaSlice<u32>,
     pe_scratch: CudaSlice<Real>,
+    /// Pre-move device-resident snapshots for revert-on-reject
+    /// (device-to-device copies; no host round-trip). Sized to the
+    /// particle count in `init_run`.
+    pos_snapshot: CudaSlice<Real4>,
+    force_snapshot_x: CudaSlice<Real>,
+    force_snapshot_y: CudaSlice<Real>,
+    force_snapshot_z: CudaSlice<Real>,
 }
 
 impl McBarostat {
@@ -108,6 +115,11 @@ impl McBarostat {
         // Placeholder molecule tables; `init_run` uploads the real ones.
         let mol_atom_offsets = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
         let mol_atom_indices = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
+        // Placeholder snapshot buffers; `init_run` sizes them to N.
+        let pos_snapshot = device.alloc_zeros::<Real4>(0).map_err(GpuError::from)?;
+        let force_snapshot_x = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
+        let force_snapshot_y = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
+        let force_snapshot_z = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
         Ok(McBarostat {
             device,
             pressure,
@@ -127,6 +139,10 @@ impl McBarostat {
             mol_atom_offsets,
             mol_atom_indices,
             pe_scratch,
+            pos_snapshot,
+            force_snapshot_x,
+            force_snapshot_y,
+            force_snapshot_z,
         })
     }
 
@@ -187,6 +203,11 @@ impl Barostat for McBarostat {
                 .htod_sync_copy(&molecules.mol_atom_indices)
                 .map_err(GpuError::from)?
         };
+        let n = molecules.particle_count;
+        self.pos_snapshot = self.device.alloc_zeros::<Real4>(n).map_err(GpuError::from)?;
+        self.force_snapshot_x = self.device.alloc_zeros::<Real>(n).map_err(GpuError::from)?;
+        self.force_snapshot_y = self.device.alloc_zeros::<Real>(n).map_err(GpuError::from)?;
+        self.force_snapshot_z = self.device.alloc_zeros::<Real>(n).map_err(GpuError::from)?;
         let v0 = sim_box.volume() as f64;
         self.max_volume_step = self.volume_step_config.unwrap_or(0.01 * v0);
         self.most_recent_volume = v0;
@@ -207,26 +228,36 @@ impl Barostat for McBarostat {
             return Ok(());
         }
 
-        // 1. Current energy at the pre-move configuration.
-        force_field.step(buffers, sim_box, timings, AggregateLevel::ForcesAndScalars)?;
+        // 1. Current energy at the pre-move configuration. The runner
+        //    evaluates scalars on the step immediately before a move
+        //    boundary, so `buffers.potential_energies` already holds the
+        //    per-particle potential energy of the current configuration —
+        //    reduce it directly rather than re-running the force pipeline.
         timings.kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)?;
         let u_old = compute_total_potential_energy(buffers, &mut self.pe_scratch)? as f64;
         timings.kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)?;
 
-        // 2. Snapshot box (host), positions and forces (host round-trip
-        //    — moves are rare). Flush the box so host fields are current.
+        // 2. Snapshot box (host fields), positions and forces (device-to-
+        //    device — no host round-trip). Flush the box so host fields
+        //    are current. `buffers.forces_*` hold `F` at the current
+        //    configuration (from the pre-move dynamics step); the
+        //    snapshot restores them on a rejected move.
         sim_box.flush_from_device()?;
         let lattice_pre = sim_box.lattice();
         let v_old = sim_box.volume() as f64;
         let min_width_pre = sim_box.min_perpendicular_width() as f64;
-        let posq_snapshot: Vec<Real4> =
-            self.device.dtoh_sync_copy(&buffers.posq).map_err(GpuError::from)?;
-        let fx_snapshot: Vec<Real> =
-            self.device.dtoh_sync_copy(&buffers.forces_x).map_err(GpuError::from)?;
-        let fy_snapshot: Vec<Real> =
-            self.device.dtoh_sync_copy(&buffers.forces_y).map_err(GpuError::from)?;
-        let fz_snapshot: Vec<Real> =
-            self.device.dtoh_sync_copy(&buffers.forces_z).map_err(GpuError::from)?;
+        self.device
+            .dtod_copy(&buffers.posq, &mut self.pos_snapshot)
+            .map_err(GpuError::from)?;
+        self.device
+            .dtod_copy(&buffers.forces_x, &mut self.force_snapshot_x)
+            .map_err(GpuError::from)?;
+        self.device
+            .dtod_copy(&buffers.forces_y, &mut self.force_snapshot_y)
+            .map_err(GpuError::from)?;
+        self.device
+            .dtod_copy(&buffers.forces_z, &mut self.force_snapshot_z)
+            .map_err(GpuError::from)?;
 
         // 3. Pre-increment the draw counter.
         self.draw_counter += 1;
@@ -293,18 +324,19 @@ impl Barostat for McBarostat {
             if accepted {
                 v_post = v_new;
             } else {
-                // 9. Revert positions, forces, and the box.
+                // 9. Revert positions, forces, and the box (device-to-
+                //    device restore from the snapshots).
                 self.device
-                    .htod_sync_copy_into(&posq_snapshot, &mut buffers.posq)
+                    .dtod_copy(&self.pos_snapshot, &mut buffers.posq)
                     .map_err(GpuError::from)?;
                 self.device
-                    .htod_sync_copy_into(&fx_snapshot, &mut buffers.forces_x)
+                    .dtod_copy(&self.force_snapshot_x, &mut buffers.forces_x)
                     .map_err(GpuError::from)?;
                 self.device
-                    .htod_sync_copy_into(&fy_snapshot, &mut buffers.forces_y)
+                    .dtod_copy(&self.force_snapshot_y, &mut buffers.forces_y)
                     .map_err(GpuError::from)?;
                 self.device
-                    .htod_sync_copy_into(&fz_snapshot, &mut buffers.forces_z)
+                    .dtod_copy(&self.force_snapshot_z, &mut buffers.forces_z)
                     .map_err(GpuError::from)?;
                 sim_box
                     .set_lattice(

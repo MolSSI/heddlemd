@@ -859,8 +859,15 @@ pub trait Barostat: std::fmt::Debug + Send {
     /// Perform a periodic barostat's host-orchestrated move at a batch
     /// boundary. Receives `&mut ForceField` (unlike `apply`) because the
     /// move re-evaluates the potential energy at a trial configuration.
-    /// Default no-op; per-step barostats do not override it. See
-    /// `rqm/integration/mc-barostat.md`.
+    /// Default no-op; per-step barostats do not override it.
+    ///
+    /// Contract: the caller (the runner) guarantees that
+    /// `buffers.potential_energies` and `buffers.forces_*` hold the
+    /// current configuration's values on entry — i.e. the force
+    /// evaluation on the step immediately preceding the move ran at
+    /// `AggregateLevel::ForcesAndScalars`. A periodic barostat relies on
+    /// this to obtain the current-configuration energy without a
+    /// redundant force evaluation. See `rqm/integration/mc-barostat.md`.
     fn apply_move(
         &mut self,
         _force_field: &mut ForceField,

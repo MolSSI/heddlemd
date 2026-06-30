@@ -70,13 +70,16 @@ on the host between graph batches, so it never appears inside a captured
 graph and never needs to be replayed.
 
 A periodic barostat does **not** force every step to evaluate scalars.
-The runner's `needs_scalars(s)` predicate is driven by the output cadence
-(`log_every`) only; a `BarostatPeriodicity::EveryNSteps` barostat does not
-set it true. The phase therefore captures **both** the forces-only and the
-forces+scalars graphs (see `cuda-graphs.md`), and every non-log dynamics
-step replays the cheap forces-only graph. The forces+scalars evaluations
-the move itself performs are issued by `apply_move` on the host, outside
-the captured graphs.
+The runner's `needs_scalars(s)` predicate is true only on output-cadence
+(`log_every`) steps and on the single step immediately before each move
+boundary (so the move reuses that step's potential energy as `U_old`); a
+`BarostatPeriodicity::EveryNSteps` barostat does not otherwise set it
+true. The phase therefore captures **both** the forces-only and the
+forces+scalars graphs (see `cuda-graphs.md`), and the ~`(frequency−1)/frequency`
+of steps that are neither a log step nor a pre-move step replay the cheap
+forces-only graph. The one trial-configuration force evaluation the move
+itself performs is issued by `apply_move` on the host, outside the
+captured graphs.
 
 The runner bounds each replay batch so it ends on the next move boundary,
 in the same way it already bounds batches on the next log / trajectory
@@ -114,13 +117,16 @@ writes `buffers.positions_*` and `sim_box`. It never reads or writes
 
 For each invocation:
 
-1. **Current energy.** Evaluate the force field at the current
-   configuration with `force_field.step(buffers, sim_box, timings,
-   AggregateLevel::ForcesAndScalars)` and reduce the total potential
-   energy `U_old` with `compute_total_potential_energy`. This refreshes
-   `buffers.forces_*` and `buffers.potential_energies` from the current
-   (pre-move) box, which the preceding forces-only dynamics steps may have
-   left stale. The reduction is a single host dtoh of one `Real`.
+1. **Current energy.** Reduce the total potential energy `U_old` with
+   `compute_total_potential_energy` from the existing
+   `buffers.potential_energies`. No force evaluation is performed here:
+   the runner evaluates scalars on the step immediately before a move
+   boundary (the move boundary always coincides with a batch boundary),
+   so `buffers.potential_energies` and `buffers.forces_*` already hold the
+   current configuration's values. The reduction is a single host dtoh of
+   one `Real`. (Reusing the pre-move energy removes one of the two force
+   evaluations a move would otherwise need; it is bit-exact because the
+   dynamics step computed the same energy at the same configuration.)
 
 2. **Snapshot.** Record the pre-move state needed for a possible revert:
    - copy `positions_x/y/z` device-to-device into the slot-owned
@@ -241,20 +247,21 @@ issues:
 
 | Order | Step                | Call                                   | Operation                                                                                   | Stage label                     |
 | ----- | ------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------- |
-| 1     | Current force eval  | `force_field.step(.., ForcesAndScalars)` | refresh forces / energy at the pre-move box                                                | (force-field stages)            |
-| 2     | Current PE reduce   | `compute_total_potential_energy`       | dtoh of `U_old`                                                                              | `POTENTIAL_ENERGY_REDUCE`       |
-| 3     | Position snapshot   | device-to-device copy ×3               | save `positions_{x,y,z}`                                                                     | `MC_BAROSTAT_SNAPSHOT`          |
-| 4     | Force snapshot      | device-to-device copy ×3               | save `forces_{x,y,z}`                                                                        | `MC_BAROSTAT_SNAPSHOT`          |
-| 5     | COM scale           | `mc_barostat_scale_molecule_com`       | scale each molecule's COM by `scale`; mutate lattice via `multiply_lattice_isotropic`       | `MC_BAROSTAT_SCALE_COM`         |
-| 6     | Trial force eval    | `force_field.step(.., ForcesAndScalars)` | rebuild neighbor list + forces / energy at the trial box                                   | (force-field stages)            |
-| 7     | Trial PE reduce     | `compute_total_potential_energy`       | dtoh of `U_new`                                                                              | `POTENTIAL_ENERGY_REDUCE`       |
-| 8     | Revert (reject only)| device-to-device copy ×6 + `set_lattice` | restore positions, forces, and lattice                                                     | `MC_BAROSTAT_REVERT`            |
+| 1     | Current PE reduce   | `compute_total_potential_energy`       | dtoh of `U_old` from the pre-move scalars step (no force eval)                               | `POTENTIAL_ENERGY_REDUCE`       |
+| 2     | Position snapshot   | `dtod_copy`                            | save `posq`                                                                                  | (untimed)                       |
+| 3     | Force snapshot      | `dtod_copy` ×3                         | save `forces_{x,y,z}`                                                                        | (untimed)                       |
+| 4     | COM scale           | `mc_barostat_scale_molecule_com`       | scale each molecule's COM by `scale`; mutate lattice via `multiply_lattice_isotropic`       | `MC_BAROSTAT_SCALE_COM`         |
+| 5     | Trial force eval    | `force_field.step(.., ForcesAndScalars)` | rebuild neighbor list + forces / energy at the trial box                                   | (force-field stages)            |
+| 6     | Trial PE reduce     | `compute_total_potential_energy`       | dtoh of `U_new`                                                                              | `POTENTIAL_ENERGY_REDUCE`       |
+| 7     | Revert (reject only)| `dtod_copy` ×4 + `set_lattice`         | restore positions, forces, and lattice                                                       | (untimed)                       |
 
-Steps 3–4 and 6–8 are skipped on an early reject (step 4 / step 5 of the
-*Algorithm*). The two force evaluations dominate the move's cost; at the
-default `frequency = 25` they add roughly `2/25 ≈ 8%` extra force
-evaluations on top of the dynamics, which the forces-only dynamics graph
-between moves more than offsets relative to a per-step virial barostat.
+Steps 2–3 and 5–7 are skipped on an early reject (step 4 / step 5 of the
+*Algorithm*). The move performs **one** force evaluation (the trial at the
+scaled box); the current-configuration energy is reused from the pre-move
+dynamics step's scalars. At the default `frequency = 25` that adds roughly
+`1/25 ≈ 4%` extra force evaluations on top of the dynamics, which the
+forces-only dynamics graph between moves offsets relative to a per-step
+virial barostat.
 
 ## Molecule Grouping <!-- rq-3e1fba8b -->
 

@@ -2500,8 +2500,14 @@ fn run_per_step_range(
             // forces a scalars step. The graph replay loop selects its
             // forces-only / forces+scalars graphs on the same condition.
             let log_due = phase.output.log_every > 0 && step % phase.output.log_every == 0;
+            // rq-03a5a290 — evaluate scalars on the step preceding a
+            // periodic-barostat move so the move reads the current-config
+            // energy without a redundant force evaluation.
+            let is_move_boundary = barostat_move_frequency(barostat)
+                .is_some_and(|f| f > 0 && step % f as u64 == 0);
             let runner_needs_scalars =
-                step_needs_force_scalars(log_due, barostat_couples_per_step(barostat));
+                step_needs_force_scalars(log_due, barostat_couples_per_step(barostat))
+                    || is_move_boundary;
             let result = if let Some(skip_idx) = post_force_substep_index {
                 crate::integrator::run_step(
                     integrator.as_mut(),
@@ -2774,7 +2780,8 @@ fn run_batched_graph_loop(
             // consumes the per-step virial. Other steps replay the
             // forces-only graph.
             let needs_scalars =
-                step_needs_force_scalars(log_every > 0 && s % log_every == 0, barostat_active);
+                step_needs_force_scalars(log_every > 0 && s % log_every == 0, barostat_active)
+                    || move_frequency.is_some_and(|f| f > 0 && s % f == 0);
             graph_loop.launch(needs_scalars).map_err(|e| {
                 (
                     RunnerError::Gpu(crate::gpu::GpuError(match e {
