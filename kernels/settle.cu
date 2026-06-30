@@ -137,9 +137,10 @@ __device__ static inline void settle_project_positions(
 // Miyamoto-Kollman rotation (the pre-drift snapshot supplies the reference
 // orientation frame), updates the half-step velocities to be consistent
 // with the position correction, and writes the position-level half of the
-// constraint virial. The closed form is the Miyamoto & Kollman 1992
-// algorithm as in OpenMM's ReferenceSETTLEAlgorithm; every sqrt argument is
-// clamped (settle_csqrt) so f32 round-off cannot produce a NaN.
+// constraint virial. The closed form is the analytical rigid-water
+// rotation of Miyamoto & Kollman (J. Comput. Chem. 13(8), pp. 952-962,
+// 1992); every sqrt argument is clamped (settle_csqrt) so f32 round-off
+// cannot produce a NaN.
 // rq-709c8eb5 rq-fa14a87f rq-4617c285
 extern "C" __global__ void settle_positions(
     Real4 *posq,
@@ -204,16 +205,16 @@ extern "C" __global__ void settle_positions(
   Real m0 = group_m_o[g];
   Real m1 = group_m_h[g];
   Real m2 = group_m_h[g];
-  Real invTotalMass = R(1.0) / (m0 + m1 + m2);
+  Real inv_total_mass = R(1.0) / (m0 + m1 + m2);
   Real ra = group_ra[g], rb = group_rb[g], rc = group_rc[g];
   Real d2 = R(2.0) * rc;            // target H–H distance
   Real d2sq = d2 * d2;
 
-  // --- Miyamoto-Kollman position reset (OpenMM ReferenceSETTLEAlgorithm) ---
+  // --- Miyamoto-Kollman analytical reset (J. Comput. Chem. 13(8), 1992) ---
   // All quantities are relative to the reference oxygen snp[0].
-  Real xcom = (xp[0][0] * m0 + (xb0 + xp[1][0]) * m1 + (xc0 + xp[2][0]) * m2) * invTotalMass;
-  Real ycom = (xp[0][1] * m0 + (yb0 + xp[1][1]) * m1 + (yc0 + xp[2][1]) * m2) * invTotalMass;
-  Real zcom = (xp[0][2] * m0 + (zb0 + xp[1][2]) * m1 + (zc0 + xp[2][2]) * m2) * invTotalMass;
+  Real xcom = (xp[0][0] * m0 + (xb0 + xp[1][0]) * m1 + (xc0 + xp[2][0]) * m2) * inv_total_mass;
+  Real ycom = (xp[0][1] * m0 + (yb0 + xp[1][1]) * m1 + (yc0 + xp[2][1]) * m2) * inv_total_mass;
+  Real zcom = (xp[0][2] * m0 + (zb0 + xp[1][2]) * m1 + (zc0 + xp[2][2]) * m2) * inv_total_mass;
 
   Real xa1 = xp[0][0] - xcom, ya1 = xp[0][1] - ycom, za1 = xp[0][2] - zcom;
   Real xb1 = xb0 + xp[1][0] - xcom, yb1 = yb0 + xp[1][1] - ycom, zb1 = zb0 + xp[1][2] - zcom;
@@ -221,84 +222,88 @@ extern "C" __global__ void settle_positions(
 
   // Orthonormal frame: Z' = reference plane normal (b0 × c0); X' from the
   // displaced oxygen; Y' completes the right-handed triad.
-  Real xaksZd = yb0 * zc0 - zb0 * yc0;
-  Real yaksZd = zb0 * xc0 - xb0 * zc0;
-  Real zaksZd = xb0 * yc0 - yb0 * xc0;
-  Real xaksXd = ya1 * zaksZd - za1 * yaksZd;
-  Real yaksXd = za1 * xaksZd - xa1 * zaksZd;
-  Real zaksXd = xa1 * yaksZd - ya1 * xaksZd;
-  Real xaksYd = yaksZd * zaksXd - zaksZd * yaksXd;
-  Real yaksYd = zaksZd * xaksXd - xaksZd * zaksXd;
-  Real zaksYd = xaksZd * yaksXd - yaksZd * xaksXd;
+  Real ez_x = yb0 * zc0 - zb0 * yc0;
+  Real ez_y = zb0 * xc0 - xb0 * zc0;
+  Real ez_z = xb0 * yc0 - yb0 * xc0;
+  Real ex_x = ya1 * ez_z - za1 * ez_y;
+  Real ex_y = za1 * ez_x - xa1 * ez_z;
+  Real ex_z = xa1 * ez_y - ya1 * ez_x;
+  Real ey_x = ez_y * ex_z - ez_z * ex_y;
+  Real ey_y = ez_z * ex_x - ez_x * ex_z;
+  Real ey_z = ez_x * ex_y - ez_y * ex_x;
 
-  Real axlng = settle_csqrt(xaksXd * xaksXd + yaksXd * yaksXd + zaksXd * zaksXd);
-  Real aylng = settle_csqrt(xaksYd * xaksYd + yaksYd * yaksYd + zaksYd * zaksYd);
-  Real azlng = settle_csqrt(xaksZd * xaksZd + yaksZd * yaksZd + zaksZd * zaksZd);
-  Real inv_ax = (axlng > R(0.0)) ? R(1.0) / axlng : R(0.0);
-  Real inv_ay = (aylng > R(0.0)) ? R(1.0) / aylng : R(0.0);
-  Real inv_az = (azlng > R(0.0)) ? R(1.0) / azlng : R(0.0);
-  Real trns11 = xaksXd * inv_ax, trns21 = yaksXd * inv_ax, trns31 = zaksXd * inv_ax;
-  Real trns12 = xaksYd * inv_ay, trns22 = yaksYd * inv_ay, trns32 = zaksYd * inv_ay;
-  Real trns13 = xaksZd * inv_az, trns23 = yaksZd * inv_az, trns33 = zaksZd * inv_az;
+  Real ex_len = settle_csqrt(ex_x * ex_x + ex_y * ex_y + ex_z * ex_z);
+  Real ey_len = settle_csqrt(ey_x * ey_x + ey_y * ey_y + ey_z * ey_z);
+  Real ez_len = settle_csqrt(ez_x * ez_x + ez_y * ez_y + ez_z * ez_z);
+  Real inv_ex = (ex_len > R(0.0)) ? R(1.0) / ex_len : R(0.0);
+  Real inv_ey = (ey_len > R(0.0)) ? R(1.0) / ey_len : R(0.0);
+  Real inv_ez = (ez_len > R(0.0)) ? R(1.0) / ez_len : R(0.0);
+  // Rows of `rot` are the normalised primed-frame basis vectors; rot_ij
+  // is component i (x/y/z = 1/2/3) of primed axis j (X'/Y'/Z' = 1/2/3).
+  Real rot11 = ex_x * inv_ex, rot21 = ex_y * inv_ex, rot31 = ex_z * inv_ex;
+  Real rot12 = ey_x * inv_ey, rot22 = ey_y * inv_ey, rot32 = ey_z * inv_ey;
+  Real rot13 = ez_x * inv_ez, rot23 = ez_y * inv_ez, rot33 = ez_z * inv_ez;
 
-  Real xb0d = trns11 * xb0 + trns21 * yb0 + trns31 * zb0;
-  Real yb0d = trns12 * xb0 + trns22 * yb0 + trns32 * zb0;
-  Real xc0d = trns11 * xc0 + trns21 * yc0 + trns31 * zc0;
-  Real yc0d = trns12 * xc0 + trns22 * yc0 + trns32 * zc0;
-  Real za1d = trns13 * xa1 + trns23 * ya1 + trns33 * za1;
-  Real xb1d = trns11 * xb1 + trns21 * yb1 + trns31 * zb1;
-  Real yb1d = trns12 * xb1 + trns22 * yb1 + trns32 * zb1;
-  Real zb1d = trns13 * xb1 + trns23 * yb1 + trns33 * zb1;
-  Real xc1d = trns11 * xc1 + trns21 * yc1 + trns31 * zc1;
-  Real yc1d = trns12 * xc1 + trns22 * yc1 + trns32 * zc1;
-  Real zc1d = trns13 * xc1 + trns23 * yc1 + trns33 * zc1;
+  // Reference and current bond vectors projected into the primed frame
+  // (`_xp`/`_yp`/`_zp` = primed x/y/z; `b`/`c` = H1/H2, `a` = O).
+  Real b0_xp = rot11 * xb0 + rot21 * yb0 + rot31 * zb0;
+  Real b0_yp = rot12 * xb0 + rot22 * yb0 + rot32 * zb0;
+  Real c0_xp = rot11 * xc0 + rot21 * yc0 + rot31 * zc0;
+  Real c0_yp = rot12 * xc0 + rot22 * yc0 + rot32 * zc0;
+  Real a1_zp = rot13 * xa1 + rot23 * ya1 + rot33 * za1;
+  Real b1_xp = rot11 * xb1 + rot21 * yb1 + rot31 * zb1;
+  Real b1_yp = rot12 * xb1 + rot22 * yb1 + rot32 * zb1;
+  Real b1_zp = rot13 * xb1 + rot23 * yb1 + rot33 * zb1;
+  Real c1_xp = rot11 * xc1 + rot21 * yc1 + rot31 * zc1;
+  Real c1_yp = rot12 * xc1 + rot22 * yc1 + rot32 * zc1;
+  Real c1_zp = rot13 * xc1 + rot23 * yc1 + rot33 * zc1;
 
   // Step 2: canonical triangle tilted by (phi, psi).
-  Real sinphi = za1d / ra;
+  Real sinphi = a1_zp / ra;
   Real cosphi = settle_csqrt(R(1.0) - sinphi * sinphi);
-  Real sinpsi = (zb1d - zc1d) / (R(2.0) * rc * cosphi);
+  Real sinpsi = (b1_zp - c1_zp) / (R(2.0) * rc * cosphi);
   Real cospsi = settle_csqrt(R(1.0) - sinpsi * sinpsi);
 
-  Real ya2d = ra * cosphi;
-  Real xb2d = -rc * cospsi;
-  Real yb2d = -rb * cosphi - rc * sinpsi * sinphi;
-  Real yc2d = -rb * cosphi + rc * sinpsi * sinphi;
-  Real xb2d2 = xb2d * xb2d;
-  Real hh2 = R(4.0) * xb2d2 + (yb2d - yc2d) * (yb2d - yc2d) + (zb1d - zc1d) * (zb1d - zc1d);
-  Real deltx = R(2.0) * xb2d + settle_csqrt(R(4.0) * xb2d2 - hh2 + d2sq);
-  xb2d -= deltx * R(0.5);
+  Real a2_yp = ra * cosphi;
+  Real b2_xp = -rc * cospsi;
+  Real b2_yp = -rb * cosphi - rc * sinpsi * sinphi;
+  Real c2_yp = -rb * cosphi + rc * sinpsi * sinphi;
+  Real b2_xp_sq = b2_xp * b2_xp;
+  Real hh_sq = R(4.0) * b2_xp_sq + (b2_yp - c2_yp) * (b2_yp - c2_yp) + (b1_zp - c1_zp) * (b1_zp - c1_zp);
+  Real delta_x = R(2.0) * b2_xp + settle_csqrt(R(4.0) * b2_xp_sq - hh_sq + d2sq);
+  b2_xp -= delta_x * R(0.5);
 
   // Step 3: in-plane rotation theta.
-  Real alpha = xb2d * (xb0d - xc0d) + yb0d * yb2d + yc0d * yc2d;
-  Real beta = xb2d * (yc0d - yb0d) + xb0d * yb2d + xc0d * yc2d;
-  Real gamma = xb0d * yb1d - xb1d * yb0d + xc0d * yc1d - xc1d * yc0d;
-  Real al2be2 = alpha * alpha + beta * beta;
-  Real inv_al2be2 = (al2be2 > R(0.0)) ? R(1.0) / al2be2 : R(0.0);
-  Real sintheta = (alpha * gamma - beta * settle_csqrt(al2be2 - gamma * gamma)) * inv_al2be2;
+  Real alpha = b2_xp * (b0_xp - c0_xp) + b0_yp * b2_yp + c0_yp * c2_yp;
+  Real beta = b2_xp * (c0_yp - b0_yp) + b0_xp * b2_yp + c0_xp * c2_yp;
+  Real gamma = b0_xp * b1_yp - b1_xp * b0_yp + c0_xp * c1_yp - c1_xp * c0_yp;
+  Real alpha2_beta2 = alpha * alpha + beta * beta;
+  Real inv_alpha2_beta2 = (alpha2_beta2 > R(0.0)) ? R(1.0) / alpha2_beta2 : R(0.0);
+  Real sintheta = (alpha * gamma - beta * settle_csqrt(alpha2_beta2 - gamma * gamma)) * inv_alpha2_beta2;
   Real costheta = settle_csqrt(R(1.0) - sintheta * sintheta);
 
   // Step 4: final constrained positions in the primed frame.
-  Real xa3d = -ya2d * sintheta;
-  Real ya3d = ya2d * costheta;
-  Real za3d = za1d;
-  Real xb3d = xb2d * costheta - yb2d * sintheta;
-  Real yb3d = xb2d * sintheta + yb2d * costheta;
-  Real zb3d = zb1d;
-  Real xc3d = -xb2d * costheta - yc2d * sintheta;
-  Real yc3d = -xb2d * sintheta + yc2d * costheta;
-  Real zc3d = zc1d;
+  Real a3_xp = -a2_yp * sintheta;
+  Real a3_yp = a2_yp * costheta;
+  Real a3_zp = a1_zp;
+  Real b3_xp = b2_xp * costheta - b2_yp * sintheta;
+  Real b3_yp = b2_xp * sintheta + b2_yp * costheta;
+  Real b3_zp = b1_zp;
+  Real c3_xp = -b2_xp * costheta - c2_yp * sintheta;
+  Real c3_yp = -b2_xp * sintheta + c2_yp * costheta;
+  Real c3_zp = c1_zp;
 
   // Step 5: back-transform to the lab frame (positions relative to COM).
   Real rcom[3][3] = {
-      {trns11 * xa3d + trns12 * ya3d + trns13 * za3d,
-       trns21 * xa3d + trns22 * ya3d + trns23 * za3d,
-       trns31 * xa3d + trns32 * ya3d + trns33 * za3d},
-      {trns11 * xb3d + trns12 * yb3d + trns13 * zb3d,
-       trns21 * xb3d + trns22 * yb3d + trns23 * zb3d,
-       trns31 * xb3d + trns32 * yb3d + trns33 * zb3d},
-      {trns11 * xc3d + trns12 * yc3d + trns13 * zc3d,
-       trns21 * xc3d + trns22 * yc3d + trns23 * zc3d,
-       trns31 * xc3d + trns32 * yc3d + trns33 * zc3d}};
+      {rot11 * a3_xp + rot12 * a3_yp + rot13 * a3_zp,
+       rot21 * a3_xp + rot22 * a3_yp + rot23 * a3_zp,
+       rot31 * a3_xp + rot32 * a3_yp + rot33 * a3_zp},
+      {rot11 * b3_xp + rot12 * b3_yp + rot13 * b3_zp,
+       rot21 * b3_xp + rot22 * b3_yp + rot23 * b3_zp,
+       rot31 * b3_xp + rot32 * b3_yp + rot33 * b3_zp},
+      {rot11 * c3_xp + rot12 * c3_yp + rot13 * c3_zp,
+       rot21 * c3_xp + rot22 * c3_yp + rot23 * c3_zp,
+       rot31 * c3_xp + rot32 * c3_yp + rot33 * c3_zp}};
 
   // Constrained positions relative to the reference oxygen.
   Real com[3] = {xcom, ycom, zcom};
