@@ -7,7 +7,6 @@ use serde::Deserialize;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, c_rescale_compute_mu,
     compute_kinetic_energy_on_device, compute_total_virial_on_device,
-    rescale_positions_device_factor,
 };
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;

@@ -565,14 +565,18 @@ fn rows_appear_in_documented_order() {
         .skip(1)
         .map(|l| l.split_whitespace().next().unwrap())
         .collect();
+    // Kernel rows are grouped by subsystem in `define_kernels!` manifest
+    // order (integrate, then forces, then neighbor), each in that
+    // subsystem's declared stage order; host rows follow in
+    // `HostStage::ORDER`. See `KernelStage::ORDER`.
     let expected = vec![
         "vv_kick_drift",
-        "class_accumulator_memset",
-        "scatter_positions_to_tile_order",
         "jit_composed_pair_force",
-        "finalize_packed_forces",
         "jit_composed_post_force",
         "combine_class_totals",
+        "class_accumulator_memset",
+        "scatter_positions_to_tile_order",
+        "finalize_packed_forces",
         "host_to_device_upload",
         "device_to_host_download",
         "trajectory_write",

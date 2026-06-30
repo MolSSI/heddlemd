@@ -1,13 +1,10 @@
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaDevice, CudaSlice};
 
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, reduce_angle_forces,
 };
-use crate::kernels;
 use crate::io::config::AngleTypeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -331,22 +328,14 @@ struct HarmonicAngleFunctor {
 }
 
 // rq-2093594f
-#[derive(Debug, Clone)]
-pub struct AngleKernels {
-    pub reduce_angle_forces: CudaFunction,
-}
-
-impl AngleKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::ANGLE),
-            "angle",
-            &["reduce_angle_forces"],
-        )?;
-        Ok(AngleKernels {
-            reduce_angle_forces: get_func(device, "angle", "reduce_angle_forces")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "angle",
+    ptx: crate::kernels::ANGLE,
+    struct: AngleKernels,
+    kernels: [reduce_angle_forces],
+    stages: {
+        REDUCE_ANGLE_FORCES = "reduce_angle_forces",
+    },
 }
 
 #[cfg(test)]

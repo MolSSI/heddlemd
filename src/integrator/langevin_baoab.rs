@@ -1,16 +1,11 @@
 // rq-d5a4f220
 
-use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction};
-use cudarc::nvrtc::Ptx;
 use serde::Deserialize;
 
 use cudarc::driver::CudaSlice;
 
-use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers, lan_drift_half, lan_ou_step, vv_kick};
-use crate::kernels;
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -239,22 +234,14 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
 }
 
 // rq-2093594f
-#[derive(Debug, Clone)]
-pub struct LangevinKernels {
-    pub lan_drift_half: CudaFunction,
-    pub lan_ou_step: CudaFunction,
-}
-
-impl LangevinKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::LANGEVIN),
-            "langevin",
-            &["lan_drift_half", "lan_ou_step"],
-        )?;
-        Ok(LangevinKernels {
-            lan_drift_half: get_func(device, "langevin", "lan_drift_half")?,
-            lan_ou_step: get_func(device, "langevin", "lan_ou_step")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "langevin",
+    ptx: crate::kernels::LANGEVIN,
+    struct: LangevinKernels,
+    kernels: [lan_drift_half, lan_ou_step],
+    stages: {
+        LANGEVIN_KICK_HALF  = "langevin_kick_half",
+        LANGEVIN_DRIFT_HALF = "langevin_drift_half",
+        LANGEVIN_OU_STEP    = "langevin_ou_step",
+    },
 }

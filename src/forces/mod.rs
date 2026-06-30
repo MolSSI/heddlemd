@@ -9,14 +9,11 @@ pub mod topology;
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, CudaViewMut};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut};
 
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, combine_class_totals,
 };
-use crate::kernels;
 use crate::registry::{Builtins, Registry};
 use crate::io::config::{
     AngleTypeConfig, BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig,
@@ -1221,20 +1218,17 @@ impl ForceField {
 }
 
 // rq-2093594f
-#[derive(Debug, Clone)]
-pub struct ForcesKernels {
-    pub combine_class_totals: CudaFunction,
-}
-
-impl ForcesKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::FORCES),
-            "forces",
-            &["combine_class_totals"],
-        )?;
-        Ok(ForcesKernels {
-            combine_class_totals: get_func(device, "forces", "combine_class_totals")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "forces",
+    ptx: crate::kernels::FORCES,
+    struct: ForcesKernels,
+    kernels: [combine_class_totals],
+    stages: {
+        JIT_COMPOSED_PAIR_FORCE   = "jit_composed_pair_force",
+        JIT_COMPOSED_BONDED_FORCE = "jit_composed_bonded_force",
+        JIT_COMPOSED_ANGLE_FORCE  = "jit_composed_angle_force",
+        JIT_COMPOSED_POST_FORCE   = "jit_composed_post_force",
+        COMBINE_CLASS_TOTALS      = "combine_class_totals",
+        CLASS_ACCUMULATOR_MEMSET  = "class_accumulator_memset",
+    },
 }

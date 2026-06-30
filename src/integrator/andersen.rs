@@ -2,13 +2,10 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::CudaDevice;
 use serde::Deserialize;
 
-use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
-use crate::kernels;
 use crate::io::config::ConfigError;
 use crate::timings::Timings;
 
@@ -369,20 +366,12 @@ impl ThermostatBuilder for AndersenBuilder {
 // scaffolding keeps compiling. The standalone `andersen_resample`
 // kernel is retired by K; the slot dispatches the resample via the
 // JIT-composed post-force per-particle kernel.
-#[derive(Debug, Clone)]
-pub struct AndersenKernels {
-    pub andersen_resample: CudaFunction,
-}
-
-impl AndersenKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::ANDERSEN),
-            "andersen",
-            &["andersen_resample"],
-        )?;
-        Ok(AndersenKernels {
-            andersen_resample: get_func(device, "andersen", "andersen_resample")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "andersen",
+    ptx: crate::kernels::ANDERSEN,
+    struct: AndersenKernels,
+    kernels: [andersen_resample],
+    stages: {
+        ANDERSEN_RESAMPLE = "andersen_resample",
+    },
 }

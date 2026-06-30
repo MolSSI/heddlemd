@@ -1,16 +1,11 @@
 // rq-09a2e15f
 
-use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction};
-use cudarc::nvrtc::Ptx;
 use serde::Deserialize;
 
-use crate::gpu::device::get_func;
 #[cfg(not(feature = "f64"))]
 use crate::gpu::{LosslessBuffers, vv_kick_drift_lossless, vv_kick_lossless};
-use crate::gpu::{GpuContext, GpuError, ParticleBuffers, vv_kick, vv_kick_drift};
-use crate::kernels;
+use crate::gpu::{GpuContext, ParticleBuffers, vv_kick, vv_kick_drift};
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -293,35 +288,20 @@ impl IntegratorBuilder for VelocityVerletBuilder {
 }
 
 // rq-2093594f rq-e20b2f39
-#[derive(Debug, Clone)]
-pub struct IntegrateKernels {
-    pub vv_kick_drift: CudaFunction,
-    pub vv_kick: CudaFunction,
-    #[cfg(not(feature = "f64"))]
-    pub vv_kick_drift_lossless: CudaFunction,
-    #[cfg(not(feature = "f64"))]
-    pub vv_kick_lossless: CudaFunction,
-}
-
-impl IntegrateKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        #[cfg(not(feature = "f64"))]
-        let names: &[&str] = &[
-            "vv_kick_drift",
-            "vv_kick",
-            "vv_kick_drift_lossless",
-            "vv_kick_lossless",
-        ];
-        #[cfg(feature = "f64")]
-        let names: &[&str] = &["vv_kick_drift", "vv_kick"];
-        device.load_ptx(Ptx::from_src(kernels::INTEGRATE), "integrate", names)?;
-        Ok(IntegrateKernels {
-            vv_kick_drift: get_func(device, "integrate", "vv_kick_drift")?,
-            vv_kick: get_func(device, "integrate", "vv_kick")?,
-            #[cfg(not(feature = "f64"))]
-            vv_kick_drift_lossless: get_func(device, "integrate", "vv_kick_drift_lossless")?,
-            #[cfg(not(feature = "f64"))]
-            vv_kick_lossless: get_func(device, "integrate", "vv_kick_lossless")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "integrate",
+    ptx: crate::kernels::INTEGRATE,
+    struct: IntegrateKernels,
+    kernels: [
+        vv_kick_drift,
+        vv_kick,
+        #[cfg(not(feature = "f64"))] vv_kick_drift_lossless,
+        #[cfg(not(feature = "f64"))] vv_kick_lossless,
+    ],
+    stages: {
+        VV_KICK_DRIFT          = "vv_kick_drift",
+        VV_KICK                = "vv_kick",
+        VV_KICK_DRIFT_LOSSLESS = "vv_kick_drift_lossless",
+        VV_KICK_LOSSLESS       = "vv_kick_lossless",
+    },
 }

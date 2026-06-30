@@ -4,10 +4,12 @@ pub mod cufft;
 pub mod device;
 pub mod fill;
 pub mod graph;
+pub mod kernel_macros;
 pub mod kernels;
 pub mod lossless_buffers;
 
 pub use barostat_kernels::BarostatKernels;
+pub use kernel_macros::{SubsystemKernels, concat_kernel_stages};
 pub use buffers::ParticleBuffers;
 pub use device::{GpuContext, GpuError, Kernels, init_device};
 pub use fill::FillKernels;

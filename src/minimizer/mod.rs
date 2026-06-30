@@ -1,17 +1,13 @@
 // rq-08aba7ee — Minimizer slot framework. See `rqm/minimization/steepest-descent.md`.
 
-use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, DeviceSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaSlice, DeviceSlice};
 
 use crate::forces::{ForceField, ForceFieldError};
-use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::integrator::{Constraint, ConstraintError};
 use crate::io::config::{ConfigError, SlotConfig};
 use crate::registry::{Builtins, KindedBuilder, Registry};
-use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
 use crate::precision::Real;
@@ -185,33 +181,17 @@ impl Registry<dyn MinimizerBuilder> {
 // rq-47a5fe0e
 // CUDA kernel handle for the minimizer's per-step kernels. Loaded
 // alongside the other kernel modules at `init_device`.
-#[derive(Debug, Clone)]
-pub struct MinimizeKernels {
-    pub sd_compute_step: CudaFunction,
-    pub sd_snapshot: CudaFunction,
-    pub sd_restore: CudaFunction,
-    pub sd_f_max_reduction: CudaFunction,
-}
-
-impl MinimizeKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::MINIMIZE),
-            "minimize",
-            &[
-                "sd_compute_step",
-                "sd_snapshot",
-                "sd_restore",
-                "sd_f_max_reduction",
-            ],
-        )?;
-        Ok(MinimizeKernels {
-            sd_compute_step: get_func(device, "minimize", "sd_compute_step")?,
-            sd_snapshot: get_func(device, "minimize", "sd_snapshot")?,
-            sd_restore: get_func(device, "minimize", "sd_restore")?,
-            sd_f_max_reduction: get_func(device, "minimize", "sd_f_max_reduction")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "minimize",
+    ptx: crate::kernels::MINIMIZE,
+    struct: MinimizeKernels,
+    kernels: [sd_compute_step, sd_snapshot, sd_restore, sd_f_max_reduction],
+    stages: {
+        SD_F_MAX_REDUCTION = "sd_f_max_reduction",
+        SD_COMPUTE_STEP    = "sd_compute_step",
+        SD_SNAPSHOT        = "sd_snapshot",
+        SD_RESTORE         = "sd_restore",
+    },
 }
 
 // Host-launch wrappers for the minimizer kernels.

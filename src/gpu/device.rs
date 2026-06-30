@@ -24,55 +24,29 @@ pub(crate) fn get_func(
 
 // rq-2093594f
 //
-// Typed handle to every CUDA kernel compiled from `kernels/*.cu`,
-// organized as one field per subsystem (one field per `.cu` file).
-// Each subsystem owns its own kernel struct, its loader, and the
-// names of its kernels. `device.rs` does not name any individual
-// kernel — adding one is a one-line edit to the relevant
-// subsystem's `XKernels::load`. Adding a whole new subsystem is a
-// one-line edit here.
-#[derive(Debug, Clone)]
-pub struct Kernels {
-    pub fill: crate::gpu::fill::FillKernels,
-    pub integrate: crate::integrator::velocity_verlet::IntegrateKernels,
-    pub spme_recip: crate::forces::spme::SpmeRecipKernels,
-    pub langevin: crate::integrator::langevin_baoab::LangevinKernels,
-    pub morse: crate::forces::morse::MorseKernels,
-    pub angle: crate::forces::angle::AngleKernels,
-    pub nose_hoover: crate::integrator::nose_hoover_chain::NoseHooverKernels,
-    pub andersen: crate::integrator::andersen::AndersenKernels,
-    pub barostat: crate::gpu::barostat_kernels::BarostatKernels,
-    pub mtk: crate::integrator::mtk_npt::MtkKernels,
-    pub shake: crate::integrator::shake::ShakeKernels,
-    pub settle: crate::integrator::settle::SettleKernels,
-    pub forces: crate::forces::ForcesKernels,
-    pub neighbor: crate::forces::neighbor_list::NeighborKernels,
-    pub minimize: crate::minimizer::MinimizeKernels,
-}
-
-impl Kernels {
-    // rq-2093594f — composes every subsystem's `XKernels::load` in
-    // registration order. The first failing subsystem short-circuits
-    // the rest.
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        Ok(Kernels {
-            fill: crate::gpu::fill::FillKernels::load(device)?,
-            integrate: crate::integrator::velocity_verlet::IntegrateKernels::load(device)?,
-            spme_recip: crate::forces::spme::SpmeRecipKernels::load(device)?,
-            langevin: crate::integrator::langevin_baoab::LangevinKernels::load(device)?,
-            morse: crate::forces::morse::MorseKernels::load(device)?,
-            angle: crate::forces::angle::AngleKernels::load(device)?,
-            nose_hoover: crate::integrator::nose_hoover_chain::NoseHooverKernels::load(device)?,
-            andersen: crate::integrator::andersen::AndersenKernels::load(device)?,
-            barostat: crate::gpu::barostat_kernels::BarostatKernels::load(device)?,
-            mtk: crate::integrator::mtk_npt::MtkKernels::load(device)?,
-            shake: crate::integrator::shake::ShakeKernels::load(device)?,
-            settle: crate::integrator::settle::SettleKernels::load(device)?,
-            forces: crate::forces::ForcesKernels::load(device)?,
-            neighbor: crate::forces::neighbor_list::NeighborKernels::load(device)?,
-            minimize: crate::minimizer::MinimizeKernels::load(device)?,
-        })
-    }
+// The `Kernels` aggregate (one typed field per subsystem), `Kernels::load`
+// (each subsystem's loader in manifest order, short-circuiting on the
+// first failure), and the `KernelStage::ORDER` registry (the manifest-order
+// concatenation of every subsystem's `STAGES`) are all generated from this
+// single manifest. `device.rs` names no individual kernel and carries no
+// per-subsystem stage list; adding a subsystem is one line here plus its
+// own `gpu_kernels!` invocation. See `rqm/build-pipeline.md`.
+crate::define_kernels! {
+    fill:        crate::gpu::fill::FillKernels,
+    integrate:   crate::integrator::velocity_verlet::IntegrateKernels,
+    spme_recip:  crate::forces::spme::SpmeRecipKernels,
+    langevin:    crate::integrator::langevin_baoab::LangevinKernels,
+    morse:       crate::forces::morse::MorseKernels,
+    angle:       crate::forces::angle::AngleKernels,
+    nose_hoover: crate::integrator::nose_hoover_chain::NoseHooverKernels,
+    andersen:    crate::integrator::andersen::AndersenKernels,
+    barostat:    crate::gpu::barostat_kernels::BarostatKernels,
+    mtk:         crate::integrator::mtk_npt::MtkKernels,
+    shake:       crate::integrator::shake::ShakeKernels,
+    settle:      crate::integrator::settle::SettleKernels,
+    forces:      crate::forces::ForcesKernels,
+    neighbor:    crate::forces::neighbor_list::NeighborKernels,
+    minimize:    crate::minimizer::MinimizeKernels,
 }
 
 // rq-2093594f

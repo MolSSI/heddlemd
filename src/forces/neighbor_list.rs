@@ -2,17 +2,14 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaDevice, CudaSlice};
 
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     compute_cell_indices_and_histogram, copy_positions_into_reference,
     neighbor_displacement_check_flag, prefix_scan_cell_counts,
     scatter_atoms_into_cells, sort_cells_by_particle_id,
 };
-use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{HostStage, KernelStage, Timings};
 use crate::precision::{Real, Real4};
@@ -1418,121 +1415,34 @@ fn map_timings_err(e: crate::timings::TimingsError) -> NeighborListError {
     }
 }
 
-// rq-2093594f rq-0469400b
-#[derive(Debug, Clone)]
-pub struct NeighborKernels {
-    pub neighbor_displacement_check_flag: CudaFunction,
-    pub copy_positions_into_reference: CudaFunction,
-    pub compute_cell_indices_and_histogram: CudaFunction,
-    pub prefix_scan_local_blocks: CudaFunction,
-    pub prefix_scan_apply_block_totals: CudaFunction,
-    pub prefix_scan_finalize_offsets: CudaFunction,
-    // rq-67a09135
-    pub prefix_scan_finalize_offsets_dev: CudaFunction,
-    pub scatter_atoms_into_cells: CudaFunction,
-    pub sort_cells_by_particle_id: CudaFunction,
-    pub scatter_positions_to_tile_order: CudaFunction,
-    pub fill_tile_position_padding: CudaFunction,
-    pub compute_block_bbox: CudaFunction,
-    pub find_blocks_with_interactions: CudaFunction,
-    // rq-67a09135
-    pub set_neighbor_status_bits: CudaFunction,
-    pub finalize_packed_forces: CudaFunction,
-    pub histogram_entries_by_iblock: CudaFunction,
-    pub scatter_entries_by_iblock: CudaFunction,
-}
-
-impl NeighborKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::NEIGHBOR),
-            "neighbor",
-            &[
-                "neighbor_displacement_check_flag",
-                "copy_positions_into_reference",
-                "compute_cell_indices_and_histogram",
-                "prefix_scan_local_blocks",
-                "prefix_scan_apply_block_totals",
-                "prefix_scan_finalize_offsets",
-                "prefix_scan_finalize_offsets_dev",
-                "scatter_atoms_into_cells",
-                "sort_cells_by_particle_id",
-                "scatter_positions_to_tile_order",
-                "fill_tile_position_padding",
-                "compute_block_bbox",
-                "find_blocks_with_interactions",
-                "set_neighbor_status_bits",
-                "finalize_packed_forces",
-                "histogram_entries_by_iblock",
-                "scatter_entries_by_iblock",
-            ],
-        )?;
-        Ok(NeighborKernels {
-            neighbor_displacement_check_flag: get_func(
-                device,
-                "neighbor",
-                "neighbor_displacement_check_flag",
-            )?,
-            copy_positions_into_reference: get_func(
-                device,
-                "neighbor",
-                "copy_positions_into_reference",
-            )?,
-            compute_cell_indices_and_histogram: get_func(
-                device,
-                "neighbor",
-                "compute_cell_indices_and_histogram",
-            )?,
-            prefix_scan_local_blocks: get_func(device, "neighbor", "prefix_scan_local_blocks")?,
-            prefix_scan_apply_block_totals: get_func(
-                device,
-                "neighbor",
-                "prefix_scan_apply_block_totals",
-            )?,
-            prefix_scan_finalize_offsets: get_func(
-                device,
-                "neighbor",
-                "prefix_scan_finalize_offsets",
-            )?,
-            prefix_scan_finalize_offsets_dev: get_func(
-                device,
-                "neighbor",
-                "prefix_scan_finalize_offsets_dev",
-            )?,
-            scatter_atoms_into_cells: get_func(device, "neighbor", "scatter_atoms_into_cells")?,
-            sort_cells_by_particle_id: get_func(device, "neighbor", "sort_cells_by_particle_id")?,
-            scatter_positions_to_tile_order: get_func(
-                device,
-                "neighbor",
-                "scatter_positions_to_tile_order",
-            )?,
-            fill_tile_position_padding: get_func(
-                device,
-                "neighbor",
-                "fill_tile_position_padding",
-            )?,
-            compute_block_bbox: get_func(device, "neighbor", "compute_block_bbox")?,
-            find_blocks_with_interactions: get_func(
-                device,
-                "neighbor",
-                "find_blocks_with_interactions",
-            )?,
-            set_neighbor_status_bits: get_func(
-                device,
-                "neighbor",
-                "set_neighbor_status_bits",
-            )?,
-            finalize_packed_forces: get_func(device, "neighbor", "finalize_packed_forces")?,
-            histogram_entries_by_iblock: get_func(
-                device,
-                "neighbor",
-                "histogram_entries_by_iblock",
-            )?,
-            scatter_entries_by_iblock: get_func(
-                device,
-                "neighbor",
-                "scatter_entries_by_iblock",
-            )?,
-        })
-    }
+// rq-2093594f rq-0469400b rq-67a09135
+crate::gpu_kernels! {
+    module: "neighbor",
+    ptx: crate::kernels::NEIGHBOR,
+    struct: NeighborKernels,
+    kernels: [
+        neighbor_displacement_check_flag,
+        copy_positions_into_reference,
+        compute_cell_indices_and_histogram,
+        prefix_scan_local_blocks,
+        prefix_scan_apply_block_totals,
+        prefix_scan_finalize_offsets,
+        prefix_scan_finalize_offsets_dev,
+        scatter_atoms_into_cells,
+        sort_cells_by_particle_id,
+        scatter_positions_to_tile_order,
+        fill_tile_position_padding,
+        compute_block_bbox,
+        find_blocks_with_interactions,
+        set_neighbor_status_bits,
+        finalize_packed_forces,
+        histogram_entries_by_iblock,
+        scatter_entries_by_iblock,
+    ],
+    stages: {
+        NEIGHBOR_DISPLACEMENT_SQUARED   = "neighbor_displacement_check_flag",
+        COPY_POSITIONS_INTO_REFERENCE   = "copy_positions_into_reference",
+        SCATTER_POSITIONS_TO_TILE_ORDER = "scatter_positions_to_tile_order",
+        FINALIZE_PACKED_FORCES          = "finalize_packed_forces",
+    },
 }

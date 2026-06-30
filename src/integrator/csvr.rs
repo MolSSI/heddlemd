@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy_on_device,
-    csvr_sample_and_factor, rescale_velocities_device_factor,
+    csvr_sample_and_factor,
 };
 use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};

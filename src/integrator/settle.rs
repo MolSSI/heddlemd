@@ -4,19 +4,16 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaDevice, CudaSlice};
 
 use serde::Deserialize;
 
 use crate::forces::{ConstraintList, GroupConstraint};
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, settle_positions, settle_positions_no_velocity,
     settle_snapshot, settle_velocities, settle_virial_scatter,
 };
 use crate::io::config::{ConfigError, NamedSlotConfig};
-use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
@@ -561,39 +558,23 @@ impl ConstraintBuilder for SettleBuilder {
     }
 }
 
-// rq-709c8eb5
-#[derive(Debug, Clone)]
-pub struct SettleKernels {
-    pub settle_snapshot: CudaFunction,
-    pub settle_positions: CudaFunction,
-    pub settle_velocities: CudaFunction,
-    pub settle_virial_scatter: CudaFunction,
-    pub settle_positions_no_velocity: CudaFunction,
-}
-
-impl SettleKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::SETTLE),
-            "settle",
-            &[
-                "settle_snapshot",
-                "settle_positions",
-                "settle_velocities",
-                "settle_virial_scatter",
-                "settle_positions_no_velocity",
-            ],
-        )?;
-        Ok(SettleKernels {
-            settle_snapshot: get_func(device, "settle", "settle_snapshot")?,
-            settle_positions: get_func(device, "settle", "settle_positions")?,
-            settle_velocities: get_func(device, "settle", "settle_velocities")?,
-            settle_virial_scatter: get_func(device, "settle", "settle_virial_scatter")?,
-            settle_positions_no_velocity: get_func(
-                device,
-                "settle",
-                "settle_positions_no_velocity",
-            )?,
-        })
-    }
+// rq-709c8eb5 rq-2093594f
+crate::gpu_kernels! {
+    module: "settle",
+    ptx: crate::kernels::SETTLE,
+    struct: SettleKernels,
+    kernels: [
+        settle_snapshot,
+        settle_positions,
+        settle_velocities,
+        settle_virial_scatter,
+        settle_positions_no_velocity,
+    ],
+    stages: {
+        SETTLE_SNAPSHOT              = "settle_snapshot",
+        SETTLE_POSITIONS             = "settle_positions",
+        SETTLE_VELOCITIES            = "settle_velocities",
+        SETTLE_VIRIAL_SCATTER        = "settle_virial_scatter",
+        SETTLE_POSITIONS_NO_VELOCITY = "settle_positions_no_velocity",
+    },
 }

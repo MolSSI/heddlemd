@@ -1,16 +1,12 @@
 // rq-f606ff6f
 
-use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::CudaSlice;
 use serde::Deserialize;
 
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, rescale_velocities,
 };
-use crate::kernels;
 use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
 
@@ -464,63 +460,32 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
 }
 
 // rq-2093594f rq-f606ff6f
-#[derive(Debug, Clone)]
-pub struct NoseHooverKernels {
-    pub kinetic_energy_reduce: CudaFunction,
-    pub kinetic_energy_reduce_partials: CudaFunction,
-    pub rescale_velocities: CudaFunction,
-    pub rescale_velocities_device_factor: CudaFunction,
-    pub csvr_sample_and_factor: CudaFunction,
-    // rq-5f59fa80
-    pub csvr_sample_partials: CudaFunction,
-    pub csvr_finish_from_partials: CudaFunction,
-    pub berendsen_compute_factor: CudaFunction,
-    pub increment_u64: CudaFunction,
-}
-
-impl NoseHooverKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::NOSE_HOOVER),
-            "nose_hoover",
-            &[
-                "kinetic_energy_reduce",
-                "kinetic_energy_reduce_partials",
-                "rescale_velocities",
-                "rescale_velocities_device_factor",
-                "csvr_sample_and_factor",
-                "csvr_sample_partials",
-                "csvr_finish_from_partials",
-                "berendsen_compute_factor",
-                "increment_u64",
-            ],
-        )?;
-        Ok(NoseHooverKernels {
-            kinetic_energy_reduce: get_func(device, "nose_hoover", "kinetic_energy_reduce")?,
-            kinetic_energy_reduce_partials: get_func(
-                device,
-                "nose_hoover",
-                "kinetic_energy_reduce_partials",
-            )?,
-            rescale_velocities: get_func(device, "nose_hoover", "rescale_velocities")?,
-            rescale_velocities_device_factor: get_func(
-                device,
-                "nose_hoover",
-                "rescale_velocities_device_factor",
-            )?,
-            csvr_sample_and_factor: get_func(device, "nose_hoover", "csvr_sample_and_factor")?,
-            csvr_sample_partials: get_func(device, "nose_hoover", "csvr_sample_partials")?,
-            csvr_finish_from_partials: get_func(
-                device,
-                "nose_hoover",
-                "csvr_finish_from_partials",
-            )?,
-            berendsen_compute_factor: get_func(
-                device,
-                "nose_hoover",
-                "berendsen_compute_factor",
-            )?,
-            increment_u64: get_func(device, "nose_hoover", "increment_u64")?,
-        })
-    }
+//
+// The `nose_hoover` PTX module backs the kinetic-energy reduction shared
+// by every thermostat and both barostats, and the per-thermostat scalar
+// kernels for the Nosé-Hoover-chain, CSVR, and Berendsen thermostats; the
+// thermostat timing stages are owned here accordingly. rq-5f59fa80
+crate::gpu_kernels! {
+    module: "nose_hoover",
+    ptx: crate::kernels::NOSE_HOOVER,
+    struct: NoseHooverKernels,
+    kernels: [
+        kinetic_energy_reduce,
+        kinetic_energy_reduce_partials,
+        rescale_velocities,
+        rescale_velocities_device_factor,
+        csvr_sample_and_factor,
+        csvr_sample_partials,
+        csvr_finish_from_partials,
+        berendsen_compute_factor,
+        increment_u64,
+    ],
+    stages: {
+        KINETIC_ENERGY_REDUCE        = "kinetic_energy_reduce",
+        NHC_RESCALE_VELOCITIES       = "nhc_rescale_velocities",
+        CSVR_RESCALE_VELOCITIES      = "csvr_rescale_velocities",
+        BERENDSEN_RESCALE_VELOCITIES = "berendsen_rescale_velocities",
+        CSVR_SAMPLE_AND_FACTOR       = "csvr_sample_and_factor",
+        BERENDSEN_COMPUTE_FACTOR     = "berendsen_compute_factor",
+    },
 }

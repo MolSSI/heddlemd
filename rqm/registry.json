@@ -1161,6 +1161,18 @@
     "title": "Comparison Procedure",
     "type": "section"
   },
+  "rq-0919ff0a": {
+    "decl": "Scenario: A subsystem that times no stages contributes an empty STAGES",
+    "file": "build-pipeline",
+    "refs": [
+      {
+        "file": "src/gpu/kernel_macros.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A subsystem that times no stages contributes an empty STAGES",
+    "type": "scenario"
+  },
   "rq-091a4341": {
     "decl": "Scenario: Per-step loop does not compute scalars on a trajectory-only step",
     "file": "cuda-graphs",
@@ -1668,10 +1680,6 @@
       },
       {
         "file": "src/integrator/berendsen_barostat.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/timings.rs",
         "kind": "code"
       },
       {
@@ -2361,10 +2369,6 @@
         "kind": "code"
       },
       {
-        "file": "src/timings.rs",
-        "kind": "code"
-      },
-      {
         "file": "tests/barostats_c_rescale.rs",
         "kind": "code"
       }
@@ -2837,12 +2841,7 @@
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/shake",
     "level": 2,
-    "refs": [
-      {
-        "file": "src/timings.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
@@ -4285,6 +4284,10 @@
         "kind": "code"
       },
       {
+        "file": "src/gpu/kernel_macros.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/integrator/andersen.rs",
         "kind": "code"
       },
@@ -4298,6 +4301,10 @@
       },
       {
         "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/settle.rs",
         "kind": "code"
       },
       {
@@ -5877,10 +5884,6 @@
       {
         "file": "src/forces/jit_composed.rs",
         "kind": "code"
-      },
-      {
-        "file": "src/timings.rs",
-        "kind": "code"
       }
     ],
     "title": "Feature: JIT-Composed Intramolecular Kernels",
@@ -7351,10 +7354,6 @@
         "kind": "code"
       },
       {
-        "file": "src/timings.rs",
-        "kind": "code"
-      },
-      {
         "file": "tests/integrators_mtk_npt.rs",
         "kind": "code"
       }
@@ -8143,6 +8142,18 @@
     "title": "heddle_jit_composed_pair_force_f",
     "type": "api-item"
   },
+  "rq-42ee692a": {
+    "decl": "Scenario: KernelStage::ORDER contains no duplicate stage",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/gpu/kernel_macros.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "KernelStage::ORDER contains no duplicate stage",
+    "type": "scenario"
+  },
   "rq-4300cafc": {
     "decl": "Scenario: plan(dt) is pure; it does not launch kernels or touch buffers",
     "file": "integration/framework",
@@ -8822,6 +8833,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-4a584e03": {
+    "decl": "Scenario: Each subsystem's STAGES is a contiguous run within KernelStage::ORDER",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/gpu/kernel_macros.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Each subsystem's STAGES is a contiguous run within KernelStage::ORDER",
+    "type": "scenario"
   },
   "rq-4a6969aa": {
     "decl": "### Number formatting",
@@ -11138,10 +11161,6 @@
         "kind": "code"
       },
       {
-        "file": "src/timings.rs",
-        "kind": "code"
-      },
-      {
         "file": "tests/barostats_berendsen.rs",
         "kind": "code"
       },
@@ -13188,10 +13207,6 @@
         "kind": "code"
       },
       {
-        "file": "src/timings.rs",
-        "kind": "code"
-      },
-      {
         "file": "tests/settle.rs",
         "kind": "code"
       }
@@ -13416,6 +13431,18 @@
     "refs": [],
     "title": "PTX Module Loading",
     "type": "section"
+  },
+  "rq-73a85df1": {
+    "decl": "Scenario: A subsystem's STAGES holds exactly the stages it declares",
+    "file": "build-pipeline",
+    "refs": [
+      {
+        "file": "src/gpu/kernel_macros.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A subsystem's STAGES holds exactly the stages it declares",
+    "type": "scenario"
   },
   "rq-73c1173f": {
     "decl": "Scenario: SettleConstraintsState::new rejects a non-positive d_OH",
@@ -16221,10 +16248,6 @@
       {
         "file": "src/runner.rs",
         "kind": "code"
-      },
-      {
-        "file": "src/timings.rs",
-        "kind": "code"
       }
     ],
     "title": "Feature: JIT-Composed Post-Force Per-Particle Kernel",
@@ -18582,10 +18605,6 @@
       {
         "file": "src/forces/jit_composed.rs",
         "kind": "code"
-      },
-      {
-        "file": "src/timings.rs",
-        "kind": "code"
       }
     ],
     "title": "Feature: JIT-Composed Pair-Force Kernel",
@@ -18969,6 +18988,18 @@
       }
     ],
     "title": "apply_post on empty CSVR state is a no-op",
+    "type": "scenario"
+  },
+  "rq-a2b911fc": {
+    "decl": "Scenario: KernelStage::ORDER is the manifest-order concatenation of subsystem STAGES",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/gpu/kernel_macros.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "KernelStage::ORDER is the manifest-order concatenation of subsystem STAGES",
     "type": "scenario"
   },
   "rq-a2bb55c6": {

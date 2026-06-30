@@ -19,7 +19,6 @@ use crate::gpu::{
     GpuContext, GpuError, K_COULOMB_F32, ParticleBuffers,
     spme_atom_sort, spme_force_gather,
 };
-use crate::kernels;
 use crate::io::config::SpmeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -988,52 +987,25 @@ impl PotentialBuilder for SpmeReciprocalBuilder {
     }
 }
 
-// rq-2093594f rq-9ca00d25
-#[derive(Debug, Clone)]
-pub struct SpmeRecipKernels {
-    pub spme_recip_compute_influence: CudaFunction,
-    pub spme_compute_bin_key: CudaFunction,
-    pub spme_spread_finish: CudaFunction,
-    pub spme_recip_apply_influence: CudaFunction,
-    pub spme_recip_reduce_partials: CudaFunction,
-}
-
 // The charge-spread and force-gather kernels are not loaded here: they
 // are NVRTC-compiled per run, specialized to the configured spline
 // order (see *Compile-time spline-order specialization*). rq-94bfcb7e
-impl SpmeRecipKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::SPME_RECIP),
-            "spme_recip",
-            &[
-                "spme_recip_compute_influence",
-                "spme_compute_bin_key",
-                "spme_spread_finish",
-                "spme_recip_apply_influence",
-                "spme_recip_reduce_partials",
-            ],
-        )?;
-        Ok(SpmeRecipKernels {
-            spme_recip_compute_influence: get_func(
-                device,
-                "spme_recip",
-                "spme_recip_compute_influence",
-            )?,
-            spme_compute_bin_key: get_func(device, "spme_recip", "spme_compute_bin_key")?,
-            spme_spread_finish: get_func(device, "spme_recip", "spme_spread_finish")?,
-            spme_recip_apply_influence: get_func(
-                device,
-                "spme_recip",
-                "spme_recip_apply_influence",
-            )?,
-            spme_recip_reduce_partials: get_func(
-                device,
-                "spme_recip",
-                "spme_recip_reduce_partials",
-            )?,
-        })
-    }
+// rq-2093594f rq-9ca00d25
+crate::gpu_kernels! {
+    module: "spme_recip",
+    ptx: crate::kernels::SPME_RECIP,
+    struct: SpmeRecipKernels,
+    kernels: [
+        spme_recip_compute_influence,
+        spme_compute_bin_key,
+        spme_spread_finish,
+        spme_recip_apply_influence,
+        spme_recip_reduce_partials,
+    ],
+    stages: {
+        SPME_RECIP_PIPELINE = "spme_recip_pipeline",
+        SPME_FORCE_GATHER   = "spme_force_gather",
+    },
 }
 
 #[cfg(test)]

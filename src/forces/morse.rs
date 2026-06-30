@@ -1,13 +1,10 @@
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaDevice, CudaSlice};
 
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, reduce_bond_forces,
 };
-use crate::kernels;
 use crate::io::config::BondTypeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -307,22 +304,14 @@ struct MorsePairFunctor {
 }
 
 // rq-2093594f
-#[derive(Debug, Clone)]
-pub struct MorseKernels {
-    pub reduce_bond_forces: CudaFunction,
-}
-
-impl MorseKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::MORSE),
-            "morse",
-            &["reduce_bond_forces"],
-        )?;
-        Ok(MorseKernels {
-            reduce_bond_forces: get_func(device, "morse", "reduce_bond_forces")?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "morse",
+    ptx: crate::kernels::MORSE,
+    struct: MorseKernels,
+    kernels: [reduce_bond_forces],
+    stages: {
+        REDUCE_BOND_FORCES = "reduce_bond_forces",
+    },
 }
 
 #[cfg(test)]

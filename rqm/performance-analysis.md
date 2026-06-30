@@ -248,37 +248,33 @@ than 92 characters.
 
 ### Row ordering <!-- rq-1b34278b -->
 
-Rows appear in this fixed order, with absent stages skipped:
+Kernel-stage rows come first, then host-stage rows; absent stages (zero
+samples) are skipped.
 
-1. `vv_kick_drift` or `vv_kick_drift_lossless` (whichever is present)
-2. `langevin_kick_half` (B step, pre and post)
-3. `langevin_drift_half` (A step)
-4. `langevin_ou_step` (O step)
-5. `neighbor_displacement_squared`
-6. `copy_positions_into_reference`
-7. `jit_composed_pair_force`
-8. `morse_bond_force`
-9. `reduce_bond_forces`
-10. `accumulate_forces`
-11. `vv_kick` or `vv_kick_lossless` (whichever is present)
-12. `host_to_device_upload`
-13. `device_to_host_download`
-14. `neighbor_list_rebuild`
-15. `trajectory_write`
-16. `log_write`
-17. `velocity_generation`
-18. `config_load`
-19. `init_load`
-20. `gpu_init`
-21. `total_runtime`
+Kernel rows follow `KernelStage::ORDER`, the manifest-order
+concatenation of each subsystem's `STAGES` (see `build-pipeline.md`).
+They are therefore grouped by subsystem, in `define_kernels!` manifest
+order, and within a subsystem in that subsystem's declared stage order.
+The subsystem groups appear in this order:
+
+`fill`, `integrate`, `spme_recip`, `langevin`, `morse`, `angle`,
+`nose_hoover`, `andersen`, `barostat`, `mtk`, `shake`, `settle`,
+`forces`, `neighbor`, `minimize`.
+
+Host rows follow `HostStage::ORDER`:
+
+`host_to_device_upload`, `device_to_host_download`,
+`neighbor_list_rebuild`, `trajectory_write`, `log_write`,
+`velocity_generation`, `config_load`, `init_load`, `gpu_init`,
+`total_runtime`.
 
 ### Example <!-- rq-6289f344 -->
 
 ```
 stage                             count       total_ms       mean_us      min_us      max_us
 vv_kick_drift                       100         2.345          23.5        20.1        28.7
-jit_composed_pair_force             101        12.467         123.4        98.7       145.2
 vv_kick                             100         2.111          21.1        18.5        25.9
+jit_composed_pair_force             101        12.467         123.4        98.7       145.2
 host_to_device_upload                 1         1.890        1890.0      1890.0      1890.0
 device_to_host_download              20         8.910         445.5       420.3       482.1
 trajectory_write                     10         1.234         123.4       100.5       180.7
@@ -333,10 +329,17 @@ partial timings are discarded).
     Distinct from `KernelStage::VIRIAL_SUM_REDUCE`, which counts
     barostat-driven launches of the same kernel binary.
 
-  The associated const `KernelStage::ORDER: &'static [KernelStage]`
-  is the canonical registry of known kernel stages and fixes the row
-  order used by `finalize` and the output file. Adding a stage means
-  declaring a new associated const and appending it to `ORDER`.
+  Each stage const is declared by the owning subsystem's `gpu_kernels!`
+  invocation (see `build-pipeline.md`), which from one `stages` list
+  emits both the consts and that subsystem's `STAGES` slice of exactly
+  those consts. `KernelStage::ORDER: &'static [KernelStage]` is the
+  canonical registry of known kernel stages: the manifest-order
+  concatenation of every subsystem's `STAGES`, assembled by
+  `define_kernels!`. It fixes the row order used by `finalize` and the
+  output file (grouped by subsystem). Adding a stage is one entry in
+  its subsystem's `stages` list — the const, that subsystem's `STAGES`,
+  and `ORDER` update from the same source, so they cannot drift, and
+  `ORDER` holds each stage exactly once.
 
 - `HostStage` — opaque newtype wrapping a `&'static str` stage name. <!-- rq-d29f2811 -->
   `Copy`, `Eq`, `Hash`, `Debug`. Method
@@ -502,10 +505,10 @@ writing the timings file is excluded from every row.
 - Cross-host or cross-GPU timing comparisons. Timings vary by hardware.
 - Reproducibility of timing data; only the *trajectory* and *log* outputs
   are bit-reproducible across runs.
-- A public API for external-crate stage registration. The
-  `KernelStage::ORDER` and `HostStage::ORDER` arrays are the canonical
-  registry; the set of valid stages is fixed at compile time, and adding
-  a stage requires editing those arrays in this crate.
+- A public API for external-crate stage registration. `KernelStage::ORDER`
+  (assembled from each subsystem's `STAGES`) and `HostStage::ORDER` are the
+  canonical registry; the set of valid stages is fixed at compile time, and
+  adding a stage is an in-crate per-subsystem declaration.
 - Streaming the timings file to stdout. Output is to a file only.
 - Compressed (gzip, etc.) timings files.
 - Profile data formats for external tools (Tracy, Perfetto, Chrome
@@ -741,11 +744,12 @@ Feature: Performance analysis and timings output
     Given a valid lossy config with n_steps=10, trajectory_every=5, log_every=5
     When heddlemd run sim.in.toml is invoked
     Then the stage column of consecutive data rows of tmp/sim.out.timings reads
-      ["vv_kick_drift", "jit_composed_pair_force", "vv_kick",
+      ["vv_kick_drift", "vv_kick", "jit_composed_pair_force",
        "host_to_device_upload", "device_to_host_download", "trajectory_write",
        "log_write", "config_load", "init_load", "gpu_init", "total_runtime"]
-      (omitting any absent stages; "velocity_generation" is absent because
-      explicit velocities are provided)
+      (kernel rows grouped by subsystem in define_kernels! manifest order,
+      then host rows; omitting any absent stages; "velocity_generation" is
+      absent because explicit velocities are provided)
 
   @rq-44dfc3da
   Scenario: Numeric columns have the documented precision
@@ -875,4 +879,24 @@ Feature: Performance analysis and timings output
       name does not appear in HostStage::ORDER
     When timings.record_host(unknown, Duration::from_micros(10)) is called
     Then it panics
+
+  # --- Stage registry assembly ---
+
+  @rq-a2b911fc
+  Scenario: KernelStage::ORDER is the manifest-order concatenation of subsystem STAGES
+    Given the define_kernels! manifest in registration order
+    Then KernelStage::ORDER equals the concatenation, in that order, of
+      every subsystem sub-struct's SubsystemKernels::STAGES
+
+  @rq-4a584e03
+  Scenario: Each subsystem's STAGES is a contiguous run within KernelStage::ORDER
+    Given any subsystem sub-struct T in the manifest
+    Then the elements of <T as SubsystemKernels>::STAGES appear in
+      KernelStage::ORDER as a contiguous slice, in the same order
+
+  @rq-42ee692a
+  Scenario: KernelStage::ORDER contains no duplicate stage
+    Given KernelStage::ORDER
+    Then no two entries have the same stage name
+    And no stage recorded by any launch site is absent from ORDER
 ```

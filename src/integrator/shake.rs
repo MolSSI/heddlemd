@@ -2,18 +2,15 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
-use cudarc::nvrtc::Ptx;
+use cudarc::driver::{CudaDevice, CudaSlice};
 
 use serde::Deserialize;
 
 use crate::forces::{ConstraintList, GroupConstraint};
-use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, constraint_virial_scatter, rattle_velocities,
     shake_positions, shake_positions_no_velocity, shake_snapshot,
 };
-use crate::kernels;
 use crate::io::config::{ConfigError, NamedSlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
@@ -679,42 +676,22 @@ impl ConstraintBuilder for ShakeBuilder {
 }
 
 // rq-2093594f
-#[derive(Debug, Clone)]
-pub struct ShakeKernels {
-    pub shake_snapshot: CudaFunction,
-    pub shake_positions: CudaFunction,
-    pub rattle_velocities: CudaFunction,
-    pub constraint_virial_scatter: CudaFunction,
-    pub shake_positions_no_velocity: CudaFunction,
-}
-
-impl ShakeKernels {
-    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::SHAKE),
-            "shake",
-            &[
-                "shake_snapshot",
-                "shake_positions",
-                "rattle_velocities",
-                "constraint_virial_scatter",
-                "shake_positions_no_velocity",
-            ],
-        )?;
-        Ok(ShakeKernels {
-            shake_snapshot: get_func(device, "shake", "shake_snapshot")?,
-            shake_positions: get_func(device, "shake", "shake_positions")?,
-            rattle_velocities: get_func(device, "shake", "rattle_velocities")?,
-            constraint_virial_scatter: get_func(
-                device,
-                "shake",
-                "constraint_virial_scatter",
-            )?,
-            shake_positions_no_velocity: get_func(
-                device,
-                "shake",
-                "shake_positions_no_velocity",
-            )?,
-        })
-    }
+crate::gpu_kernels! {
+    module: "shake",
+    ptx: crate::kernels::SHAKE,
+    struct: ShakeKernels,
+    kernels: [
+        shake_snapshot,
+        shake_positions,
+        rattle_velocities,
+        constraint_virial_scatter,
+        shake_positions_no_velocity,
+    ],
+    stages: {
+        SHAKE_SNAPSHOT              = "shake_snapshot",
+        SHAKE_POSITIONS             = "shake_positions",
+        RATTLE_VELOCITIES           = "rattle_velocities",
+        CONSTRAINT_VIRIAL_SCATTER   = "constraint_virial_scatter",
+        SHAKE_POSITIONS_NO_VELOCITY = "shake_positions_no_velocity",
+    },
 }
