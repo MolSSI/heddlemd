@@ -506,6 +506,22 @@
     "title": "Feature: Simulation Box and Periodic Boundary Conditions",
     "type": "file"
   },
+  "rq-03a5a290": {
+    "decl": "- `apply_move(&mut self, force_field: &mut ForceField, buffers: &mut",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "src/integrator/mc_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "apply_move",
+    "type": "api-item"
+  },
   "rq-03c6490c": {
     "decl": "### File format precision selection",
     "file": "precision",
@@ -1225,6 +1241,22 @@
     "title": "Feature: Velocity Verlet Time Integration",
     "type": "file"
   },
+  "rq-09ac44ea": {
+    "decl": "- `McBarostat` — implements the `Barostat` trait declared in",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "src/integrator/mc_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "McBarostat",
+    "type": "api-item"
+  },
   "rq-09b6b539": {
     "decl": "Scenario: spme_spread_finish converts rho_fixed to rho via the inverse scale",
     "file": "forces/spme",
@@ -1477,6 +1509,18 @@
     "title": "Composed post-force kernel is compiled before capture begins",
     "type": "scenario"
   },
+  "rq-0ba1a24a": {
+    "decl": "- `periodicity(&self) -> BarostatPeriodicity` — default",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "src/integrator/mc_barostat.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "periodicity",
+    "type": "api-item"
+  },
   "rq-0bb735c9": {
     "decl": "## Empty State",
     "file": "integration/framework",
@@ -1488,7 +1532,12 @@
   "rq-0bc3a66e": {
     "decl": "Scenario: Graph mode and per-step mode use the same composed kernel",
     "file": "cuda-graphs",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Graph mode and per-step mode use the same composed kernel",
     "type": "scenario"
   },
@@ -1653,6 +1702,19 @@
     ],
     "title": "Dimension",
     "type": "api-item"
+  },
+  "rq-0d729ecb": {
+    "decl": "## Graph Interaction",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Graph Interaction",
+    "type": "section"
   },
   "rq-0d7ebeb6": {
     "decl": "Scenario: Custom integrator builder is selectable",
@@ -2113,6 +2175,14 @@
     ],
     "title": "n_steps = 0 is accepted",
     "type": "scenario"
+  },
+  "rq-106fbbdf": {
+    "decl": "### `Barostat` trait surface",
+    "file": "integration/mc-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "`Barostat` trait surface",
+    "type": "section"
   },
   "rq-107a7187": {
     "decl": "Scenario: KE of a single particle at rest is zero",
@@ -3003,6 +3073,14 @@
     "title": "`kinetic_energy_reduce`",
     "type": "section"
   },
+  "rq-174505f0": {
+    "decl": "### Counter packing",
+    "file": "integration/mc-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Counter packing",
+    "type": "section"
+  },
   "rq-175e5b45": {
     "decl": "## Reproducibility contract",
     "file": "analysis/framework",
@@ -3654,6 +3732,13 @@
     "title": "Display Messages",
     "type": "section"
   },
+  "rq-1bcfd19c": {
+    "decl": "Scenario: a per-step barostat still forces per-step scalars",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "a per-step barostat still forces per-step scalars",
+    "type": "scenario"
+  },
   "rq-1bd297f4": {
     "decl": "## Instrumented Stages",
     "file": "performance-analysis",
@@ -3855,12 +3940,32 @@
     "title": "Accept r_switch equal to cutoff (hard-cutoff degenerate case)",
     "type": "scenario"
   },
+  "rq-1dadb8e9": {
+    "decl": "Scenario: Missing pressure rejected",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Missing pressure rejected",
+    "type": "scenario"
+  },
   "rq-1db7cf2a": {
     "decl": "## JIT-Composed Post-Force Kernel in the Captured Sequence",
     "file": "cuda-graphs",
     "level": 2,
     "refs": [],
     "title": "JIT-Composed Post-Force Kernel in the Captured Sequence",
+    "type": "section"
+  },
+  "rq-1dc985cc": {
+    "decl": "### Reproducibility",
+    "file": "integration/mc-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
     "type": "section"
   },
   "rq-1ddf84f1": {
@@ -4053,6 +4158,13 @@
     ],
     "title": "Displacement Check",
     "type": "section"
+  },
+  "rq-1f5391f7": {
+    "decl": "- `mc_barostat_scale_molecule_com(buffers, mol_atom_offsets,",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "mc_barostat_scale_molecule_com",
+    "type": "api-item"
   },
   "rq-1f87880c": {
     "decl": "- `SlotConfig` — open-shaped parsed slot selection. Lives alongside",
@@ -4440,6 +4552,18 @@
     "title": "Empty State",
     "type": "section"
   },
+  "rq-21ad8af9": {
+    "decl": "Scenario: volume_step defaults to one percent of the initial box volume",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "volume_step defaults to one percent of the initial box volume",
+    "type": "scenario"
+  },
   "rq-21d27f06": {
     "decl": "Scenario: All-pairs mode skips the box-too-small check",
     "file": "simulation-runner",
@@ -4462,6 +4586,18 @@
       }
     ],
     "title": "Construct MtkNptIntegrator with defaults (unconstrained system)",
+    "type": "scenario"
+  },
+  "rq-220808ef": {
+    "decl": "Scenario: Construct McBarostat via the registry",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct McBarostat via the registry",
     "type": "scenario"
   },
   "rq-220f3f10": {
@@ -4795,6 +4931,13 @@
     "title": "Two builders producing slots with the same label fail construction",
     "type": "scenario"
   },
+  "rq-24c7ed51": {
+    "decl": "Scenario: N_mol is the molecule count, not the atom count",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "N_mol is the molecule count, not the atom count",
+    "type": "scenario"
+  },
   "rq-24cd0b9c": {
     "decl": "Scenario: SimulationSetup::new short-circuits at the first failing step helper",
     "file": "simulation-runner",
@@ -5106,6 +5249,18 @@
     "title": "fill kernel handles a non-block-aligned buffer size",
     "type": "scenario"
   },
+  "rq-26d969aa": {
+    "decl": "Scenario: Accept negative target pressure",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Accept negative target pressure",
+    "type": "scenario"
+  },
   "rq-26dce0f6": {
     "decl": "Scenario: A phase without a barostat captures both graphs",
     "file": "cuda-graphs",
@@ -5220,6 +5375,13 @@
     ],
     "title": "Construct an orthorhombic box (all tilts zero)",
     "type": "scenario"
+  },
+  "rq-282850ad": {
+    "decl": "- `post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` —",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "post_force_per_particle",
+    "type": "api-item"
   },
   "rq-282af621": {
     "decl": "## Box Generation Tracking",
@@ -5407,6 +5569,14 @@
     "title": "SPME-real JIT fragment evaluates erfc via Real_erfc under f64",
     "type": "scenario"
   },
+  "rq-29b5ed1e": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
+    "type": "section"
+  },
   "rq-29bdf2b2": {
     "decl": "### Self-energy",
     "file": "forces/spme",
@@ -5540,12 +5710,37 @@
     "title": "Round-trip preserves a representative Real value in the default build",
     "type": "scenario"
   },
+  "rq-2aad1786": {
+    "decl": "Scenario: rigid-water internal geometry is invariant under a move",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "rigid-water internal geometry is invariant under a move",
+    "type": "scenario"
+  },
   "rq-2aadbec9": {
     "decl": "### CUDA Kernels",
     "file": "integration/berendsen",
     "level": 3,
     "refs": [],
     "title": "CUDA Kernels",
+    "type": "section"
+  },
+  "rq-2acc094a": {
+    "decl": "## Periodicity and the Barostat Slot Contract",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Periodicity and the Barostat Slot Contract",
     "type": "section"
   },
   "rq-2ad32a7b": {
@@ -6402,6 +6597,14 @@
     "title": "Registries",
     "type": "api-item"
   },
+  "rq-3246a873": {
+    "decl": "### Molecule list",
+    "file": "forces/topology",
+    "level": 3,
+    "refs": [],
+    "title": "Molecule list",
+    "type": "section"
+  },
   "rq-3288a78c": {
     "decl": "Scenario: NPT-style sequence of small barostat ticks rebuilds at the displacement-driven rate",
     "file": "forces/neighbor-list",
@@ -6432,6 +6635,14 @@
     ],
     "title": "step() on a ForceField with only LennardJones writes LJ forces to forces_*",
     "type": "scenario"
+  },
+  "rq-32f5770f": {
+    "decl": "## RNG",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "RNG",
+    "type": "section"
   },
   "rq-32fda118": {
     "decl": "Scenario: Load an empty (N=0) file",
@@ -6558,6 +6769,18 @@
     "refs": [],
     "title": "A real-space exclusion entry on one pair does not attenuate other pairs",
     "type": "scenario"
+  },
+  "rq-343a8f18": {
+    "decl": "- `BarostatPeriodicity` — closed enum: `EveryStep` (per-step coupling) <!-- inline -->",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "BarostatPeriodicity",
+    "type": "api-item"
   },
   "rq-34446ef5": {
     "decl": "- `UnitSystem` — discriminated enum naming the two supported systems.",
@@ -6745,6 +6968,13 @@
     ],
     "title": "lan_drift_half advances positions by v * dt/2",
     "type": "scenario"
+  },
+  "rq-3597f2a0": {
+    "decl": "- `apply(&mut self, ...) -> Result<(), BarostatError>` — `McBarostat`",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "apply",
+    "type": "api-item"
   },
   "rq-35981c27": {
     "decl": "Scenario: First displacement_check call always rebuilds (needs_rebuild starts true)",
@@ -6946,6 +7176,13 @@
     "title": "Two independent runs produce byte-identical outputs",
     "type": "scenario"
   },
+  "rq-37e9c873": {
+    "decl": "Scenario: a contracting move that violates the width guard is rejected",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "a contracting move that violates the width guard is rejected",
+    "type": "scenario"
+  },
   "rq-37f8c017": {
     "decl": "Scenario: Per-pair-type r_switch dispatches correctly",
     "file": "forces/lj-pair-force",
@@ -7128,6 +7365,18 @@
       }
     ],
     "title": "Reject when explicit IDs have the wrong length",
+    "type": "scenario"
+  },
+  "rq-392ac5d3": {
+    "decl": "Scenario: Each constraint group is one molecule",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Each constraint group is one molecule",
     "type": "scenario"
   },
   "rq-3933f0c3": {
@@ -7701,6 +7950,23 @@
     "title": "Unknown minimizer kind in a populated registry reports UnknownKind",
     "type": "scenario"
   },
+  "rq-3e1fba8b": {
+    "decl": "## Molecule Grouping",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/mc_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Molecule Grouping",
+    "type": "section"
+  },
   "rq-3e2bcb37": {
     "decl": "## Slot structure",
     "file": "forces/spme",
@@ -8096,6 +8362,18 @@
     "title": "Other attributes",
     "type": "section"
   },
+  "rq-4207d7ef": {
+    "decl": "Scenario: Missing seed rejected",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Missing seed rejected",
+    "type": "scenario"
+  },
   "rq-420d2eb3": {
     "decl": "Scenario: SD reduces energy of a 1D harmonic well in one step",
     "file": "minimization/steepest-descent",
@@ -8107,6 +8385,18 @@
     ],
     "title": "SD reduces energy of a 1D harmonic well in one step",
     "type": "scenario"
+  },
+  "rq-42195e6f": {
+    "decl": "- `MoleculeList` — host-side. Fields: `mol_atom_offsets: Vec<u32>`",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "MoleculeList",
+    "type": "api-item"
   },
   "rq-4241d94b": {
     "decl": "## Constraint Handling",
@@ -8383,6 +8673,18 @@
     ],
     "title": "load_config",
     "type": "api-item"
+  },
+  "rq-45d384b3": {
+    "decl": "Scenario: Bonds join their atoms into one molecule",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Bonds join their atoms into one molecule",
+    "type": "scenario"
   },
   "rq-45e6b20a": {
     "decl": "Scenario: Convergence on energy tolerance ends the phase",
@@ -9360,6 +9662,14 @@
     "title": "λ² is clamped to zero when (K_target/K_old − 1) · dt/τ < −1",
     "type": "scenario"
   },
+  "rq-4fead095": {
+    "decl": "### Types",
+    "file": "integration/mc-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-4ff84310": {
     "decl": "- `lint_simulation(config_path: &Path, with_gpu: bool) -> LintReport`",
     "file": "simulation-runner",
@@ -10096,6 +10406,14 @@
     "title": "Output File Format",
     "type": "section"
   },
+  "rq-56545622": {
+    "decl": "## Out of Scope",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-565ffbcc": {
     "decl": "- `AngleForceFragment` — same shape as `BondedForceFragment`,",
     "file": "forces/jit-composed-intramolecular",
@@ -10494,6 +10812,13 @@
     "title": "crate",
     "type": "api-item"
   },
+  "rq-5977755f": {
+    "decl": "Scenario: max_volume_step is unchanged for mid-range acceptance",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "max_volume_step is unchanged for mid-range acceptance",
+    "type": "scenario"
+  },
   "rq-5985846f": {
     "decl": "Scenario: step(ForcesOnly) updates forces and leaves potential_energies / virials stale",
     "file": "forces/framework",
@@ -10534,6 +10859,13 @@
     "refs": [],
     "title": "An exclusion entry on one pair does not attenuate other pairs",
     "type": "scenario"
+  },
+  "rq-59f42062": {
+    "decl": "- `log_column_values(&self, ke, pe) -> Vec<f64>` — returns",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "log_column_values",
+    "type": "api-item"
   },
   "rq-5a0f5c00": {
     "decl": "### Config filename convention",
@@ -10643,6 +10975,18 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "run_minimization_phase from a constructed setup matches the orchestrator",
+    "type": "scenario"
+  },
+  "rq-5af90224": {
+    "decl": "Scenario: Two graph-mode runs with identical configs and seeds are byte-identical",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two graph-mode runs with identical configs and seeds are byte-identical",
     "type": "scenario"
   },
   "rq-5b004038": {
@@ -11566,6 +11910,13 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-627fc517": {
+    "decl": "Scenario: a periodic barostat does not force per-step scalars",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "a periodic barostat does not force per-step scalars",
+    "type": "scenario"
+  },
   "rq-6289f344": {
     "decl": "### Example",
     "file": "performance-analysis",
@@ -11833,6 +12184,18 @@
       }
     ],
     "title": "Tilts may exceed the corresponding diagonals",
+    "type": "scenario"
+  },
+  "rq-656ce38f": {
+    "decl": "Scenario: Log header includes the MC barostat columns when configured",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Log header includes the MC barostat columns when configured",
     "type": "scenario"
   },
   "rq-6575e627": {
@@ -12350,6 +12713,18 @@
     "title": "Bonded composed module is compiled at ForceField::new when at least one bonded slot is active",
     "type": "scenario"
   },
+  "rq-69ba800a": {
+    "decl": "Scenario: Reject zero frequency",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject zero frequency",
+    "type": "scenario"
+  },
   "rq-69bf814f": {
     "decl": "Scenario: Lint short-circuits on the first failure",
     "file": "simulation-runner",
@@ -12399,6 +12774,18 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "from_config receives the default r_switch when the config omitted it",
+    "type": "scenario"
+  },
+  "rq-6a983abc": {
+    "decl": "Scenario: draw_counter starts at 0 and increments by 1 per attempted move",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "draw_counter starts at 0 and increments by 1 per attempted move",
     "type": "scenario"
   },
   "rq-6a9f0a18": {
@@ -12889,6 +13276,18 @@
     "title": "Dependencies",
     "type": "section"
   },
+  "rq-6e1916c0": {
+    "decl": "- `McBarostatBuilder` — implements `BarostatBuilder` with",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "src/integrator/mc_barostat.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "McBarostatBuilder",
+    "type": "api-item"
+  },
   "rq-6e191fd0": {
     "decl": "## Reproducibility",
     "file": "forces/pair-force-kernel",
@@ -12932,6 +13331,14 @@
     ],
     "title": "compute_kinetic_energy",
     "type": "api-item"
+  },
+  "rq-6e822476": {
+    "decl": "### Periodic-barostat moves <!-- new -->",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "Periodic-barostat moves <!-- new -->",
+    "type": "section"
   },
   "rq-6e828da5": {
     "decl": "# Feature: f64 Precision Compile-Time Feature Flag",
@@ -13858,6 +14265,18 @@
       }
     ],
     "title": "Unknown top-level key is permitted",
+    "type": "scenario"
+  },
+  "rq-763200f7": {
+    "decl": "Scenario: An atom in no bond and no constraint is its own molecule",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An atom in no bond and no constraint is its own molecule",
     "type": "scenario"
   },
   "rq-7646dd13": {
@@ -15137,6 +15556,19 @@
     "title": "Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
     "type": "scenario"
   },
+  "rq-8114b8c4": {
+    "decl": "## Algorithm",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/mc_barostat.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-811ba2a0": {
     "decl": "- `ShakeConstraintSpec` — one row of the `constraints` array. Fields:",
     "file": "integration/shake",
@@ -15984,6 +16416,14 @@
     "title": "Number formatting",
     "type": "section"
   },
+  "rq-88ef7e60": {
+    "decl": "## Per-Move Sequence",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Move Sequence",
+    "type": "section"
+  },
   "rq-8904d7cb": {
     "decl": "Scenario: Accept negative target pressure",
     "file": "integration/c-rescale-barostat",
@@ -16292,6 +16732,13 @@
     ],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-8b4f642c": {
+    "decl": "Scenario: rejected move restores positions, forces, and box exactly",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "rejected move restores positions, forces, and box exactly",
+    "type": "scenario"
   },
   "rq-8b6d0c41": {
     "decl": "Scenario: A rebuild grows the buffers when the interaction count rises",
@@ -17066,6 +17513,18 @@
     "title": "apply launches the expected kernel set",
     "type": "scenario"
   },
+  "rq-92eee9d8": {
+    "decl": "Scenario: a singleton-molecule system scales each atom about the origin",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "a singleton-molecule system scales each atom about the origin",
+    "type": "scenario"
+  },
   "rq-92f5e5c4": {
     "decl": "## Out of Scope",
     "file": "integration/velocity-verlet",
@@ -17284,6 +17743,13 @@
     "title": "Compile-time spline-order specialization",
     "type": "section"
   },
+  "rq-94c5a0ec": {
+    "decl": "Scenario: a move with w > 0 is accepted iff u2 < exp(-w/kT)",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "a move with w > 0 is accepted iff u2 < exp(-w/kT)",
+    "type": "scenario"
+  },
   "rq-94cb21a5": {
     "decl": "# atom_count per row is determined by the constraint_type's `kind`.",
     "file": "forces/topology",
@@ -17373,6 +17839,13 @@
     "refs": [],
     "title": "Atom indices are 0-based and refer to entries in the init file.",
     "type": "file"
+  },
+  "rq-95944e8b": {
+    "decl": "Scenario: a move fires once per frequency steps at a batch boundary",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "a move fires once per frequency steps at a batch boundary",
+    "type": "scenario"
   },
   "rq-9594de53": {
     "decl": "Scenario: Download overwrites in-place after host mutation",
@@ -17698,6 +18171,25 @@
       }
     ],
     "title": "check_min_perpendicular_width with non-positive threshold always returns Ok",
+    "type": "scenario"
+  },
+  "rq-98ac24d9": {
+    "decl": "Scenario: monte-carlo composes with velocity-Verlet + CSVR for NPT water",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "monte-carlo composes with velocity-Verlet + CSVR for NPT water",
+    "type": "scenario"
+  },
+  "rq-98c80507": {
+    "decl": "Scenario: apply is a no-op every step",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "apply is a no-op every step",
     "type": "scenario"
   },
   "rq-98fd2e40": {
@@ -18337,6 +18829,18 @@
     "title": "Temperature for an unconstrained 10-particle COM-removed system",
     "type": "scenario"
   },
+  "rq-9d8f0e2a": {
+    "decl": "Scenario: frequency defaults to 25 when omitted",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "frequency defaults to 25 when omitted",
+    "type": "scenario"
+  },
   "rq-9d9ca545": {
     "decl": "### Reduction Kernel",
     "file": "forces/harmonic-angle",
@@ -18699,6 +19203,13 @@
     ],
     "title": "StepPlan",
     "type": "api-item"
+  },
+  "rq-9fbe4022": {
+    "decl": "Scenario: Different seeds produce different trajectories",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "Different seeds produce different trajectories",
+    "type": "scenario"
   },
   "rq-9fe1d656": {
     "decl": "## Determinism Guarantees",
@@ -19169,6 +19680,13 @@
     "title": "Open creates a new trajectory file",
     "type": "scenario"
   },
+  "rq-a41f3e8b": {
+    "decl": "Scenario: log_column_values returns volume, acceptance, step, and conserved quantity",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "log_column_values returns volume, acceptance, step, and conserved quantity",
+    "type": "scenario"
+  },
   "rq-a45a30ce": {
     "decl": "### Schema-Checked Binding",
     "file": "forces/jit-composed-pair-force",
@@ -19281,6 +19799,13 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "Berendsen barostat apply writes mu_device via on-device compute",
+    "type": "scenario"
+  },
+  "rq-a516b529": {
+    "decl": "Scenario: max_volume_step grows when acceptance is high",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "max_volume_step grows when acceptance is high",
     "type": "scenario"
   },
   "rq-a54cc657": {
@@ -20361,6 +20886,18 @@
     "title": "Morse bond_type rejects non-positive a",
     "type": "scenario"
   },
+  "rq-ae8e2b7d": {
+    "decl": "Scenario: Molecules are ordered by minimum particle index",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Molecules are ordered by minimum particle index",
+    "type": "scenario"
+  },
   "rq-aea6734a": {
     "decl": "Scenario: Empty constraint list yields None",
     "file": "integration/constraint-framework",
@@ -20630,6 +21167,18 @@
     "title": "rescale_isotropic rejects zero factor",
     "type": "scenario"
   },
+  "rq-b0bdc311": {
+    "decl": "- `MoleculeList::from_topology(particle_count: usize, bonds: &BondList, constraints: &ConstraintList) -> MoleculeList`",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "MoleculeList",
+    "type": "api-item"
+  },
   "rq-b0c18819": {
     "decl": "Scenario: Empty topology file is valid",
     "file": "forces/topology",
@@ -20703,6 +21252,13 @@
     ],
     "title": "The evaluate signature carries per-atom i_type and j_type",
     "type": "scenario"
+  },
+  "rq-b13a5224": {
+    "decl": "# Feature: Monte-Carlo Barostat",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "Feature: Monte-Carlo Barostat",
+    "type": "file"
   },
   "rq-b13eba96": {
     "decl": "Scenario: Particles evolve independently with their own forces",
@@ -20969,6 +21525,13 @@
     "title": "settle_velocities accumulates a velocity-level constraint virial when dt > 0",
     "type": "scenario"
   },
+  "rq-b33106df": {
+    "decl": "Scenario: Graph-mode and non-graph-mode runs are byte-identical",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "Graph-mode and non-graph-mode runs are byte-identical",
+    "type": "scenario"
+  },
   "rq-b33243ff": {
     "decl": "## Parameters",
     "file": "forces/harmonic-angle",
@@ -21160,6 +21723,13 @@
       }
     ],
     "title": "minimum_image of a c-aligned displacement subtracts the c lattice vector",
+    "type": "scenario"
+  },
+  "rq-b4f1c3a8": {
+    "decl": "Scenario: accepted move keeps the trial box and trial forces",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "accepted move keeps the trial box and trial forces",
     "type": "scenario"
   },
   "rq-b4f36b2a": {
@@ -22276,6 +22846,13 @@
     "title": "minimum_image leaves a displacement strictly inside the primary image unchanged",
     "type": "scenario"
   },
+  "rq-bfd5cc3a": {
+    "decl": "- `BarostatPeriodicity` — closed enum describing how often a barostat",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "BarostatPeriodicity",
+    "type": "api-item"
+  },
   "rq-bfd7004c": {
     "decl": "## Algorithm",
     "file": "forces/coulomb-pair-force",
@@ -22558,6 +23135,14 @@
     "title": "Feature: Pluggable Potential Slot Framework",
     "type": "file"
   },
+  "rq-c200c7b8": {
+    "decl": "## Molecule grouping",
+    "file": "forces/topology",
+    "level": 2,
+    "refs": [],
+    "title": "Molecule grouping",
+    "type": "section"
+  },
   "rq-c2211c85": {
     "decl": "## Parameters",
     "file": "integration/c-rescale-barostat",
@@ -22732,6 +23317,13 @@
     "title": "Launch bounds preserve same-GPU run-to-run bit-exactness",
     "type": "scenario"
   },
+  "rq-c479f47e": {
+    "decl": "Scenario: max_volume_step shrinks when acceptance is low",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "max_volume_step shrinks when acceptance is low",
+    "type": "scenario"
+  },
   "rq-c4845f90": {
     "decl": "- `Timings::finalize(&mut self) -> Result<TimingsReport, TimingsError>`",
     "file": "performance-analysis",
@@ -22830,6 +23422,13 @@
       }
     ],
     "title": "Quiescent batch incurs no rebuild",
+    "type": "scenario"
+  },
+  "rq-c4cd5622": {
+    "decl": "Scenario: a move that lowers the weight is always accepted",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "a move that lowers the weight is always accepted",
     "type": "scenario"
   },
   "rq-c4d04411": {
@@ -23085,6 +23684,18 @@
     "title": "A phase with a barostat captures only the forces+scalars graph",
     "type": "scenario"
   },
+  "rq-c6ee2fb9": {
+    "decl": "- `McBarostatParams` — `#[serde(deny_unknown_fields)]` parameter struct:",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "src/integrator/mc_barostat.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "McBarostatParams",
+    "type": "api-item"
+  },
   "rq-c6f6a13c": {
     "decl": "- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>`",
     "file": "forces/spme",
@@ -23210,6 +23821,14 @@
     ],
     "title": "draw_counter starts at 0 and increments by 1 per apply_post",
     "type": "scenario"
+  },
+  "rq-c83742c0": {
+    "decl": "## CUDA Kernels and launch helpers",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "CUDA Kernels and launch helpers",
+    "type": "section"
   },
   "rq-c85fa8d1": {
     "decl": "### Functions",
@@ -23614,6 +24233,18 @@
     "title": "Builder validate_params rejects an out-of-domain field",
     "type": "scenario"
   },
+  "rq-cb831438": {
+    "decl": "Scenario: Reject non-positive temperature",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject non-positive temperature",
+    "type": "scenario"
+  },
   "rq-cb85cf61": {
     "decl": "Scenario: Pair near r_cut inside the switching window has force smaller than the unmodified value",
     "file": "forces/lj-pair-force",
@@ -23814,6 +24445,18 @@
     "refs": [],
     "title": "File Format",
     "type": "section"
+  },
+  "rq-cdd66a5a": {
+    "decl": "Scenario: velocities are never modified by a move",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "velocities are never modified by a move",
+    "type": "scenario"
   },
   "rq-cde6e114": {
     "decl": "Scenario: neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff",
@@ -24045,6 +24688,13 @@
     "title": "Box generation tick that changes n_cells_total forces a rebuild",
     "type": "scenario"
   },
+  "rq-cf8948a8": {
+    "decl": "- `log_column_names(&self) -> &'static [(&'static str, Dimension)]` —",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "log_column_names",
+    "type": "api-item"
+  },
   "rq-cfb1e3aa": {
     "decl": "Scenario: The constraint-iteration order matches the topology's declared order",
     "file": "integration/shake",
@@ -24121,6 +24771,19 @@
     "level": 3,
     "refs": [],
     "title": "Rust Launch Helpers",
+    "type": "section"
+  },
+  "rq-d0506951": {
+    "decl": "## Diagnostic log columns",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/mc_barostat.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Diagnostic log columns",
     "type": "section"
   },
   "rq-d05a8f16": {
@@ -24796,6 +25459,14 @@
     "title": "skip_substep_index skips the integrator's execute for that sub-step",
     "type": "scenario"
   },
+  "rq-d651a188": {
+    "decl": "## Feature API",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-d65bcc90": {
     "decl": "Scenario: Reject image column whose value does not parse as i32",
     "file": "io/init-state-file",
@@ -25393,6 +26064,14 @@
     "level": 2,
     "refs": [],
     "title": "Determinism",
+    "type": "section"
+  },
+  "rq-db9cf120": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
     "type": "section"
   },
   "rq-dba8d096": {
@@ -27009,6 +27688,13 @@
     "title": "dt=0 leaves state unchanged for vv_kick_drift",
     "type": "scenario"
   },
+  "rq-e8ceba10": {
+    "decl": "Scenario: monte-carlo composes with langevin-baoab",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "monte-carlo composes with langevin-baoab",
+    "type": "scenario"
+  },
   "rq-e8d29f08": {
     "decl": "Scenario: Reject non-finite lattice value",
     "file": "io/init-state-file",
@@ -27019,6 +27705,18 @@
       }
     ],
     "title": "Reject non-finite lattice value",
+    "type": "scenario"
+  },
+  "rq-e8f97894": {
+    "decl": "Scenario: Reject non-positive volume_step",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject non-positive volume_step",
     "type": "scenario"
   },
   "rq-e92c18c6": {
@@ -27138,6 +27836,18 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-e9b8f0a6": {
+    "decl": "Scenario: apply_move on empty state is a no-op",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "apply_move on empty state is a no-op",
+    "type": "scenario"
   },
   "rq-e9b9f528": {
     "decl": "## Launch Configuration",
@@ -27325,6 +28035,30 @@
       }
     ],
     "title": "settle_positions handles a water group straddling a periodic boundary",
+    "type": "scenario"
+  },
+  "rq-ebab7fd7": {
+    "decl": "Scenario: Atoms within a molecule are listed in ascending order",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Atoms within a molecule are listed in ascending order",
+    "type": "scenario"
+  },
+  "rq-ebe75818": {
+    "decl": "Scenario: log_column_names returns the four MC barostat columns",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "log_column_names returns the four MC barostat columns",
     "type": "scenario"
   },
   "rq-ebfa6e1f": {
@@ -28598,6 +29332,18 @@
     "title": "Feature: Nosé-Hoover Chain (NHC) Thermostat",
     "type": "file"
   },
+  "rq-f609ea67": {
+    "decl": "Scenario: BarostatRegistry::with_builtins() exposes monte-carlo alongside berendsen and c-rescale",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "BarostatRegistry::with_builtins() exposes monte-carlo alongside berendsen and c-rescale",
+    "type": "scenario"
+  },
   "rq-f6107e43": {
     "decl": "Scenario: Reject duplicate phase names",
     "file": "io/config-schema",
@@ -28620,6 +29366,13 @@
       }
     ],
     "title": "SI-mode writer multiplies velocities by the velocity factor",
+    "type": "scenario"
+  },
+  "rq-f632c56c": {
+    "decl": "Scenario: a non-positive proposed volume is rejected without a trial energy",
+    "file": "integration/mc-barostat",
+    "refs": [],
+    "title": "a non-positive proposed volume is rejected without a trial energy",
     "type": "scenario"
   },
   "rq-f652bf7c": {
@@ -28946,6 +29699,14 @@
     "title": "Slots",
     "type": "section"
   },
+  "rq-f8dc8ee0": {
+    "decl": "## Parameters",
+    "file": "integration/mc-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
+  },
   "rq-f8df9364": {
     "decl": "Scenario: Velocity generation is deterministic in the seed",
     "file": "simulation-runner",
@@ -29088,6 +29849,14 @@
     ],
     "title": "`heddlemd lint` on an .in.analysis path runs the analyze lint",
     "type": "scenario"
+  },
+  "rq-fa2fd108": {
+    "decl": "### Functions",
+    "file": "integration/mc-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
   },
   "rq-fa6f7414": {
     "decl": "Scenario: KE of empty input is zero",

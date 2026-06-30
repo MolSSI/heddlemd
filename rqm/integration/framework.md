@@ -10,10 +10,13 @@ compose at every timestep:
    (`apply_post`), so symmetric Trotter splittings such as
    Nosé-Hoover-chain can place a half-step on each side of the
    integrator's velocity-Verlet body.
-3. An optional `Barostat` — pressure coupling. Fires once per step,
-   after the thermostat's post-step, so it consumes the freshest
-   virial / kinetic-energy data and mutates the box for the next
-   step's force evaluation.
+3. An optional `Barostat` — pressure coupling. A per-step barostat fires
+   once per step, after the thermostat's post-step, so it consumes the
+   freshest virial / kinetic-energy data and mutates the box for the next
+   step's force evaluation. A periodic barostat (declared through
+   `Barostat::periodicity`) instead performs no per-step work and runs a
+   host-orchestrated move every `N` steps at a batch boundary through
+   `apply_move` (the Monte-Carlo barostat; see `mc-barostat.md`).
 4. An optional `Constraint` — holonomic constraint projection (rigid
    bonds, rigid groups). Driven by the runner during its walk of the
    integrator's `StepPlan` (see *Per-Step Interface*): the runner
@@ -72,12 +75,13 @@ The default registry exposes four thermostats:
 
 ### Barostat slot <!-- rq-d898f1cd -->
 
-The default registry exposes two barostats:
+The default registry exposes three barostats:
 
-| `kind` value | Implementation                                                       | File                      |
-| ------------ | -------------------------------------------------------------------- | ------------------------- |
-| `berendsen`  | weak-coupling isotropic pressure coupling (equilibration only — not canonical) | `berendsen-barostat.md`   |
-| `c-rescale`  | stochastic isotropic cell-rescaling (canonical NPT)                  | `c-rescale-barostat.md`   |
+| `kind` value   | Implementation                                                       | File                      |
+| -------------- | -------------------------------------------------------------------- | ------------------------- |
+| `berendsen`    | weak-coupling isotropic pressure coupling (equilibration only — not canonical) | `berendsen-barostat.md`   |
+| `c-rescale`    | stochastic isotropic cell-rescaling (canonical NPT)                  | `c-rescale-barostat.md`   |
+| `monte-carlo`  | periodic isotropic Metropolis volume moves on molecular centres of mass (canonical NPT) | `mc-barostat.md`          |
 
 ## Per-Step Interface <!-- rq-daadfc1a -->
 
@@ -570,18 +574,43 @@ successfully.
 
   ```rust
   pub trait Barostat: std::fmt::Debug + Send {
-      /// Apply the barostat's box / position rescale. Reads
+      /// How often this barostat couples to the dynamics. A per-step
+      /// barostat (the default) runs `apply` every step inside the
+      /// captured sequence; a periodic barostat runs `apply_move`
+      /// every `N` steps at a batch boundary and leaves `apply` a
+      /// no-op. See `mc-barostat.md`.
+      fn periodicity(&self) -> BarostatPeriodicity {
+          BarostatPeriodicity::EveryStep
+      }
+
+      /// Apply the per-step barostat's box / position rescale. Reads
       /// virial and kinetic data from `buffers` (already populated
       /// by the integrator's in-step force evaluation), mutates
       /// `buffers.positions_*` and `sim_box`. Never launches the
-      /// force pipeline directly.
+      /// force pipeline directly. A periodic barostat leaves this at
+      /// the no-op default.
       fn apply(
           &mut self,
           buffers: &mut ParticleBuffers,
           sim_box: &mut SimulationBox,
           dt: f32,
           timings: &mut Timings,
-      ) -> Result<(), BarostatError>;
+      ) -> Result<(), BarostatError> { Ok(()) }
+
+      /// Perform a periodic barostat's host-orchestrated move at a
+      /// batch boundary. Unlike `apply`, it receives `&mut ForceField`
+      /// because the move re-evaluates the potential energy at a trial
+      /// configuration (e.g. a Monte-Carlo volume move). The default
+      /// is a no-op; per-step barostats do not override it.
+      fn apply_move(
+          &mut self,
+          force_field: &mut ForceField,
+          buffers: &mut ParticleBuffers,
+          sim_box: &mut SimulationBox,
+          constraint: Option<&mut dyn Constraint>,
+          dt: f32,
+          timings: &mut Timings,
+      ) -> Result<(), BarostatError> { Ok(()) }
 
       fn log_column_names(&self) -> &'static [&'static str] { &[] }
       fn log_column_values(
@@ -592,12 +621,21 @@ successfully.
   }
   ```
 
-  - `apply` returns immediately when
+  - `apply` and `apply_move` each return immediately when
     `buffers.particle_count() == 0`.
+  - A barostat overrides exactly one of `apply` (per-step) or
+    `apply_move` (periodic); the choice is consistent with the
+    `periodicity()` it reports.
   - Mutating `sim_box` bumps its generation counter, which the next
     iteration's force pipeline observes via the existing
     change-detection path (`forces/neighbor-list.md`,
     `forces/spme.md`).
+
+- `BarostatPeriodicity` — closed enum: `EveryStep` (per-step coupling) <!-- inline --> <!-- rq-343a8f18 -->
+  or `EveryNSteps(u32)` (a host-orchestrated move every `N` steps at a
+  batch boundary). The runner reads it to bound replay batches on the
+  move cadence and to keep the per-step scalar requirement off for a
+  periodic barostat (see `cuda-graphs.md`).
 
 - `SlotConfig` — open-shaped parsed slot selection. Lives alongside <!-- rq-1f87880c -->
   the rest of the config types in `crate::io::config`. Its TOML
@@ -773,7 +811,7 @@ successfully.
   built-in rosters: the integrator registry carries a builder for every
   `kind` in the slot's "Slots" table; the thermostat registry carries
   `nose-hoover-chain`, `csvr`, `andersen`, `berendsen`; the barostat
-  registry carries `berendsen` and `c-rescale`.
+  registry carries `berendsen`, `c-rescale`, and `monte-carlo`.
 
   Construction dispatch is subsystem-specific (the build inputs are
   integrator-side):

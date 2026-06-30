@@ -41,6 +41,7 @@ crate::define_kernels! {
     nose_hoover: crate::integrator::nose_hoover_chain::NoseHooverKernels,
     andersen:    crate::integrator::andersen::AndersenKernels,
     barostat:    crate::gpu::barostat_kernels::BarostatKernels,
+    mc_barostat: crate::gpu::mc_barostat_kernels::McBarostatKernels,
     mtk:         crate::integrator::mtk_npt::MtkKernels,
     shake:       crate::integrator::shake::ShakeKernels,
     settle:      crate::integrator::settle::SettleKernels,

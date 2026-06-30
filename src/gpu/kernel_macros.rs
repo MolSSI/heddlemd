@@ -200,6 +200,10 @@ mod tests {
                 <crate::gpu::barostat_kernels::BarostatKernels as SubsystemKernels>::STAGES,
             ),
             (
+                <crate::gpu::mc_barostat_kernels::McBarostatKernels as SubsystemKernels>::MODULE,
+                <crate::gpu::mc_barostat_kernels::McBarostatKernels as SubsystemKernels>::STAGES,
+            ),
+            (
                 <crate::integrator::mtk_npt::MtkKernels as SubsystemKernels>::MODULE,
                 <crate::integrator::mtk_npt::MtkKernels as SubsystemKernels>::STAGES,
             ),

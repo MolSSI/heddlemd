@@ -32,14 +32,20 @@ hold:
 - Every active slot for the phase (integrator, optional thermostat,
   optional barostat, optional constraint) reports
   `graph_compatible(&params) == true`.
-- Every active integrator / thermostat / barostat slot returns
+- Every active integrator / thermostat slot, and every per-step
+  barostat (`Barostat::periodicity() == EveryStep`), returns
   `Some(_)` from `post_force_per_particle()`. The
   JIT-composed post-force per-particle kernel is part of the
-  captured sequence and the per-step loop alike; a slot that does
-  not expose a fragment cannot participate. Every in-tree slot
-  satisfies this. User-registered slots that return `None` raise
+  captured sequence and the per-step loop alike; such a slot that
+  does not expose a fragment cannot participate. Every in-tree
+  integrator, thermostat, and per-step barostat satisfies this.
+  User-registered slots that return `None` raise
   `StepError::MissingPostForcePerParticleFragment` at phase setup
-  before either graph capture or per-step launch is attempted.
+  before either graph capture or per-step launch is attempted. A
+  *periodic* barostat (`EveryNSteps`, the Monte-Carlo barostat) does
+  no per-step work and is exempt: it contributes no post-force
+  fragment, and its move runs on the host at batch boundaries (see
+  *Periodic-barostat moves* below).
 
 When any condition fails the phase runs the per-step launch loop
 described in `simulation-runner.md` step 17, with full per-kernel
@@ -64,6 +70,7 @@ every in-tree slot exposes a post-force per-particle fragment:
 | Thermostat  | `nose-hoover-chain`     | `false`            | yes (cumulative factor rescale) |
 | Barostat    | `c-rescale`             | `true`             | yes (mu position rescale) |
 | Barostat    | `berendsen`             | `true`             | yes (mu position rescale) |
+| Barostat    | `monte-carlo`           | `true`             | none (periodic host move; no per-step node) |
 | Constraint  | `shake`                 | `true`             | n/a (constraints have their own hooks) |
 | Constraint  | `settle`                | `true`             | n/a                 |
 
@@ -267,12 +274,16 @@ sequence:
    - **forces-only graph** — the same sequence with the force
      evaluation at `AggregateLevel::ForcesOnly`: the `_f` composed
      pair-force kernel, with the scalar reductions absent. Captured
-     only when no barostat is active for the phase.
+     unless a *per-step* barostat is active for the phase.
 
-   A barostat consumes the per-step scalar virial inside the captured
-   sequence (`barostat.apply` in step 4), so a barostat phase evaluates
-   scalars on every step and captures only the forces+scalars graph.
-   When no barostat is active the per-particle force, position, and
+   A per-step barostat consumes the per-step scalar virial inside the
+   captured sequence (`barostat.apply` in step 4), so a per-step-barostat
+   phase evaluates scalars on every step and captures only the
+   forces+scalars graph. A periodic (Monte-Carlo) barostat puts no node
+   in the captured sequence and consumes no per-step virial, so its phase
+   captures both graphs exactly as an NVT phase does; its volume move runs
+   on the host between batches (see *Periodic-barostat moves*). When no
+   per-step barostat is active the per-particle force, position, and
    velocity results of the two graphs are bit-identical — the scalar
    reductions are diagnostic outputs that do not feed back into the
    dynamics — so replaying either graph for a given step produces the
@@ -319,7 +330,8 @@ sequence:
      sticky across replays of the captured graph until cleared by
      the host between batches.
 5. Both instantiated graphs are stored in the phase's `GraphLoop`
-   (the forces-only graph as an `Option`, absent for barostat phases).
+   (the forces-only graph as an `Option`, absent for per-step-barostat
+   phases).
 
 Capture records but does not execute, so capturing the graphs
 advances no simulation state; every physical step of the phase is
@@ -356,11 +368,12 @@ For an eligible phase with `[simulation].graph_batch_size = K`, the
 per-phase loop has the shape:
 
 ```text
-needs_scalars(s) = (log_every > 0 and s % log_every == 0) or barostat_active
+needs_scalars(s) = (log_every > 0 and s % log_every == 0) or per_step_barostat_active
 while remaining > 0:
     next_log    = if log_every  > 0 then log_every  - (step % log_every)  else remaining
     next_traj   = if traj_every > 0 then traj_every - (step % traj_every) else remaining
-    batch = min(K, remaining, next_log, next_traj)
+    next_move   = if periodic_barostat then frequency - (step % frequency) else remaining
+    batch = min(K, remaining, next_log, next_traj, next_move)
 
     for i in 1..=batch:
         s = step + i
@@ -368,6 +381,9 @@ while remaining > 0:
 
     step      += batch
     remaining -= batch
+
+    if periodic_barostat and step % frequency == 0:
+        barostat.apply_move(force_field, buffers, sim_box, constraint, dt, timings)  // host-orchestrated MC volume move
 
     outcome = nl.pre_step(sim_box, buffers, timings)    // 4-byte dtoh of neighbor_status; rebuild iff non-zero
     if outcome.reallocated and remaining > 0:           // a rebuild grew (reallocated) a packed-neighbour buffer
@@ -385,14 +401,18 @@ while remaining > 0:
 ```
 
 `graph_batch_size` is a phase-independent host parameter. Output
-cadences (`log_every`, `trajectory_every`) shrink the effective batch
-when they are not multiples of `graph_batch_size`. The captured graph
-itself is always one physical step.
+cadences (`log_every`, `trajectory_every`) and a periodic barostat's
+move cadence (`frequency`) shrink the effective batch when they are not
+multiples of `graph_batch_size`. The captured graph itself is always one
+physical step.
 
 A step requires force-kernel scalars — the total potential energy and
 virial — only when it produces a log row (the log row reports the
-potential energy) or when a barostat is active (the barostat consumes
-the per-step virial). This is the `needs_scalars(s)` predicate above.
+potential energy) or when a *per-step* barostat is active (it consumes
+the per-step virial). This is the `needs_scalars(s)` predicate above. A
+periodic (Monte-Carlo) barostat does not raise the predicate: it consumes
+no per-step virial, and its host-side move evaluates its own energy
+outside the captured graphs.
 A trajectory frame carries positions and velocities, not force-kernel
 scalars, and the thermostat's kinetic energy is reduced from
 velocities independently of the force evaluation, so neither forces a
@@ -406,8 +426,11 @@ forces+scalars graph. Because a batch is bounded so it ends on the
 next log or trajectory cadence boundary, the forces+scalars graph
 runs at most once per batch — on the boundary step that feeds a log
 row — and every other step in the batch runs forces-only. When a
-barostat is active every step requires scalars, the forces-only graph
-is not captured, and every replay launches the forces+scalars graph.
+*per-step* barostat is active every step requires scalars, the
+forces-only graph is not captured, and every replay launches the
+forces+scalars graph. A periodic (Monte-Carlo) barostat does not change
+this scalar cadence; it only adds the `next_move` batch bound and the
+host-side `apply_move` call at each move boundary.
 
 Every per-batch `nl.pre_step` synchronises against the device only
 via a single 4-byte `dtoh_sync_copy` of `neighbor_status`. When the
@@ -424,6 +447,35 @@ the phase graph before the next batch (see *Neighbor-List Pre-Step
 Decomposition*). Stream capture records the kernel sequence without
 executing it, so the re-capture consumes no physical step: the step
 counter is unchanged and the phase still runs exactly `n_steps` steps.
+
+### Periodic-barostat moves <!-- new --> <!-- rq-6e822476 -->
+
+A periodic barostat (`Barostat::periodicity() == EveryNSteps(frequency)`,
+the Monte-Carlo barostat) runs its move on the host at batch boundaries,
+never inside a captured graph. The runner adds `next_move = frequency -
+(step % frequency)` to the batch-bound minimum so a batch always ends on a
+move boundary, and calls `barostat.apply_move(force_field, buffers,
+sim_box, constraint, dt, timings)` after that batch's last replay and
+before `nl.pre_step`. The move evaluates the force field at the pre-move
+and trial configurations, performs a host-side Metropolis accept/reject,
+and mutates (or restores) the device lattice and positions; its full
+contract is in `integration/mc-barostat.md`.
+
+Because the move mutates the device lattice through
+`SimulationBox::set_lattice` / `multiply_lattice_isotropic`, the box
+generation advances, and the next batch's first force evaluation rebuilds
+the neighbor list and refreshes the SPME influence function against the
+new box through the existing generation-change path — the same mechanism
+the per-batch `nl.pre_step` rebuild already uses. The captured graphs hold
+buffer pointers, not box values, so a move never invalidates them; no
+re-capture is triggered by a move (only a packed-neighbour reallocation
+re-captures, exactly as without a barostat).
+
+A move performs host dtoh reads (the trial energy) and host branching, so
+it is run only between batches on the per-step launch path's host side,
+never under stream capture. The phase otherwise replays the forces-only
+graph for every non-log step, which is the production benefit of the
+periodic barostat over a per-step barostat.
 
 ### Skin-distance contract under batched replay <!-- rq-b57700e0 -->
 
@@ -605,8 +657,9 @@ rejected as `ConfigError::InvalidValue { field:
   - `forces_and_scalars: CudaGraphExec` — the instantiated
     forces+scalars graph for one physical step. Always present.
   - `forces_only: Option<CudaGraphExec>` — the instantiated
-    forces-only graph for one physical step. `Some` when no barostat
-    is active for the phase, `None` otherwise.
+    forces-only graph for one physical step. `Some` when no per-step
+    barostat is active for the phase (including periodic Monte-Carlo
+    barostat phases), `None` otherwise.
   - `batch_size: u32` — the phase's `graph_batch_size`.
   - `launch(&self, stream: &CudaStream, scalars: bool) -> Result<(),
     GraphError>` — forwards to `forces_and_scalars.launch(stream)`
@@ -646,8 +699,8 @@ rejected as `ConfigError::InvalidValue { field:
   Option<&mut dyn Constraint>, timings: &mut Timings) ->
   Result<Option<GraphLoop>, GraphError>` — runs the capture procedure
   described under *Capture Lifecycle*, capturing the forces+scalars
-  graph and, when no barostat is active, the forces-only graph, and
-  returning them in one `GraphLoop`. Returns `Ok(None)`
+  graph and, when no per-step barostat is active, the forces-only graph,
+  and returning them in one `GraphLoop`. Returns `Ok(None)`
   when any of the supplied slots reports `graph_compatible = false`
   or when `[simulation].cuda_graphs_disable = true`. Returns
   `Err(...)` only when a CUDA driver call fails during capture or

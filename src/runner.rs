@@ -1208,6 +1208,18 @@ pub(crate) fn run_md_phase_inner(
         .barostats
         .build_optional(phase.barostat.as_ref(), &setup.gpu, n, n_constraints)
         .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+    // rq-3e1fba8b — hand the barostat the connectivity-derived molecule
+    // partition and the initial box (the Monte-Carlo barostat uploads
+    // its molecule tables and resolves its default volume step here).
+    if let Some(b) = barostat.as_mut() {
+        let molecules = crate::forces::MoleculeList::from_topology(
+            n,
+            &setup.bond_list,
+            &setup.constraint_list,
+        );
+        b.init_run(&setup.sim_box, &molecules)
+            .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+    }
     let mut constraint = setup
         .registries
         .constraint_types
@@ -1234,7 +1246,10 @@ pub(crate) fn run_md_phase_inner(
             .post_force_per_particle()
             .map(|p| p.post_force_per_particle_fragment());
         let therm_active = thermostat.is_some();
-        let baro_active = barostat.is_some();
+        // Only a per-step barostat contributes a post-force per-particle
+        // fragment; a periodic (Monte-Carlo) barostat does no per-step
+        // work and is exempt from the fragment requirement.
+        let baro_active = barostat_couples_per_step(&barostat);
         let therm_frag = thermostat
             .as_ref()
             .and_then(|t| t.post_force_per_particle())
@@ -2181,6 +2196,32 @@ fn captures_forces_only_graph(barostat_active: bool) -> bool {
     !barostat_active
 }
 
+// rq-0d729ecb rq-2acc094a — periodic (Monte-Carlo) barostat helpers. A
+// periodic barostat does no per-step work: it consumes no virial (so it
+// does not force per-step scalars or suppress the forces-only graph) and
+// runs a host-orchestrated move every `frequency` steps at a batch
+// boundary.
+fn barostat_move_frequency(
+    barostat: &Option<Box<dyn crate::integrator::Barostat>>,
+) -> Option<u32> {
+    match barostat.as_ref().map(|b| b.periodicity()) {
+        Some(crate::integrator::BarostatPeriodicity::EveryNSteps(n)) => Some(n),
+        _ => None,
+    }
+}
+
+/// Whether a barostat couples to the dynamics on every step (and so
+/// consumes the per-step virial). False for an absent or periodic
+/// barostat.
+fn barostat_couples_per_step(
+    barostat: &Option<Box<dyn crate::integrator::Barostat>>,
+) -> bool {
+    matches!(
+        barostat.as_ref().map(|b| b.periodicity()),
+        Some(crate::integrator::BarostatPeriodicity::EveryStep)
+    )
+}
+
 // rq-766c88fb rq-e35fa835
 /// Captures the phase's executable graphs: the forces+scalars graph
 /// always, and the forces-only graph unless a barostat is active. Both
@@ -2223,7 +2264,7 @@ fn capture_phase_graph(
     // A barostat consumes the per-step virial inside the captured
     // sequence, so a barostat phase evaluates scalars on every step and
     // does not capture a forces-only graph.
-    let forces_only = if captures_forces_only_graph(barostat.is_some()) {
+    let forces_only = if captures_forces_only_graph(barostat_couples_per_step(barostat)) {
         Some(capture_one_graph(
             buffers,
             sim_box,
@@ -2447,7 +2488,8 @@ fn run_per_step_range(
             // forces a scalars step. The graph replay loop selects its
             // forces-only / forces+scalars graphs on the same condition.
             let log_due = phase.output.log_every > 0 && step % phase.output.log_every == 0;
-            let runner_needs_scalars = step_needs_force_scalars(log_due, barostat.is_some());
+            let runner_needs_scalars =
+                step_needs_force_scalars(log_due, barostat_couples_per_step(barostat));
             let result = if let Some(skip_idx) = post_force_substep_index {
                 crate::integrator::run_step(
                     integrator.as_mut(),
@@ -2522,6 +2564,28 @@ fn run_per_step_range(
                 &mut *timings,
             )
             .map_err(|e| (e, ExitPhase::Loop))?;
+        }
+
+        // rq-03a5a290 — a periodic (Monte-Carlo) barostat runs its
+        // host-orchestrated move every `frequency` steps, after the
+        // dynamics step and before this step's output. The neighbour-
+        // checking force evaluations inside the move (and the next step's
+        // full `step` call) rebuild the neighbour list against the moved
+        // box.
+        if let Some(freq) = barostat_move_frequency(barostat) {
+            if freq > 0 && step % freq as u64 == 0 {
+                if let Some(b) = barostat.as_mut() {
+                    b.apply_move(
+                        &mut setup.force_field,
+                        &mut setup.buffers,
+                        &mut setup.sim_box,
+                        None,
+                        dt,
+                        &mut *timings,
+                    )
+                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+                }
+            }
         }
 
         let want_traj =
@@ -2662,6 +2726,11 @@ fn run_batched_graph_loop(
     // ran on the instrumented per-step path (graph-timing calibration).
     let mut step: u64 = start_step;
 
+    // rq-0d729ecb — a periodic (Monte-Carlo) barostat runs a host move
+    // every `move_frequency` steps; batches are bounded so each move lands
+    // exactly on a batch boundary.
+    let move_frequency = barostat_move_frequency(barostat).map(|f| f as u64);
+
     while step < n_steps {
         let remaining = n_steps - step;
         let next_log = if log_every > 0 {
@@ -2674,8 +2743,16 @@ fn run_batched_graph_loop(
         } else {
             remaining
         };
-        let batch = batch_size.min(remaining).min(next_log).min(next_traj);
-        let barostat_active = barostat.is_some();
+        let next_move = match move_frequency {
+            Some(f) if f > 0 => f - (step % f),
+            _ => remaining,
+        };
+        let batch = batch_size
+            .min(remaining)
+            .min(next_log)
+            .min(next_traj)
+            .min(next_move);
+        let barostat_active = barostat_couples_per_step(barostat);
         let mut forces_only_launches: u32 = 0;
         let mut forces_and_scalars_launches: u32 = 0;
         for i in 1..=batch {
@@ -2718,6 +2795,30 @@ fn run_batched_graph_loop(
         }
         step += batch;
 
+        // rq-03a5a290 — a periodic (Monte-Carlo) barostat runs its
+        // host-orchestrated move at the move boundary, before the
+        // neighbour pre-step so that the moved box is rebuilt against. The
+        // move's trial force evaluations may grow a packed-neighbour
+        // buffer, which would invalidate the captured graph's device
+        // pointers, so a move forces a re-capture below.
+        let mut move_happened = false;
+        if let Some(f) = move_frequency {
+            if f > 0 && step % f == 0 && step <= n_steps {
+                if let Some(b) = barostat.as_mut() {
+                    b.apply_move(
+                        &mut setup.force_field,
+                        &mut setup.buffers,
+                        &mut setup.sim_box,
+                        None,
+                        dt,
+                        timings,
+                    )
+                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+                    move_happened = true;
+                }
+            }
+        }
+
         // Displacement check + neighbor-list rebuild (if triggered)
         // run at every batch boundary, outside the captured graph.
         let reallocated = setup
@@ -2731,7 +2832,7 @@ fn run_batched_graph_loop(
         // graph against the new buffers before the next batch. On a
         // re-capture driver error, finish the phase on the per-step
         // launch loop from the next un-run step. rq-67a09135 rq-1217c816
-        if reallocated && step < n_steps {
+        if (reallocated || move_happened) && step < n_steps {
             match capture_phase_graph(
                 &mut setup.buffers,
                 &mut setup.sim_box,

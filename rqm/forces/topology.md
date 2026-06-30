@@ -20,6 +20,13 @@ angle-coupled, constraint-coupled, or otherwise excluded atoms), and a
 `integration/constraint-framework.md` for the SoA layout and the kernel
 contract).
 
+The bond and constraint connectivity additionally induces a
+`MoleculeList`, a partition of the particles into connected molecular
+groups derived from the combined bond + constraint graph (see *Molecule
+grouping*). The Monte-Carlo barostat
+(`integration/mc-barostat.md`) consumes this partition to scale molecular
+centres of mass.
+
 ## File Format <!-- rq-a33c1f4f -->
 
 The `.topology` file is UTF-8 text organised into four named sections,
@@ -225,6 +232,33 @@ empty `ExclusionList`, and an empty `ConstraintList`; the
 `MorseBonded`, `HarmonicAngle`, and `Constraint` slots are not
 constructed.
 
+## Molecule grouping <!-- rq-c200c7b8 -->
+
+A *molecule* is a connected component of the undirected graph whose nodes
+are the `N` particles and whose edges are the union of:
+
+- every bond `(atom_i, atom_j)` in the `BondList`, and
+- every intra-group pair of a `ConstraintList` group (a `k`-atom
+  constraint group contributes edges among all its atoms, so the group's
+  atoms land in one component regardless of which pairwise constraints the
+  algorithm expands to).
+
+Angles and exclusions do **not** induce molecule edges: a 1-3 angle pair is
+already covered by the two bonds that form the angle, and exclusions carry
+no bonding meaning. Every particle in no bond and no constraint is its own
+singleton molecule.
+
+The partition is derived from the already-parsed `BondList` and
+`ConstraintList`; it adds no `.topology` file syntax. For a rigid SPC water
+system each three-atom SETTLE (or SHAKE) constraint group is one molecule;
+for a monatomic fluid every atom is a singleton molecule. The molecule
+decomposition is fixed for the lifetime of a run.
+
+Molecules are ordered by their minimum particle index, and the atoms
+within each molecule are listed in ascending particle-index order. Both
+orderings are deterministic functions of the parsed topology, so the
+device-resident molecule tables are byte-identical across runs.
+
 ## Data Model <!-- rq-361623d8 -->
 
 ### Bond list <!-- rq-f1210419 -->
@@ -299,6 +333,25 @@ the shared device helper `exclusion_scale` declared in
 The helper performs the linear scan over atom `i`'s partner range and
 returns either the matching scale (from the per-potential scale array
 the kernel passes in) or `1.0f` when `j` is not present.
+
+### Molecule list <!-- rq-3246a873 -->
+
+For `M` molecules among `N` particles, the host-side `MoleculeList`
+carries:
+
+- `mol_atom_offsets: Vec<u32>` — length `M + 1`. For molecule `m`, the
+  slice `mol_atom_indices[mol_atom_offsets[m] .. mol_atom_offsets[m+1]]`
+  lists the particle indices belonging to that molecule, in ascending
+  order.
+- `mol_atom_indices: Vec<u32>` — length `N`. Each particle index appears
+  exactly once (the molecules partition the particles).
+- `particle_count: usize` — `N`.
+- `molecule_count: usize` — `M`.
+
+The two index tables are uploaded to the device once at load time and read
+by the Monte-Carlo barostat's centre-of-mass scale kernel
+(`integration/mc-barostat.md`). They are immutable for the lifetime of a
+run.
 
 ## Device-side Exclusion Helper <!-- rq-b2f23140 -->
 
@@ -378,6 +431,15 @@ contribution flows through to the caller without a separate code path.
   Method `ConstraintList::is_empty(&self) -> bool` —
   `self.groups.is_empty()`.
 
+- `MoleculeList` — host-side. Fields: `mol_atom_offsets: Vec<u32>` <!-- rq-42195e6f -->
+  (length `molecule_count + 1`), `mol_atom_indices: Vec<u32>`
+  (length `particle_count`), `particle_count: usize`,
+  `molecule_count: usize`. Partitions the particles into the connected
+  components of the combined bond + constraint graph (see *Molecule
+  grouping*).
+
+  Method `MoleculeList::molecule_count(&self) -> usize`.
+
 - `TopologyFileError` — error type returned by the parser. Variants: <!-- rq-bca0adbc -->
   - `Io(String)` — failed to read the file.
   - `UnknownSection { name: String, line_number: usize }` — a section
@@ -438,6 +500,19 @@ contribution flows through to the caller without a separate code path.
     `constraint_registry` (used to look up each constraint type's
     builder for the `expected_atom_count(&params)` query that
     size-checks `[constraints]` rows).
+
+- `MoleculeList::from_topology(particle_count: usize, bonds: &BondList, constraints: &ConstraintList) -> MoleculeList` <!-- rq-b0bdc311 -->
+  - Builds the connected-component partition described in *Molecule
+    grouping* from the parsed bond and constraint lists.
+  - Each bond contributes an edge between its two atoms; each constraint
+    group contributes edges joining all its atoms into one component.
+  - Every particle in no bond and no constraint becomes a singleton
+    molecule.
+  - Molecules are ordered by their minimum particle index; atoms within
+    each molecule are listed in ascending particle-index order.
+  - Pure function of its inputs: identical lists produce a byte-identical
+    `MoleculeList`. With empty bond and constraint lists every particle is
+    its own molecule (`molecule_count == particle_count`).
 
 ## Out of Scope <!-- rq-ad0edc95 -->
 
@@ -902,4 +977,44 @@ Feature: Topology file with bonds, angles, and exclusions
     Then constraint_list.groups[0]'s atoms start with 4
     And constraint_list.groups[1]'s atoms start with 50
     And constraint_list.groups[2]'s atoms start with 100
+
+  # --- Molecule grouping ---
+
+  @rq-392ac5d3
+  Scenario: Each constraint group is one molecule
+    Given a ConstraintList with rigid-water groups [0,1,2] and [3,4,5]
+      and an empty BondList, particle_count = 6
+    When MoleculeList::from_topology(6, &bonds, &constraints) is called
+    Then molecule_count equals 2
+    And molecule 0's atoms are [0, 1, 2]
+    And molecule 1's atoms are [3, 4, 5]
+
+  @rq-45d384b3
+  Scenario: Bonds join their atoms into one molecule
+    Given a BondList with bonds (0,1) and (1,2) and an empty ConstraintList,
+      particle_count = 4
+    When MoleculeList::from_topology(4, &bonds, &constraints) is called
+    Then molecule_count equals 2
+    And molecule 0's atoms are [0, 1, 2]
+    And molecule 1's atoms are [3]
+
+  @rq-763200f7
+  Scenario: An atom in no bond and no constraint is its own molecule
+    Given empty BondList and ConstraintList, particle_count = 3
+    When MoleculeList::from_topology(3, &bonds, &constraints) is called
+    Then molecule_count equals 3
+    And every molecule has exactly one atom
+
+  @rq-ae8e2b7d
+  Scenario: Molecules are ordered by minimum particle index
+    Given constraint groups [3,4,5] and [0,1,2], particle_count = 6
+    When MoleculeList::from_topology(6, &bonds, &constraints) is called
+    Then molecule 0's atoms start with 0
+    And molecule 1's atoms start with 3
+
+  @rq-ebab7fd7
+  Scenario: Atoms within a molecule are listed in ascending order
+    Given a BondList with bonds (2,0) and (0,1), particle_count = 3
+    When MoleculeList::from_topology(3, &bonds, &constraints) is called
+    Then molecule 0's atoms are [0, 1, 2]
 ```

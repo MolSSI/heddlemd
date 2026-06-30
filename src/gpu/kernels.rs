@@ -1397,6 +1397,44 @@ pub fn compute_total_potential_energy(
     Ok(out[0])
 }
 
+// Monte-Carlo barostat: rigid molecular-centre-of-mass volume scale.
+// One thread per molecule; translates every atom of a molecule by
+// `(scale - 1) * COM_molecule`. Block 256, grid ceil(n_mol / 256).
+// Returns Ok(()) without launching when there are no molecules.
+// See `rqm/integration/mc-barostat.md`.
+pub fn mc_barostat_scale_molecule_com(
+    buffers: &mut ParticleBuffers,
+    mol_atom_offsets: &CudaSlice<u32>,
+    mol_atom_indices: &CudaSlice<u32>,
+    scale: Real,
+) -> Result<(), GpuError> {
+    let n_mol = mol_atom_offsets.len().saturating_sub(1);
+    if n_mol == 0 {
+        return Ok(());
+    }
+    let func = buffers
+        .kernels
+        .mc_barostat
+        .mc_barostat_scale_molecule_com
+        .clone();
+    let cfg = launch_config(n_mol as u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.posq,
+                mol_atom_offsets,
+                mol_atom_indices,
+                &buffers.masses,
+                scale,
+                n_mol as u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // Uniform per-particle position rescale used by the Berendsen barostat.
 // Block size 256, grid ceil(n / 256). When n == 0 returns Ok(()) without
 // launching. Does NOT touch velocities, forces, image flags, or any

@@ -1,4 +1,5 @@
 pub mod barostat_kernels;
+pub mod mc_barostat_kernels;
 pub mod buffers;
 pub mod cufft;
 pub mod device;
@@ -9,6 +10,7 @@ pub mod kernels;
 pub mod lossless_buffers;
 
 pub use barostat_kernels::BarostatKernels;
+pub use mc_barostat_kernels::McBarostatKernels;
 pub use kernel_macros::{SubsystemKernels, concat_kernel_stages};
 pub use buffers::ParticleBuffers;
 pub use device::{GpuContext, GpuError, Kernels, init_device};
@@ -36,6 +38,7 @@ pub use kernels::{
     histogram_entries_by_iblock,
     scatter_entries_by_iblock,
     lan_drift_half, lan_ou_step,
+    mc_barostat_scale_molecule_com,
     mtk_position_drift, mtk_velocity_half_kick,
     neighbor_displacement_check_flag,
     prefix_scan_cell_counts, reduce_angle_forces, reduce_bond_forces,

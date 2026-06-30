@@ -41,8 +41,8 @@ pub use lj::{LennardJonesBuilder, LennardJonesState};
 pub use morse::{MorseBondedBuilder, MorseBondedState};
 pub use topology::{
     Angle, AngleList, Bond, BondList, ConstraintGroup, ConstraintList,
-    DeviceExclusionList, Exclusion, ExclusionList, GroupConstraint, TopologyFileError,
-    load_topology_file,
+    DeviceExclusionList, Exclusion, ExclusionList, GroupConstraint, MoleculeList,
+    TopologyFileError, load_topology_file,
 };
 pub use neighbor_list::{
     CellListData, NeighborListError, NeighborListMode, NeighborListState, PreStepOutcome,

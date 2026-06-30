@@ -4,7 +4,7 @@
 // The runner chains the slots `apply_pre → step → apply_post → apply`
 // per timestep (see `simulation-runner.md` and `framework.md`).
 
-use crate::forces::{ForceField, ForceFieldError};
+use crate::forces::{ForceField, ForceFieldError, MoleculeList};
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::io::config::{ConfigError, SlotConfig};
 use crate::registry::{Builtins, KindedBuilder, Registry};
@@ -19,6 +19,7 @@ pub mod c_rescale_barostat;
 pub mod constraint;
 pub mod csvr;
 pub mod langevin_baoab;
+pub mod mc_barostat;
 pub mod mtk_npt;
 pub mod nose_hoover_chain;
 pub mod philox;
@@ -33,6 +34,7 @@ pub use c_rescale_barostat::{CRescaleBarostat, CRescaleBarostatBuilder};
 pub use constraint::{Constraint, ConstraintBuilder, ConstraintError, ConstraintRegistry};
 pub use csvr::{CsvrBuilder, CsvrThermostat};
 pub use langevin_baoab::{LangevinBaoabBuilder, LangevinBaoabState};
+pub use mc_barostat::{McBarostat, McBarostatBuilder};
 pub use mtk_npt::{MtkNptBuilder, MtkNptIntegrator};
 pub use nose_hoover_chain::{
     NoseHooverChainBuilder, NoseHooverChainThermostat, nhc_chain_sub_step,
@@ -110,6 +112,13 @@ pub enum BarostatError {
     Gpu(#[from] GpuError),
     #[error("{0}")]
     Timings(#[from] TimingsError),
+    /// A force-field evaluation issued by a barostat move (the
+    /// Monte-Carlo barostat's trial energy evaluation) failed.
+    #[error("{0}")]
+    ForceField(#[from] ForceFieldError),
+    /// A simulation-box mutation issued by a barostat move failed.
+    #[error("{0}")]
+    SimulationBox(#[from] crate::pbc::SimulationBoxError),
     #[error("unknown barostat kind `{0}`")]
     UnknownKind(String),
 }
@@ -816,16 +825,66 @@ impl Registry<dyn ThermostatBuilder> {
 
 // --- Barostat trait, builder, registry --------------------------------
 
+// rq-343a8f18 — how often a barostat couples to the dynamics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarostatPeriodicity {
+    /// Couples every step inside the captured per-step sequence
+    /// (Berendsen, C-rescale).
+    EveryStep,
+    /// Runs a host-orchestrated move every `N` steps at a batch
+    /// boundary (Monte-Carlo); `apply` is a no-op.
+    EveryNSteps(u32),
+}
+
 // rq-076617ab
 pub trait Barostat: std::fmt::Debug + Send {
-    // rq-1179e42f
+    // rq-343a8f18 — declares per-step vs periodic coupling. Default
+    // per-step; the Monte-Carlo barostat returns `EveryNSteps`.
+    fn periodicity(&self) -> BarostatPeriodicity {
+        BarostatPeriodicity::EveryStep
+    }
+
+    // rq-1179e42f — per-step coupling. A periodic barostat leaves this
+    // at the no-op default and implements `apply_move` instead.
     fn apply(
         &mut self,
-        buffers: &mut ParticleBuffers,
-        sim_box: &mut SimulationBox,
-        dt: Real,
-        timings: &mut Timings,
-    ) -> Result<(), BarostatError>;
+        _buffers: &mut ParticleBuffers,
+        _sim_box: &mut SimulationBox,
+        _dt: Real,
+        _timings: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
+
+    /// Perform a periodic barostat's host-orchestrated move at a batch
+    /// boundary. Receives `&mut ForceField` (unlike `apply`) because the
+    /// move re-evaluates the potential energy at a trial configuration.
+    /// Default no-op; per-step barostats do not override it. See
+    /// `rqm/integration/mc-barostat.md`.
+    fn apply_move(
+        &mut self,
+        _force_field: &mut ForceField,
+        _buffers: &mut ParticleBuffers,
+        _sim_box: &mut SimulationBox,
+        _constraint: Option<&mut dyn Constraint>,
+        _dt: Real,
+        _timings: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
+
+    /// One-time per-run initialisation invoked by the runner after
+    /// construction, once the simulation box and the connectivity-derived
+    /// molecule partition are available. Default no-op; the Monte-Carlo
+    /// barostat uploads its molecule tables and resolves its default
+    /// volume step here.
+    fn init_run(
+        &mut self,
+        _sim_box: &SimulationBox,
+        _molecules: &MoleculeList,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
 
     /// Drain any device-side accumulators the barostat maintains
     /// (e.g. C-rescale's `P_target · (v_post - v_pre)` delta) into host
@@ -897,6 +956,7 @@ impl Builtins for dyn BarostatBuilder {
         vec![
             Box::new(BerendsenBarostatBuilder),
             Box::new(CRescaleBarostatBuilder),
+            Box::new(McBarostatBuilder),
         ]
     }
 }
