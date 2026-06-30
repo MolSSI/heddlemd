@@ -648,6 +648,59 @@ pub fn reduce_bond_forces(
     Ok(())
 }
 
+// Launch helper for the per-atom dihedral reduction. One thread per
+// atom. Mirrors `reduce_angle_forces` but indexes across 4*D dihedral
+// scratch slots instead of 3*A angle slots.
+#[allow(clippy::too_many_arguments)]
+pub fn reduce_dihedral_forces(
+    kernels: &Kernels,
+    dihedral_quadruple_x: &CudaSlice<Real>,
+    dihedral_quadruple_y: &CudaSlice<Real>,
+    dihedral_quadruple_z: &CudaSlice<Real>,
+    dihedral_quadruple_energy: &CudaSlice<Real>,
+    dihedral_quadruple_virial: &CudaSlice<Real>,
+    atom_dihedral_offsets: &CudaSlice<u32>,
+    atom_dihedral_indices: &CudaSlice<u32>,
+    slot_force_x: &mut CudaViewMut<'_, Real>,
+    slot_force_y: &mut CudaViewMut<'_, Real>,
+    slot_force_z: &mut CudaViewMut<'_, Real>,
+    slot_energy: &mut CudaViewMut<'_, Real>,
+    slot_virial: &mut CudaViewMut<'_, Real>,
+    particle_count: usize,
+    write_scalars: bool,
+) -> Result<(), GpuError> {
+    if particle_count == 0 {
+        return Ok(());
+    }
+    let n_u32 = particle_count as u32;
+    let func = kernels.dihedral.reduce_dihedral_forces.clone();
+    let cfg = launch_config(n_u32);
+    let write_scalars_u32: u32 = if write_scalars { 1 } else { 0 };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                dihedral_quadruple_x,
+                dihedral_quadruple_y,
+                dihedral_quadruple_z,
+                dihedral_quadruple_energy,
+                dihedral_quadruple_virial,
+                atom_dihedral_offsets,
+                atom_dihedral_indices,
+                slot_force_x,
+                slot_force_y,
+                slot_force_z,
+                slot_energy,
+                slot_virial,
+                n_u32,
+                write_scalars_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // Launch helper for the per-atom angle reduction. One thread per atom.
 // rq-34bfe79a
 #[allow(clippy::too_many_arguments)]

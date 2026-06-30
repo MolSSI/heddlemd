@@ -38,6 +38,7 @@ crate::define_kernels! {
     langevin:    crate::integrator::langevin_baoab::LangevinKernels,
     morse:       crate::forces::morse::MorseKernels,
     angle:       crate::forces::angle::AngleKernels,
+    dihedral:    crate::forces::dihedral::DihedralKernels,
     nose_hoover: crate::integrator::nose_hoover_chain::NoseHooverKernels,
     andersen:    crate::integrator::andersen::AndersenKernels,
     barostat:    crate::gpu::barostat_kernels::BarostatKernels,

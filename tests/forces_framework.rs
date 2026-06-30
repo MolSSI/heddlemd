@@ -9,12 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use cudarc::driver::DeviceSlice;
-use heddle_md::forces::{
-    AggregateLevel, AngleList, Bond, BondList, CutoffHandling, ExclusionList, ForceClass,
-    ForceField, ForceFieldContext, ForceFieldError, ForceLaunchBuilder, JitParticipant,
-    PairForceBindContext, PairForceFragment, PairForcePotential, Potential, PotentialBuildContext,
-    PotentialBuilder, PotentialRegistry, SlotOutputView,
-};
+use heddle_md::forces::{AggregateLevel, AngleList, Bond, BondList, CutoffHandling, DihedralList, ExclusionList, ForceClass, ForceField, ForceFieldContext, ForceFieldError, ForceLaunchBuilder, JitParticipant, PairForceBindContext, PairForceFragment, PairForcePotential, Potential, PotentialBuildContext, PotentialBuilder, PotentialRegistry, SlotOutputView};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
@@ -113,11 +108,13 @@ fn lj_only_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[lj_pair_config()],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -135,11 +132,13 @@ fn lj_and_morse_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[lj_pair_config()],
         &[morse_bond_type()],
         &[],
+        &[],
         None,
         None,
         &[],
         &single_bond_list(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -157,11 +156,13 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -178,11 +179,13 @@ fn morse_only_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[morse_bond_type()],
         &[],
+        &[],
         None,
         None,
         &[],
         &single_bond_list(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -387,11 +390,13 @@ fn build_with(
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -434,11 +439,13 @@ fn bond_types_declared_with_no_bonds_omits_morse_slot() {
         &[lj_pair_config()],
         &[morse_bond_type()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -569,11 +576,13 @@ fn lj_mixed_type_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &oh_pair_configs(),
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -822,11 +831,13 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
         &[lj_pair_config()],
         &[morse_bond_type()],
         &[],
+        &[],
         None,
         None,
         &[],
         &single_bond_list(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -854,11 +865,13 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
         &[lj_pair_config()],
         &[morse_bond_type()],
         &[],
+        &[],
         None,
         None,
         &[],
         &single_bond_list(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -880,7 +893,7 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
 #[test]
 fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
     let r = PotentialRegistry::with_builtins();
-    assert_eq!(r.builders().len(), 6);
+    assert_eq!(r.builders().len(), 7);
     let names: Vec<String> = r.builders().iter().map(|b| format!("{:?}", b)).collect();
     assert!(names[0].contains("LennardJones"), "builder 0 = {}", names[0]);
     assert!(names[1].contains("Coulomb"), "builder 1 = {}", names[1]);
@@ -888,6 +901,7 @@ fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
     assert!(names[3].contains("SpmeReciprocal"), "builder 3 = {}", names[3]);
     assert!(names[4].contains("MorseBonded"), "builder 4 = {}", names[4]);
     assert!(names[5].contains("HarmonicAngle"), "builder 5 = {}", names[5]);
+    assert!(names[6].contains("PeriodicDihedral"), "builder 6 = {}", names[6]);
 }
 
 // rq-78ad9477
@@ -902,8 +916,8 @@ fn registry_new_starts_empty() {
 fn register_appends_a_builder_at_the_end() {
     let mut r = PotentialRegistry::with_builtins();
     r.register(Box::new(StubBuilder::new("custom")));
-    assert_eq!(r.builders().len(), 7);
-    let last = format!("{:?}", r.builders()[6]);
+    assert_eq!(r.builders().len(), 8);
+    let last = format!("{:?}", r.builders()[7]);
     assert!(last.contains("custom"), "last builder = {}", last);
 }
 
@@ -1522,11 +1536,13 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::CellList { r_skin: 0.0 },
     )
@@ -1857,11 +1873,13 @@ fn build_with_spme(
         pair_interactions,
         &[],
         &[],
+        &[],
         None,
         spme_config,
         charges,
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

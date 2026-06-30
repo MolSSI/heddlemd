@@ -79,7 +79,7 @@ A built-in potential is added by writing a `PotentialBuilder` and inserting
 it at the appropriate position in `PotentialRegistry::with_builtins()`.
 The `ForceField::new` body does not change.
 
-Fast-class slots participate in one of three JIT-composed kernels
+Fast-class slots participate in one of four JIT-composed kernels
 selected by parallelism shape:
 
 - **Pair-force shape** — a slot whose `jit_participant()` returns
@@ -95,6 +95,10 @@ selected by parallelism shape:
   `Some(JitParticipant::Angle(_))` participates in the JIT-composed
   angle module (also `jit-composed-intramolecular.md`). One launch
   per active angle slot from the shared module per step.
+- **Dihedral shape** — a slot whose `jit_participant()` returns
+  `Some(JitParticipant::Dihedral(_))` participates in the JIT-composed
+  dihedral module (also `jit-composed-intramolecular.md`). One launch
+  per active dihedral slot from the shared module per step.
 
 The framework collects each shape's active fragments at
 `ForceField::new` time, compiles a per-shape composed module via
@@ -494,6 +498,7 @@ the additive identity. The rest of the pipeline runs normally.
       PairForce(&'a dyn PairForcePotential),
       Bonded(&'a dyn BondedPotential),
       Angle(&'a dyn AnglePotential),
+      Dihedral(&'a dyn DihedralPotential),
   }
   ```
 
@@ -560,6 +565,24 @@ the additive identity. The rest of the pipeline runs normally.
 
   No method has a default. See `jit-composed-intramolecular.md`.
 
+- `DihedralPotential` — capability trait a dihedral slot implements, <!-- rq-f660b144 -->
+  carrying the slot's fragment, its per-dihedral scratch view, and
+  its argument binding.
+
+  ```rust
+  pub trait DihedralPotential {
+      fn dihedral_force_fragment(&self) -> DihedralForceFragment;
+      fn dihedral_scratch(&self) -> DihedralScratchView<'_>;
+      fn bind_dihedral_force_args(
+          &self,
+          ctx: &ForceLaunchContext<'_>,
+          builder: &mut ForceLaunchBuilder,
+      );
+  }
+  ```
+
+  No method has a default. See `jit-composed-intramolecular.md`.
+
 - `PairForceFragment` — self-contained CUDA C++ source fragment plus <!-- rq-aa6efe11 -->
   identifying metadata, returned by
   `PairForcePotential::pair_force_fragment()`. Fields:
@@ -589,14 +612,20 @@ the additive identity. The rest of the pipeline runs normally.
   functor's contract is the angle shape from
   `jit-composed-intramolecular.md`.
 
+- `DihedralForceFragment` — same shape as `BondedForceFragment`, <!-- rq-93010e61 -->
+  returned by `DihedralPotential::dihedral_force_fragment()`. The
+  functor's contract is the dihedral shape from
+  `jit-composed-intramolecular.md`.
+
 - `ForceLaunchBuilder` — opaque argument-builder threaded through <!-- rq-3aa5f5b8 -->
   every active fast-class slot's bind method
   (`bind_pair_force_args`, `bind_bonded_force_args`,
-  `bind_angle_force_args`). Shape-agnostic — the binding mechanism
-  is the same across the pair-force, bonded, and angle composers.
-  Constructed by the framework once per composed-kernel launch and
-  pre-populated with the launch's common arguments. Slots push
-  their own arguments via:
+  `bind_angle_force_args`, `bind_dihedral_force_args`).
+  Shape-agnostic — the binding mechanism is the same across the
+  pair-force, bonded, angle, and dihedral composers. Constructed by
+  the framework once per composed-kernel launch and pre-populated
+  with the launch's common arguments. Slots push their own arguments
+  via:
 
   ```rust
   impl ForceLaunchBuilder {
@@ -692,6 +721,19 @@ the additive identity. The rest of the pipeline runs normally.
   the angle contribution kernel followed by the angle reduction kernel
   and writes its per-particle output into the `SlotOutputView` it
   receives.
+
+- `PeriodicDihedralState` — implements `Potential` with `label() == <!-- rq-e14fdc0d -->
+  "periodic_dihedral"` and `frequency_class() == ForceClass::Fast`
+  (the trait default). Owns the slot's
+  `DihedralQuadrupleBuffer`, the dihedral index/offset tables, and
+  the per-dihedral-type parameter table. Construction requires a
+  non-empty filtered dihedral list (at least one dihedral whose type
+  selects `potential = "periodic"`); see `periodic-dihedral.md`.
+  Its `compute` runs the dihedral contribution kernel followed by the
+  dihedral reduction kernel and writes its per-particle output into
+  the `SlotOutputView` it receives. The slot implements
+  `DihedralPotential` and contributes a `DihedralForceFragment` to
+  the JIT-composed dihedral module.
 
 - `ForceField` — handle owning the slot collection, the per-class accumulator buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
 
@@ -1414,12 +1456,13 @@ Feature: Pluggable potential slot framework
   @rq-2dbda7ec
   Scenario: Built-in potentials report their canonical class
     Given a ForceField with every built-in slot present
-    Then slot "lennard_jones"   reports frequency_class() == Fast
-    And  slot "coulomb"         reports frequency_class() == Fast
-    And  slot "spme_real"       reports frequency_class() == Fast
-    And  slot "spme_reciprocal" reports frequency_class() == Slow
-    And  slot "morse_bonded"    reports frequency_class() == Fast
-    And  slot "harmonic_angle"  reports frequency_class() == Fast
+    Then slot "lennard_jones"     reports frequency_class() == Fast
+    And  slot "coulomb"           reports frequency_class() == Fast
+    And  slot "spme_real"         reports frequency_class() == Fast
+    And  slot "spme_reciprocal"   reports frequency_class() == Slow
+    And  slot "morse_bonded"      reports frequency_class() == Fast
+    And  slot "harmonic_angle"    reports frequency_class() == Fast
+    And  slot "periodic_dihedral" reports frequency_class() == Fast
 
   @rq-57fd217e
   Scenario: step() evaluates every class and produces the total in ParticleBuffers

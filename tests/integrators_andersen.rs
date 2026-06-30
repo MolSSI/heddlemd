@@ -4,7 +4,7 @@
 // through its `apply_post` hook; the `andersen_resample` kernel is
 // also exercised directly.
 
-use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{
     GpuContext, ParticleBuffers, andersen_resample, compute_kinetic_energy, init_device,
 };
@@ -53,11 +53,13 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

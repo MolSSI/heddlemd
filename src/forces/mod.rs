@@ -1,5 +1,6 @@
 pub mod angle;
 pub mod coulomb;
+pub mod dihedral;
 pub mod jit_composed;
 pub mod lj;
 pub mod morse;
@@ -16,8 +17,8 @@ use crate::gpu::{
 };
 use crate::registry::{Builtins, Registry};
 use crate::io::config::{
-    AngleTypeConfig, BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig,
-    ParticleTypeConfig, SpmeConfig,
+    AngleTypeConfig, BondTypeConfig, CoulombConfig, DihedralTypeConfig, NeighborListConfig,
+    PairInteractionConfig, ParticleTypeConfig, SpmeConfig,
 };
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
@@ -25,10 +26,12 @@ use crate::precision::Real;
 
 pub use angle::{HarmonicAngleBuilder, HarmonicAngleState};
 pub use coulomb::{CoulombBuilder, CoulombParameters, CoulombState};
+pub use dihedral::{PeriodicDihedralBuilder, PeriodicDihedralState};
 pub use jit_composed::{
     AngleForceFragment, AngleScratchView, ArgKind, BondedForceFragment, BondedScratchView,
-    CutoffHandling, ElemTy, ForceLaunchBuilder, ForceLaunchContext, JitComposedAngleForce,
-    JitComposedBondedForce, JitComposedPairForce, JitComposedPostForcePerParticle, KernelArg,
+    CutoffHandling, DihedralForceFragment, DihedralScratchView, ElemTy, ForceLaunchBuilder,
+    ForceLaunchContext, JitComposedAngleForce, JitComposedBondedForce,
+    JitComposedDihedralForce, JitComposedPairForce, JitComposedPostForcePerParticle, KernelArg,
     KernelArgBinder, KernelArgSchema, KernelArgType, KernelElem, PairForceBindContext,
     PairForceFragment, PerParticleFragment, PostForceBindContext,
     set_jit_fast_math,
@@ -41,8 +44,8 @@ pub use lj::{LennardJonesBuilder, LennardJonesState};
 pub use morse::{MorseBondedBuilder, MorseBondedState};
 pub use topology::{
     Angle, AngleList, Bond, BondList, ConstraintGroup, ConstraintList,
-    DeviceExclusionList, Exclusion, ExclusionList, GroupConstraint, MoleculeList,
-    TopologyFileError, load_topology_file,
+    DeviceExclusionList, Dihedral, DihedralList, Exclusion, ExclusionList, GroupConstraint,
+    MoleculeList, TopologyFileError, load_topology_file,
 };
 pub use neighbor_list::{
     CellListData, NeighborListError, NeighborListMode, NeighborListState, PreStepOutcome,
@@ -110,10 +113,11 @@ pub trait Potential: std::fmt::Debug + Send {
     /// slot that runs only through `compute` (the slow-class SPME
     /// reciprocal slot, and any slot not JIT-composed). A participating
     /// slot returns `Some(JitParticipant::PairForce(self))`,
-    /// `Some(JitParticipant::Bonded(self))`, or
-    /// `Some(JitParticipant::Angle(self))`, implementing the matching
-    /// capability trait. Because the return is a single enum, a slot
-    /// participates in at most one shape by construction. See
+    /// `Some(JitParticipant::Bonded(self))`,
+    /// `Some(JitParticipant::Angle(self))`, or
+    /// `Some(JitParticipant::Dihedral(self))`, implementing the
+    /// matching capability trait. Because the return is a single enum,
+    /// a slot participates in at most one shape by construction. See
     /// `rqm/forces/jit-composed-pair-force.md` and
     /// `rqm/forces/jit-composed-intramolecular.md`.
     fn jit_participant(&self) -> Option<JitParticipant<'_>> {
@@ -129,6 +133,7 @@ pub enum JitParticipant<'a> {
     PairForce(&'a dyn PairForcePotential),
     Bonded(&'a dyn BondedPotential),
     Angle(&'a dyn AnglePotential),
+    Dihedral(&'a dyn DihedralPotential),
 }
 
 // rq-e533174d
@@ -172,6 +177,18 @@ pub trait AnglePotential {
     fn angle_force_fragment(&self) -> AngleForceFragment;
     fn angle_scratch(&self) -> AngleScratchView<'_>;
     fn bind_angle_force_args(
+        &self,
+        ctx: &ForceLaunchContext<'_>,
+        builder: &mut ForceLaunchBuilder,
+    );
+}
+
+/// Capability trait a dihedral slot implements, carrying the slot's
+/// fragment, its per-dihedral scratch view, and its argument binding.
+pub trait DihedralPotential {
+    fn dihedral_force_fragment(&self) -> DihedralForceFragment;
+    fn dihedral_scratch(&self) -> DihedralScratchView<'_>;
+    fn bind_dihedral_force_args(
         &self,
         ctx: &ForceLaunchContext<'_>,
         builder: &mut ForceLaunchBuilder,
@@ -225,11 +242,13 @@ pub struct PotentialBuildContext<'a> {
     pub pair_interactions: &'a [PairInteractionConfig],
     pub bond_types: &'a [BondTypeConfig],
     pub angle_types: &'a [AngleTypeConfig],
+    pub dihedral_types: &'a [DihedralTypeConfig],
     pub coulomb_config: Option<&'a CoulombConfig>,
     pub spme_config: Option<&'a SpmeConfig>,
     pub charges: &'a [Real],
     pub bond_list: &'a BondList,
     pub angle_list: &'a AngleList,
+    pub dihedral_list: &'a DihedralList,
     pub exclusion_list: &'a ExclusionList,
     pub neighbor_list_config: &'a NeighborListConfig,
 }
@@ -265,6 +284,7 @@ impl Builtins for dyn PotentialBuilder {
             Box::new(SpmeReciprocalBuilder),
             Box::new(MorseBondedBuilder),
             Box::new(HarmonicAngleBuilder),
+            Box::new(PeriodicDihedralBuilder),
         ]
     }
 }
@@ -331,6 +351,9 @@ pub struct ForceField {
     /// JIT-composed angle module, parallel to `jit_composed_bonded`.
     pub jit_composed_angle: Option<JitComposedAngleForce>,
     jit_angle_slot_indices: Vec<usize>,
+    /// JIT-composed dihedral module, parallel to `jit_composed_angle`.
+    pub jit_composed_dihedral: Option<JitComposedDihedralForce>,
+    jit_dihedral_slot_indices: Vec<usize>,
     num_fast_slots: usize,
     num_slow_slots: usize,
     particle_count: usize,
@@ -348,11 +371,13 @@ impl ForceField {
         pair_interactions: &[PairInteractionConfig],
         bond_types: &[BondTypeConfig],
         angle_types: &[AngleTypeConfig],
+        dihedral_types: &[DihedralTypeConfig],
         coulomb_config: Option<&CoulombConfig>,
         spme_config: Option<&SpmeConfig>,
         charges: &[Real],
         bond_list: &BondList,
         angle_list: &AngleList,
+        dihedral_list: &DihedralList,
         exclusion_list: &ExclusionList,
         neighbor_list_config: &NeighborListConfig,
     ) -> Result<Self, ForceFieldError> {
@@ -367,11 +392,13 @@ impl ForceField {
             pair_interactions,
             bond_types,
             angle_types,
+            dihedral_types,
             coulomb_config,
             spme_config,
             charges,
             bond_list,
             angle_list,
+            dihedral_list,
             exclusion_list,
             neighbor_list_config,
         };
@@ -502,6 +529,8 @@ impl ForceField {
         let mut jit_bonded_slot_indices: Vec<usize> = Vec::new();
         let mut jit_angle_fragments: Vec<AngleForceFragment> = Vec::new();
         let mut jit_angle_slot_indices: Vec<usize> = Vec::new();
+        let mut jit_dihedral_fragments: Vec<DihedralForceFragment> = Vec::new();
+        let mut jit_dihedral_slot_indices: Vec<usize> = Vec::new();
         for (idx, slot) in slots.iter().enumerate() {
             match slot.jit_participant() {
                 Some(JitParticipant::PairForce(p)) => {
@@ -515,6 +544,10 @@ impl ForceField {
                 Some(JitParticipant::Angle(a)) => {
                     jit_angle_fragments.push(a.angle_force_fragment());
                     jit_angle_slot_indices.push(idx);
+                }
+                Some(JitParticipant::Dihedral(d)) => {
+                    jit_dihedral_fragments.push(d.dihedral_force_fragment());
+                    jit_dihedral_slot_indices.push(idx);
                 }
                 None => {}
             }
@@ -552,6 +585,16 @@ impl ForceField {
             Some(JitComposedAngleForce::compile_and_load(
                 &device,
                 &jit_angle_fragments,
+            )?)
+        };
+
+        // JIT compose the fast-class dihedral module.
+        let jit_composed_dihedral = if jit_dihedral_fragments.is_empty() {
+            None
+        } else {
+            Some(JitComposedDihedralForce::compile_and_load(
+                &device,
+                &jit_dihedral_fragments,
             )?)
         };
 
@@ -606,6 +649,8 @@ impl ForceField {
             jit_bonded_slot_indices,
             jit_composed_angle,
             jit_angle_slot_indices,
+            jit_composed_dihedral,
+            jit_dihedral_slot_indices,
             num_fast_slots,
             num_slow_slots,
             particle_count,
@@ -638,6 +683,15 @@ impl ForceField {
         match self.slots[idx].jit_participant() {
             Some(JitParticipant::Angle(a)) => a,
             _ => unreachable!("jit_angle_slot_indices holds only angle participants"),
+        }
+    }
+
+    /// The dihedral capability of the slot at `idx` (from
+    /// `jit_dihedral_slot_indices`).
+    fn dihedral_participant(&self, idx: usize) -> &dyn DihedralPotential {
+        match self.slots[idx].jit_participant() {
+            Some(JitParticipant::Dihedral(d)) => d,
+            _ => unreachable!("jit_dihedral_slot_indices holds only dihedral participants"),
         }
     }
 
@@ -1132,6 +1186,52 @@ impl ForceField {
             timings.kernel_stop(KernelStage::JIT_COMPOSED_ANGLE_FORCE)?;
         }
 
+        // Launch the JIT-composed dihedral module's per-slot entry
+        // points. Same pattern as angle.
+        let dispatch_dihedral = evaluating_fast
+            && self.jit_composed_dihedral.is_some()
+            && !self.jit_dihedral_slot_indices.is_empty();
+        if dispatch_dihedral {
+            timings.kernel_start(KernelStage::JIT_COMPOSED_DIHEDRAL_FORCE)?;
+            let dihedral_jit = self
+                .jit_composed_dihedral
+                .as_ref()
+                .expect("dispatch_dihedral implies jit_composed_dihedral.is_some()");
+            let bind_ctx = ForceLaunchContext {
+                buffers: &*buffers,
+                sim_box,
+            };
+            for (entry_idx, &slot_idx) in self.jit_dihedral_slot_indices.iter().enumerate() {
+                let scratch = self.dihedral_participant(slot_idx).dihedral_scratch();
+                if scratch.dihedral_count == 0 {
+                    continue;
+                }
+                let mut launch_builder = ForceLaunchBuilder::new();
+                launch_builder.push_device_buffer(&buffers.posq);
+                launch_builder.push_device_buffer(scratch.dihedrals);
+                launch_builder.push_device_buffer(sim_box.lattice_device());
+                launch_builder.push_device_buffer(scratch.dihedral_quadruple_x);
+                launch_builder.push_device_buffer(scratch.dihedral_quadruple_y);
+                launch_builder.push_device_buffer(scratch.dihedral_quadruple_z);
+                if write_scalars {
+                    launch_builder.push_device_buffer(scratch.dihedral_quadruple_energy);
+                    launch_builder.push_device_buffer(scratch.dihedral_quadruple_virial);
+                }
+                self.dihedral_participant(slot_idx)
+                    .bind_dihedral_force_args(&bind_ctx, &mut launch_builder);
+                launch_builder.push_scalar(scratch.dihedral_count as u32);
+                unsafe {
+                    dihedral_jit.launch_slot(
+                        entry_idx,
+                        scratch.dihedral_count as u32,
+                        write_scalars,
+                        launch_builder,
+                    )?;
+                }
+            }
+            timings.kernel_stop(KernelStage::JIT_COMPOSED_DIHEDRAL_FORCE)?;
+        }
+
         // Per-slot compute path for slots NOT covered by the JIT
         // composed kernel (every slot whose index is not in
         // jit_slot_indices). The composed kernel already populated
@@ -1224,11 +1324,12 @@ crate::gpu_kernels! {
     struct: ForcesKernels,
     kernels: [combine_class_totals],
     stages: {
-        JIT_COMPOSED_PAIR_FORCE   = "jit_composed_pair_force",
-        JIT_COMPOSED_BONDED_FORCE = "jit_composed_bonded_force",
-        JIT_COMPOSED_ANGLE_FORCE  = "jit_composed_angle_force",
-        JIT_COMPOSED_POST_FORCE   = "jit_composed_post_force",
-        COMBINE_CLASS_TOTALS      = "combine_class_totals",
-        CLASS_ACCUMULATOR_MEMSET  = "class_accumulator_memset",
+        JIT_COMPOSED_PAIR_FORCE     = "jit_composed_pair_force",
+        JIT_COMPOSED_BONDED_FORCE   = "jit_composed_bonded_force",
+        JIT_COMPOSED_ANGLE_FORCE    = "jit_composed_angle_force",
+        JIT_COMPOSED_DIHEDRAL_FORCE = "jit_composed_dihedral_force",
+        JIT_COMPOSED_POST_FORCE     = "jit_composed_post_force",
+        COMBINE_CLASS_TOTALS        = "combine_class_totals",
+        CLASS_ACCUMULATOR_MEMSET    = "class_accumulator_memset",
     },
 }

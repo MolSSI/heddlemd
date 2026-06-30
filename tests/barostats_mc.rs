@@ -1,9 +1,7 @@
 // rq-09ac44ea — Monte-Carlo barostat tests. See
 // `rqm/integration/mc-barostat.md`.
 
-use heddle_md::forces::{
-    AngleList, BondList, ExclusionList, ForceField, MoleculeList, PotentialRegistry,
-};
+use heddle_md::forces::{AngleList, BondList, DihedralList, ExclusionList, ForceField, MoleculeList, PotentialRegistry};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device, mc_barostat_scale_molecule_com};
 use heddle_md::integrator::{
     Barostat, BarostatPeriodicity, BarostatRegistry, McBarostat,
@@ -54,11 +52,13 @@ fn empty_force_field(gpu: &GpuContext, n: usize, sim_box: &SimulationBox) -> For
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

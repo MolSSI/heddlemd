@@ -717,7 +717,7 @@ fn end_to_end_w_per_particle_virial_equals_half_over_n_times_sum_of_partials() {
     // SpmeReciprocalState::compute), then verify the scalar matches the
     // host-side reference.
     use heddle_md::forces::{AggregateLevel, ForceField, PotentialRegistry};
-    use heddle_md::forces::{AngleList, BondList, ExclusionList};
+    use heddle_md::forces::{AngleList, BondList, DihedralList, ExclusionList};
     use heddle_md::io::config::{NeighborListConfig, PairInteractionConfig, ParticleTypeConfig, PairPotentialParams, SpmeConfig};
 
     let gpu = init_device().unwrap();
@@ -753,11 +753,13 @@ fn end_to_end_w_per_particle_virial_equals_half_over_n_times_sum_of_partials() {
         &pairs,
         &[],
         &[],
+        &[],
         None,
         Some(&spme_cfg),
         &charges,
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

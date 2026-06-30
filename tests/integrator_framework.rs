@@ -1,6 +1,6 @@
 use heddle_md::integrator::IntegratorStepExt;
 use heddle_md::registry::KindedBuilder;
-use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::forces::{BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::integrator::{
     Integrator, IntegratorBuilder, IntegratorError, IntegratorRegistry, LangevinBaoabBuilder,
@@ -61,11 +61,13 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &heddle_md::forces::AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -312,11 +314,13 @@ fn integrator_owns_force_evaluation_inside_step() {
         }],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
         &heddle_md::forces::AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1255,11 +1259,13 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
         }],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
         &heddle_md::forces::AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1313,11 +1319,13 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
         }],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
         &heddle_md::forces::AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1371,11 +1379,13 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
         }],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
         &heddle_md::forces::AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )

@@ -100,6 +100,8 @@ pub enum ConfigError {
     DuplicateBondTypeName { name: String },
     #[error("duplicate angle type name `{name}`")]
     DuplicateAngleTypeName { name: String },
+    #[error("duplicate dihedral type name `{name}`")]
+    DuplicateDihedralTypeName { name: String },
     #[error("duplicate constraint type name `{name}`")]
     DuplicateConstraintTypeName { name: String },
     #[error("integrator `{integrator}` in phase `{phase}` does not support holonomic constraints; remove the topology file's [constraints] section or choose a different integrator")]
@@ -462,6 +464,51 @@ impl AngleTypeConfig {
     }
 }
 
+/// Tagged enum carrying the chosen dihedral-potential parameters and
+/// the per-type 1-4 scale factors. The `scale_lj_14` / `scale_coul_14`
+/// fields live at the enum level (not per-variant) so the implicit 1-4
+/// exclusion derivation in `topology.rs` is independent of the
+/// functional form.
+#[derive(Debug, Clone)]
+pub enum DihedralTypeConfig {
+    Periodic {
+        name: String,
+        /// Force constant in atomic energy units (Hartrees).
+        k_phi: f64,
+        /// Multiplicity. Integer in `[1, 6]`.
+        n: u32,
+        /// Phase offset in radians.
+        phi_0: f64,
+        /// Lennard-Jones scale applied to the implicit 1-4 exclusion
+        /// derived from any `[dihedrals]` row of this type. Default
+        /// `0.5` (AMBER convention).
+        scale_lj_14: f64,
+        /// Coulomb scale applied to the same implicit 1-4 exclusion.
+        /// Default `1.0 / 1.2 ≈ 0.83333` (AMBER convention).
+        scale_coul_14: f64,
+    },
+}
+
+impl DihedralTypeConfig {
+    pub fn name(&self) -> &str {
+        match self {
+            DihedralTypeConfig::Periodic { name, .. } => name,
+        }
+    }
+
+    pub fn scale_lj_14(&self) -> f64 {
+        match self {
+            DihedralTypeConfig::Periodic { scale_lj_14, .. } => *scale_lj_14,
+        }
+    }
+
+    pub fn scale_coul_14(&self) -> f64 {
+        match self {
+            DihedralTypeConfig::Periodic { scale_coul_14, .. } => *scale_coul_14,
+        }
+    }
+}
+
 // rq-060b1fab rq-a8320030
 #[derive(Debug, Clone, PartialEq)]
 pub enum NeighborListConfig {
@@ -522,6 +569,7 @@ pub struct Config {
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
     pub angle_types: Vec<AngleTypeConfig>,
+    pub dihedral_types: Vec<DihedralTypeConfig>,
     pub constraint_types: Vec<NamedSlotConfig>,
     pub coulomb: Option<CoulombConfig>,
     pub spme: Option<SpmeConfig>,
@@ -612,6 +660,8 @@ struct RawConfig {
     bond_types: Vec<RawBondType>,
     #[serde(default)]
     angle_types: Vec<RawAngleType>,
+    #[serde(default)]
+    dihedral_types: Vec<RawDihedralType>,
     #[serde(default)]
     constraint_types: Vec<NamedSlotConfig>,
     #[serde(default)]
@@ -725,6 +775,51 @@ impl From<RawAngleType> for AngleTypeConfig {
                 name,
                 k_theta: k_theta.0,
                 theta_0,
+            },
+        }
+    }
+}
+
+// AMBER convention: scale_lj_14 = 0.5, scale_coul_14 = 1.0 / 1.2.
+fn default_scale_lj_14() -> f64 {
+    0.5
+}
+fn default_scale_coul_14() -> f64 {
+    1.0 / 1.2
+}
+
+#[derive(Debug, Deserialize, crate::units::Convert)]
+#[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
+enum RawDihedralType {
+    Periodic {
+        name: String,
+        k_phi: crate::units::Energy,
+        n: u32,
+        phi_0: f64,
+        #[serde(default = "default_scale_lj_14")]
+        scale_lj_14: f64,
+        #[serde(default = "default_scale_coul_14")]
+        scale_coul_14: f64,
+    },
+}
+
+impl From<RawDihedralType> for DihedralTypeConfig {
+    fn from(r: RawDihedralType) -> Self {
+        match r {
+            RawDihedralType::Periodic {
+                name,
+                k_phi,
+                n,
+                phi_0,
+                scale_lj_14,
+                scale_coul_14,
+            } => DihedralTypeConfig::Periodic {
+                name,
+                k_phi: k_phi.0,
+                n,
+                phi_0,
+                scale_lj_14,
+                scale_coul_14,
             },
         }
     }
@@ -1078,6 +1173,8 @@ fn build_config(
         raw.bond_types.into_iter().map(Into::into).collect();
     let angle_types: Vec<AngleTypeConfig> =
         raw.angle_types.into_iter().map(Into::into).collect();
+    let dihedral_types: Vec<DihedralTypeConfig> =
+        raw.dihedral_types.into_iter().map(Into::into).collect();
 
     // Open-shaped slot params (constraint types here; integrator /
     // thermostat / barostat / minimizer below) are carried through in the
@@ -1311,6 +1408,7 @@ fn build_config(
         pair_interactions,
         bond_types,
         angle_types,
+        dihedral_types,
         constraint_types,
         coulomb,
         spme,
@@ -1339,6 +1437,7 @@ impl Config {
         validate_pair_interactions(&self.pair_interactions, &self.particle_types)?;
         validate_bond_types(&self.bond_types)?;
         validate_angle_types(&self.angle_types)?;
+        validate_dihedral_types(&self.dihedral_types)?;
         validate_constraint_type_names(&self.constraint_types)?;
         if let Some(c) = &self.coulomb {
             validate_coulomb(c)?;
@@ -1830,6 +1929,65 @@ fn validate_angle_types(ats: &[AngleTypeConfig]) -> Result<(), ConfigError> {
                     return Err(invalid(
                         format!("angle_types[{i}].theta_0"),
                         "theta_0 must be finite and in [0, π]",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_dihedral_types(dts: &[DihedralTypeConfig]) -> Result<(), ConfigError> {
+    let two_pi = 2.0 * std::f64::consts::PI;
+    let mut seen: Vec<&str> = Vec::with_capacity(dts.len());
+    for (i, dt) in dts.iter().enumerate() {
+        match dt {
+            DihedralTypeConfig::Periodic {
+                name,
+                k_phi,
+                n,
+                phi_0,
+                scale_lj_14,
+                scale_coul_14,
+            } => {
+                if name.is_empty() {
+                    return Err(invalid(
+                        format!("dihedral_types[{i}].name"),
+                        "name must not be empty",
+                    ));
+                }
+                if seen.iter().any(|x| *x == name) {
+                    return Err(ConfigError::DuplicateDihedralTypeName { name: name.clone() });
+                }
+                seen.push(name);
+                if !k_phi.is_finite() {
+                    return Err(invalid(
+                        format!("dihedral_types[{i}].k_phi"),
+                        "k_phi must be finite",
+                    ));
+                }
+                if !(1..=6).contains(n) {
+                    return Err(invalid(
+                        format!("dihedral_types[{i}].n"),
+                        "n must be an integer in [1, 6]",
+                    ));
+                }
+                if !phi_0.is_finite() || !(-two_pi..=two_pi).contains(phi_0) {
+                    return Err(invalid(
+                        format!("dihedral_types[{i}].phi_0"),
+                        "phi_0 must be finite and in [-2π, 2π]",
+                    ));
+                }
+                if !scale_lj_14.is_finite() || !(0.0..=1.0).contains(scale_lj_14) {
+                    return Err(invalid(
+                        format!("dihedral_types[{i}].scale_lj_14"),
+                        "scale_lj_14 must be finite and in [0.0, 1.0]",
+                    ));
+                }
+                if !scale_coul_14.is_finite() || !(0.0..=1.0).contains(scale_coul_14) {
+                    return Err(invalid(
+                        format!("dihedral_types[{i}].scale_coul_14"),
+                        "scale_coul_14 must be finite and in [0.0, 1.0]",
                     ));
                 }
             }

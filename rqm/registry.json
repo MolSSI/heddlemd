@@ -587,6 +587,13 @@
     "title": "KernelArgSchema",
     "type": "api-item"
   },
+  "rq-0426f8c9": {
+    "decl": "Scenario: Two rows on the same quadruple naming the same dihedral type are rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Two rows on the same quadruple naming the same dihedral type are rejected",
+    "type": "scenario"
+  },
   "rq-043796fa": {
     "decl": "- `__device__ __forceinline__ Real Real_sin(Real x);`",
     "file": "precision",
@@ -645,6 +652,18 @@
     "refs": [],
     "title": "Determinism guarantees",
     "type": "section"
+  },
+  "rq-04a6973e": {
+    "decl": "Scenario: Two independent calls produce byte-identical accumulators",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two independent calls produce byte-identical accumulators",
+    "type": "scenario"
   },
   "rq-04fda32f": {
     "decl": "Scenario: Explicit init velocities override sampled velocities",
@@ -735,6 +754,14 @@
     "refs": [],
     "title": "init_device succeeds on a machine with a CUDA GPU",
     "type": "scenario"
+  },
+  "rq-056c4760": {
+    "decl": "### Dihedral entries",
+    "file": "forces/topology",
+    "level": 3,
+    "refs": [],
+    "title": "Dihedral entries",
+    "type": "section"
   },
   "rq-059aff56": {
     "decl": "Scenario: LJ with mixed cutoffs across pair types reports CutoffHandling::PerPair",
@@ -844,6 +871,13 @@
     "refs": [],
     "title": "Algorithm",
     "type": "section"
+  },
+  "rq-06369a61": {
+    "decl": "Scenario: Periodic dihedral_type rejects n = 0",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type rejects n = 0",
+    "type": "scenario"
   },
   "rq-063beff1": {
     "decl": "### Per-iteration kernel sequence (one accepted iteration)",
@@ -984,6 +1018,13 @@
     "title": "Barostat",
     "type": "api-item"
   },
+  "rq-077fb357": {
+    "decl": "Scenario: Dihedral composed module is compiled at ForceField::new when at least one dihedral slot is active",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Dihedral composed module is compiled at ForceField::new when at least one dihedral slot is active",
+    "type": "scenario"
+  },
   "rq-07a18814": {
     "decl": "Scenario: log_column_values returns the conserved Hamiltonian",
     "file": "integration/nose-hoover-chain",
@@ -995,6 +1036,13 @@
     ],
     "title": "log_column_values returns the conserved Hamiltonian",
     "type": "scenario"
+  },
+  "rq-07be6b5e": {
+    "decl": "- `DihedralList` — host-side. Fields: `dihedrals: Vec<Dihedral>`,",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "DihedralList",
+    "type": "api-item"
   },
   "rq-07d003c4": {
     "decl": "- `AngleList` — host-side. Fields: `angles: Vec<Angle>`,",
@@ -1590,6 +1638,20 @@
     "title": "Config",
     "type": "api-item"
   },
+  "rq-0c5e7b0d": {
+    "decl": "Scenario: Periodic dihedral_type missing k_phi is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type missing k_phi is rejected",
+    "type": "scenario"
+  },
+  "rq-0c69218c": {
+    "decl": "Scenario: Dihedral composed module is not compiled when no dihedral slot is active",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Dihedral composed module is not compiled when no dihedral slot is active",
+    "type": "scenario"
+  },
   "rq-0c717392": {
     "decl": "- `Exclusion` — `Debug, Clone, Copy`. Fields: `atom_i: u32`,",
     "file": "forces/topology",
@@ -2096,6 +2158,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-10274a65": {
+    "decl": "Scenario: Dihedral row with wrong column count",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Dihedral row with wrong column count",
+    "type": "scenario"
+  },
   "rq-1027778f": {
     "decl": "Scenario: SI-mode dt and simulation temperature are converted to atomic",
     "file": "io/unit-system",
@@ -2485,6 +2554,13 @@
     "title": "PotentialBuilder is not a KindedBuilder",
     "type": "scenario"
   },
+  "rq-124c9de8": {
+    "decl": "- `DihedralForceFragment` — same shape as `BondedForceFragment`,",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "DihedralForceFragment",
+    "type": "api-item"
+  },
   "rq-1254cd3a": {
     "decl": "- `OutputConfig`",
     "file": "io/config-schema",
@@ -2557,7 +2633,7 @@
     "type": "scenario"
   },
   "rq-12b7dcb6": {
-    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>`",
+    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], dihedral_types: &[DihedralTypeConfig], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList), TopologyFileError>`",
     "file": "forces/topology",
     "refs": [
       {
@@ -2883,6 +2959,13 @@
     "title": "Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid",
     "type": "scenario"
   },
+  "rq-152fe459": {
+    "decl": "Scenario: Repeated atom in dihedral rejected (i == j)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Repeated atom in dihedral rejected (i == j)",
+    "type": "scenario"
+  },
   "rq-153dd875": {
     "decl": "Scenario: set_lattice validation order is lx, ly, lz, xy, xz, yz",
     "file": "simulation-box",
@@ -3160,6 +3243,13 @@
     "title": "spme_recip_compute_influence",
     "type": "api-item"
   },
+  "rq-17bee31c": {
+    "decl": "Scenario: Periodic dihedral_type missing phi_0 is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type missing phi_0 is rejected",
+    "type": "scenario"
+  },
   "rq-17d3ddfe": {
     "decl": "Scenario: log_column_names returns [\"nhc_conserved\"] for NHC",
     "file": "integration/nose-hoover-chain",
@@ -3206,6 +3296,13 @@
       }
     ],
     "title": "Histogram accumulates across multiple frames in order",
+    "type": "scenario"
+  },
+  "rq-180d0e97": {
+    "decl": "Scenario: dihedral_type unknown potential is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "dihedral_type unknown potential is rejected",
     "type": "scenario"
   },
   "rq-18165336": {
@@ -3271,6 +3368,18 @@
     ],
     "title": "`[[phase]]` (array of tables, >= 1 entry)",
     "type": "section"
+  },
+  "rq-185a2743": {
+    "decl": "Scenario: Force matches the closed-form periodic expression for a non-degenerate dihedral",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Force matches the closed-form periodic expression for a non-degenerate dihedral",
+    "type": "scenario"
   },
   "rq-187a5252": {
     "decl": "### Types",
@@ -3938,6 +4047,20 @@
       }
     ],
     "title": "Accept r_switch equal to cutoff (hard-cutoff degenerate case)",
+    "type": "scenario"
+  },
+  "rq-1d8fd9cf": {
+    "decl": "- `reduce_dihedral_forces(state: &mut PeriodicDihedralState, output_force_x: &mut CudaViewMut<'_, Real>, output_force_y: &mut CudaViewMut<'_, Real>, output_force_z: &mut CudaViewMut<'_, Real>, output_energy: &mut CudaViewMut<'_, Real>, output_virial: &mut CudaViewMut<'_, Real>) -> Result<(), GpuError>`",
+    "file": "forces/periodic-dihedral",
+    "refs": [],
+    "title": "reduce_dihedral_forces",
+    "type": "api-item"
+  },
+  "rq-1d9fd409": {
+    "decl": "Scenario: Reject duplicate dihedral_type names",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject duplicate dihedral_type names",
     "type": "scenario"
   },
   "rq-1dadb8e9": {
@@ -4689,6 +4812,14 @@
     "title": "Schema",
     "type": "section"
   },
+  "rq-22a1660e": {
+    "decl": "### Source Fragment",
+    "file": "forces/periodic-dihedral",
+    "level": 3,
+    "refs": [],
+    "title": "Source Fragment",
+    "type": "section"
+  },
   "rq-22d0ce50": {
     "decl": "### Types",
     "file": "forces/topology",
@@ -5396,6 +5527,18 @@
     "title": "Box Generation Tracking",
     "type": "section"
   },
+  "rq-2835ec70": {
+    "decl": "Scenario: Multi-term dihedral (two rows on the same quadruple) sums by the framework",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Multi-term dihedral (two rows on the same quadruple) sums by the framework",
+    "type": "scenario"
+  },
   "rq-28445f4e": {
     "decl": "Scenario: A composite-fragment builder that builds without its constituents falls back gracefully",
     "file": "forces/jit-composed-pair-force",
@@ -5519,6 +5662,19 @@
     "title": "Reject a name containing non-ASCII characters",
     "type": "scenario"
   },
+  "rq-2932ea42": {
+    "decl": "## Launch Configuration",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Launch Configuration",
+    "type": "section"
+  },
   "rq-29718dcf": {
     "decl": "Scenario: kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
     "file": "integration/velocity-verlet",
@@ -5608,6 +5764,13 @@
     ],
     "title": "IntegratorBuilder",
     "type": "api-item"
+  },
+  "rq-2a0dcb1e": {
+    "decl": "Scenario: Periodic dihedral_type with explicit 1-4 scales overrides defaults",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type with explicit 1-4 scales overrides defaults",
+    "type": "scenario"
   },
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
@@ -6072,6 +6235,13 @@
     "title": "C-rescale composes with langevin-baoab",
     "type": "scenario"
   },
+  "rq-2d18165a": {
+    "decl": "Scenario: atom_dihedral_offsets reflects sorted dihedral list",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "atom_dihedral_offsets reflects sorted dihedral list",
+    "type": "scenario"
+  },
   "rq-2d2eaf72": {
     "decl": "# Feature: JIT-Composed Intramolecular Kernels",
     "file": "forces/jit-composed-intramolecular",
@@ -6128,6 +6298,13 @@
       }
     ],
     "title": "Berendsen barostat composes with langevin-baoab integrator",
+    "type": "scenario"
+  },
+  "rq-2d7dd2a1": {
+    "decl": "Scenario: Load a topology file containing a dihedral",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Load a topology file containing a dihedral",
     "type": "scenario"
   },
   "rq-2dbda7ec": {
@@ -6263,6 +6440,14 @@
     ],
     "title": "Timings path equal to init path is rejected",
     "type": "scenario"
+  },
+  "rq-2ec7b7fc": {
+    "decl": "## Force Accumulation",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [],
+    "title": "Force Accumulation",
+    "type": "section"
   },
   "rq-2ed137d9": {
     "decl": "Scenario: Reject lattice with a non-zero upper-triangular entry",
@@ -6881,6 +7066,13 @@
     "title": "Refuse to run with multiple types",
     "type": "scenario"
   },
+  "rq-351976f8": {
+    "decl": "Scenario: step() with one dihedral slot launches the dihedral composed kernel once and the reduction once",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "step() with one dihedral slot launches the dihedral composed kernel once and the reduction once",
+    "type": "scenario"
+  },
   "rq-3533e8a9": {
     "decl": "Scenario: Morse bond_type rejects non-positive re",
     "file": "io/config-schema",
@@ -7098,6 +7290,13 @@
     "title": "SI-mode position columns are converted to Bohr",
     "type": "scenario"
   },
+  "rq-371e20eb": {
+    "decl": "Scenario: Periodic dihedral_type rejects scale_coul_14 outside [0, 1]",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type rejects scale_coul_14 outside [0, 1]",
+    "type": "scenario"
+  },
   "rq-3726c0f1": {
     "decl": "Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)",
     "file": "forces/spme",
@@ -7128,6 +7327,13 @@
     ],
     "title": "ParticleState",
     "type": "api-item"
+  },
+  "rq-378b96c9": {
+    "decl": "Scenario: Periodic dihedral_type rejects n > 6",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type rejects n > 6",
+    "type": "scenario"
   },
   "rq-37b05f03": {
     "decl": "## Determinism",
@@ -7719,6 +7925,13 @@
     "title": "Rust Launch Helpers",
     "type": "section"
   },
+  "rq-3c013c74": {
+    "decl": "Scenario: Two independent runs of the dihedral composed kernel on identical inputs are byte-identical",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Two independent runs of the dihedral composed kernel on identical inputs are byte-identical",
+    "type": "scenario"
+  },
   "rq-3c0beda9": {
     "decl": "Scenario: Spread reduces to a single B-spline weight for one isolated particle",
     "file": "forces/spme",
@@ -7768,6 +7981,21 @@
     "level": 2,
     "refs": [],
     "title": "Activation Policy",
+    "type": "section"
+  },
+  "rq-3c83b98a": {
+    "decl": "Scenario: Dihedral row with atom index out of range",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Dihedral row with atom index out of range",
+    "type": "scenario"
+  },
+  "rq-3c978326": {
+    "decl": "### Dihedral list",
+    "file": "forces/topology",
+    "level": 3,
+    "refs": [],
+    "title": "Dihedral list",
     "type": "section"
   },
   "rq-3c98d7a9": {
@@ -7891,6 +8119,14 @@
     "level": 2,
     "refs": [],
     "title": "Parameters",
+    "type": "section"
+  },
+  "rq-3dc1c2d1": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
     "type": "section"
   },
   "rq-3dc94856": {
@@ -8063,6 +8299,13 @@
       }
     ],
     "title": "atom_bond_offsets reflects sorted bond list",
+    "type": "scenario"
+  },
+  "rq-3ebdb69b": {
+    "decl": "Scenario: Dihedral virial equals b1·F_i + b2·F_k + (b2−b3)·F_l",
+    "file": "forces/periodic-dihedral",
+    "refs": [],
+    "title": "Dihedral virial equals b1·F_i + b2·F_k + (b2−b3)·F_l",
     "type": "scenario"
   },
   "rq-3ee1ab17": {
@@ -8309,6 +8552,18 @@
       }
     ],
     "title": "Missing compressibility rejected",
+    "type": "scenario"
+  },
+  "rq-41636703": {
+    "decl": "Scenario: Degenerate geometry (|n_vec|² ~ 0) produces zero force, not NaN",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Degenerate geometry (|n_vec|² ~ 0) produces zero force, not NaN",
     "type": "scenario"
   },
   "rq-4169d3af": {
@@ -8910,6 +9165,13 @@
     "title": "min_perpendicular_width of a c-tilted box reflects the yz contribution",
     "type": "scenario"
   },
+  "rq-480f7a8b": {
+    "decl": "Scenario: Periodic dihedral_type rejects scale_lj_14 outside [0, 1]",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type rejects scale_lj_14 outside [0, 1]",
+    "type": "scenario"
+  },
   "rq-4811af60": {
     "decl": "Scenario: r=0 produces zero force, not NaN",
     "file": "forces/morse-bonded",
@@ -9276,6 +9538,18 @@
     "title": "Reject an unknown units value",
     "type": "scenario"
   },
+  "rq-4b84f452": {
+    "decl": "# Feature: Periodic Dihedral Bonded Potential",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Periodic Dihedral Bonded Potential",
+    "type": "file"
+  },
   "rq-4b9d059e": {
     "decl": "Scenario: wrap_position wraps a position outside the primary cell (orthorhombic)",
     "file": "simulation-box",
@@ -9479,6 +9753,14 @@
     "title": "μ clamped to μ_min when the formula yields a non-positive μ³",
     "type": "scenario"
   },
+  "rq-4dcd812b": {
+    "decl": "### Rust Launch Helpers",
+    "file": "forces/periodic-dihedral",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
+  },
   "rq-4dd1b9e3": {
     "decl": "- `R(x)` — a function-style macro that casts a numeric literal to `Real`:",
     "file": "precision",
@@ -9553,6 +9835,14 @@
     ],
     "title": "vv_kick_lossless",
     "type": "api-item"
+  },
+  "rq-4eec8cf7": {
+    "decl": "## Parameters",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-4ef89c50": {
     "decl": "- `BerendsenBarostatBuilder` — implements `BarostatBuilder` with",
@@ -10138,6 +10428,13 @@
     "title": "Custom external slot defaults to graph_compatible = true",
     "type": "scenario"
   },
+  "rq-53e43a30": {
+    "decl": "Scenario: Valid periodic dihedral_type is accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Valid periodic dihedral_type is accepted",
+    "type": "scenario"
+  },
   "rq-5444c7ae": {
     "decl": "Scenario: Per-particle energy slot accumulates half the pair's potential energy",
     "file": "forces/coulomb-pair-force",
@@ -10682,6 +10979,13 @@
     "title": "Rust Launch Helpers",
     "type": "section"
   },
+  "rq-58221c00": {
+    "decl": "Scenario: Two rows on the same quadruple with different dihedral types are accepted",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Two rows on the same quadruple with different dihedral types are accepted",
+    "type": "scenario"
+  },
   "rq-58254790": {
     "decl": "Scenario: Download from an empty buffers into an empty state",
     "file": "particle-state",
@@ -10833,6 +11137,18 @@
     "refs": [],
     "title": "Fill Kernel",
     "type": "section"
+  },
+  "rq-59b48bcd": {
+    "decl": "Scenario: Atom appearing in two dihedrals receives the sum of its slot values",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Atom appearing in two dihedrals receives the sum of its slot values",
+    "type": "scenario"
   },
   "rq-59bbfa07": {
     "decl": "Scenario: Captured graph includes the displacement-check kernel",
@@ -11382,6 +11698,20 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-5e3b9b77": {
+    "decl": "Scenario: Dihedrals are sorted by (atom_i, atom_j, atom_k, atom_l)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Dihedrals are sorted by (atom_i, atom_j, atom_k, atom_l)",
+    "type": "scenario"
+  },
+  "rq-5e5912cf": {
+    "decl": "Scenario: dihedral_types is optional and defaults to empty",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "dihedral_types is optional and defaults to empty",
+    "type": "scenario"
+  },
   "rq-5e5f48da": {
     "decl": "Scenario: runner.resolve_level falls through to ForcesOnly when neither logging",
     "file": "integration/framework",
@@ -11608,6 +11938,18 @@
     "title": "AngleForceFragment",
     "type": "api-item"
   },
+  "rq-603b4597": {
+    "decl": "Scenario: Equilibrium dihedral (n*phi == phi_0) produces zero force on each atom",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Equilibrium dihedral (n*phi == phi_0) produces zero force on each atom",
+    "type": "scenario"
+  },
   "rq-603bd03b": {
     "decl": "Scenario: settle_positions restores constraint distances after a small per-atom kick",
     "file": "integration/settle",
@@ -11811,6 +12153,13 @@
     ],
     "title": "SpmeConfig",
     "type": "api-item"
+  },
+  "rq-6188c086": {
+    "decl": "Scenario: step_class(Slow) does not launch the dihedral composed kernel",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "step_class(Slow) does not launch the dihedral composed kernel",
+    "type": "scenario"
   },
   "rq-61a19da3": {
     "decl": "Scenario: Missing temperature is rejected",
@@ -12327,6 +12676,14 @@
     "title": "init_device exposes the Langevin kernels on the Kernels handle",
     "type": "scenario"
   },
+  "rq-66bad604": {
+    "decl": "## Empty State",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
+  },
   "rq-66bcfbe3": {
     "decl": "### Exclusion scaling <!-- inline -->",
     "file": "forces/coulomb-pair-force",
@@ -12432,6 +12789,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-6789ef26": {
+    "decl": "Scenario: Repeated atom in dihedral rejected (k == l)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Repeated atom in dihedral rejected (k == l)",
+    "type": "scenario"
   },
   "rq-678c233d": {
     "decl": "- `ThermostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`",
@@ -12607,6 +12971,13 @@
     "refs": [],
     "title": "Per-step launch loop unaffected by Phase 3 plumbing",
     "type": "scenario"
+  },
+  "rq-68c5d30a": {
+    "decl": "# Column format: atom_i  atom_j  atom_k  atom_l  dihedral_type_name",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Column format: atom_i  atom_j  atom_k  atom_l  dihedral_type_name",
+    "type": "file"
   },
   "rq-69109415": {
     "decl": "Scenario: Reject an unknown minimization algorithm kind",
@@ -12850,6 +13221,25 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-6afeb5c1": {
+    "decl": "Scenario: Periodic dihedral_type rejects non-finite k_phi",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type rejects non-finite k_phi",
+    "type": "scenario"
+  },
+  "rq-6b38fe0b": {
+    "decl": "Scenario: reduce_dihedral_forces on zero particles is a no-op",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "reduce_dihedral_forces on zero particles is a no-op",
+    "type": "scenario"
   },
   "rq-6b4dda1b": {
     "decl": "Scenario: flush_from_device is idempotent",
@@ -13155,6 +13545,14 @@
     ],
     "title": "log_column_values",
     "type": "api-item"
+  },
+  "rq-6d4a49ac": {
+    "decl": "#### `[[dihedral_types]]` (optional array of tables)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[[dihedral_types]]` (optional array of tables)",
+    "type": "section"
   },
   "rq-6d65f104": {
     "decl": "## Host / device synchronisation <!-- new -->",
@@ -13700,6 +14098,13 @@
     "refs": [],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-720fd816": {
+    "decl": "Scenario: A dihedral with full LJ and Coul 1-4 (CHARMM convention) adds the entry",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "A dihedral with full LJ and Coul 1-4 (CHARMM convention) adds the entry",
+    "type": "scenario"
   },
   "rq-72157184": {
     "decl": "# Feature: End-to-End Pipeline Reproducibility Test",
@@ -14995,6 +15400,13 @@
     "title": "Cross-subsystem reads pull from the kernel's home sub-struct",
     "type": "scenario"
   },
+  "rq-7b7659be": {
+    "decl": "Scenario: Dihedral is canonicalised so atom_i <= atom_l",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Dihedral is canonicalised so atom_i <= atom_l",
+    "type": "scenario"
+  },
   "rq-7b99234a": {
     "decl": "Scenario: Framework zeros the class accumulator before the first slot adds",
     "file": "forces/framework",
@@ -15050,6 +15462,18 @@
     ],
     "title": "Parameters",
     "type": "section"
+  },
+  "rq-7bf70ee9": {
+    "decl": "Scenario: n = 0 is rejected at config-load time",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "n = 0 is rejected at config-load time",
+    "type": "scenario"
   },
   "rq-7c13040a": {
     "decl": "Scenario: shake_positions restores constraint distances after a small per-atom kick",
@@ -15140,6 +15564,18 @@
       }
     ],
     "title": "VelocityVerlet builder's supports_constraints depends on the lossless flag",
+    "type": "scenario"
+  },
+  "rq-7d412e08": {
+    "decl": "Scenario: Reduction summation order follows sorted atom_dihedral_indices",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reduction summation order follows sorted atom_dihedral_indices",
     "type": "scenario"
   },
   "rq-7d4c470a": {
@@ -16491,6 +16927,14 @@
     "title": "Defaults populate the output section when [output] is omitted",
     "type": "scenario"
   },
+  "rq-898a6225": {
+    "decl": "### Reduction Kernel",
+    "file": "forces/periodic-dihedral",
+    "level": 3,
+    "refs": [],
+    "title": "Reduction Kernel",
+    "type": "section"
+  },
   "rq-89b8e85c": {
     "decl": "Scenario: step() launches the expected kernel set",
     "file": "integration/mtk-npt",
@@ -17415,6 +17859,18 @@
     "title": "Config rejected by the filename convention",
     "type": "scenario"
   },
+  "rq-91fbdf55": {
+    "decl": "Scenario: Atom with no dihedrals gets zero accumulator",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Atom with no dihedrals gets zero accumulator",
+    "type": "scenario"
+  },
   "rq-922c9a86": {
     "decl": "# Both scales default to 0.0 (full exclusion) when omitted.",
     "file": "forces/topology",
@@ -17501,6 +17957,13 @@
     "title": "f64 build refuses to instantiate the packed-neighbour kernel",
     "type": "scenario"
   },
+  "rq-92b8e6af": {
+    "decl": "Scenario: Angle-derived (1, 0, 0) exclusion overrides a dihedral's 1-4 entry for the same pair",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Angle-derived (1, 0, 0) exclusion overrides a dihedral's 1-4 entry for the same pair",
+    "type": "scenario"
+  },
   "rq-92cecd28": {
     "decl": "Scenario: apply launches the expected kernel set",
     "file": "integration/berendsen-barostat",
@@ -17564,6 +18027,13 @@
     "refs": [],
     "title": "Parameter Binding and Launch",
     "type": "section"
+  },
+  "rq-93010e61": {
+    "decl": "- `DihedralForceFragment` — same shape as `BondedForceFragment`,",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "DihedralForceFragment",
+    "type": "api-item"
   },
   "rq-930121d6": {
     "decl": "Scenario: Group order is determined by minimum particle index",
@@ -17635,6 +18105,13 @@
       }
     ],
     "title": "Constraint row with repeated atom is rejected",
+    "type": "scenario"
+  },
+  "rq-93536cac": {
+    "decl": "Scenario: Periodic dihedral_type rejects extra fields",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type rejects extra fields",
     "type": "scenario"
   },
   "rq-93be622c": {
@@ -18052,6 +18529,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-97961787": {
+    "decl": "Scenario: Repeated atom in dihedral rejected (j == k)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Repeated atom in dihedral rejected (j == k)",
+    "type": "scenario"
+  },
   "rq-97e525d8": {
     "decl": "Scenario: trajectory_every = 0 is accepted (disables trajectory output)",
     "file": "io/config-schema",
@@ -18292,6 +18776,13 @@
     "refs": [],
     "title": "Reproducibility",
     "type": "section"
+  },
+  "rq-99bd424a": {
+    "decl": "Scenario: Implicit 1-4 exclusion is added for a dihedral whose (i, l) pair is otherwise uncovered",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Implicit 1-4 exclusion is added for a dihedral whose (i, l) pair is otherwise uncovered",
+    "type": "scenario"
   },
   "rq-99cb2bd3": {
     "decl": "Scenario: Two runs of the sort pipeline produce byte-identical sorted_atom_index",
@@ -18913,7 +19404,7 @@
     "type": "scenario"
   },
   "rq-9e1eee68": {
-    "decl": "# Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List",
+    "decl": "# Feature: Topology File, Bond List, Angle List, Dihedral List, Exclusion List, and Constraint List",
     "file": "forces/topology",
     "refs": [
       {
@@ -18925,7 +19416,7 @@
         "kind": "code"
       }
     ],
-    "title": "Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List",
+    "title": "Feature: Topology File, Bond List, Angle List, Dihedral List, Exclusion List, and Constraint List",
     "type": "file"
   },
   "rq-9e22adb3": {
@@ -19210,6 +19701,19 @@
     "refs": [],
     "title": "Different seeds produce different trajectories",
     "type": "scenario"
+  },
+  "rq-9fd47b06": {
+    "decl": "## Algorithm",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Algorithm",
+    "type": "section"
   },
   "rq-9fe1d656": {
     "decl": "## Determinism Guarantees",
@@ -19935,6 +20439,13 @@
     "title": "Construct CsvrThermostat via the registry (unconstrained system)",
     "type": "scenario"
   },
+  "rq-a6df14c8": {
+    "decl": "- `Dihedral` — `Debug, Clone, Copy`. Fields: `atom_i: u32`,",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Dihedral",
+    "type": "api-item"
+  },
   "rq-a6ecc598": {
     "decl": "Scenario: Packed-neighbour pass skips the no-atom sentinel",
     "file": "forces/packed-neighbour-pair-force",
@@ -19983,6 +20494,18 @@
       }
     ],
     "title": "log_column_values returns the cached pressure, post-step volume,",
+    "type": "scenario"
+  },
+  "rq-a73f7a4b": {
+    "decl": "Scenario: Atom appearing in one dihedral receives that dihedral's force directly",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Atom appearing in one dihedral receives that dihedral's force directly",
     "type": "scenario"
   },
   "rq-a740c278": {
@@ -20350,6 +20873,13 @@
       }
     ],
     "title": "SI-mode log row converts time to seconds",
+    "type": "scenario"
+  },
+  "rq-aa00b384": {
+    "decl": "Scenario: Bond-derived (1, 0, 0) exclusion overrides a dihedral's 1-4 entry for the same pair",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Bond-derived (1, 0, 0) exclusion overrides a dihedral's 1-4 entry for the same pair",
     "type": "scenario"
   },
   "rq-aa1492a7": {
@@ -20824,6 +21354,30 @@
     "title": "`[neighbor_list]` (optional table)",
     "type": "section"
   },
+  "rq-ae19b22f": {
+    "decl": "Scenario: Construct PeriodicDihedralState filters out non-periodic dihedral entries",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct PeriodicDihedralState filters out non-periodic dihedral entries",
+    "type": "scenario"
+  },
+  "rq-ae1c6a11": {
+    "decl": "Scenario: init_device exposes the dihedral reduction kernel on the Kernels handle",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "init_device exposes the dihedral reduction kernel on the Kernels handle",
+    "type": "scenario"
+  },
   "rq-ae20ddac": {
     "decl": "Scenario: Force is C¹ continuous at r_switch",
     "file": "forces/lj-pair-force",
@@ -21189,6 +21743,18 @@
       }
     ],
     "title": "Empty topology file is valid",
+    "type": "scenario"
+  },
+  "rq-b0e866c2": {
+    "decl": "Scenario: periodic dihedral compute on zero dihedrals is a no-op",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "periodic dihedral compute on zero dihedrals is a no-op",
     "type": "scenario"
   },
   "rq-b1060817": {
@@ -21592,6 +22158,14 @@
     "title": "Composed kernel is compiled when an integrator is active",
     "type": "scenario"
   },
+  "rq-b3cbcae1": {
+    "decl": "### PTX Module Loading",
+    "file": "forces/periodic-dihedral",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
   "rq-b3e0f901": {
     "decl": "- `register` never deduplicates: two builders of the same kind may both be",
     "file": "registry-framework",
@@ -21609,6 +22183,13 @@
       }
     ],
     "title": "B-spline correction factors are finite for odd spline orders",
+    "type": "scenario"
+  },
+  "rq-b3ffde38": {
+    "decl": "Scenario: Dihedral row with non-integer index",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Dihedral row with non-integer index",
     "type": "scenario"
   },
   "rq-b41d8d36": {
@@ -21803,6 +22384,18 @@
     "refs": [],
     "title": "KernelArgBinder",
     "type": "api-item"
+  },
+  "rq-b600335f": {
+    "decl": "Scenario: Degenerate geometry (|m|² ~ 0) produces zero force, not NaN",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Degenerate geometry (|m|² ~ 0) produces zero force, not NaN",
+    "type": "scenario"
   },
   "rq-b6324878": {
     "decl": "## Gherkin Scenarios",
@@ -22049,6 +22642,13 @@
     "title": "settle_velocities skips the velocity-level virial accumulation when dt <= 0",
     "type": "scenario"
   },
+  "rq-b7fe6425": {
+    "decl": "- `PeriodicDihedralState` — implements the `Potential` trait with",
+    "file": "forces/periodic-dihedral",
+    "refs": [],
+    "title": "PeriodicDihedralState",
+    "type": "api-item"
+  },
   "rq-b8070abb": {
     "decl": "### Constructor",
     "file": "simulation-box",
@@ -22192,6 +22792,14 @@
     ],
     "title": ".minlog header line",
     "type": "scenario"
+  },
+  "rq-b97c4c03": {
+    "decl": "### Types",
+    "file": "forces/periodic-dihedral",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-b98dcdd2": {
     "decl": "Scenario: SettleConstraintsState::new rejects a group with the wrong atom count",
@@ -22359,6 +22967,13 @@
     "title": "Reject a row missing a velocity column",
     "type": "scenario"
   },
+  "rq-bafeed55": {
+    "decl": "Scenario: Explicit [exclusions] row overrides a dihedral-derived 1-4 entry",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Explicit [exclusions] row overrides a dihedral-derived 1-4 entry",
+    "type": "scenario"
+  },
   "rq-bb075030": {
     "decl": "Scenario: vv_kick_drift_lossless does not modify forces, masses, or particle_ids",
     "file": "integration/velocity-verlet",
@@ -22374,6 +22989,14 @@
     ],
     "title": "vv_kick_drift_lossless does not modify forces, masses, or particle_ids",
     "type": "scenario"
+  },
+  "rq-bb0ff6de": {
+    "decl": "## Out of Scope",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-bb3773aa": {
     "decl": "Scenario: Trivial-mode pre_step does no work",
@@ -22444,6 +23067,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-bc1b494f": {
+    "decl": "Scenario: Empty dihedral_type name rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Empty dihedral_type name rejected",
+    "type": "scenario"
   },
   "rq-bc442f5b": {
     "decl": "### Particle IDs",
@@ -22814,6 +23444,14 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-bf722ba2": {
+    "decl": "## Source-Fragment Contract — Dihedral Shape",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Source-Fragment Contract — Dihedral Shape",
+    "type": "section"
+  },
   "rq-bf98584a": {
     "decl": "Scenario: Reject an analysis filename whose derived root is empty",
     "file": "analysis/framework",
@@ -22929,6 +23567,18 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
+  "rq-c0951af5": {
+    "decl": "Scenario: Degenerate geometry (|b2|² ~ 0) produces zero force, not NaN",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Degenerate geometry (|b2|² ~ 0) produces zero force, not NaN",
+    "type": "scenario"
+  },
   "rq-c0aa3b5c": {
     "decl": "### Types",
     "file": "io/log-output",
@@ -22947,6 +23597,18 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
+    "type": "scenario"
+  },
+  "rq-c0e1d856": {
+    "decl": "Scenario: Builder skips dihedral_types whose potential is not \"periodic\"",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Builder skips dihedral_types whose potential is not \"periodic\"",
     "type": "scenario"
   },
   "rq-c0e4b4d6": {
@@ -23048,6 +23710,13 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "PTX is embedded in the Rust binary",
+    "type": "scenario"
+  },
+  "rq-c18f9511": {
+    "decl": "Scenario: kernels/dihedral.cu does not declare a periodic_dihedral_force entry point",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "kernels/dihedral.cu does not declare a periodic_dihedral_force entry point",
     "type": "scenario"
   },
   "rq-c195ddf0": {
@@ -23243,6 +23912,13 @@
     "title": "The user guide documents the launch-configuration tuning constants",
     "type": "scenario"
   },
+  "rq-c42b0c81": {
+    "decl": "Scenario: Periodic dihedral_type rejects phi_0 outside [-2π, 2π]",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type rejects phi_0 outside [-2π, 2π]",
+    "type": "scenario"
+  },
   "rq-c4300389": {
     "decl": "## Out of Scope",
     "file": "registry-framework",
@@ -23250,6 +23926,18 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-c432078d": {
+    "decl": "Scenario: Minimum image is applied to b1, b2, and b3",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Minimum image is applied to b1, b2, and b3",
+    "type": "scenario"
   },
   "rq-c43dd1ab": {
     "decl": "Scenario: Displacement-check kernel sets the flag when any particle exceeds threshold",
@@ -23636,6 +24324,13 @@
     "title": "__device__",
     "type": "api-item"
   },
+  "rq-c6575989": {
+    "decl": "Scenario: Periodic dihedral_type missing n is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Periodic dihedral_type missing n is rejected",
+    "type": "scenario"
+  },
   "rq-c669b757": {
     "decl": "## Smoke Test",
     "file": "build-pipeline",
@@ -23883,6 +24578,13 @@
     ],
     "title": "Allocate device buffers from an empty state",
     "type": "scenario"
+  },
+  "rq-c8c03ed1": {
+    "decl": "# one Fourier term to the total dihedral potential on that quadruple.",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "one Fourier term to the total dihedral potential on that quadruple.",
+    "type": "file"
   },
   "rq-c8e5b14e": {
     "decl": "Scenario: Two independent runs with identical inputs are byte-identical",
@@ -24207,6 +24909,13 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-cb1a8507": {
+    "decl": "Scenario: Repeated atom in dihedral rejected (i == l)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Repeated atom in dihedral rejected (i == l)",
+    "type": "scenario"
+  },
   "rq-cb2f6a59": {
     "decl": "- `lookup` matches on `kind_name()` equality and returns the **first** match",
     "file": "registry-framework",
@@ -24250,6 +24959,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Pair near r_cut inside the switching window has force smaller than the unmodified value",
+    "type": "scenario"
+  },
+  "rq-cb96dfd0": {
+    "decl": "Scenario: Implicit 1-4 uses the dihedral_type's scale_lj_14 / scale_coul_14",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Implicit 1-4 uses the dihedral_type's scale_lj_14 / scale_coul_14",
     "type": "scenario"
   },
   "rq-cbe60abb": {
@@ -24373,6 +25089,19 @@
     "title": "convert_params default is a no-op for a kind with no unit-bearing params",
     "type": "scenario"
   },
+  "rq-ccea967a": {
+    "decl": "## Feature API",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-ccf4dc3f": {
     "decl": "Scenario: Builder returning Ok(None) is skipped without erroring",
     "file": "forces/framework",
@@ -24404,6 +25133,13 @@
     "refs": [],
     "title": "Class Output Accumulators",
     "type": "section"
+  },
+  "rq-cd2911bd": {
+    "decl": "Scenario: dihedral_type missing potential field",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "dihedral_type missing potential field",
+    "type": "scenario"
   },
   "rq-cd3943e1": {
     "decl": "Scenario: Toggling the f64 feature forces a kernel recompile",
@@ -24517,6 +25253,25 @@
     "refs": [],
     "title": "Reciprocal-space virial",
     "type": "section"
+  },
+  "rq-ce48ab4a": {
+    "decl": "Scenario: n > 6 is rejected at config-load time",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "n > 6 is rejected at config-load time",
+    "type": "scenario"
+  },
+  "rq-ce519f29": {
+    "decl": "Scenario: First-wins when two dihedrals share the same (i, l) 1-4 pair",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "First-wins when two dihedrals share the same (i, l) 1-4 pair",
+    "type": "scenario"
   },
   "rq-ce68c21a": {
     "decl": "Scenario: Influence recompute under a C-rescale barostat fires every step",
@@ -24852,6 +25607,13 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-d1453cff": {
+    "decl": "# The torsion angle is the angle between the (i, j, k) plane and the",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "The torsion angle is the angle between the (i, j, k) plane and the",
+    "type": "file"
+  },
   "rq-d148149f": {
     "decl": "Scenario: Explicit [output] values override defaults",
     "file": "io/config-schema",
@@ -24949,6 +25711,18 @@
       }
     ],
     "title": "apply_pre is the trait default (no-op)",
+    "type": "scenario"
+  },
+  "rq-d225bef2": {
+    "decl": "Scenario: Dihedral energy matches the closed-form expression",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Dihedral energy matches the closed-form expression",
     "type": "scenario"
   },
   "rq-d22f105f": {
@@ -25111,6 +25885,18 @@
     "title": "`Integrator` trait overrides",
     "type": "section"
   },
+  "rq-d2f43e61": {
+    "decl": "Scenario: Construct PeriodicDihedralState",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct PeriodicDihedralState",
+    "type": "scenario"
+  },
   "rq-d340b338": {
     "decl": "- `CoulombState` — implements the `Potential` trait with",
     "file": "forces/coulomb-pair-force",
@@ -25145,6 +25931,13 @@
       }
     ],
     "title": "validate_constraint_compatibility rejects lossless velocity-Verlet with constraints",
+    "type": "scenario"
+  },
+  "rq-d387c0f5": {
+    "decl": "Scenario: Two-bond, one-angle, one-dihedral n-butane configuration",
+    "file": "forces/periodic-dihedral",
+    "refs": [],
+    "title": "Two-bond, one-angle, one-dihedral n-butane configuration",
     "type": "scenario"
   },
   "rq-d3aeaa23": {
@@ -25189,6 +25982,14 @@
     ],
     "title": "Reject non-positive temperature",
     "type": "scenario"
+  },
+  "rq-d447cc3e": {
+    "decl": "## Determinism",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
   },
   "rq-d4759a9a": {
     "decl": "- `pub const REAL_NAME: &str;`",
@@ -25623,6 +26424,13 @@
     "title": "BondedPotential",
     "type": "api-item"
   },
+  "rq-d7e933cb": {
+    "decl": "Scenario: FragmentCompileFailed surfaces the dihedral slot labels of every contributing fragment",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "FragmentCompileFailed surfaces the dihedral slot labels of every contributing fragment",
+    "type": "scenario"
+  },
   "rq-d801f67c": {
     "decl": "Scenario: compute_total_virial is deterministic",
     "file": "integration/berendsen-barostat",
@@ -25752,6 +26560,13 @@
     "refs": [],
     "title": "tile_sorted_positions reflects current positions after the scatter",
     "type": "scenario"
+  },
+  "rq-d91c6352": {
+    "decl": "# multiple rows naming different dihedral types; each row contributes",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "multiple rows naming different dihedral types; each row contributes",
+    "type": "file"
   },
   "rq-d920e446": {
     "decl": "Scenario: fill kernel does not write beyond the buffer",
@@ -26135,6 +26950,13 @@
     "title": "Construction Pipeline",
     "type": "section"
   },
+  "rq-dc0b647b": {
+    "decl": "Scenario: A slot that returns JitParticipant::Dihedral becomes a dihedral participant",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "A slot that returns JitParticipant::Dihedral becomes a dihedral participant",
+    "type": "scenario"
+  },
   "rq-dc140510": {
     "decl": "- `MinlogWriter` — handle to an open `.minlog` file. Fields are",
     "file": "minimization/steepest-descent",
@@ -26279,6 +27101,18 @@
     "file": "integration/jit-composed-post-force",
     "refs": [],
     "title": "Construction is rejected when a built-in slot does not participate",
+    "type": "scenario"
+  },
+  "rq-dceedbbb": {
+    "decl": "Scenario: Force computed from analytical -dU/dφ via central differences",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Force computed from analytical -dU/dφ via central differences",
     "type": "scenario"
   },
   "rq-dcfdb7c9": {
@@ -26672,6 +27506,18 @@
     "title": "Reject extra fields (e.g. seed)",
     "type": "scenario"
   },
+  "rq-e0933b95": {
+    "decl": "Scenario: Newton's third law holds for the four per-atom forces",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Newton's third law holds for the four per-atom forces",
+    "type": "scenario"
+  },
   "rq-e0a0553d": {
     "decl": "# Feature: Pluggable Integration Framework",
     "file": "integration/framework",
@@ -26747,6 +27593,13 @@
     "refs": [],
     "title": "Slot bind methods are invoked once each in canonical order",
     "type": "scenario"
+  },
+  "rq-e14fdc0d": {
+    "decl": "- `PeriodicDihedralState` — implements `Potential` with `label() ==",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "PeriodicDihedralState",
+    "type": "api-item"
   },
   "rq-e15cc5ac": {
     "decl": "## Algorithm",
@@ -26870,6 +27723,13 @@
       }
     ],
     "title": "One plan walk launches all six expected kernel calls",
+    "type": "scenario"
+  },
+  "rq-e1df90e7": {
+    "decl": "Scenario: Unknown dihedral type name rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Unknown dihedral type name rejected",
     "type": "scenario"
   },
   "rq-e20b2f39": {
@@ -28302,6 +29162,13 @@
     "title": "Reject stride = 0",
     "type": "scenario"
   },
+  "rq-edebcf92": {
+    "decl": "# (j, k, l) plane about the j-k axis (IUPAC convention).",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "(j, k, l) plane about the j-k axis (IUPAC convention).",
+    "type": "file"
+  },
   "rq-edf9864f": {
     "decl": "## Feature API",
     "file": "integration/jit-composed-post-force",
@@ -28309,6 +29176,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-edfc2b75": {
+    "decl": "- `DihedralTypeConfig` — tagged enum carrying the chosen",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "DihedralTypeConfig",
+    "type": "api-item"
   },
   "rq-ee10237d": {
     "decl": "#### `[phase.thermostat]` (optional)",
@@ -28549,6 +29423,13 @@
     ],
     "title": "Cell-list neighbor mode records the neighbor-list host stages",
     "type": "scenario"
+  },
+  "rq-efba2cce": {
+    "decl": "# A given (atom_i, atom_j, atom_k, atom_l) quadruple may appear in",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "A given (atom_i, atom_j, atom_k, atom_l) quadruple may appear in",
+    "type": "file"
   },
   "rq-efc07f81": {
     "decl": "Scenario: Different seeds produce different trajectories",
@@ -29019,6 +29900,18 @@
     "title": "Cell-list scratch is reallocated alongside cell_offsets on box generation refresh",
     "type": "scenario"
   },
+  "rq-f2f1372d": {
+    "decl": "Scenario: Degenerate dihedral produces zero energy and zero virial",
+    "file": "forces/periodic-dihedral",
+    "refs": [
+      {
+        "file": "tests/forces_dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Degenerate dihedral produces zero energy and zero virial",
+    "type": "scenario"
+  },
   "rq-f2f2519f": {
     "decl": "## CLI",
     "file": "analysis/framework",
@@ -29381,6 +30274,13 @@
     "refs": [],
     "title": "Forces on the two members of a non-boundary pair are equal and opposite",
     "type": "scenario"
+  },
+  "rq-f660b144": {
+    "decl": "- `DihedralPotential` — capability trait a dihedral slot implements,",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "DihedralPotential",
+    "type": "api-item"
   },
   "rq-f6927716": {
     "decl": "Scenario: Init file rejected by load_init_state",
@@ -29858,6 +30758,13 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-fa31470f": {
+    "decl": "- `DihedralPotential::bind_dihedral_force_args(&self, ctx, builder)` —",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "DihedralPotential",
+    "type": "api-item"
+  },
   "rq-fa6f7414": {
     "decl": "Scenario: KE of empty input is zero",
     "file": "io/log-output",
@@ -29900,6 +30807,19 @@
     ],
     "title": "Per-batch host work is a single 4-byte download",
     "type": "scenario"
+  },
+  "rq-fb1676f8": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "forces/periodic-dihedral",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
   },
   "rq-fb310fbe": {
     "decl": "Scenario: Per-block SPC predicate is boundary-true at exactly MAX_CUTOFF margin",

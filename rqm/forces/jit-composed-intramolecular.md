@@ -1,19 +1,22 @@
 # Feature: JIT-Composed Intramolecular Kernels <!-- rq-2d2eaf72 -->
 
 Every fast-class intramolecular slot — bonded slots that iterate the
-bond list (Morse, future cosine bonds, …) and angle slots that
-iterate the angle list (HarmonicAngle, future Urey-Bradley angles,
-…) — exposes its per-bond or per-angle physics as a CUDA source
-fragment. At `ForceField::new` time the framework collects the
-active fragments grouped by parallelism shape, JIT-compiles a
-per-shape composed module via `cudarc::nvrtc::compile_ptx_with_opts`,
-and loads each module on the device. The per-step force-evaluation
-pipeline dispatches one composed contribution kernel per active
-bonded slot from the bonded module and one per active angle slot
-from the angle module, in canonical slot order.
+bond list (Morse, future cosine bonds, …), angle slots that iterate
+the angle list (HarmonicAngle, future Urey-Bradley angles, …), and
+dihedral slots that iterate the dihedral list (PeriodicDihedral,
+future Ryckaert-Bellemans, …) — exposes its per-bond, per-angle, or
+per-dihedral physics as a CUDA source fragment. At `ForceField::new`
+time the framework collects the active fragments grouped by
+parallelism shape, JIT-compiles a per-shape composed module via
+`cudarc::nvrtc::compile_ptx_with_opts`, and loads each module on the
+device. The per-step force-evaluation pipeline dispatches one
+composed contribution kernel per active bonded slot from the bonded
+module, one per active angle slot from the angle module, and one per
+active dihedral slot from the dihedral module, in canonical slot
+order.
 
 The mechanism mirrors the pair-force composer described in
-`jit-composed-pair-force.md`. Two parallelism shapes have their own
+`jit-composed-pair-force.md`. Three parallelism shapes have their own
 composed modules:
 
 - **Bonded shape** — one thread per bond, walks the slot's bond
@@ -28,23 +31,41 @@ composed modules:
   contributions into the slot's angle-triple scratch buffer; the
   standalone `reduce_angle_forces` kernel sums each atom's
   contributions into the slot's per-particle accumulator.
+- **Dihedral shape** — one thread per dihedral, walks the slot's
+  dihedral list (`(atom_i, atom_j, atom_k, atom_l,
+  dihedral_type_index)` quintuples). Writes per-atom force,
+  quarter-energy, and quarter-virial contributions into the slot's
+  dihedral-quadruple scratch buffer; the standalone
+  `reduce_dihedral_forces` kernel sums each atom's contributions
+  into the slot's per-particle accumulator.
 
 Each composed module holds the union of every active slot's
 fragment source in that shape. Per-slot entry points address one
-slot's bond/angle list and write into one slot's scratch buffer.
-The framework launches each entry point in canonical slot order
-once per `step()` / `step_class(Fast, ...)` invocation. Each slot
-still owns its own bond / angle list and its own bond-pair /
-angle-triple scratch buffer; bond and angle lists are not merged
-across slots.
+slot's bond / angle / dihedral list and write into one slot's
+scratch buffer. The framework launches each entry point in canonical
+slot order once per `step()` / `step_class(Fast, ...)` invocation.
+Each slot still owns its own bond / angle / dihedral list and its
+own bond-pair / angle-triple / dihedral-quadruple scratch buffer;
+bond, angle, and dihedral lists are not merged across slots.
 
 The reduction stage (per-atom summation of scratch contributions
 into the per-particle accumulator) runs as a separate launch per
 active slot using the universal `reduce_bond_forces` /
-`reduce_angle_forces` kernels documented in `morse-bonded.md` and
-`harmonic-angle.md`. These reduction kernels are shape-universal
+`reduce_angle_forces` / `reduce_dihedral_forces` kernels documented
+in `morse-bonded.md`, `harmonic-angle.md`, and
+`periodic-dihedral.md`. These reduction kernels are shape-universal
 across slots and are not part of the JIT module; they are compiled
 at build time via `nvcc` and loaded as PTX.
+
+The three composers (bonded, angle, dihedral) share their data
+structures (`KernelArgSchema`, `KernelArg`, `KernelArgBinder`,
+`ForceLaunchBuilder`) and follow the same launch-time contract, but
+each shape has its own per-shape code path in the composer — the
+entry-point emitter, the participant collection, the module-name
+constant, and the per-step dispatch block are duplicated per shape
+rather than parameterised by a generic n-tuple-shape descriptor.
+Folding the three composers into a single n-tuple-shape composer is
+a deliberate non-goal of this layer (see *Out of Scope*).
 
 This file specifies the composition mechanism, the source-fragment
 contract a slot must satisfy for each shape, the composed kernel
@@ -57,23 +78,29 @@ A *fast-class bonded slot* is a slot whose `Potential::jit_participant`
 returns `Some(JitParticipant::Bonded(self))`; the slot is then a
 `BondedPotential`. A *fast-class angle slot* is the analogous slot
 whose `jit_participant()` returns `Some(JitParticipant::Angle(self))`,
-making it an `AnglePotential`. Both report `max_cutoff() == None`.
+making it an `AnglePotential`. A *fast-class dihedral slot* is the
+analogous slot whose `jit_participant()` returns
+`Some(JitParticipant::Dihedral(self))`, making it a
+`DihedralPotential`. All three report `max_cutoff() == None`.
 
 The framework reads each built slot's `jit_participant()` during
 `ForceField::new`, after `build(cx)` has returned `Ok(Some(slot))` and
 the displacement-resolution pass has determined the slot survives. It
 collects `BondedPotential::bonded_force_fragment()` from each bonded
-participant into the bonded composed module and
+participant into the bonded composed module,
 `AnglePotential::angle_force_fragment()` from each angle participant
-into the angle composed module, both in canonical slot order. A slot
-whose `jit_participant()` returns `None` dispatches via its own
-`Potential::compute` kernel call at step time (the bonded / angle JIT
-path does not see it).
+into the angle composed module, and
+`DihedralPotential::dihedral_force_fragment()` from each dihedral
+participant into the dihedral composed module, all in canonical slot
+order. A slot whose `jit_participant()` returns `None` dispatches via
+its own `Potential::compute` kernel call at step time (the bonded /
+angle / dihedral JIT path does not see it).
 
 Because `jit_participant()` returns a single `JitParticipant` variant,
 a slot belongs to at most one shape by construction, and a bonded /
-angle participant always carries both its fragment and its argument
-binding (both live on the capability trait) — neither can be absent.
+angle / dihedral participant always carries both its fragment and its
+argument binding (both live on the capability trait) — neither can be
+absent.
 
 ## Source-Fragment Contract — Bonded Shape <!-- rq-892e8856 -->
 
@@ -176,16 +203,69 @@ The fragment's `entry_point_args` and `functor_init_source` are
 generated from the slot's `KernelArgSchema` exactly as in the bonded
 shape (see *Argument Schema*).
 
+## Source-Fragment Contract — Dihedral Shape <!-- rq-bf722ba2 -->
+
+A dihedral fragment's functor exposes the four-atom evaluator:
+
+```c
+struct <functor_struct_name> {
+    __device__ inline void evaluate(
+        Real dx_ij, Real dy_ij, Real dz_ij,
+        Real dx_kj, Real dy_kj, Real dz_kj,
+        Real dx_lk, Real dy_lk, Real dz_lk,
+        unsigned int dihedral_type_index,
+        Real &fix, Real &fiy, Real &fiz,
+        Real &fjx, Real &fjy, Real &fjz,
+        Real &fkx, Real &fky, Real &fkz,
+        Real &flx, Real &fly, Real &flz,
+        Real &u_m,
+        Real &w_m) const;
+};
+```
+
+Inputs:
+- `(dx_ij, dy_ij, dz_ij)` — minimum-image displacement
+  `b1 = (r_i - r_j)`.
+- `(dx_kj, dy_kj, dz_kj)` — minimum-image displacement
+  `b2 = (r_k - r_j)`.
+- `(dx_lk, dy_lk, dz_lk)` — minimum-image displacement
+  `b3 = (r_l - r_k)`.
+- `dihedral_type_index` — the dihedral's type tag from the dihedral
+  list.
+
+Outputs:
+- `(fix, fiy, fiz)`, `(fjx, fjy, fjz)`, `(fkx, fky, fkz)`,
+  `(flx, fly, flz)` — Cartesian forces on atoms `i`, `j`, `k`, `l`
+  respectively. The functor is responsible for computing all four
+  triples (no shortcut by which `F_j` is derived as
+  `−(F_i + F_k + F_l)` outside the functor; the cleanest expression
+  uses the explicit per-atom gradients of the torsion angle, all
+  four of which the functor knows).
+- `u_m` — the dihedral's full potential energy `U_m`.
+- `w_m` — the dihedral's scalar virial
+  `W_m = b1 · F_i + b2 · F_k + (b2 + b3) · F_l`.
+
+The outer-loop body writes the four per-atom triples (one each for
+`i`, `j`, `k`, `l`) along with `u_m / 4` / `w_m / 4` (one-quarter
+shares; see `periodic-dihedral.md`'s *Force Accumulation*) into the
+slot's scratch buffer at indices `4·m`, `4·m + 1`, `4·m + 2`, and
+`4·m + 3`.
+
+The fragment's `entry_point_args` and `functor_init_source` are
+generated from the slot's `KernelArgSchema` exactly as in the
+bonded and angle shapes (see *Argument Schema*).
+
 ## Argument Schema <!-- rq-13d8e659 -->
 
-A bonded or angle slot's kernel parameters are declared once as a
-`KernelArgSchema` — an ordered list of typed `KernelArg` entries that is
-the single source of truth for the slot's contribution to the composed
-module. The schema type and its companions (`KernelArg`,
-`KernelArgType`, `KernelArgBinder`, `ElemTy`, `ArgKind`, `KernelElem`)
-are shape-neutral and shared with the pair-force composer, where they
-are canonically defined (`jit-composed-pair-force.md`'s *Feature API*).
-A bonded or angle slot constructs its schema with
+A bonded, angle, or dihedral slot's kernel parameters are declared
+once as a `KernelArgSchema` — an ordered list of typed `KernelArg`
+entries that is the single source of truth for the slot's
+contribution to the composed module. The schema type and its
+companions (`KernelArg`, `KernelArgType`, `KernelArgBinder`,
+`ElemTy`, `ArgKind`, `KernelElem`) are shape-neutral and shared with
+the pair-force composer, where they are canonically defined
+(`jit-composed-pair-force.md`'s *Feature API*). A bonded, angle, or
+dihedral slot constructs its schema with
 `KernelArgSchema::intramolecular(label, args)`.
 
 From this one list the framework derives the three artefacts that must
@@ -202,14 +282,14 @@ stay in agreement:
   per entry point, not a shared composite functor as in the pair-force
   shape).
 - The slot's `Potential::bind_bonded_force_args` /
-  `bind_angle_force_args` pushes one launch argument per schema entry
-  through a `KernelArgBinder`, which validates each push against the
-  same schema.
+  `bind_angle_force_args` / `bind_dihedral_force_args` pushes one
+  launch argument per schema entry through a `KernelArgBinder`, which
+  validates each push against the same schema.
 
 Because all three derive from one ordered list, the parameter order in
 the entry-point signature, the field-initialisation order, and the
-launch-time binding order are identical by construction. A bonded or
-angle slot does not hand-write `entry_point_args` or
+launch-time binding order are identical by construction. A bonded,
+angle, or dihedral slot does not hand-write `entry_point_args` or
 `functor_init_source`, and its bind method does not push arguments
 directly onto the `ForceLaunchBuilder`.
 
@@ -222,10 +302,10 @@ nvrtc compile error (`FragmentCompileFailed`), not a silent fault.
 
 ### Schema-Checked Binding <!-- rq-30d233fd -->
 
-`bind_bonded_force_args` / `bind_angle_force_args` constructs a
-`KernelArgBinder` over the slot's schema and the framework's
-`ForceLaunchBuilder`, then pushes one value per declared argument by
-name. The binder validates every push, in declaration order, on every
+`bind_bonded_force_args` / `bind_angle_force_args` /
+`bind_dihedral_force_args` constructs a `KernelArgBinder` over the
+slot's schema and the framework's `ForceLaunchBuilder`, then pushes
+one value per declared argument by name. The binder validates every push, in declaration order, on every
 launch: the pushed name must equal the next schema entry's `name`; the
 push kind (buffer vs scalar) and, for buffers, the `CudaSlice<T>`
 element type must match the schema entry's `KernelArgType`; and the
@@ -248,25 +328,35 @@ Each shape's composed module contains:
 3. A generated `extern "C" __global__` entry point per active
    slot per `AggregateLevel` variant. Naming:
    `heddle_jit_composed_bonded_<slot_index>_<f|fev>` for the
-   bonded shape and `heddle_jit_composed_angle_<slot_index>_<f|fev>`
-   for the angle shape, where `<slot_index>` is the slot's
-   zero-based index among the shape's active slots in canonical
-   order. Each entry point takes the common args (positions,
-   lattice, bond / angle list, scratch buffer slices, n_bonds /
-   n_angles) plus the slot's per-fragment args.
+   bonded shape, `heddle_jit_composed_angle_<slot_index>_<f|fev>`
+   for the angle shape, and
+   `heddle_jit_composed_dihedral_<slot_index>_<f|fev>` for the
+   dihedral shape, where `<slot_index>` is the slot's zero-based
+   index among the shape's active slots in canonical order. Each
+   entry point takes the common args (positions, lattice, bond /
+   angle / dihedral list, scratch buffer slices, n_bonds /
+   n_angles / n_dihedrals) plus the slot's per-fragment args.
 
-The bonded entry point's per-thread body is the standalone
-`morse_bond_force` body abstracted to a generic functor call: read
-the bond, compute the minimum-image displacement, compute
-`r2` and `r`, call the slot's `evaluate(...)`, write the
-per-atom contributions to slots `2·k` and `2·k + 1` of the scratch
-buffer. The angle entry point's body is the analogous abstraction
-of the standalone `harmonic_angle_force` body.
+The bonded entry point's per-thread body reads the bond, computes
+the minimum-image displacement, computes `r2` and `r`, calls the
+slot's `evaluate(...)`, and writes the per-atom contributions to
+slots `2·k` and `2·k + 1` of the scratch buffer. The angle entry
+point's body is the analogous three-atom shape, reading the angle
+quadruple, computing the two displacements `r_ij` and `r_kj`,
+calling the slot's `evaluate(...)`, and writing per-atom
+contributions to slots `3·m`, `3·m + 1`, and `3·m + 2`. The
+dihedral entry point's body reads the dihedral quintuple, computes
+the three displacements `b1 = r_i − r_j`, `b2 = r_k − r_j`, and
+`b3 = r_l − r_k`, calls the slot's `evaluate(...)` for the four
+per-atom forces and the scalar `u_m` / `w_m`, and writes per-atom
+contributions to slots `4·m`, `4·m + 1`, `4·m + 2`, and
+`4·m + 3` of the scratch buffer (with `u_m / 4` and `w_m / 4`
+quarter-shares on each).
 
 When zero fast-class bonded slots are active, the bonded module is
-not compiled and not loaded. Same for the angle module. The
-per-step pipeline detects each empty state and dispatches no
-composed-module launches for that shape.
+not compiled and not loaded. Same for the angle module and the
+dihedral module. The per-step pipeline detects each empty state and
+dispatches no composed-module launches for that shape.
 
 ## Compilation <!-- rq-e5f8b6fc -->
 
@@ -275,9 +365,10 @@ shape independently, after the slot list has been determined and
 displacement resolution has run:
 
 1. Collect every participant's fragment for that shape by matching
-   each slot's `jit_participant()` against `JitParticipant::Bonded(b)`
-   / `JitParticipant::Angle(a)` and calling `b.bonded_force_fragment()`
-   / `a.angle_force_fragment()`, in canonical slot order.
+   each slot's `jit_participant()` against `JitParticipant::Bonded(b)`,
+   `JitParticipant::Angle(a)`, or `JitParticipant::Dihedral(d)` and
+   calling `b.bonded_force_fragment()`, `a.angle_force_fragment()`,
+   or `d.dihedral_force_fragment()`, in canonical slot order.
 2. Build the composed-module source by concatenating, in order:
    the shape's preamble, each fragment's `functor_source`, and
    the generated `extern "C"` entry points (one per slot per
@@ -288,58 +379,64 @@ displacement resolution has run:
    `ForceFieldError::FragmentCompileFailed { log }` with the
    fragment labels prepended for diagnostic clarity.
 4. Load the compiled PTX into the device under the module name
-   `"heddle_jit_composed_bonded"` (or
-   `"heddle_jit_composed_angle"`). Resolve every entry point into
+   `"heddle_jit_composed_bonded"`, `"heddle_jit_composed_angle"`, or
+   `"heddle_jit_composed_dihedral"`. Resolve every entry point into
    a `CudaFunction` handle and store them on the `ForceField`
    keyed by `(slot_index, AggregateLevel)`.
 
-The bonded and angle composed modules are loaded independently;
-either may be present without the other. Both are held for the
-`ForceField`'s lifetime. PTX is not cached to disk; every
-`ForceField::new` call recompiles.
+The bonded, angle, and dihedral composed modules are loaded
+independently; any subset may be present without the others. All
+are held for the `ForceField`'s lifetime. PTX is not cached to disk;
+every `ForceField::new` call recompiles.
 
 ## Parameter Binding and Launch <!-- rq-8bf40375 -->
 
 Each fast-class bonded slot's `Potential` implementation exposes a
 `bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>, builder:
-&mut ForceLaunchBuilder)` method, and each fast-class angle slot
-exposes `bind_angle_force_args(&self, ctx, builder)` with the same
-signature. The methods supply the slot's parameter buffers and scalars
-through a `KernelArgBinder` validated against the slot's
-`KernelArgSchema` (see *Argument Schema*), in the order the schema
-declares them — the same order the slot's fragment's `entry_point_args`
-were generated in.
+&mut ForceLaunchBuilder)` method, each fast-class angle slot exposes
+`bind_angle_force_args(&self, ctx, builder)`, and each fast-class
+dihedral slot exposes `bind_dihedral_force_args(&self, ctx, builder)`
+— all with the same signature. The methods supply the slot's
+parameter buffers and scalars through a `KernelArgBinder` validated
+against the slot's `KernelArgSchema` (see *Argument Schema*), in the
+order the schema declares them — the same order the slot's
+fragment's `entry_point_args` were generated in.
 
 The `ForceLaunchBuilder` is the same type used by the pair-force
 composer (see `framework.md`'s *Feature API* and
 `jit-composed-pair-force.md`); the binding mechanism is
 shape-agnostic. `ForceLaunchContext<'a>` carries `&ParticleBuffers`,
-`&SimulationBox`, and the slot's bond-pair-buffer or
-angle-triple-buffer slices (see `morse-bonded.md` /
-`harmonic-angle.md` for the buffer layouts).
+`&SimulationBox`, and the slot's bond-pair-buffer, angle-triple-
+buffer, or dihedral-quadruple-buffer slices (see `morse-bonded.md`,
+`harmonic-angle.md`, and `periodic-dihedral.md` for the buffer
+layouts).
 
 The framework's per-step pipeline launches each active slot's
 composed entry point in canonical slot order. For each launch:
 
 1. Construct a fresh `ForceLaunchBuilder`.
 2. Push the common args: positions_x/y/z, lattice, the slot's
-   bond / angle list, the slot's scratch-buffer slices, the slot's
-   bond / angle count.
-3. Invoke the slot's `bind_bonded_force_args` /
-   `bind_angle_force_args` to push the slot's per-fragment args.
+   bond / angle / dihedral list, the slot's scratch-buffer slices,
+   the slot's bond / angle / dihedral count.
+3. Invoke the slot's `bind_bonded_force_args`,
+   `bind_angle_force_args`, or `bind_dihedral_force_args` to push
+   the slot's per-fragment args.
 4. Dispatch the composed entry point with block size 256, grid
-   `ceil(n_bonds / 256)` (or `ceil(n_angles / 256)`), no shared
-   memory.
-5. Run the slot's `reduce_bond_forces` / `reduce_angle_forces`
-   kernel (standalone, build-time-compiled) over the scratch
-   buffer to sum into the Fast-class accumulator. The reduction
-   kernel is not part of the composed module.
+   `ceil(n_bonds / 256)`, `ceil(n_angles / 256)`, or
+   `ceil(n_dihedrals / 256)` respectively, no shared memory.
+5. Run the slot's `reduce_bond_forces`, `reduce_angle_forces`, or
+   `reduce_dihedral_forces` kernel (standalone, build-time-compiled)
+   over the scratch buffer to sum into the Fast-class accumulator.
+   The reduction kernel is not part of the composed module.
 
-The composed-bonded and composed-angle launches are recorded in
-`timings` under `KernelStage::JitComposedBondedForce` and
-`KernelStage::JitComposedAngleForce`. The per-slot standalone
-`KernelStage::MorseBondForce` and `KernelStage::HarmonicAngleForce`
-stages do not appear in runs that go through the JIT path.
+The composed-bonded, composed-angle, and composed-dihedral launches
+are recorded in `timings` under
+`KernelStage::JitComposedBondedForce`,
+`KernelStage::JitComposedAngleForce`, and
+`KernelStage::JitComposedDihedralForce`. The per-slot standalone
+`KernelStage::MorseBondForce`, `KernelStage::HarmonicAngleForce`,
+and `KernelStage::PeriodicDihedralForce` stages do not appear in
+runs that go through the JIT path.
 
 ## Determinism <!-- rq-627ed4b9 -->
 
@@ -350,14 +447,17 @@ the same `ForceField` configuration with byte-identical inputs:
    walking active slots in canonical slot order; nvrtc with fixed
    flags produces byte-identical PTX from byte-identical input.
 2. *Per-thread evaluation is independent.* Each thread is the sole
-   writer of two (bonded) or three (angle) scratch-buffer slots
-   keyed by its bond / angle index. No atomics, no shared memory,
-   no inter-thread communication during contribution.
-3. *Per-atom reduction is deterministic.* `reduce_bond_forces` and
-   `reduce_angle_forces` (unchanged from `morse-bonded.md` and
-   `harmonic-angle.md`) sum the slot's scratch buffer's atom-keyed
-   slots in fixed `atom_bond_indices` / `atom_angle_indices`
-   order, which is sorted at load time.
+   writer of two (bonded), three (angle), or four (dihedral)
+   scratch-buffer slots keyed by its bond / angle / dihedral
+   index. No atomics, no shared memory, no inter-thread
+   communication during contribution.
+3. *Per-atom reduction is deterministic.* `reduce_bond_forces`,
+   `reduce_angle_forces`, and `reduce_dihedral_forces` (specified
+   in `morse-bonded.md`, `harmonic-angle.md`, and
+   `periodic-dihedral.md`) sum the slot's scratch buffer's atom-
+   keyed slots in fixed `atom_bond_indices`,
+   `atom_angle_indices`, or `atom_dihedral_indices` order, which
+   is sorted at load time.
 
 Cross-configuration equality (one slot's per-particle output via
 the JIT path vs the same physics evaluated through the standalone
@@ -395,6 +495,11 @@ reproducibility invariant individually.
   `entry_point_args` and `functor_init_source` are likewise generated
   from the slot's `KernelArgSchema`.
 
+- `DihedralForceFragment` — same shape as `BondedForceFragment`, <!-- rq-124c9de8 -->
+  returned by `DihedralPotential::dihedral_force_fragment()`. Its
+  `entry_point_args` and `functor_init_source` are likewise generated
+  from the slot's `KernelArgSchema`.
+
 - `KernelArgSchema`, `KernelArg`, `KernelArgType`, `KernelArgBinder`, <!-- rq-402b55fc -->
   `ElemTy`, `ArgKind`, `KernelElem` — the shape-neutral kernel-argument
   schema types, defined canonically in `jit-composed-pair-force.md`'s
@@ -405,9 +510,10 @@ reproducibility invariant individually.
 
 - `ForceLaunchBuilder` — opaque argument-builder threaded through <!-- rq-61a784a9 -->
   every active fast-class slot's bind method (`bind_pair_force_args`,
-  `bind_bonded_force_args`, `bind_angle_force_args`). The same
-  type the pair-force composer uses; the bonded and angle
-  composers reuse it unchanged.
+  `bind_bonded_force_args`, `bind_angle_force_args`,
+  `bind_dihedral_force_args`). The same type the pair-force composer
+  uses; the bonded, angle, and dihedral composers reuse it
+  unchanged.
 
 - `ForceLaunchContext<'a>` — shape-specific per-launch context <!-- rq-1e1cd9c7 -->
   carrying read-only references to `ParticleBuffers`,
@@ -415,39 +521,44 @@ reproducibility invariant individually.
   applicable. The pair-force shape carries the neighbour list;
   the bonded shape carries the slot's bond list + bond-pair
   scratch slices; the angle shape carries the slot's angle list +
-  angle-triple scratch slices. (See `framework.md` for the full
-  field set.)
+  angle-triple scratch slices; the dihedral shape carries the
+  slot's dihedral list + dihedral-quadruple scratch slices. (See
+  `framework.md` for the full field set.)
 
 ### Error variants <!-- rq-0f8a60e2 -->
 
 `FragmentCompileFailed` and `FragmentLoadFailed` (see `framework.md`)
-are reused for bonded / angle module compile / load errors; the
-error's `Display` impl additionally names every contributing
-fragment's slot label so the caller can identify which slot's
-fragment is the likely culprit. There are no missing-fragment or
-multiple-shape error variants: a bonded or angle participant carries
-its fragment and binding together on its capability trait, and a slot
-declares at most one shape through `Potential::jit_participant`, so
-both inconsistencies are impossible by construction.
+are reused for bonded / angle / dihedral module compile / load
+errors; the error's `Display` impl additionally names every
+contributing fragment's slot label so the caller can identify which
+slot's fragment is the likely culprit. There are no missing-fragment
+or multiple-shape error variants: a bonded, angle, or dihedral
+participant carries its fragment and binding together on its
+capability trait, and a slot declares at most one shape through
+`Potential::jit_participant`, so both inconsistencies are impossible
+by construction.
 
 ### Capability traits <!-- rq-0b1918e0 -->
 
-A bonded slot is a `BondedPotential` and an angle slot is an
-`AnglePotential` (both defined in `framework.md`'s *Feature API*),
-reached through `Potential::jit_participant` returning
-`JitParticipant::Bonded(self)` / `JitParticipant::Angle(self)`. Each
-capability trait carries the slot's fragment, its scratch view, and
-its argument binding, none with a default:
+A bonded slot is a `BondedPotential`, an angle slot is an
+`AnglePotential`, and a dihedral slot is a `DihedralPotential` (all
+defined in `framework.md`'s *Feature API*), reached through
+`Potential::jit_participant` returning `JitParticipant::Bonded(self)`,
+`JitParticipant::Angle(self)`, or `JitParticipant::Dihedral(self)`.
+Each capability trait carries the slot's fragment, its scratch view,
+and its argument binding, none with a default:
 
 - `BondedPotential::bonded_force_fragment(&self) -> BondedForceFragment` <!-- rq-ac1403d3 -->
   / `AnglePotential::angle_force_fragment(&self) -> AngleForceFragment`
+  / `DihedralPotential::dihedral_force_fragment(&self) -> DihedralForceFragment`
   — return the slot's CUDA source fragment, collected once per
   participant at `ForceField::new`. The slot computes its fragment
   from the build inputs at construction; the method takes no context.
 - `BondedPotential::bonded_scratch(&self) -> BondedScratchView<'_>` <!-- rq-c9ac8000 -->
-  / `AnglePotential::angle_scratch(&self) -> AngleScratchView<'_>` —
-  expose the slot's per-bond / per-angle contribution buffers so the
-  framework can wire the composed launch.
+  / `AnglePotential::angle_scratch(&self) -> AngleScratchView<'_>`
+  / `DihedralPotential::dihedral_scratch(&self) -> DihedralScratchView<'_>`
+  — expose the slot's per-bond / per-angle / per-dihedral
+  contribution buffers so the framework can wire the composed launch.
 - `BondedPotential::bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>, <!-- rq-b08937a3 -->
   builder: &mut ForceLaunchBuilder)` — supplies the slot's parameter
   buffers through a `KernelArgBinder` over the slot's `KernelArgSchema`
@@ -457,6 +568,8 @@ its argument binding, none with a default:
   the slot and the offending argument.
 - `AnglePotential::bind_angle_force_args(&self, ctx, builder)` — angle <!-- rq-9bd9ccd4 -->
   analogue.
+- `DihedralPotential::bind_dihedral_force_args(&self, ctx, builder)` — <!-- rq-fa31470f -->
+  dihedral analogue.
 
 ### Composed-module name and entry points <!-- rq-529b2c5f -->
 
@@ -474,23 +587,27 @@ order), the module exposes:
 
 The angle composed module is loaded under
 `"heddle_jit_composed_angle"`; entry points follow the same
-convention substituting `angle` for `bonded`.
+convention substituting `angle` for `bonded`. The dihedral composed
+module is loaded under `"heddle_jit_composed_dihedral"`; entry
+points follow the same convention substituting `dihedral` for
+`bonded`.
 
-Both kernels launch with block size 256, grid `ceil(n_bonds / 256)`
-or `ceil(n_angles / 256)`, no shared memory.
+All three kernels launch with block size 256, grid `ceil(n_bonds /
+256)`, `ceil(n_angles / 256)`, or `ceil(n_dihedrals / 256)`, no
+shared memory.
 
 ### Framework integration <!-- rq-b677d7a4 -->
 
-`ForceField` owns two new optional fields holding the bonded and
-angle composed modules and their per-slot entry-point handles
-(typed analogously to the pair-force `JitComposedPairForce` field).
-They are `Some(_)` exactly when the slot list contains at least
-one active bonded / angle slot.
+`ForceField` owns three optional fields holding the bonded, angle,
+and dihedral composed modules and their per-slot entry-point
+handles (typed analogously to the pair-force `JitComposedPairForce`
+field). Each is `Some(_)` exactly when the slot list contains at
+least one active slot of that shape.
 
 `ForceField::step` and `ForceField::step_class(Fast, ...)`'s
-per-class compute phase dispatches the bonded and angle composed
-launches in canonical slot order. For each fast-class bonded slot,
-the framework:
+per-class compute phase dispatches the bonded, angle, and dihedral
+composed launches in canonical slot order. For each fast-class
+bonded slot, the framework:
 
 1. Constructs a `ForceLaunchBuilder`, pushes the common args,
    invokes `bind_bonded_force_args`, dispatches the slot's
@@ -501,35 +618,50 @@ the framework:
 The slot's `Potential::compute` is bypassed at step time for
 every fast-class bonded slot that participates in the bonded
 composed module. The analogous dispatch handles fast-class angle
-slots.
+slots (with `bind_angle_force_args` + `reduce_angle_forces`) and
+fast-class dihedral slots (with `bind_dihedral_force_args` +
+`reduce_dihedral_forces`).
 
 ## Out of Scope <!-- rq-bbbcfdc3 -->
 
 - Composition of the per-atom reduction kernels
-  (`reduce_bond_forces`, `reduce_angle_forces`). These are
-  shape-universal across slots; they stay as standalone PTX
-  modules compiled at build time. Folding them into the
-  JIT-composed module is a separate feature gated on the K
-  multi-step-persistent-loop work that needs every device-side
-  function in one module.
+  (`reduce_bond_forces`, `reduce_angle_forces`,
+  `reduce_dihedral_forces`). These are shape-universal across
+  slots; they stay as standalone PTX modules compiled at build
+  time. Folding them into the JIT-composed module is a separate
+  feature gated on the K multi-step-persistent-loop work that
+  needs every device-side function in one module.
 
 - Merging multiple bonded slots' bond lists into one tagged list
   walked by a single launch. With one launch per active slot
   sharing the JIT module, the launch count scales with the active
   slot count. Workloads with multiple bonded slots remain rare;
-  merging is a follow-up if and when that changes.
+  merging is a follow-up if and when that changes. The same logic
+  applies to angle and dihedral shapes.
 
 - Composition of bonded fragments with pair-force fragments into a
   single kernel. The parallelism shapes (warp-per-particle over
-  neighbour list vs one-thread-per-bond) are incompatible.
+  neighbour list vs one-thread-per-bond / per-angle / per-dihedral)
+  are incompatible.
 
-- A user-supplied DSL for bonded / angle source fragments. Like
-  the pair-force composer, fragments are CUDA C++ text constructed
-  by builders at construction time; the framework does not
-  interpret a higher-level language.
+- A unified n-tuple-shape composer parameterised by atoms-per-tuple,
+  displacement count, scratch stride, and reduction kernel name,
+  collapsing the three shape-specific composers (bonded, angle,
+  dihedral) into one. The current design keeps the three composer
+  code paths separate: each shape has its own participant
+  collection, its own entry-point emitter, its own module-name
+  constant, and its own per-step dispatch block. A unification
+  refactor is a follow-up if and when the duplication becomes a
+  maintenance burden.
 
-- On-disk PTX caching of the bonded / angle modules. Same policy
-  as the pair-force composer: every `ForceField::new` recompiles.
+- A user-supplied DSL for bonded / angle / dihedral source
+  fragments. Like the pair-force composer, fragments are CUDA C++
+  text constructed by builders at construction time; the framework
+  does not interpret a higher-level language.
+
+- On-disk PTX caching of the bonded / angle / dihedral modules.
+  Same policy as the pair-force composer: every `ForceField::new`
+  recompiles.
 
 - Hot-reload of the composed modules mid-run. The slot list is
   fixed at `ForceField::new`; modules are loaded once and never
@@ -728,4 +860,71 @@ Feature: JIT-composed intramolecular kernels
     When the angle-shape standalone kernel symbols are enumerated
     Then no extern "C" kernel named harmonic_angle_force exists
     And reduce_angle_forces is declared as the only standalone angle-shape kernel
+
+  # --- Dihedral composition: construction ---
+
+  @rq-077fb357
+  Scenario: Dihedral composed module is compiled at ForceField::new when at least one dihedral slot is active
+    Given a config with one [[dihedral_types]] entry "periodic" and a non-empty DihedralList
+    And PotentialRegistry::with_builtins()
+    When ForceField::new(...) is called
+    Then force_field exposes a CudaFunction handle for "heddle_jit_composed_dihedral_0_f"
+    And force_field exposes a CudaFunction handle for "heddle_jit_composed_dihedral_0_fev"
+
+  @rq-0c69218c
+  Scenario: Dihedral composed module is not compiled when no dihedral slot is active
+    Given a config with no dihedral list
+    When ForceField::new(...) is called
+    Then no composed-dihedral module is loaded
+
+  @rq-dc0b647b
+  Scenario: A slot that returns JitParticipant::Dihedral becomes a dihedral participant
+    Given a custom slot whose jit_participant() returns Some(JitParticipant::Dihedral(_))
+    When ForceField::new(...) is called
+    Then the slot's dihedral_force_fragment is collected into the dihedral composed module
+    And the slot's Potential::compute is not invoked at step time
+
+  # --- Per-step launch (dihedral) ---
+
+  @rq-351976f8
+  Scenario: step() with one dihedral slot launches the dihedral composed kernel once and the reduction once
+    Given a ForceField with exactly one dihedral slot (PeriodicDihedral) active
+    When force_field.step(...) is called with AggregateLevel::ForcesAndScalars
+    Then timings records exactly one sample for KernelStage::JitComposedDihedralForce
+    And timings records exactly one sample for KernelStage::ReduceDihedralForces
+    And timings records zero samples for KernelStage::PeriodicDihedralForce
+
+  @rq-6188c086
+  Scenario: step_class(Slow) does not launch the dihedral composed kernel
+    Given a ForceField with both Fast (PeriodicDihedral) and Slow slots active
+    When force_field.step_class(ForceClass::Slow, ...) is called
+    Then timings records zero samples for KernelStage::JitComposedDihedralForce
+
+  # --- Correctness (dihedral) ---
+
+  @rq-3c013c74
+  Scenario: Two independent runs of the dihedral composed kernel on identical inputs are byte-identical
+    Given two ForceField instances built from byte-identical configurations with one PeriodicDihedral slot
+    And two ParticleBuffers built from byte-identical ParticleStates
+    When force_field.step(...) is called on each
+    Then run A's forces_x, forces_y, forces_z, potential_energies, and virials agree
+      byte-for-byte with run B's
+
+  # --- Error reporting (dihedral) ---
+
+  @rq-d7e933cb
+  Scenario: FragmentCompileFailed surfaces the dihedral slot labels of every contributing fragment
+    Given two active dihedral fragments where one fragment's source contains a deliberate syntax error
+    When ForceField::new(...) is called
+    Then the returned Err's Display contains every active dihedral slot's label
+    And the underlying FragmentCompileFailed::log carries the nvrtc compile log verbatim
+
+  # --- Standalone-kernel retirement (dihedral) ---
+
+  @rq-c18f9511
+  Scenario: kernels/dihedral.cu does not declare a periodic_dihedral_force entry point
+    Given the project's kernel source tree
+    When the dihedral-shape standalone kernel symbols are enumerated
+    Then no extern "C" kernel named periodic_dihedral_force exists
+    And reduce_dihedral_forces is declared as the only standalone dihedral-shape kernel
 ```

@@ -232,6 +232,32 @@ pub struct AngleScratchView<'a> {
 }
 
 /// Self-contained CUDA C++ source fragment plus identifying metadata,
+/// returned by `DihedralPotential::dihedral_force_fragment()`. Same
+/// field shape as `AngleForceFragment`; the functor's contract is the
+/// dihedral shape (per-dihedral evaluation taking displacements of
+/// `r_ij = r_i − r_j`, `r_kj = r_k − r_j`, and `r_lk = r_l − r_k`).
+#[derive(Debug, Clone)]
+pub struct DihedralForceFragment {
+    pub label: &'static str,
+    pub functor_struct_name: &'static str,
+    pub functor_source: String,
+    pub entry_point_args: String,
+    pub functor_init_source: String,
+}
+
+/// Dihedral slot's per-launch scratch buffers exposed to the framework
+/// for the composed-dihedral-kernel argument list.
+pub struct DihedralScratchView<'a> {
+    pub dihedrals: &'a CudaSlice<u32>,
+    pub dihedral_quadruple_x: &'a CudaSlice<crate::precision::Real>,
+    pub dihedral_quadruple_y: &'a CudaSlice<crate::precision::Real>,
+    pub dihedral_quadruple_z: &'a CudaSlice<crate::precision::Real>,
+    pub dihedral_quadruple_energy: &'a CudaSlice<crate::precision::Real>,
+    pub dihedral_quadruple_virial: &'a CudaSlice<crate::precision::Real>,
+    pub dihedral_count: usize,
+}
+
+/// Self-contained CUDA C++ source fragment plus identifying metadata,
 /// returned by `Integrator::post_force_per_particle_fragment(...)`,
 /// `Thermostat::post_force_per_particle_fragment(...)`, and
 /// `Barostat::post_force_per_particle_fragment(...)`. The composer
@@ -1478,6 +1504,8 @@ __device__ __forceinline__ Real Real_floor(Real x) { return floor(x); }
 __device__ __forceinline__ Real Real_fma(Real a, Real b, Real c) { return fma(a, b, c); }
 __device__ __forceinline__ Real Real_erfc(Real x) { return erfc(x); }
 __device__ __forceinline__ Real Real_atan2(Real y, Real x) { return atan2(y, x); }
+__device__ __forceinline__ Real Real_sin(Real x) { return sin(x); }
+__device__ __forceinline__ Real Real_cos(Real x) { return cos(x); }
 #else
 typedef float Real;
 typedef float4 Real4;
@@ -1490,6 +1518,8 @@ __device__ __forceinline__ Real Real_floor(Real x) { return floorf(x); }
 __device__ __forceinline__ Real Real_fma(Real a, Real b, Real c) { return fmaf(a, b, c); }
 __device__ __forceinline__ Real Real_erfc(Real x) { return erfcf(x); }
 __device__ __forceinline__ Real Real_atan2(Real y, Real x) { return atan2f(y, x); }
+__device__ __forceinline__ Real Real_sin(Real x) { return sinf(x); }
+__device__ __forceinline__ Real Real_cos(Real x) { return cosf(x); }
 #endif
 
 #define HEDDLE_JIT_WARP_SIZE 32
@@ -2550,6 +2580,229 @@ fn format_angle_compile_failure(
     let _ = writeln!(s, "nvrtc compile log:");
     let _ = writeln!(s, "{}", log);
     let _ = writeln!(s, "Composed angle source (line-numbered):");
+    for (i, line) in source.lines().enumerate() {
+        let _ = writeln!(s, "{:5}: {}", i + 1, line);
+    }
+    s
+}
+
+// ============================================================
+// Dihedral composer
+// ============================================================
+
+const DIHEDRAL_MODULE_NAME: &str = "heddle_jit_composed_dihedral";
+
+/// JIT-composed dihedral contribution module + per-slot entry-point
+/// handles. Built by `ForceField::new` when at least one fast-class
+/// dihedral slot is active.
+#[derive(Debug)]
+pub struct JitComposedDihedralForce {
+    pub fragment_labels: Vec<&'static str>,
+    pub entry_points_f: Vec<CudaFunction>,
+    pub entry_points_fev: Vec<CudaFunction>,
+}
+
+impl JitComposedDihedralForce {
+    pub fn compile_and_load(
+        device: &Arc<CudaDevice>,
+        fragments: &[DihedralForceFragment],
+    ) -> Result<Self, ForceFieldError> {
+        let source = compose_dihedral_source(fragments);
+        let ptx = jit_compile(device, &source, |log| {
+            ForceFieldError::FragmentCompileFailed {
+                log: format_dihedral_compile_failure(fragments, log, &source),
+            }
+        })?;
+
+        let mut entry_name_refs: Vec<&'static str> = Vec::with_capacity(2 * fragments.len());
+        for i in 0..fragments.len() {
+            entry_name_refs.push(Box::leak(
+                format!("heddle_jit_composed_dihedral_{}_f", i).into_boxed_str(),
+            ));
+            entry_name_refs.push(Box::leak(
+                format!("heddle_jit_composed_dihedral_{}_fev", i).into_boxed_str(),
+            ));
+        }
+
+        device
+            .load_ptx(ptx, DIHEDRAL_MODULE_NAME, &entry_name_refs)
+            .map_err(|e| ForceFieldError::FragmentLoadFailed(GpuError::from(e)))?;
+
+        let mut entry_points_f: Vec<CudaFunction> = Vec::with_capacity(fragments.len());
+        let mut entry_points_fev: Vec<CudaFunction> = Vec::with_capacity(fragments.len());
+        for i in 0..fragments.len() {
+            entry_points_f.push(
+                device
+                    .get_func(DIHEDRAL_MODULE_NAME, entry_name_refs[2 * i])
+                    .expect("composed dihedral kernel _f entry was just loaded"),
+            );
+            entry_points_fev.push(
+                device
+                    .get_func(DIHEDRAL_MODULE_NAME, entry_name_refs[2 * i + 1])
+                    .expect("composed dihedral kernel _fev entry was just loaded"),
+            );
+        }
+
+        Ok(JitComposedDihedralForce {
+            fragment_labels: fragments.iter().map(|f| f.label).collect(),
+            entry_points_f,
+            entry_points_fev,
+        })
+    }
+
+    /// Launch one slot's composed dihedral entry point.
+    pub unsafe fn launch_slot(
+        &self,
+        slot_index: usize,
+        n_dihedrals: u32,
+        use_fev: bool,
+        mut builder: ForceLaunchBuilder,
+    ) -> Result<(), GpuError> {
+        let cfg = LaunchConfig {
+            grid_dim: (n_dihedrals.div_ceil(256), 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        let func = if use_fev {
+            self.entry_points_fev[slot_index].clone()
+        } else {
+            self.entry_points_f[slot_index].clone()
+        };
+        unsafe {
+            func.launch(cfg, &mut builder.kernel_params)
+                .map_err(GpuError::from)?;
+        }
+        drop(builder.storage);
+        Ok(())
+    }
+}
+
+fn compose_dihedral_source(fragments: &[DihedralForceFragment]) -> String {
+    let mut s = String::with_capacity(
+        8192 + fragments.iter().map(|f| f.functor_source.len()).sum::<usize>(),
+    );
+    s.push_str(PREAMBLE);
+    for f in fragments {
+        s.push_str("// ---- dihedral fragment functor source: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n");
+        s.push_str(&f.functor_source);
+        s.push_str("\n// ---- end dihedral fragment functor source: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n");
+    }
+    for (i, f) in fragments.iter().enumerate() {
+        emit_dihedral_entry_point(&mut s, f, i, false);
+        emit_dihedral_entry_point(&mut s, f, i, true);
+    }
+    s
+}
+
+fn emit_dihedral_entry_point(
+    s: &mut String,
+    fragment: &DihedralForceFragment,
+    slot_index: usize,
+    write_ev: bool,
+) {
+    let entry_name = format!(
+        "heddle_jit_composed_dihedral_{}_{}",
+        slot_index,
+        if write_ev { "fev" } else { "f" }
+    );
+    s.push_str("\nextern \"C\" __global__ void ");
+    s.push_str(&entry_name);
+    s.push_str("(\n");
+    s.push_str("    const Real4 *posq,\n");
+    s.push_str("    const unsigned int *dihedrals,\n");
+    s.push_str("    const Real *lattice,\n");
+    s.push_str("    Real *dihedral_quadruple_x,\n");
+    s.push_str("    Real *dihedral_quadruple_y,\n");
+    s.push_str("    Real *dihedral_quadruple_z,\n");
+    if write_ev {
+        s.push_str("    Real *dihedral_quadruple_energy,\n");
+        s.push_str("    Real *dihedral_quadruple_virial,\n");
+    }
+    s.push_str(&fragment.entry_point_args);
+    s.push_str("    unsigned int n_dihedrals)\n");
+    s.push_str("{\n");
+    s.push_str(&format!(
+        "    {} functor;\n",
+        fragment.functor_struct_name
+    ));
+    s.push_str(&fragment.functor_init_source);
+    s.push_str("    Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];\n");
+    s.push_str("    Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];\n");
+    s.push_str("    unsigned int m = blockIdx.x * blockDim.x + threadIdx.x;\n");
+    s.push_str("    if (m >= n_dihedrals) return;\n");
+    s.push_str("    unsigned int atom_i = dihedrals[5u * m + 0u];\n");
+    s.push_str("    unsigned int atom_j = dihedrals[5u * m + 1u];\n");
+    s.push_str("    unsigned int atom_k = dihedrals[5u * m + 2u];\n");
+    s.push_str("    unsigned int atom_l = dihedrals[5u * m + 3u];\n");
+    s.push_str("    unsigned int type_idx = dihedrals[5u * m + 4u];\n");
+    s.push_str("    Real4 pq_i = posq[atom_i];\n");
+    s.push_str("    Real4 pq_j = posq[atom_j];\n");
+    s.push_str("    Real4 pq_k = posq[atom_k];\n");
+    s.push_str("    Real4 pq_l = posq[atom_l];\n");
+    s.push_str("    Real dx_ij = pq_i.x - pq_j.x;\n");
+    s.push_str("    Real dy_ij = pq_i.y - pq_j.y;\n");
+    s.push_str("    Real dz_ij = pq_i.z - pq_j.z;\n");
+    s.push_str("    Real dx_kj = pq_k.x - pq_j.x;\n");
+    s.push_str("    Real dy_kj = pq_k.y - pq_j.y;\n");
+    s.push_str("    Real dz_kj = pq_k.z - pq_j.z;\n");
+    s.push_str("    Real dx_kl = pq_k.x - pq_l.x;\n");
+    s.push_str("    Real dy_kl = pq_k.y - pq_l.y;\n");
+    s.push_str("    Real dz_kl = pq_k.z - pq_l.z;\n");
+    s.push_str("    heddle_jit_triclinic_min_image(dx_ij, dy_ij, dz_ij, lx, ly, lz, xy, xz, yz);\n");
+    s.push_str("    heddle_jit_triclinic_min_image(dx_kj, dy_kj, dz_kj, lx, ly, lz, xy, xz, yz);\n");
+    s.push_str("    heddle_jit_triclinic_min_image(dx_kl, dy_kl, dz_kl, lx, ly, lz, xy, xz, yz);\n");
+    s.push_str("    Real fix, fiy, fiz, fjx, fjy, fjz, fkx, fky, fkz, flx, fly, flz, u_m, w_m;\n");
+    s.push_str("    functor.evaluate(dx_ij, dy_ij, dz_ij, dx_kj, dy_kj, dz_kj, dx_kl, dy_kl, dz_kl, type_idx,\n");
+    s.push_str("                     fix, fiy, fiz, fjx, fjy, fjz, fkx, fky, fkz, flx, fly, flz, u_m, w_m);\n");
+    s.push_str("    dihedral_quadruple_x[4u * m + 0u] = fix;\n");
+    s.push_str("    dihedral_quadruple_y[4u * m + 0u] = fiy;\n");
+    s.push_str("    dihedral_quadruple_z[4u * m + 0u] = fiz;\n");
+    s.push_str("    dihedral_quadruple_x[4u * m + 1u] = fjx;\n");
+    s.push_str("    dihedral_quadruple_y[4u * m + 1u] = fjy;\n");
+    s.push_str("    dihedral_quadruple_z[4u * m + 1u] = fjz;\n");
+    s.push_str("    dihedral_quadruple_x[4u * m + 2u] = fkx;\n");
+    s.push_str("    dihedral_quadruple_y[4u * m + 2u] = fky;\n");
+    s.push_str("    dihedral_quadruple_z[4u * m + 2u] = fkz;\n");
+    s.push_str("    dihedral_quadruple_x[4u * m + 3u] = flx;\n");
+    s.push_str("    dihedral_quadruple_y[4u * m + 3u] = fly;\n");
+    s.push_str("    dihedral_quadruple_z[4u * m + 3u] = flz;\n");
+    if write_ev {
+        s.push_str("    Real e_share = u_m * R(0.25);\n");
+        s.push_str("    Real w_share = w_m * R(0.25);\n");
+        s.push_str("    dihedral_quadruple_energy[4u * m + 0u] = e_share;\n");
+        s.push_str("    dihedral_quadruple_energy[4u * m + 1u] = e_share;\n");
+        s.push_str("    dihedral_quadruple_energy[4u * m + 2u] = e_share;\n");
+        s.push_str("    dihedral_quadruple_energy[4u * m + 3u] = e_share;\n");
+        s.push_str("    dihedral_quadruple_virial[4u * m + 0u] = w_share;\n");
+        s.push_str("    dihedral_quadruple_virial[4u * m + 1u] = w_share;\n");
+        s.push_str("    dihedral_quadruple_virial[4u * m + 2u] = w_share;\n");
+        s.push_str("    dihedral_quadruple_virial[4u * m + 3u] = w_share;\n");
+    }
+    s.push_str("}\n");
+}
+
+fn format_dihedral_compile_failure(
+    fragments: &[DihedralForceFragment],
+    log: &str,
+    source: &str,
+) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "nvrtc failed to compile the JIT-composed dihedral kernel."
+    );
+    let _ = writeln!(s, "Active dihedral fragments (canonical slot order):");
+    for f in fragments {
+        let _ = writeln!(s, "  - {} (functor: {})", f.label, f.functor_struct_name);
+    }
+    let _ = writeln!(s, "nvrtc compile log:");
+    let _ = writeln!(s, "{}", log);
+    let _ = writeln!(s, "Composed dihedral source (line-numbered):");
     for (i, line) in source.lines().enumerate() {
         let _ = writeln!(s, "{:5}: {}", i + 1, line);
     }

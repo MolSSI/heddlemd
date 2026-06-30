@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use heddle_md::registry::KindedBuilder;
 use heddle_md::integrator::IntegratorStepExt;
-use heddle_md::forces::{ConstraintGroup, ConstraintList, GroupConstraint, PotentialRegistry};
+use heddle_md::forces::{ConstraintGroup, ConstraintList, DihedralList, GroupConstraint, PotentialRegistry};
 use heddle_md::gpu::{ParticleBuffers, init_device};
 use heddle_md::integrator::shake::{ShakeBuilder, ShakeConstraintsState, ShakeError};
 use heddle_md::integrator::{Constraint, ConstraintError, ConstraintRegistry};
@@ -1711,11 +1711,13 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &heddle_md::forces::BondList::empty(3),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &heddle_md::forces::ExclusionList::empty(3),
         &NeighborListConfig::AllPairs,
     )
@@ -1754,11 +1756,13 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &heddle_md::forces::BondList::empty(3),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &heddle_md::forces::ExclusionList::empty(3),
         &NeighborListConfig::AllPairs,
     )

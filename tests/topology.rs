@@ -3,7 +3,18 @@ use std::path::{Path, PathBuf};
 
 use heddle_md::forces::{TopologyFileError, load_topology_file};
 use heddle_md::integrator::ConstraintRegistry;
-use heddle_md::io::config::NamedSlotConfig;
+use heddle_md::io::config::{DihedralTypeConfig, NamedSlotConfig};
+
+fn dihedral_type(name: &str, scale_lj: f64, scale_coul: f64) -> DihedralTypeConfig {
+    DihedralTypeConfig::Periodic {
+        name: name.to_string(),
+        k_phi: 1.0,
+        n: 1,
+        phi_0: 0.0,
+        scale_lj_14: scale_lj,
+        scale_coul_14: scale_coul,
+    }
+}
 
 fn registry() -> ConstraintRegistry {
     ConstraintRegistry::with_builtins()
@@ -45,7 +56,7 @@ fn load_typical_bonds_file() {
 0 2 0.5
 "#;
     let path = write(&dir, body);
-    let (bl, _al, el, _cl) = load_topology_file(&path, 4, &["CC", "CN"], &[], &[], &registry()).unwrap();
+    let (bl, _al, _dl, el, _cl) = load_topology_file(&path, 4, &["CC", "CN"], &[], &[], &[], &registry()).unwrap();
     assert_eq!(bl.bonds.len(), 3);
     assert_eq!((bl.bonds[0].atom_i, bl.bonds[0].atom_j, bl.bonds[0].bond_type_index), (0, 1, 0));
     assert_eq!((bl.bonds[1].atom_i, bl.bonds[1].atom_j, bl.bonds[1].bond_type_index), (1, 2, 0));
@@ -60,7 +71,7 @@ fn bonds_canonicalised_min_max() {
     let dir = tmp_path("canonical");
     let body = "[bonds]\n3 1 CC\n";
     let path = write(&dir, body);
-    let (bl, _al, _, _cl) = load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap();
+    let (bl, _al, _dl, _, _cl) = load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap();
     assert_eq!(bl.bonds[0].atom_i, 1);
     assert_eq!(bl.bonds[0].atom_j, 3);
 }
@@ -71,7 +82,7 @@ fn bonds_sorted() {
     let dir = tmp_path("sorted");
     let body = "[bonds]\n2 3 CC\n0 1 CC\n1 2 CC\n";
     let path = write(&dir, body);
-    let (bl, _al, _, _cl) = load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap();
+    let (bl, _al, _dl, _, _cl) = load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap();
     let pairs: Vec<(u32, u32)> = bl.bonds.iter().map(|b| (b.atom_i, b.atom_j)).collect();
     assert_eq!(pairs, vec![(0, 1), (1, 2), (2, 3)]);
 }
@@ -82,7 +93,7 @@ fn exclusion_scale_defaults_to_zero() {
     let dir = tmp_path("default_scale");
     let body = "[exclusions]\n0 1\n";
     let path = write(&dir, body);
-    let (_, _al, el, _cl) = load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap();
+    let (_, _al, _dl, el, _cl) = load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap();
     assert_eq!(el.entries[0].scale_lj, 0.0);
 }
 
@@ -92,7 +103,7 @@ fn implicit_exclusion_added_for_bond() {
     let dir = tmp_path("implicit");
     let body = "[bonds]\n0 1 CC\n";
     let path = write(&dir, body);
-    let (_, _al, el, _cl) = load_topology_file(&path, 2, &["CC"], &[], &[], &registry()).unwrap();
+    let (_, _al, _dl, el, _cl) = load_topology_file(&path, 2, &["CC"], &[], &[], &[], &registry()).unwrap();
     assert_eq!(el.entries.len(), 1);
     assert_eq!(el.entries[0].atom_i, 0);
     assert_eq!(el.entries[0].atom_j, 1);
@@ -105,7 +116,7 @@ fn explicit_exclusion_overrides_bond_default() {
     let dir = tmp_path("override");
     let body = "[bonds]\n0 1 CC\n\n[exclusions]\n0 1 1.0\n";
     let path = write(&dir, body);
-    let (_, _al, el, _cl) = load_topology_file(&path, 2, &["CC"], &[], &[], &registry()).unwrap();
+    let (_, _al, _dl, el, _cl) = load_topology_file(&path, 2, &["CC"], &[], &[], &[], &registry()).unwrap();
     assert_eq!(el.entries.len(), 1);
     assert_eq!(el.entries[0].scale_lj, 1.0);
 }
@@ -116,7 +127,7 @@ fn empty_file_is_valid() {
     let dir = tmp_path("empty_file");
     let body = "# nothing here\n\n";
     let path = write(&dir, body);
-    let (bl, _al, el, _cl) = load_topology_file(&path, 4, &[], &[], &[], &registry()).unwrap();
+    let (bl, _al, _dl, el, _cl) = load_topology_file(&path, 4, &[], &[], &[], &[], &registry()).unwrap();
     assert!(bl.is_empty());
     assert!(el.entries.is_empty());
 }
@@ -127,7 +138,7 @@ fn empty_sections_valid() {
     let dir = tmp_path("empty_sections");
     let body = "[bonds]\n[exclusions]\n";
     let path = write(&dir, body);
-    let (bl, _al, el, _cl) = load_topology_file(&path, 4, &[], &[], &[], &registry()).unwrap();
+    let (bl, _al, _dl, el, _cl) = load_topology_file(&path, 4, &[], &[], &[], &[], &registry()).unwrap();
     assert!(bl.is_empty());
     assert!(el.entries.is_empty());
 }
@@ -138,7 +149,7 @@ fn sections_either_order() {
     let dir = tmp_path("section_order");
     let body = "[exclusions]\n0 2 0.5\n\n[bonds]\n0 1 CC\n";
     let path = write(&dir, body);
-    let (bl, _al, el, _cl) = load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap();
+    let (bl, _al, _dl, el, _cl) = load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap();
     assert_eq!(bl.bonds.len(), 1);
     assert_eq!(el.entries.len(), 2);
 }
@@ -149,7 +160,7 @@ fn comments_and_blanks_tolerated() {
     let dir = tmp_path("comments");
     let body = "# header\n\n[bonds]\n# inside\n0 1 CC   # trailing\n\n[exclusions]\n0 1 0.0\n";
     let path = write(&dir, body);
-    let (bl, _al, _, _cl) = load_topology_file(&path, 2, &["CC"], &[], &[], &registry()).unwrap();
+    let (bl, _al, _dl, _, _cl) = load_topology_file(&path, 2, &["CC"], &[], &[], &[], &registry()).unwrap();
     assert_eq!(bl.bonds.len(), 1);
 }
 
@@ -159,7 +170,7 @@ fn atom_bond_offsets_reflect_sorted_list() {
     let dir = tmp_path("offsets");
     let body = "[bonds]\n0 1 CC\n0 2 CC\n1 3 CC\n";
     let path = write(&dir, body);
-    let (bl, _al, _, _cl) = load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap();
+    let (bl, _al, _dl, _, _cl) = load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap();
     // 3 bonds → 6 slot entries (each bond contributes 2 to atom_bond_indices).
     // Atom 0 in bonds 0,1: offsets[0..2]
     // Atom 1 in bonds 0,2: offsets[2..4]
@@ -174,7 +185,7 @@ fn atom_bond_offsets_reflect_sorted_list() {
 fn file_does_not_exist() {
     let dir = tmp_path("missing");
     let path = dir.join("no-such.bonds");
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::Io(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -184,10 +195,12 @@ fn file_does_not_exist() {
 #[test]
 fn unknown_section_header() {
     let dir = tmp_path("unknown_section");
-    let body = "[dihedrals]\n0 1 2 3 X\n";
+    // `[dihedrals]` is now an accepted section; an unknown one like
+    // `[impropers]` exercises the UnknownSection path.
+    let body = "[impropers]\n0 1 2 3 X\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
-        TopologyFileError::UnknownSection { name, .. } => assert_eq!(name, "dihedrals"),
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
+        TopologyFileError::UnknownSection { name, .. } => assert_eq!(name, "impropers"),
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -198,7 +211,7 @@ fn duplicate_section_header() {
     let dir = tmp_path("duplicate_section");
     let body = "[bonds]\n0 1 CC\n[bonds]\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::DuplicateSection { name, .. } => assert_eq!(name, "bonds"),
         other => panic!("unexpected: {other:?}"),
     }
@@ -210,7 +223,7 @@ fn content_before_section_rejected() {
     let dir = tmp_path("orphan_content");
     let body = "0 1 CC\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::ContentOutsideSection { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -222,7 +235,7 @@ fn bond_row_wrong_column_count() {
     let dir = tmp_path("bond_cols");
     let body = "[bonds]\n0 1\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::InvalidBondRow { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -234,7 +247,7 @@ fn bond_row_atom_out_of_range() {
     let dir = tmp_path("bond_oob");
     let body = "[bonds]\n0 5 CC\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::AtomIndexOutOfRange { index, max, .. } => {
             assert_eq!(index, 5);
             assert_eq!(max, 3);
@@ -249,7 +262,7 @@ fn self_bond_rejected() {
     let dir = tmp_path("self_bond");
     let body = "[bonds]\n2 2 CC\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::SelfBond { atom, .. } => assert_eq!(atom, 2),
         other => panic!("unexpected: {other:?}"),
     }
@@ -261,7 +274,7 @@ fn duplicate_bond_rejected() {
     let dir = tmp_path("dup_bond");
     let body = "[bonds]\n0 1 CC\n1 0 CC\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::DuplicateBond { atom_i, atom_j } => {
             assert_eq!((atom_i, atom_j), (0, 1));
         }
@@ -275,7 +288,7 @@ fn unknown_bond_type() {
     let dir = tmp_path("unknown_type");
     let body = "[bonds]\n0 1 XX\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::UnknownBondType { name, .. } => assert_eq!(name, "XX"),
         other => panic!("unexpected: {other:?}"),
     }
@@ -287,7 +300,7 @@ fn exclusion_row_wrong_cols() {
     let dir = tmp_path("excl_cols");
     let body = "[exclusions]\n0 1 0.5 extra\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::InvalidExclusionRow { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -299,7 +312,7 @@ fn self_exclusion_rejected() {
     let dir = tmp_path("self_excl");
     let body = "[exclusions]\n2 2 0.0\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::SelfExclusion { atom, .. } => assert_eq!(atom, 2),
         other => panic!("unexpected: {other:?}"),
     }
@@ -311,7 +324,7 @@ fn duplicate_exclusion_rejected() {
     let dir = tmp_path("dup_excl");
     let body = "[exclusions]\n0 1 0.0\n1 0 0.5\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::DuplicateExclusion { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -323,7 +336,7 @@ fn exclusion_scale_out_of_range_negative() {
     let dir = tmp_path("scale_neg");
     let body = "[exclusions]\n0 1 -0.1\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::ScaleOutOfRange { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -335,7 +348,7 @@ fn exclusion_scale_out_of_range_above_one() {
     let dir = tmp_path("scale_high");
     let body = "[exclusions]\n0 1 1.5\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::ScaleOutOfRange { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -347,7 +360,7 @@ fn exclusion_scale_nan_rejected() {
     let dir = tmp_path("scale_nan");
     let body = "[exclusions]\n0 1 nan\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::ScaleOutOfRange { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -359,7 +372,7 @@ fn single_scale_form_sets_both_lj_and_coul_scales_equally() {
     let dir = tmp_path("single_scale");
     let body = "[exclusions]\n0 1 0.5\n";
     let path = write(&dir, body);
-    let (_b, _al, el, _cl) = load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap();
+    let (_b, _al, _dl, el, _cl) = load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap();
     assert_eq!(el.entries.len(), 1);
     assert_eq!(el.entries[0].scale_lj, 0.5);
     assert_eq!(el.entries[0].scale_coul, 0.5);
@@ -371,7 +384,7 @@ fn four_column_form_sets_lj_and_coul_scales_independently() {
     let dir = tmp_path("four_col");
     let body = "[exclusions]\n0 1 0.5 0.833\n";
     let path = write(&dir, body);
-    let (_b, _al, el, _cl) = load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap();
+    let (_b, _al, _dl, el, _cl) = load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap();
     assert_eq!(el.entries.len(), 1);
     assert_eq!(el.entries[0].scale_lj, 0.5);
     assert_eq!(el.entries[0].scale_coul, 0.833);
@@ -383,7 +396,7 @@ fn out_of_range_coul_scale_in_four_column_form_rejected() {
     let dir = tmp_path("coul_oor");
     let body = "[exclusions]\n0 1 0.5 1.5\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::ScaleOutOfRange { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -395,7 +408,7 @@ fn too_few_exclusion_columns_rejected() {
     let dir = tmp_path("too_few");
     let body = "[exclusions]\n0\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::InvalidExclusionRow { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -407,7 +420,7 @@ fn too_many_exclusion_columns_rejected() {
     let dir = tmp_path("too_many");
     let body = "[exclusions]\n0 1 0.5 0.8 extra\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 2, &[], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 2, &[], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::InvalidExclusionRow { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -421,7 +434,7 @@ fn load_topology_with_an_angle() {
     let dir = tmp_path("angle_basic");
     let body = "[bonds]\n0 1 OH\n0 2 OH\n\n[angles]\n1 0 2 HOH\n";
     let path = write(&dir, body);
-    let (bl, al, el, _cl) = load_topology_file(&path, 3, &["OH"], &["HOH"], &[], &registry()).unwrap();
+    let (bl, al, _dl, el, _cl) = load_topology_file(&path, 3, &["OH"], &["HOH"], &[], &[], &registry()).unwrap();
     assert_eq!(bl.bonds.len(), 2);
     assert_eq!(al.angles.len(), 1);
     let a = &al.angles[0];
@@ -439,7 +452,7 @@ fn angle_wings_canonicalised_so_atom_i_lt_atom_k() {
     let dir = tmp_path("angle_canon");
     let body = "[angles]\n2 0 1 HOH\n";
     let path = write(&dir, body);
-    let (_bl, al, _el, _cl) = load_topology_file(&path, 3, &[], &["HOH"], &[], &registry()).unwrap();
+    let (_bl, al, _dl, _el, _cl) = load_topology_file(&path, 3, &[], &["HOH"], &[], &[], &registry()).unwrap();
     let a = &al.angles[0];
     assert_eq!(a.atom_i, 1);
     assert_eq!(a.atom_j, 0);
@@ -452,7 +465,7 @@ fn angles_sorted_by_centre_then_wings() {
     let dir = tmp_path("angle_sort");
     let body = "[angles]\n3 2 1 HOH\n2 0 1 HOH\n";
     let path = write(&dir, body);
-    let (_bl, al, _el, _cl) = load_topology_file(&path, 4, &[], &["HOH"], &[], &registry()).unwrap();
+    let (_bl, al, _dl, _el, _cl) = load_topology_file(&path, 4, &[], &["HOH"], &[], &[], &registry()).unwrap();
     assert_eq!(al.angles.len(), 2);
     // After canonicalisation (atom_i<atom_k) and sort by (j, i, k):
     //   first  centre j=0 → (1, 0, 2)
@@ -467,7 +480,7 @@ fn angle_row_wrong_column_count_rejected() {
     let dir = tmp_path("angle_short");
     let body = "[angles]\n0 1 2\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 3, &[], &["HOH"], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &["HOH"], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::InvalidAngleRow { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -479,7 +492,7 @@ fn angle_row_atom_out_of_range() {
     let dir = tmp_path("angle_oor");
     let body = "[angles]\n0 1 9 HOH\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &[], &["HOH"], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &[], &["HOH"], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::AtomIndexOutOfRange { index, max, .. } => {
             assert_eq!(index, 9);
             assert_eq!(max, 3);
@@ -494,7 +507,7 @@ fn angle_repeated_atom_i_eq_j_rejected() {
     let dir = tmp_path("angle_ij");
     let body = "[angles]\n1 1 2 HOH\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 3, &[], &["HOH"], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &["HOH"], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::RepeatedAtomInAngle { atom, .. } => assert_eq!(atom, 1),
         other => panic!("unexpected: {other:?}"),
     }
@@ -506,7 +519,7 @@ fn angle_repeated_atom_j_eq_k_rejected() {
     let dir = tmp_path("angle_jk");
     let body = "[angles]\n0 2 2 HOH\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 3, &[], &["HOH"], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &["HOH"], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::RepeatedAtomInAngle { atom, .. } => assert_eq!(atom, 2),
         other => panic!("unexpected: {other:?}"),
     }
@@ -518,7 +531,7 @@ fn angle_repeated_atom_i_eq_k_rejected() {
     let dir = tmp_path("angle_ik");
     let body = "[angles]\n1 0 1 HOH\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 3, &[], &["HOH"], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &["HOH"], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::RepeatedAtomInAngle { atom, .. } => assert_eq!(atom, 1),
         other => panic!("unexpected: {other:?}"),
     }
@@ -530,7 +543,7 @@ fn duplicate_angle_after_canonicalisation_rejected() {
     let dir = tmp_path("angle_dup");
     let body = "[angles]\n1 0 2 HOH\n2 0 1 HOH\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 3, &[], &["HOH"], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &["HOH"], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::DuplicateAngle {
             atom_i,
             atom_j,
@@ -548,7 +561,7 @@ fn unknown_angle_type_rejected() {
     let dir = tmp_path("angle_unk");
     let body = "[angles]\n1 0 2 XX\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 3, &[], &["HOH"], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &["HOH"], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::UnknownAngleType { name, .. } => assert_eq!(name, "XX"),
         other => panic!("unexpected: {other:?}"),
     }
@@ -560,7 +573,7 @@ fn explicit_exclusion_overrides_angle_implicit_default() {
     let dir = tmp_path("angle_excl_override");
     let body = "[bonds]\n0 1 OH\n0 2 OH\n[angles]\n1 0 2 HOH\n[exclusions]\n1 2 0.5 0.833\n";
     let path = write(&dir, body);
-    let (_bl, _al, el, _cl) = load_topology_file(&path, 3, &["OH"], &["HOH"], &[], &registry()).unwrap();
+    let (_bl, _al, _dl, el, _cl) = load_topology_file(&path, 3, &["OH"], &["HOH"], &[], &[], &registry()).unwrap();
     let entry_1_2 = el.entries.iter().find(|e| e.atom_i == 1 && e.atom_j == 2).unwrap();
     assert_eq!(entry_1_2.scale_lj, 0.5);
     assert_eq!(entry_1_2.scale_coul, 0.833);
@@ -572,7 +585,7 @@ fn atom_angle_offsets_reflect_sorted_list() {
     let dir = tmp_path("angle_offsets");
     let body = "[angles]\n0 1 2 HOH\n0 2 3 HOH\n";
     let path = write(&dir, body);
-    let (_bl, al, _el, _cl) = load_topology_file(&path, 5, &[], &["HOH"], &[], &registry()).unwrap();
+    let (_bl, al, _dl, _el, _cl) = load_topology_file(&path, 5, &[], &["HOH"], &[], &[], &registry()).unwrap();
     // Two angles after canonicalisation+sort:
     //   angle 0: (0, 1, 2)  → slots 0, 1, 2 belong to atoms 0, 1, 2
     //   angle 1: (0, 2, 3)  → slots 3, 4, 5 belong to atoms 0, 2, 3
@@ -598,8 +611,8 @@ fn load_topology_with_a_shake_constraint() {
     let body = "[constraints]\n0 1 2 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    let (_bl, _al, el, cl) =
-        load_topology_file(&path, 3, &[], &[], &cts, &registry()).unwrap();
+    let (_bl, _al, _dl, el, cl) =
+        load_topology_file(&path, 3, &[], &[], &[], &cts, &registry()).unwrap();
     assert_eq!(cl.groups.len(), 1);
     assert_eq!(cl.groups[0].atom_count, 3);
     assert_eq!(cl.groups[0].constraint_count, 3);
@@ -623,7 +636,7 @@ fn constraint_row_wrong_atom_count_rejected() {
     let body = "[constraints]\n0 1 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    match load_topology_file(&path, 3, &[], &[], &cts, &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &[], &[], &cts, &registry()).unwrap_err() {
         TopologyFileError::InvalidConstraintRow { line_number, reason } => {
             assert_eq!(line_number, 2);
             assert!(reason.contains("3 atoms"));
@@ -639,7 +652,7 @@ fn constraint_row_repeated_atom_rejected() {
     let body = "[constraints]\n0 1 1 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    match load_topology_file(&path, 3, &[], &[], &cts, &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &[], &[], &cts, &registry()).unwrap_err() {
         TopologyFileError::SelfConstraint { atom, .. } => assert_eq!(atom, 1),
         other => panic!("expected SelfConstraint, got {other:?}"),
     }
@@ -652,7 +665,7 @@ fn constraint_row_atom_out_of_range_rejected() {
     let body = "[constraints]\n0 1 9 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    match load_topology_file(&path, 3, &[], &[], &cts, &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &[], &[], &cts, &registry()).unwrap_err() {
         TopologyFileError::AtomIndexOutOfRange { index, max, .. } => {
             assert_eq!(index, 9);
             assert_eq!(max, 2);
@@ -668,7 +681,7 @@ fn unknown_constraint_type_rejected() {
     let body = "[constraints]\n0 1 2 UNKNOWN\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    match load_topology_file(&path, 3, &[], &[], &cts, &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &[], &[], &[], &cts, &registry()).unwrap_err() {
         TopologyFileError::UnknownConstraintType { name, .. } => {
             assert_eq!(name, "UNKNOWN");
         }
@@ -683,7 +696,7 @@ fn duplicate_constraint_atom_across_rows_rejected() {
     let body = "[constraints]\n0 1 2 SPCE\n2 3 4 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    match load_topology_file(&path, 5, &[], &[], &cts, &registry()).unwrap_err() {
+    match load_topology_file(&path, 5, &[], &[], &[], &cts, &registry()).unwrap_err() {
         TopologyFileError::DuplicateConstraintAtom { atom } => assert_eq!(atom, 2),
         other => panic!("expected DuplicateConstraintAtom, got {other:?}"),
     }
@@ -696,7 +709,7 @@ fn bond_and_constraint_pair_overlap_rejected() {
     let body = "[bonds]\n0 1 OH\n\n[constraints]\n0 1 2 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    match load_topology_file(&path, 3, &["OH"], &[], &cts, &registry()).unwrap_err() {
+    match load_topology_file(&path, 3, &["OH"], &[], &[], &cts, &registry()).unwrap_err() {
         TopologyFileError::BondIsAlsoConstraint { atom_i, atom_j } => {
             assert_eq!(atom_i, 0);
             assert_eq!(atom_j, 1);
@@ -712,8 +725,8 @@ fn explicit_exclusion_overrides_constraint_derived_default() {
     let body = "[exclusions]\n1 2 0.25 0.25\n\n[constraints]\n0 1 2 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    let (_bl, _al, el, _cl) =
-        load_topology_file(&path, 3, &[], &[], &cts, &registry()).unwrap();
+    let (_bl, _al, _dl, el, _cl) =
+        load_topology_file(&path, 3, &[], &[], &[], &cts, &registry()).unwrap();
     let entry = el.entries.iter().find(|e| e.atom_i == 1 && e.atom_j == 2).unwrap();
     assert_eq!(entry.scale_lj, 0.25);
     assert_eq!(entry.scale_coul, 0.25);
@@ -726,8 +739,8 @@ fn constraint_groups_sorted_by_minimum_atom_index() {
     let body = "[constraints]\n100 101 102 SPCE\n4 5 6 SPCE\n50 51 52 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    let (_bl, _al, _el, cl) =
-        load_topology_file(&path, 103, &[], &[], &cts, &registry()).unwrap();
+    let (_bl, _al, _dl, _el, cl) =
+        load_topology_file(&path, 103, &[], &[], &[], &cts, &registry()).unwrap();
     assert_eq!(cl.groups.len(), 3);
     let first = cl.group_atoms[cl.groups[0].atom_offset as usize];
     let second = cl.group_atoms[cl.groups[1].atom_offset as usize];
@@ -743,8 +756,8 @@ fn empty_constraints_section_is_valid() {
     let body = "[constraints]\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
-    let (_bl, _al, _el, cl) =
-        load_topology_file(&path, 3, &[], &[], &cts, &registry()).unwrap();
+    let (_bl, _al, _dl, _el, cl) =
+        load_topology_file(&path, 3, &[], &[], &[], &cts, &registry()).unwrap();
     assert!(cl.is_empty());
 }
 
@@ -756,7 +769,7 @@ fn bond_row_with_non_integer_index_rejected() {
     let dir = tmp_path("bond_non_int");
     let body = "[bonds]\nabc 1 CC\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::InvalidBondRow { .. } => {}
         other => panic!("expected InvalidBondRow, got {other:?}"),
     }
@@ -768,7 +781,7 @@ fn angle_row_with_non_integer_index_rejected() {
     let dir = tmp_path("angle_non_int");
     let body = "[angles]\nabc 1 2 HOH\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &[], &["HOH"], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &[], &["HOH"], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::InvalidAngleRow { .. } => {}
         other => panic!("expected InvalidAngleRow, got {other:?}"),
     }
@@ -780,7 +793,7 @@ fn exclusion_row_with_non_numeric_scale_rejected() {
     let dir = tmp_path("excl_non_numeric_scale");
     let body = "[exclusions]\n0 1 maybe\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &[], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &[], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::InvalidExclusionRow { .. } => {}
         other => panic!("expected InvalidExclusionRow, got {other:?}"),
     }
@@ -792,7 +805,7 @@ fn exclusion_atom_out_of_range_rejected() {
     let dir = tmp_path("excl_oor");
     let body = "[exclusions]\n0 9\n";
     let path = write(&dir, body);
-    match load_topology_file(&path, 4, &[], &[], &[], &registry()).unwrap_err() {
+    match load_topology_file(&path, 4, &[], &[], &[], &[], &registry()).unwrap_err() {
         TopologyFileError::AtomIndexOutOfRange { index, max, .. } => {
             assert_eq!(index, 9);
             assert_eq!(max, 3);
@@ -824,8 +837,8 @@ fn atom_excl_offsets_reflects_sorted_exclusion_list() {
 1 3 0.5 0.833
 ";
     let path = write(&dir, body);
-    let (_bl, _al, el, _cl) =
-        load_topology_file(&path, 4, &[], &[], &[], &registry()).unwrap();
+    let (_bl, _al, _dl, el, _cl) =
+        load_topology_file(&path, 4, &[], &[], &[], &[], &registry()).unwrap();
     assert_eq!(el.atom_excl_offsets, vec![0u32, 2, 4, 5, 6]);
 
     let slice = |a: usize| -> (usize, usize) {
@@ -851,4 +864,232 @@ fn atom_excl_offsets_reflects_sorted_exclusion_list() {
     assert_eq!(&el.atom_excl_partners[s3..e3], &[1u32]);
     assert!((el.atom_excl_lj_scales[s3] - 0.5).abs() < 1.0e-6);
     assert!((el.atom_excl_coul_scales[s3] - 0.833).abs() < 1.0e-6);
+}
+
+// =====================================================================
+// Dihedral tests — see `rqm/forces/periodic-dihedral.md` and
+// `rqm/forces/topology.md`'s [dihedrals] section.
+// =====================================================================
+
+#[test]
+fn load_dihedral_row() {
+    let dir = tmp_path("dih_one");
+    let body = "[dihedrals]\n0 1 2 3 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    let (_, _, dl, _, _) =
+        load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap();
+    assert_eq!(dl.dihedrals.len(), 1);
+    let d = &dl.dihedrals[0];
+    assert_eq!(
+        (d.atom_i, d.atom_j, d.atom_k, d.atom_l, d.dihedral_type_index),
+        (0, 1, 2, 3, 0)
+    );
+}
+
+#[test]
+fn dihedral_canonicalised_so_i_leq_l() {
+    let dir = tmp_path("dih_canon");
+    let body = "[dihedrals]\n3 2 1 0 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    let (_, _, dl, _, _) =
+        load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap();
+    let d = &dl.dihedrals[0];
+    assert_eq!((d.atom_i, d.atom_j, d.atom_k, d.atom_l), (0, 1, 2, 3));
+}
+
+#[test]
+fn dihedrals_sorted_by_quadruple() {
+    let dir = tmp_path("dih_sort");
+    let body = "[dihedrals]\n0 1 2 4 D\n0 1 2 3 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    let (_, _, dl, _, _) =
+        load_topology_file(&path, 5, &[], &[], &dts, &[], &registry()).unwrap();
+    assert_eq!(dl.dihedrals.len(), 2);
+    assert_eq!(dl.dihedrals[0].atom_l, 3);
+    assert_eq!(dl.dihedrals[1].atom_l, 4);
+}
+
+#[test]
+fn two_dihedrals_same_quad_different_types_accepted() {
+    let dir = tmp_path("dih_multi_type");
+    let body = "[dihedrals]\n0 1 2 3 A\n0 1 2 3 B\n";
+    let path = write(&dir, body);
+    let dts = vec![
+        dihedral_type("A", 0.5, 0.8333),
+        dihedral_type("B", 0.5, 0.8333),
+    ];
+    let (_, _, dl, _, _) =
+        load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap();
+    assert_eq!(dl.dihedrals.len(), 2);
+    assert!(dl.dihedrals[0].dihedral_type_index != dl.dihedrals[1].dihedral_type_index);
+}
+
+#[test]
+fn duplicate_dihedral_rejected() {
+    let dir = tmp_path("dih_dup");
+    // Same canonical quadruple AND same type -> DuplicateDihedral.
+    let body = "[dihedrals]\n0 1 2 3 D\n3 2 1 0 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    match load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap_err() {
+        TopologyFileError::DuplicateDihedral {
+            atom_i,
+            atom_j,
+            atom_k,
+            atom_l,
+            dihedral_type_name,
+        } => {
+            assert_eq!((atom_i, atom_j, atom_k, atom_l), (0, 1, 2, 3));
+            assert_eq!(dihedral_type_name, "D");
+        }
+        e => panic!("unexpected: {e:?}"),
+    }
+}
+
+#[test]
+fn dihedral_wrong_column_count_rejected() {
+    let dir = tmp_path("dih_cols");
+    let body = "[dihedrals]\n0 1 2 3\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    match load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap_err() {
+        TopologyFileError::InvalidDihedralRow { .. } => {}
+        e => panic!("unexpected: {e:?}"),
+    }
+}
+
+#[test]
+fn dihedral_atom_out_of_range() {
+    let dir = tmp_path("dih_oob");
+    let body = "[dihedrals]\n0 1 2 9 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    match load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap_err() {
+        TopologyFileError::AtomIndexOutOfRange { index, max, .. } => {
+            assert_eq!(index, 9);
+            assert_eq!(max, 3);
+        }
+        e => panic!("unexpected: {e:?}"),
+    }
+}
+
+#[test]
+fn repeated_atom_in_dihedral_rejected() {
+    let dir = tmp_path("dih_repeat");
+    for body in &[
+        "[dihedrals]\n1 1 2 3 D\n",
+        "[dihedrals]\n0 1 1 3 D\n",
+        "[dihedrals]\n0 1 2 2 D\n",
+        "[dihedrals]\n0 1 2 0 D\n",
+    ] {
+        let path = write(&dir, body);
+        let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+        match load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap_err() {
+            TopologyFileError::RepeatedAtomInDihedral { .. } => {}
+            e => panic!("unexpected for body {body:?}: {e:?}"),
+        }
+    }
+}
+
+#[test]
+fn unknown_dihedral_type_rejected() {
+    let dir = tmp_path("dih_unknown");
+    let body = "[dihedrals]\n0 1 2 3 ZZ\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    match load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap_err() {
+        TopologyFileError::UnknownDihedralType { name, .. } => {
+            assert_eq!(name, "ZZ");
+        }
+        e => panic!("unexpected: {e:?}"),
+    }
+}
+
+#[test]
+fn dihedral_implicit_14_exclusion_uses_type_scales() {
+    let dir = tmp_path("dih_14_implicit");
+    let body = "[dihedrals]\n0 1 2 3 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.25, 0.75)];
+    let (_, _, _dl, el, _) =
+        load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap();
+    let entry = el
+        .entries
+        .iter()
+        .find(|e| (e.atom_i, e.atom_j) == (0, 3))
+        .expect("expected (0,3) 1-4 entry");
+    assert!((entry.scale_lj - 0.25).abs() < 1.0e-6);
+    assert!((entry.scale_coul - 0.75).abs() < 1.0e-6);
+}
+
+#[test]
+fn explicit_14_overrides_dihedral_implicit() {
+    let dir = tmp_path("dih_14_override");
+    let body = "[exclusions]\n0 3 0.4 0.6\n[dihedrals]\n0 1 2 3 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.25, 0.75)];
+    let (_, _, _dl, el, _) =
+        load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap();
+    let entry = el
+        .entries
+        .iter()
+        .find(|e| (e.atom_i, e.atom_j) == (0, 3))
+        .expect("expected (0,3) entry");
+    assert!((entry.scale_lj - 0.4).abs() < 1.0e-6);
+    assert!((entry.scale_coul - 0.6).abs() < 1.0e-6);
+}
+
+#[test]
+fn first_dihedral_wins_for_14_exclusion() {
+    let dir = tmp_path("dih_14_first_wins");
+    let body = "[dihedrals]\n0 1 2 3 A\n0 1 2 3 B\n";
+    let path = write(&dir, body);
+    let dts = vec![
+        dihedral_type("A", 0.5, 0.8333),
+        dihedral_type("B", 0.25, 0.75),
+    ];
+    let (_, _, _dl, el, _) =
+        load_topology_file(&path, 4, &[], &[], &dts, &[], &registry()).unwrap();
+    let entries_for_pair: Vec<_> = el
+        .entries
+        .iter()
+        .filter(|e| (e.atom_i, e.atom_j) == (0, 3))
+        .collect();
+    assert_eq!(entries_for_pair.len(), 1, "exactly one (0,3) row");
+    assert!((entries_for_pair[0].scale_lj - 0.5).abs() < 1.0e-6);
+    assert!((entries_for_pair[0].scale_coul - 0.8333).abs() < 1.0e-3);
+}
+
+#[test]
+fn bond_derived_exclusion_overrides_dihedral_14() {
+    let dir = tmp_path("dih_14_vs_bond");
+    let body = "[bonds]\n0 3 CC\n[dihedrals]\n0 1 2 3 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    let (_, _, _dl, el, _) =
+        load_topology_file(&path, 4, &["CC"], &[], &dts, &[], &registry()).unwrap();
+    let entry = el
+        .entries
+        .iter()
+        .find(|e| (e.atom_i, e.atom_j) == (0, 3))
+        .expect("expected (0,3) entry");
+    assert_eq!(entry.scale_lj, 0.0);
+    assert_eq!(entry.scale_coul, 0.0);
+}
+
+#[test]
+fn atom_dihedral_offsets_correct() {
+    let dir = tmp_path("dih_atom_offsets");
+    let body = "[dihedrals]\n0 1 2 3 D\n1 2 3 4 D\n";
+    let path = write(&dir, body);
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
+    let (_, _, dl, _, _) =
+        load_topology_file(&path, 5, &[], &[], &dts, &[], &registry()).unwrap();
+    assert_eq!(dl.dihedrals.len(), 2);
+    // Counts: atom 0 in 1 dihedral, atoms 1,2,3 in 2, atom 4 in 1.
+    assert_eq!(dl.atom_dihedral_offsets, vec![0, 1, 3, 5, 7, 8]);
+    assert_eq!(dl.atom_dihedral_indices.len(), 8);
 }

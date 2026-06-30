@@ -6,10 +6,7 @@
 //! These tests drive the slot through a `ForceField` instance and
 //! assert on the per-particle force / energy / virial outputs.
 
-use heddle_md::forces::{
-    AggregateLevel, AngleList, Bond, BondList, ExclusionList, ForceField, MorseBondedBuilder,
-    PotentialRegistry,
-};
+use heddle_md::forces::{AggregateLevel, AngleList, Bond, BondList, DihedralList, ExclusionList, ForceField, MorseBondedBuilder, PotentialRegistry};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{BondTypeConfig, NeighborListConfig};
 use heddle_md::pbc::SimulationBox;
@@ -97,11 +94,13 @@ fn run_morse(
         &[],
         bond_types,
         &[],
+        &[],
         None,
         None,
         &[],
         bonds,
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

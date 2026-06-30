@@ -41,7 +41,7 @@ pub use kernels::{
     mc_barostat_scale_molecule_com,
     mtk_position_drift, mtk_velocity_half_kick,
     neighbor_displacement_check_flag,
-    prefix_scan_cell_counts, reduce_angle_forces, reduce_bond_forces,
+    prefix_scan_cell_counts, reduce_angle_forces, reduce_bond_forces, reduce_dihedral_forces,
     rescale_positions, rescale_positions_device_factor, rescale_velocities,
     rescale_velocities_device_factor,
     constraint_virial_scatter, increment_u64_device, rattle_velocities, scatter_atoms_into_cells,

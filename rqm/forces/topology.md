@@ -1,24 +1,26 @@
-# Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List <!-- rq-9e1eee68 -->
+# Feature: Topology File, Bond List, Angle List, Dihedral List, Exclusion List, and Constraint List <!-- rq-9e1eee68 -->
 
 A simulation's bonded topology is described by a `.topology` file referenced
 from the TOML config (`io/config-schema.md`) and consumed by the
 `MorseBonded` slot (`morse-bonded.md`), the `HarmonicAngle` slot
-(`harmonic-angle.md`), the `Constraint` slot
+(`harmonic-angle.md`), every dihedral slot (`periodic-dihedral.md` and any
+future dihedral functional forms), the `Constraint` slot
 (`integration/constraint-framework.md`, `integration/shake.md`), and the
 Lennard-Jones and Coulomb slots' exclusion logic (`lj-pair-force.md`,
 `coulomb-pair-force.md`). The file lists bond instances, angle instances,
-per-pair non-bonded exclusions, and rigid constraint groups; bond, angle,
-and constraint *types* (parameters) live in the config alongside particle
-types.
+dihedral instances, per-pair non-bonded exclusions, and rigid constraint
+groups; bond, angle, dihedral, and constraint *types* (parameters) live in
+the config alongside particle types.
 
-The file produces four host-side structures: a `BondList` (bonds, with
+The file produces five host-side structures: a `BondList` (bonds, with
 precomputed per-atom indexing tables for deterministic reduction), an
-`AngleList` (angles, with the same indexing pattern), an `ExclusionList`
-(per-pair scaling factors for non-bonded interactions between bonded,
-angle-coupled, constraint-coupled, or otherwise excluded atoms), and a
-`ConstraintList` (rigid constraint groups; see
-`integration/constraint-framework.md` for the SoA layout and the kernel
-contract).
+`AngleList` (angles, with the same indexing pattern), a `DihedralList`
+(dihedrals, with the same indexing pattern extended to four atoms per
+entry), an `ExclusionList` (per-pair scaling factors for non-bonded
+interactions between bonded, angle-coupled, dihedral-coupled,
+constraint-coupled, or otherwise excluded atoms), and a `ConstraintList`
+(rigid constraint groups; see `integration/constraint-framework.md` for the
+SoA layout and the kernel contract).
 
 The bond and constraint connectivity additionally induces a
 `MoleculeList`, a partition of the particles into connected molecular
@@ -29,14 +31,14 @@ centres of mass.
 
 ## File Format <!-- rq-a33c1f4f -->
 
-The `.topology` file is UTF-8 text organised into four named sections,
-`[bonds]`, `[exclusions]`, `[angles]`, and `[constraints]`. Each section
-may appear at most once; each may be empty; each may be absent (an absent
-`[bonds]` means no bonds, an absent `[exclusions]` means no explicit
-exclusions, an absent `[angles]` means no angles, an absent
-`[constraints]` means no rigid constraint groups). Section headers are
-case-sensitive and must appear on their own line. Sections may appear
-in any order.
+The `.topology` file is UTF-8 text organised into five named sections,
+`[bonds]`, `[exclusions]`, `[angles]`, `[dihedrals]`, and `[constraints]`.
+Each section may appear at most once; each may be empty; each may be absent
+(an absent `[bonds]` means no bonds, an absent `[exclusions]` means no
+explicit exclusions, an absent `[angles]` means no angles, an absent
+`[dihedrals]` means no dihedrals, an absent `[constraints]` means no rigid
+constraint groups). Section headers are case-sensitive and must appear on
+their own line. Sections may appear in any order.
 
 ```
 # Comments start with '#' and run to end of line. Blank lines are <!-- rq-38285db7 -->
@@ -53,6 +55,16 @@ in any order.
 # atom_j is the centre (vertex) atom; atom_i and atom_k are the wings. <!-- rq-443a91da -->
 # Atom indices are 0-based and refer to entries in the init file. <!-- rq-147f5ea6 -->
 1 0 2 HOH
+
+[dihedrals]
+# Column format: atom_i  atom_j  atom_k  atom_l  dihedral_type_name <!-- rq-68c5d30a -->
+# The torsion angle is the angle between the (i, j, k) plane and the <!-- rq-d1453cff -->
+# (j, k, l) plane about the j-k axis (IUPAC convention). <!-- rq-edebcf92 -->
+# A given (atom_i, atom_j, atom_k, atom_l) quadruple may appear in <!-- rq-efba2cce -->
+# multiple rows naming different dihedral types; each row contributes <!-- rq-d91c6352 -->
+# one Fourier term to the total dihedral potential on that quadruple. <!-- rq-c8c03ed1 -->
+0 1 2 3 CT-CT-CT-CT_n1
+0 1 2 3 CT-CT-CT-CT_n3
 
 [exclusions]
 # Column format: atom_i  atom_j  [scale_lj]  [scale_coul] <!-- rq-c8ea0a96 -->
@@ -115,6 +127,45 @@ centre `atom_j` in place. The canonicalised triples are then sorted by
 `(atom_j, atom_i, atom_k)` before assigning angle indices. Two entries
 that normalise to the same triple (same centre and same unordered wing
 pair) are rejected as duplicates regardless of order in the file.
+
+### Dihedral entries <!-- rq-056c4760 -->
+
+Each non-comment line in `[dihedrals]` has the form `atom_i atom_j
+atom_k atom_l dihedral_type_name` where:
+
+- `atom_i: u32`, `atom_j: u32`, `atom_k: u32`, and `atom_l: u32` are
+  zero-based particle indices. All four must be `< particle_count`.
+  The torsion is the angle between the `(atom_i, atom_j, atom_k)`
+  plane and the `(atom_j, atom_k, atom_l)` plane, measured about the
+  `atom_j`–`atom_k` axis (IUPAC convention).
+- The four atoms must all be distinct: any of `atom_i == atom_j`,
+  `atom_i == atom_k`, `atom_i == atom_l`, `atom_j == atom_k`,
+  `atom_j == atom_l`, or `atom_k == atom_l` is rejected as
+  `RepeatedAtomInDihedral`.
+- `dihedral_type_name: String` must match the `name` field of an
+  entry in the config's `[[dihedral_types]]` array. Unknown names are
+  rejected.
+
+Dihedral *order* in the section is preserved for diagnostics.
+Internally the parser canonicalises each `(atom_i, atom_j, atom_k,
+atom_l)` quadruple by reversing the sequence (so `atom_i` and
+`atom_l` swap and `atom_j` and `atom_k` swap) when `atom_i > atom_l`,
+which leaves the dihedral angle unchanged and yields a canonical form
+with `atom_i ≤ atom_l`. The canonicalised quadruples are then sorted
+by `(atom_i, atom_j, atom_k, atom_l)` before assigning dihedral
+indices.
+
+A given canonical `(atom_i, atom_j, atom_k, atom_l)` quadruple may
+appear in multiple `[dihedrals]` rows naming different dihedral types
+— this is how multiple Fourier terms (e.g. `n = 1`, `n = 2`, `n = 3`)
+on the same torsion are expressed. Two rows that share both the same
+canonical quadruple *and* the same `dihedral_type_name` are rejected
+as `DuplicateDihedral` regardless of file order.
+
+The canonical quadruple `atom_i ≤ atom_l` constraint allows
+`atom_i == atom_l` only when the four atoms are non-distinct, which
+the `RepeatedAtomInDihedral` rule has already ruled out; in practice
+the canonical form always satisfies `atom_i < atom_l`.
 
 ### Exclusion entries <!-- rq-4ae7794c -->
 
@@ -185,52 +236,77 @@ appearing in `[bonds]`. Conflicting rows are rejected as
 After parsing, the consumer-facing `ExclusionList` is the *effective
 exclusion list*, formed by combining the explicit `[exclusions]`
 entries with implicit exclusions derived from `[bonds]`, `[angles]`,
-and `[constraints]`:
+`[dihedrals]`, and `[constraints]`. The four implicit sources are
+layered with strict precedence, from highest to lowest:
 
-- Every explicit `(i, j, scale_lj, scale_coul)` entry from the file
-  becomes an effective exclusion with those two scales.
-- For every bond `(i, j)` in `[bonds]` that does **not** have a
-  matching explicit `(i, j, _, _)` entry, an implicit exclusion
-  `(i, j, 0.0, 0.0)` is added.
-- For every angle `(i, j, k)` in `[angles]`, the 1-3 pair `(i, k)` is
-  considered. When `(i, k)` does **not** have a matching explicit
-  `(i, k, _, _)` entry *and* is not already covered by an implicit
-  bond-derived entry, an implicit exclusion `(i, k, 0.0, 0.0)` is
-  added.
-- For every constraint group in `[constraints]`, every pair `(p, q)`
-  of distinct atoms drawn from the group's atom set is considered.
-  When `(p, q)` does **not** have a matching explicit `(p, q, _, _)`
-  entry *and* is not already covered by an implicit bond-derived or
-  angle-derived entry, an implicit exclusion `(p, q, 0.0, 0.0)` is
-  added. For a SHAKE-constrained rigid-water group `(O, H1, H2)` this
-  produces three implicit exclusions: `(O, H1)`, `(O, H2)`, and
-  `(H1, H2)`.
+1. **Explicit `[exclusions]` rows.** Every explicit
+   `(i, j, scale_lj, scale_coul)` entry from the file becomes an
+   effective exclusion with those two scales; no implicit source can
+   override an explicit row.
+2. **Implicit 1-2 from bonds.** For every bond `(i, j)` in `[bonds]`
+   that does **not** have a matching explicit `(i, j, _, _)` entry,
+   an implicit exclusion `(i, j, 0.0, 0.0)` is added.
+3. **Implicit 1-3 from angles.** For every angle `(i, j, k)` in
+   `[angles]`, the 1-3 pair `(i, k)` is considered. When `(i, k)`
+   does **not** have a matching explicit `(i, k, _, _)` entry *and*
+   is not already covered by an implicit bond-derived entry, an
+   implicit exclusion `(i, k, 0.0, 0.0)` is added.
+4. **Implicit 1-3 from constraints.** For every constraint group in
+   `[constraints]`, every pair `(p, q)` of distinct atoms drawn from
+   the group's atom set is considered. When `(p, q)` does **not**
+   have a matching explicit `(p, q, _, _)` entry *and* is not already
+   covered by an implicit bond-derived or angle-derived entry, an
+   implicit exclusion `(p, q, 0.0, 0.0)` is added. For a SHAKE-
+   constrained rigid-water group `(O, H1, H2)` this produces three
+   implicit exclusions: `(O, H1)`, `(O, H2)`, and `(H1, H2)`.
+5. **Implicit scaled 1-4 from dihedrals.** Each dihedral
+   `(i, j, k, l)` in `[dihedrals]` considers its 1-4 pair `(i, l)`.
+   When `(i, l)` is **not** already covered by an explicit entry, a
+   bond-derived implicit entry, an angle-derived implicit entry, or
+   a constraint-derived implicit entry, a scaled implicit exclusion
+   `(i, l, scale_lj, scale_coul)` is added, where the scales are
+   drawn from the dihedral's `dihedral_type` (`scale_lj_14` and
+   `scale_coul_14`; see `io/config-schema.md`). When several
+   dihedrals share the same canonical `(i, l)` pair, only the first
+   one (in the canonical dihedral order — see *Dihedral entries*)
+   introduces the implicit 1-4; subsequent dihedrals on the same
+   `(i, l)` still contribute their own torque through the
+   `DihedralList` but do not add a second `(i, l)` entry to the
+   exclusion list. This *first-wins* policy mirrors AMBER's
+   *ignore_end* convention.
+
+Precedence is applied in the order layered above (1 → 2 → 3 → 4 → 5):
+at each layer, the rule's candidate pair is added only when no
+preceding layer has already produced an entry for the same canonical
+`(i, j)` pair. The framework treats these implicit-exclusion rules
+(1-2 from bonds, 1-3 from angles, 1-3 from constraints, scaled 1-4
+from dihedrals) as the only default behaviour that affects simulation
+results without an explicit user declaration. They are documented
+here, in `lj-pair-force.md`, and in `coulomb-pair-force.md`.
 
 The result is the set of `(i, j, scale_lj, scale_coul)` tuples
-consulted by the LJ and Coulomb pair-force kernels. The LJ kernel reads
-`scale_lj`; the Coulomb kernel reads `scale_coul`. Explicit entries take
-precedence over both implicit bond-derived and implicit angle-derived
-entries; an explicit entry with `scale = 1.0` therefore *keeps* the
-corresponding non-bonded contribution for a bonded or angle-coupled
-pair, which is unusual physics but is the user's deliberate override.
+consulted by the LJ and Coulomb pair-force kernels. The LJ kernel
+reads `scale_lj`; the Coulomb kernel reads `scale_coul`. Explicit
+entries take precedence over every implicit source; an explicit entry
+with `scale = 1.0` therefore *keeps* the corresponding non-bonded
+contribution for a bonded, angle-coupled, dihedral-coupled, or
+constraint-coupled pair, which is unusual physics but is the user's
+deliberate override.
 
 Effective exclusions for pairs that are neither bonded, angle-coupled,
-nor explicitly listed are absent from the list; the LJ and Coulomb
-kernels treat them as `scale = 1.0` (no scaling).
-
-The framework treats these two implicit-exclusion rules (1-2 from
-bonds, 1-3 from angles) as the only default behaviour that affects
-simulation results without an explicit user declaration. They are
-documented here, in `lj-pair-force.md`, and in `coulomb-pair-force.md`.
+dihedral-coupled, constraint-coupled, nor explicitly listed are absent
+from the list; the LJ and Coulomb kernels treat them as `scale = 1.0`
+(no scaling).
 
 ### Empty file <!-- rq-1c794f95 -->
 
 A `.topology` file containing zero bonds, zero exclusions, zero
-angles, and zero constraints is valid (all sections empty or absent).
-The runner produces an empty `BondList`, an empty `AngleList`, an
-empty `ExclusionList`, and an empty `ConstraintList`; the
-`MorseBonded`, `HarmonicAngle`, and `Constraint` slots are not
-constructed.
+angles, zero dihedrals, and zero constraints is valid (all sections
+empty or absent). The runner produces an empty `BondList`, an empty
+`AngleList`, an empty `DihedralList`, an empty `ExclusionList`, and
+an empty `ConstraintList`; the `MorseBonded`, `HarmonicAngle`,
+`PeriodicDihedral` (and any other dihedral slot), and `Constraint`
+slots are not constructed.
 
 ## Molecule grouping <!-- rq-c200c7b8 -->
 
@@ -308,6 +384,33 @@ For `A` angles among `N` particles, the host-side `AngleList` carries:
 The atom-to-angle indexing is built at load time and uploaded to the
 device once. Angles are immutable for the lifetime of a run; no
 recomputation is necessary.
+
+### Dihedral list <!-- rq-3c978326 -->
+
+For `D` dihedrals among `N` particles, the host-side `DihedralList`
+carries:
+
+- `dihedrals: Vec<Dihedral>` — length `D`, sorted by
+  `(atom_i, atom_j, atom_k, atom_l)`. Each `Dihedral` records
+  `atom_i: u32`, `atom_j: u32`, `atom_k: u32`, `atom_l: u32` (with
+  `atom_i ≤ atom_l` after canonicalisation), and
+  `dihedral_type_index: u32` (an index into the config's
+  `[[dihedral_types]]` array).
+- `atom_dihedral_offsets: Vec<u32>` — length `N + 1`. For atom `a`,
+  the slice
+  `atom_dihedral_indices[atom_dihedral_offsets[a] .. atom_dihedral_offsets[a+1]]`
+  lists the slot indices in the dihedral-quadruple buffer that
+  contribute force to atom `a`.
+- `atom_dihedral_indices: Vec<u32>` — length `4 * D` (each dihedral
+  appears four times, once for each of its four atoms). Entry `m`
+  is an index into the per-dihedral force buffer of length `4 * D`.
+  Within each atom's slice, entries are sorted by the underlying
+  dihedral index so the reduction's summation order is deterministic
+  across runs.
+
+The atom-to-dihedral indexing is built at load time and uploaded to
+the device once. Dihedrals are immutable for the lifetime of a run;
+no recomputation is necessary.
 
 ### Exclusion list <!-- rq-1e1b4e02 -->
 
@@ -401,6 +504,12 @@ contribution flows through to the caller without a separate code path.
   (centre), `atom_k: u32`, `angle_type_index: u32`. Wings satisfy
   `atom_i < atom_k`.
 
+- `Dihedral` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, <!-- rq-a6df14c8 -->
+  `atom_j: u32`, `atom_k: u32`, `atom_l: u32`,
+  `dihedral_type_index: u32`. Outer atoms satisfy
+  `atom_i ≤ atom_l` (in practice `<`, because the four atoms must be
+  distinct).
+
 - `Exclusion` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, <!-- rq-0c717392 -->
   `atom_j: u32`, `scale_lj: f32`, `scale_coul: f32`.
 
@@ -416,6 +525,13 @@ contribution flows through to the caller without a separate code path.
 
   Method `AngleList::is_empty(&self) -> bool` —
   `self.angles.is_empty()`.
+
+- `DihedralList` — host-side. Fields: `dihedrals: Vec<Dihedral>`, <!-- rq-07be6b5e -->
+  `atom_dihedral_offsets: Vec<u32>`, `atom_dihedral_indices: Vec<u32>`,
+  `particle_count: usize`.
+
+  Method `DihedralList::is_empty(&self) -> bool` —
+  `self.dihedrals.is_empty()`.
 
 - `ExclusionList` — host-side. Fields: `entries: Vec<Exclusion>`, <!-- rq-f807cd11 -->
   `atom_excl_offsets: Vec<u32>`, `atom_excl_partners: Vec<u32>`,
@@ -444,7 +560,7 @@ contribution flows through to the caller without a separate code path.
   - `Io(String)` — failed to read the file.
   - `UnknownSection { name: String, line_number: usize }` — a section
     header is not one of the accepted names (`bonds`, `exclusions`,
-    `angles`).
+    `angles`, `dihedrals`, `constraints`).
   - `DuplicateSection { name: String, line_number: usize }` — the
     same section header appears twice.
   - `ContentOutsideSection { line_number: usize }` — non-blank,
@@ -452,17 +568,25 @@ contribution flows through to the caller without a separate code path.
   - `InvalidBondRow { line_number: usize, reason: String }` — column
     count wrong, atom index unparseable, etc.
   - `InvalidAngleRow { line_number: usize, reason: String }`.
+  - `InvalidDihedralRow { line_number: usize, reason: String }`.
   - `InvalidExclusionRow { line_number: usize, reason: String }`.
   - `AtomIndexOutOfRange { line_number: usize, index: u32, max: u32 }`.
   - `SelfBond { line_number: usize, atom: u32 }`.
   - `RepeatedAtomInAngle { line_number: usize, atom: u32 }` — at
     least two of `atom_i`, `atom_j`, `atom_k` are equal.
+  - `RepeatedAtomInDihedral { line_number: usize, atom: u32 }` — at
+    least two of `atom_i`, `atom_j`, `atom_k`, `atom_l` are equal.
   - `SelfExclusion { line_number: usize, atom: u32 }`.
   - `DuplicateBond { atom_i: u32, atom_j: u32 }`.
   - `DuplicateAngle { atom_i: u32, atom_j: u32, atom_k: u32 }`.
+  - `DuplicateDihedral { atom_i: u32, atom_j: u32, atom_k: u32, atom_l: u32, dihedral_type_name: String }` —
+    a `(canonical quadruple, dihedral_type_name)` pair appears twice
+    in `[dihedrals]`. Distinct dihedral types on the same quadruple
+    are *not* rejected (that is the multi-Fourier-term case).
   - `DuplicateExclusion { atom_i: u32, atom_j: u32 }`.
   - `UnknownBondType { line_number: usize, name: String }`.
   - `UnknownAngleType { line_number: usize, name: String }`.
+  - `UnknownDihedralType { line_number: usize, name: String }`.
   - `ScaleOutOfRange { line_number: usize, scale: f32 }` — not in
     `[0.0, 1.0]` or non-finite.
   - `InvalidConstraintRow { line_number: usize, reason: String }` —
@@ -481,19 +605,25 @@ contribution flows through to the caller without a separate code path.
 
 ### Functions <!-- rq-e66012e0 -->
 
-- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>` <!-- rq-12b7dcb6 -->
-  - Reads the file at `path` and parses all four sections.
+- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], dihedral_types: &[DihedralTypeConfig], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList), TopologyFileError>` <!-- rq-12b7dcb6 -->
+  - Reads the file at `path` and parses all five sections.
   - Validates every constraint described in *File Format*.
-  - Returns the canonicalised, sorted `BondList`, `AngleList`, the
-    *effective* `ExclusionList` (explicit entries plus implicit
-    bond-derived, angle-derived, and constraint-derived defaults),
-    and the `ConstraintList` (groups sorted by minimum particle
-    index per `integration/constraint-framework.md`).
+  - Returns the canonicalised, sorted `BondList`, `AngleList`,
+    `DihedralList`, the *effective* `ExclusionList` (explicit
+    entries plus implicit bond-derived, angle-derived,
+    constraint-derived, and dihedral-derived-1-4 defaults), and the
+    `ConstraintList` (groups sorted by minimum particle index per
+    `integration/constraint-framework.md`).
   - The caller passes `particle_count` (used to bound atom indices),
     `bond_type_names` (used to resolve `bond_type_name` strings to
     indices in the config's `[[bond_types]]` array),
     `angle_type_names` (used to resolve `angle_type_name` strings to
     indices in the config's `[[angle_types]]` array),
+    `dihedral_types` (the full parsed `[[dihedral_types]]` array of
+    `DihedralTypeConfig` entries, used to resolve
+    `dihedral_type_name` strings to indices and to read each type's
+    `scale_lj_14` / `scale_coul_14` fields when generating implicit
+    1-4 exclusions),
     `constraint_types` (the full parsed `[[constraint_types]]`
     array of `NamedSlotConfig` entries, used to resolve
     `constraint_type_name` strings to indices), and
@@ -516,26 +646,36 @@ contribution flows through to the caller without a separate code path.
 
 ## Out of Scope <!-- rq-ad0edc95 -->
 
-- Dihedrals, impropers, CMAP terms. The `.topology` file's schema
-  reserves no syntax for them.
-- Per-bond and per-angle parameter overrides (every bond's parameters
-  come from its bond type; every angle's parameters come from its
-  angle type).
+- Improper-dihedral and CMAP terms. The `.topology` file's schema
+  reserves no syntax for `[impropers]` or `[cmap]`; both are
+  planned as separate future sections with their own per-row layout
+  and their own implicit-exclusion rules. The `[dihedrals]` section
+  is reserved for proper dihedrals only.
+- Per-bond, per-angle, and per-dihedral parameter overrides (every
+  bond's parameters come from its bond type; every angle's
+  parameters come from its angle type; every dihedral's parameters
+  come from its dihedral type).
 - Connected-component merging of `[constraints]` rows that share
   atoms. v1 requires disjoint clusters; cross-row groups arrive with
   M-SHAKE. The on-disk format and the in-memory `ConstraintList`
   layout already accommodate the merged case.
-- Forming or breaking bonds, angles, or constraints during a
-  simulation. All four lists are fixed at start of run.
-- A separate `[scaled_exclusions]` section or 1-4-specific syntax.
-  Every exclusion is an `(i, j, scale_lj, scale_coul)` tuple; the
-  user is responsible for emitting whichever 1-4 exclusions they
-  need.
+- Forming or breaking bonds, angles, dihedrals, or constraints
+  during a simulation. All lists are fixed at start of run.
+- A separate `[scaled_exclusions]` section for declaring 1-4 (or
+  other) scaled exclusions independent of the dihedral list. The
+  existing four-column `[exclusions]` form already lets the user
+  emit any `(i, j, scale_lj, scale_coul)` row by hand, and the
+  dihedral-derived implicit 1-4 rule covers the common AMBER /
+  GROMACS / OPLS / CHARMM convention. A future
+  `[scaled_exclusions]` section would reuse the existing
+  `Exclusion` data model and the existing
+  layered-precedence machinery in *Effective exclusions*; only a
+  new parser entry point would be needed.
 - Multi-`.topology`-file support; the config references at most one
   file.
 - Binary topology formats.
-- Automatic angle/dihedral derivation from the bond graph. Angle
-  declarations are explicit.
+- Automatic angle / dihedral derivation from the bond graph. Angle
+  and dihedral declarations are explicit.
 - An exclusion "scale = NaN" sentinel to mean "remove implicit
   exclusion". An explicit entry with `scale = 1.0` already achieves
   that effect.
@@ -551,6 +691,8 @@ Feature: Topology file with bonds, angles, and exclusions
     Given a temporary directory tmp
     And a bond_type_names slice of ["CC", "CN", "OH"]
     And an angle_type_names slice of ["HOH"]
+    And a dihedral_types slice (empty by default; scenarios that exercise
+      [dihedrals] supply their own typed entries with explicit scales)
     And particle_count = 4
 
   # --- Happy paths ---
@@ -680,9 +822,9 @@ Feature: Topology file with bonds, angles, and exclusions
 
   @rq-4c245ce7
   Scenario: Unknown section header
-    Given tmp/sim.topology with a section "[dihedrals]"
+    Given tmp/sim.topology with a section "[impropers]"
     When load_topology_file is called
-    Then it returns Err(TopologyFileError::UnknownSection { name: "dihedrals", line_number: _ })
+    Then it returns Err(TopologyFileError::UnknownSection { name: "impropers", line_number: _ })
 
   @rq-583d3df1
   Scenario: Duplicate section header
@@ -908,6 +1050,173 @@ Feature: Topology file with bonds, angles, and exclusions
     And atom 0's angle indices reference slot 0 (its slot in angle 0) and slot 3 (its slot in angle 1)
     And atom 2's angle indices reference slot 2 (its wing slot in angle 0)
       and slot 4 (its centre slot in angle 1)
+
+  # --- Dihedral rows ---
+
+  @rq-2d7dd2a1
+  Scenario: Load a topology file containing a dihedral
+    Given tmp/sim.topology containing
+      """
+      [dihedrals]
+      0 1 2 3 CT-CT-CT-CT_n3
+      """
+    And dihedral_types contains an entry "CT-CT-CT-CT_n3" potential="periodic"
+    When load_topology_file(tmp/sim.topology, 4, &bond_types, &angle_types,
+      &dihedral_types, &constraint_types, &constraint_registry) is called
+    Then it returns Ok((bond_list, angle_list, dihedral_list, exclusion_list,
+      constraint_list))
+    And dihedral_list.dihedrals equals
+      [(atom_i=0, atom_j=1, atom_k=2, atom_l=3, dihedral_type_index=0)]
+
+  @rq-7b7659be
+  Scenario: Dihedral is canonicalised so atom_i <= atom_l
+    Given a single dihedral "3 2 1 0 CT-CT-CT-CT_n3" with particle_count = 4
+    When load_topology_file is called
+    Then dihedral_list.dihedrals[0].atom_i equals 0
+    And dihedral_list.dihedrals[0].atom_j equals 1
+    And dihedral_list.dihedrals[0].atom_k equals 2
+    And dihedral_list.dihedrals[0].atom_l equals 3
+
+  @rq-5e3b9b77
+  Scenario: Dihedrals are sorted by (atom_i, atom_j, atom_k, atom_l)
+    Given two dihedrals "0 1 2 4 X" and "0 1 2 3 X" with particle_count = 5
+    When load_topology_file is called
+    Then dihedral_list.dihedrals equals
+      [(0, 1, 2, 3, type=0), (0, 1, 2, 4, type=0)]
+
+  @rq-58221c00
+  Scenario: Two rows on the same quadruple with different dihedral types are accepted
+    Given two dihedral rows "0 1 2 3 CT-CT-CT-CT_n1" and "0 1 2 3 CT-CT-CT-CT_n3"
+    And dihedral_types contains both "CT-CT-CT-CT_n1" and "CT-CT-CT-CT_n3"
+    When load_topology_file is called
+    Then dihedral_list.dihedrals has length 2
+    And both entries share atom indices (0, 1, 2, 3) and differ only in
+      dihedral_type_index
+
+  @rq-0426f8c9
+  Scenario: Two rows on the same quadruple naming the same dihedral type are rejected
+    Given two dihedral rows "0 1 2 3 CT-CT-CT-CT_n3" and "3 2 1 0 CT-CT-CT-CT_n3"
+      (the second canonicalises to (0,1,2,3))
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::DuplicateDihedral { atom_i: 0, atom_j: 1, atom_k: 2, atom_l: 3, dihedral_type_name: "CT-CT-CT-CT_n3" })
+
+  @rq-10274a65
+  Scenario: Dihedral row with wrong column count
+    Given a dihedral row "0 1 2 3" (missing type)
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::InvalidDihedralRow { line_number: _, reason: _ })
+
+  @rq-b3ffde38
+  Scenario: Dihedral row with non-integer index
+    Given a dihedral row "abc 1 2 3 X"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::InvalidDihedralRow { reason: _, .. })
+
+  @rq-3c83b98a
+  Scenario: Dihedral row with atom index out of range
+    Given a dihedral row "0 1 2 9 X" and particle_count = 4
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::AtomIndexOutOfRange { index: 9, max: 3, .. })
+
+  @rq-152fe459
+  Scenario: Repeated atom in dihedral rejected (i == j)
+    Given a dihedral row "1 1 2 3 X"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::RepeatedAtomInDihedral { atom: 1, .. })
+
+  @rq-97961787
+  Scenario: Repeated atom in dihedral rejected (j == k)
+    Given a dihedral row "0 1 1 3 X"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::RepeatedAtomInDihedral { atom: 1, .. })
+
+  @rq-6789ef26
+  Scenario: Repeated atom in dihedral rejected (k == l)
+    Given a dihedral row "0 1 2 2 X"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::RepeatedAtomInDihedral { atom: 2, .. })
+
+  @rq-cb1a8507
+  Scenario: Repeated atom in dihedral rejected (i == l)
+    Given a dihedral row "0 1 2 0 X"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::RepeatedAtomInDihedral { atom: 0, .. })
+
+  @rq-e1df90e7
+  Scenario: Unknown dihedral type name rejected
+    Given a dihedral row "0 1 2 3 ZZ" with dihedral_types containing only "X"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::UnknownDihedralType { name: "ZZ", .. })
+
+  # --- Dihedral-derived implicit 1-4 exclusions ---
+
+  @rq-99bd424a
+  Scenario: Implicit 1-4 exclusion is added for a dihedral whose (i, l) pair is otherwise uncovered
+    Given a single dihedral "0 1 2 3 D"
+    And no bonds, no angles, no constraints, no explicit exclusions
+    And dihedral_types contains "D" potential="periodic" with default
+      scale_lj_14=0.5, scale_coul_14=0.8333
+    When load_topology_file is called
+    Then exclusion_list.entries contains (0, 3, scale_lj=0.5, scale_coul=0.8333)
+
+  @rq-cb96dfd0
+  Scenario: Implicit 1-4 uses the dihedral_type's scale_lj_14 / scale_coul_14
+    Given a single dihedral "0 1 2 3 D"
+    And dihedral_types contains "D" with scale_lj_14=0.25 scale_coul_14=0.75
+    When load_topology_file is called
+    Then exclusion_list.entries contains (0, 3, scale_lj=0.25, scale_coul=0.75)
+
+  @rq-aa00b384
+  Scenario: Bond-derived (1, 0, 0) exclusion overrides a dihedral's 1-4 entry for the same pair
+    Given a 4-atom system with a [bond] "0 3 X", an angle and a dihedral whose
+      1-4 pair is also (0, 3), and no explicit exclusion on (0, 3)
+    When load_topology_file is called
+    Then exclusion_list.entries contains (0, 3, scale_lj=0.0, scale_coul=0.0)
+    And exclusion_list.entries does not contain (0, 3) with non-zero scales
+
+  @rq-92b8e6af
+  Scenario: Angle-derived (1, 0, 0) exclusion overrides a dihedral's 1-4 entry for the same pair
+    Given a 4-atom system with an angle "0 _ 3 _" giving 1-3 pair (0, 3) and a
+      dihedral whose 1-4 pair is also (0, 3)
+    When load_topology_file is called
+    Then exclusion_list.entries contains (0, 3, scale_lj=0.0, scale_coul=0.0)
+
+  @rq-bafeed55
+  Scenario: Explicit [exclusions] row overrides a dihedral-derived 1-4 entry
+    Given a single dihedral "0 1 2 3 D" and an explicit exclusion row "0 3 0.4 0.6"
+    When load_topology_file is called
+    Then exclusion_list.entries contains (0, 3, scale_lj=0.4, scale_coul=0.6)
+    And exclusion_list.entries does not contain (0, 3) with the type's
+      default scales
+
+  @rq-ce519f29
+  Scenario: First-wins when two dihedrals share the same (i, l) 1-4 pair
+    Given two dihedrals on the same canonical quadruple (0, 1, 2, 3) of types
+      D_a (scale_lj_14=0.5, scale_coul_14=0.8333) and D_b
+      (scale_lj_14=0.25, scale_coul_14=0.75)
+    And the canonical dihedral order is [D_a, D_b]
+    When load_topology_file is called
+    Then exclusion_list.entries contains exactly one (0, 3) row with scales
+      (0.5, 0.8333) — from the first dihedral
+    And no (0, 3) row with scales (0.25, 0.75) is present
+
+  @rq-720fd816
+  Scenario: A dihedral with full LJ and Coul 1-4 (CHARMM convention) adds the entry
+    Given a single dihedral "0 1 2 3 D" with scale_lj_14=1.0 scale_coul_14=1.0
+    When load_topology_file is called
+    Then exclusion_list.entries contains (0, 3, scale_lj=1.0, scale_coul=1.0)
+
+  # --- Per-atom indexing for dihedrals ---
+
+  @rq-2d18165a
+  Scenario: atom_dihedral_offsets reflects sorted dihedral list
+    Given particle_count = 5 and dihedrals "0 1 2 3 D" and "1 2 3 4 D"
+    When load_topology_file is called
+    Then dihedral_list.atom_dihedral_offsets equals [0, 1, 3, 5, 7, 8]
+    And atom 0's dihedral indices reference slot 0 (its slot in dihedral 0)
+    And atom 1's dihedral indices reference slot 1 (in dihedral 0)
+      and slot 4 (its slot in dihedral 1)
+    And atom 4's dihedral indices reference slot 7 (its slot in dihedral 1)
 
   # --- Constraint rows ---
 

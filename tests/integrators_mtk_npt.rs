@@ -6,7 +6,7 @@
 // kernels (mtk_velocity_half_kick, mtk_position_drift) and the
 // shared nhc_chain_sub_step host helper are also exercised directly.
 
-use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{
     GpuContext, ParticleBuffers, init_device, mtk_position_drift, mtk_velocity_half_kick,
 };
@@ -43,11 +43,13 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

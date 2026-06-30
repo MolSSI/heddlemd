@@ -3,7 +3,7 @@
 // CSVR (Bussi-Donadio-Parrinello) thermostat tests. The thermostat is
 // exercised in isolation through its `apply_post` hook.
 
-use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, lan_ou_step,
 };
@@ -43,11 +43,13 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

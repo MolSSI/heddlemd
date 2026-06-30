@@ -188,6 +188,10 @@ mod tests {
                 <crate::forces::angle::AngleKernels as SubsystemKernels>::STAGES,
             ),
             (
+                <crate::forces::dihedral::DihedralKernels as SubsystemKernels>::MODULE,
+                <crate::forces::dihedral::DihedralKernels as SubsystemKernels>::STAGES,
+            ),
+            (
                 <crate::integrator::nose_hoover_chain::NoseHooverKernels as SubsystemKernels>::MODULE,
                 <crate::integrator::nose_hoover_chain::NoseHooverKernels as SubsystemKernels>::STAGES,
             ),

@@ -329,7 +329,7 @@ fn ou_variance_scales_with_predicted_factor() {
 // rq-e1dd0625
 #[test]
 fn step_launches_all_six_expected_kernel_calls() {
-    use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::forces::{BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
     use heddle_md::io::config::NeighborListConfig;
     let gpu = init_device().unwrap();
     let state = n_particle_state(4);
@@ -342,11 +342,13 @@ fn step_launches_all_six_expected_kernel_calls() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
         &heddle_md::forces::AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -381,7 +383,7 @@ fn step_launches_all_six_expected_kernel_calls() {
 // rq-6e98222c
 #[test]
 fn langevin_step_on_empty_is_noop() {
-    use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::forces::{BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
     use heddle_md::io::config::NeighborListConfig;
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
@@ -400,11 +402,13 @@ fn langevin_step_on_empty_is_noop() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(0),
         &heddle_md::forces::AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs,
     )

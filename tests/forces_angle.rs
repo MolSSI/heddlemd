@@ -8,10 +8,7 @@
 //! force / energy / virial outputs.
 
 use heddle_md::forces::topology::Angle;
-use heddle_md::forces::{
-    AggregateLevel, AngleList, BondList, ExclusionList, ForceField, HarmonicAngleBuilder,
-    PotentialRegistry,
-};
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, DihedralList, ExclusionList, ForceField, HarmonicAngleBuilder, PotentialRegistry};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{AngleTypeConfig, NeighborListConfig};
 use heddle_md::pbc::SimulationBox;
@@ -122,11 +119,13 @@ fn run_angle(
         &[],
         &[],
         angle_types,
+        &[],
         None,
         None,
         &[],
         &BondList::empty(n),
         angles,
+        &DihedralList::empty(n),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

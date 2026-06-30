@@ -6,7 +6,7 @@ use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::GpuError;
 use crate::integrator::ConstraintRegistry;
-use crate::io::config::NamedSlotConfig;
+use crate::io::config::{DihedralTypeConfig, NamedSlotConfig};
 use crate::precision::Real;
 
 // rq-0a8831b1
@@ -24,6 +24,20 @@ pub struct Angle {
     pub atom_j: u32,
     pub atom_k: u32,
     pub angle_type_index: u32,
+}
+
+/// One dihedral instance from the topology file. Atoms are stored in
+/// canonical order: `atom_i ≤ atom_l`. Because the four atoms must be
+/// distinct, the strict inequality `atom_i < atom_l` holds in practice.
+/// `dihedral_type_index` references an entry of the config's
+/// `[[dihedral_types]]` array.
+#[derive(Debug, Clone, Copy)]
+pub struct Dihedral {
+    pub atom_i: u32,
+    pub atom_j: u32,
+    pub atom_k: u32,
+    pub atom_l: u32,
+    pub dihedral_type_index: u32,
 }
 
 // rq-0c717392
@@ -80,6 +94,33 @@ impl AngleList {
 
     pub fn is_empty(&self) -> bool {
         self.angles.is_empty()
+    }
+}
+
+/// Host-side per-dihedral indexing tables; consumed by the
+/// `PeriodicDihedral` slot (and any other dihedral functional form
+/// added later). Each dihedral contributes four slots to the per-atom
+/// reduction, one per atom.
+#[derive(Debug, Clone)]
+pub struct DihedralList {
+    pub dihedrals: Vec<Dihedral>,
+    pub atom_dihedral_offsets: Vec<u32>,
+    pub atom_dihedral_indices: Vec<u32>,
+    pub particle_count: usize,
+}
+
+impl DihedralList {
+    pub fn empty(particle_count: usize) -> Self {
+        DihedralList {
+            dihedrals: Vec::new(),
+            atom_dihedral_offsets: vec![0; particle_count + 1],
+            atom_dihedral_indices: Vec::new(),
+            particle_count,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.dihedrals.is_empty()
     }
 }
 
@@ -275,6 +316,8 @@ pub enum TopologyFileError {
     InvalidBondRow { line_number: usize, reason: String },
     #[error("line {line_number}: invalid angle row: {reason}")]
     InvalidAngleRow { line_number: usize, reason: String },
+    #[error("line {line_number}: invalid dihedral row: {reason}")]
+    InvalidDihedralRow { line_number: usize, reason: String },
     #[error("line {line_number}: invalid exclusion row: {reason}")]
     InvalidExclusionRow { line_number: usize, reason: String },
     #[error("line {line_number}: atom index {index} is out of range (max {max})")]
@@ -287,6 +330,8 @@ pub enum TopologyFileError {
     SelfBond { line_number: usize, atom: u32 },
     #[error("line {line_number}: atom {atom} appears more than once in this angle")]
     RepeatedAtomInAngle { line_number: usize, atom: u32 },
+    #[error("line {line_number}: atom {atom} appears more than once in this dihedral")]
+    RepeatedAtomInDihedral { line_number: usize, atom: u32 },
     #[error("line {line_number}: atom {atom} is excluded from itself")]
     SelfExclusion { line_number: usize, atom: u32 },
     #[error("duplicate bond between atoms {atom_i} and {atom_j}")]
@@ -297,12 +342,22 @@ pub enum TopologyFileError {
         atom_j: u32,
         atom_k: u32,
     },
+    #[error("duplicate dihedral ({atom_i}, {atom_j}, {atom_k}, {atom_l}) of type `{dihedral_type_name}`")]
+    DuplicateDihedral {
+        atom_i: u32,
+        atom_j: u32,
+        atom_k: u32,
+        atom_l: u32,
+        dihedral_type_name: String,
+    },
     #[error("duplicate exclusion between atoms {atom_i} and {atom_j}")]
     DuplicateExclusion { atom_i: u32, atom_j: u32 },
     #[error("line {line_number}: unknown bond type `{name}`")]
     UnknownBondType { line_number: usize, name: String },
     #[error("line {line_number}: unknown angle type `{name}`")]
     UnknownAngleType { line_number: usize, name: String },
+    #[error("line {line_number}: unknown dihedral type `{name}`")]
+    UnknownDihedralType { line_number: usize, name: String },
     #[error("line {line_number}: exclusion scale {scale} is out of the range [0, 1]")]
     ScaleOutOfRange { line_number: usize, scale: Real },
     #[error("line {line_number}: invalid constraint row: {reason}")]
@@ -320,14 +375,17 @@ pub enum TopologyFileError {
 }
 
 // rq-12b7dcb6
+#[allow(clippy::too_many_arguments)]
 pub fn load_topology_file(
     path: &Path,
     particle_count: usize,
     bond_type_names: &[&str],
     angle_type_names: &[&str],
+    dihedral_types: &[DihedralTypeConfig],
     constraint_types: &[NamedSlotConfig],
     constraint_registry: &ConstraintRegistry,
-) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError> {
+) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList), TopologyFileError>
+{
     let raw = std::fs::read_to_string(path)
         .map_err(|e| TopologyFileError::Io(format!("{}: {}", path.display(), e)))?;
     parse_topology_file(
@@ -335,6 +393,7 @@ pub fn load_topology_file(
         particle_count,
         bond_type_names,
         angle_type_names,
+        dihedral_types,
         constraint_types,
         constraint_registry,
     )
@@ -346,27 +405,34 @@ enum Section {
     Bonds,
     Exclusions,
     Angles,
+    Dihedrals,
     Constraints,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn parse_topology_file(
     raw: &str,
     particle_count: usize,
     bond_type_names: &[&str],
     angle_type_names: &[&str],
+    dihedral_types: &[DihedralTypeConfig],
     constraint_types: &[NamedSlotConfig],
     constraint_registry: &ConstraintRegistry,
-) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError> {
+) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList), TopologyFileError>
+{
     let max_index_for_check: i64 = particle_count as i64 - 1;
 
     let mut current: Section = Section::None;
     let mut bonds_seen = false;
     let mut exclusions_seen = false;
     let mut angles_seen = false;
+    let mut dihedrals_seen = false;
     let mut constraints_seen = false;
     let mut raw_bonds: Vec<(usize, u32, u32, u32)> = Vec::new();
     let mut raw_excl: Vec<(usize, u32, u32, Real, Real)> = Vec::new();
     let mut raw_angles: Vec<(usize, u32, u32, u32, u32)> = Vec::new();
+    // (line_number, atom_i, atom_j, atom_k, atom_l, dihedral_type_index)
+    let mut raw_dihedrals: Vec<(usize, u32, u32, u32, u32, u32)> = Vec::new();
     // (line_number, atom_indices_in_declared_order, constraint_type_index)
     let mut raw_constraint_rows: Vec<(usize, Vec<u32>, u32)> = Vec::new();
 
@@ -408,6 +474,16 @@ pub(crate) fn parse_topology_file(
                     }
                     angles_seen = true;
                     current = Section::Angles;
+                }
+                "dihedrals" => {
+                    if dihedrals_seen {
+                        return Err(TopologyFileError::DuplicateSection {
+                            name: "dihedrals".to_string(),
+                            line_number,
+                        });
+                    }
+                    dihedrals_seen = true;
+                    current = Section::Dihedrals;
                 }
                 "constraints" => {
                     if constraints_seen {
@@ -543,6 +619,69 @@ pub(crate) fn parse_topology_file(
                         name: cols[3].to_string(),
                     })? as u32;
                 raw_angles.push((line_number, atom_i, atom_j, atom_k, type_idx));
+            }
+            Section::Dihedrals => {
+                let cols: Vec<&str> = trimmed.split_ascii_whitespace().collect();
+                if cols.len() != 5 {
+                    return Err(TopologyFileError::InvalidDihedralRow {
+                        line_number,
+                        reason: format!("expected 5 columns, got {}", cols.len()),
+                    });
+                }
+                let atom_i = cols[0].parse::<u32>().map_err(|_| {
+                    TopologyFileError::InvalidDihedralRow {
+                        line_number,
+                        reason: format!("atom_i {:?} is not a u32", cols[0]),
+                    }
+                })?;
+                let atom_j = cols[1].parse::<u32>().map_err(|_| {
+                    TopologyFileError::InvalidDihedralRow {
+                        line_number,
+                        reason: format!("atom_j {:?} is not a u32", cols[1]),
+                    }
+                })?;
+                let atom_k = cols[2].parse::<u32>().map_err(|_| {
+                    TopologyFileError::InvalidDihedralRow {
+                        line_number,
+                        reason: format!("atom_k {:?} is not a u32", cols[2]),
+                    }
+                })?;
+                let atom_l = cols[3].parse::<u32>().map_err(|_| {
+                    TopologyFileError::InvalidDihedralRow {
+                        line_number,
+                        reason: format!("atom_l {:?} is not a u32", cols[3]),
+                    }
+                })?;
+                for &a in &[atom_i, atom_j, atom_k, atom_l] {
+                    if (a as i64) > max_index_for_check {
+                        return Err(TopologyFileError::AtomIndexOutOfRange {
+                            line_number,
+                            index: a,
+                            max: max_index_for_check.max(0) as u32,
+                        });
+                    }
+                }
+                // All four atoms must be distinct. Check every pair; the
+                // error reports the first repeat encountered.
+                let atoms = [atom_i, atom_j, atom_k, atom_l];
+                for i in 0..atoms.len() {
+                    for j in (i + 1)..atoms.len() {
+                        if atoms[i] == atoms[j] {
+                            return Err(TopologyFileError::RepeatedAtomInDihedral {
+                                line_number,
+                                atom: atoms[i],
+                            });
+                        }
+                    }
+                }
+                let type_idx = dihedral_types
+                    .iter()
+                    .position(|t| t.name() == cols[4])
+                    .ok_or_else(|| TopologyFileError::UnknownDihedralType {
+                        line_number,
+                        name: cols[4].to_string(),
+                    })? as u32;
+                raw_dihedrals.push((line_number, atom_i, atom_j, atom_k, atom_l, type_idx));
             }
             Section::Exclusions => {
                 let cols: Vec<&str> = trimmed.split_ascii_whitespace().collect();
@@ -719,6 +858,52 @@ pub(crate) fn parse_topology_file(
                 atom_i: w[0].atom_i,
                 atom_j: w[0].atom_j,
                 atom_k: w[0].atom_k,
+            });
+        }
+    }
+
+    // Canonicalise + sort dihedrals. The quadruple is reversed
+    // (i ↔ l, j ↔ k) when atom_i > atom_l so the canonical form
+    // satisfies atom_i ≤ atom_l (in practice atom_i < atom_l, since
+    // the parser has already rejected any quadruple with repeated
+    // atoms). Reversal preserves the dihedral angle (cos φ and sin φ
+    // are invariant under the simultaneous swap of (i, l) and (j, k);
+    // proof: m × n_vec ↔ −n_vec × −m = m × n_vec, dot product
+    // m · n_vec invariant). Sorting is by (atom_i, atom_j, atom_k,
+    // atom_l); two rows that share canonical quadruple and
+    // dihedral_type_index are rejected as DuplicateDihedral, but two
+    // rows sharing the quadruple with different types are kept (this
+    // is the multi-term Fourier representation).
+    let mut dihedrals: Vec<Dihedral> = raw_dihedrals
+        .iter()
+        .map(|&(_, i, j, k, l, t)| {
+            let (ci, cj, ck, cl) = if i <= l { (i, j, k, l) } else { (l, k, j, i) };
+            Dihedral {
+                atom_i: ci,
+                atom_j: cj,
+                atom_k: ck,
+                atom_l: cl,
+                dihedral_type_index: t,
+            }
+        })
+        .collect();
+    dihedrals.sort_by_key(|d| (d.atom_i, d.atom_j, d.atom_k, d.atom_l, d.dihedral_type_index));
+    for w in dihedrals.windows(2) {
+        if w[0].atom_i == w[1].atom_i
+            && w[0].atom_j == w[1].atom_j
+            && w[0].atom_k == w[1].atom_k
+            && w[0].atom_l == w[1].atom_l
+            && w[0].dihedral_type_index == w[1].dihedral_type_index
+        {
+            let type_name = dihedral_types[w[0].dihedral_type_index as usize]
+                .name()
+                .to_string();
+            return Err(TopologyFileError::DuplicateDihedral {
+                atom_i: w[0].atom_i,
+                atom_j: w[0].atom_j,
+                atom_k: w[0].atom_k,
+                atom_l: w[0].atom_l,
+                dihedral_type_name: type_name,
             });
         }
     }
@@ -919,6 +1104,33 @@ pub(crate) fn parse_topology_file(
             }
         }
     }
+    // Dihedral-derived implicit scaled 1-4 exclusions. AMBER-style
+    // first-wins policy: walk dihedrals in canonical (sorted) order;
+    // for each dihedral's (atom_i, atom_l) pair, add a scaled exclusion
+    // only when no entry covers that pair yet (whether an explicit
+    // [exclusions] row, a bond-derived implicit, an angle-derived
+    // implicit, a constraint-derived implicit, or an earlier
+    // dihedral's scaled 1-4). Subsequent dihedrals on the same (i, l)
+    // pair still contribute their own torque through the DihedralList,
+    // but they do not produce a second exclusion entry.
+    for d in &dihedrals {
+        // Canonical form guarantees atom_i ≤ atom_l (and < in
+        // practice, since the four atoms are distinct).
+        let (lo, hi) = (d.atom_i, d.atom_l);
+        let already = effective
+            .binary_search_by_key(&(lo, hi), |e| (e.atom_i, e.atom_j))
+            .is_ok();
+        if !already {
+            let dtype = &dihedral_types[d.dihedral_type_index as usize];
+            effective.push(Exclusion {
+                atom_i: lo,
+                atom_j: hi,
+                scale_lj: dtype.scale_lj_14() as Real,
+                scale_coul: dtype.scale_coul_14() as Real,
+            });
+            effective.sort_by_key(|e| (e.atom_i, e.atom_j));
+        }
+    }
 
     // Build the atom-to-bond indexing.
     let mut atom_bond_offsets = vec![0u32; particle_count + 1];
@@ -972,6 +1184,42 @@ pub(crate) fn parse_topology_file(
         cursor_a[pk] += 1;
     }
 
+    // Build the atom-to-dihedral indexing. Each dihedral contributes
+    // four slots (4·m for atom_i, 4·m+1 for atom_j, 4·m+2 for atom_k,
+    // 4·m+3 for atom_l). Entries within each atom's slice are sorted
+    // by underlying dihedral index since `dihedrals` is iterated in
+    // its already-sorted order.
+    let mut atom_dihedral_offsets = vec![0u32; particle_count + 1];
+    for d in &dihedrals {
+        atom_dihedral_offsets[d.atom_i as usize + 1] += 1;
+        atom_dihedral_offsets[d.atom_j as usize + 1] += 1;
+        atom_dihedral_offsets[d.atom_k as usize + 1] += 1;
+        atom_dihedral_offsets[d.atom_l as usize + 1] += 1;
+    }
+    for i in 1..=particle_count {
+        atom_dihedral_offsets[i] += atom_dihedral_offsets[i - 1];
+    }
+    let mut atom_dihedral_indices = vec![0u32; dihedrals.len() * 4];
+    let mut cursor_d: Vec<u32> = atom_dihedral_offsets[..particle_count].to_vec();
+    for (m, d) in dihedrals.iter().enumerate() {
+        let slot_i = (4 * m) as u32;
+        let slot_j = (4 * m + 1) as u32;
+        let slot_k = (4 * m + 2) as u32;
+        let slot_l = (4 * m + 3) as u32;
+        let pi = d.atom_i as usize;
+        let pj = d.atom_j as usize;
+        let pk = d.atom_k as usize;
+        let pl = d.atom_l as usize;
+        atom_dihedral_indices[cursor_d[pi] as usize] = slot_i;
+        cursor_d[pi] += 1;
+        atom_dihedral_indices[cursor_d[pj] as usize] = slot_j;
+        cursor_d[pj] += 1;
+        atom_dihedral_indices[cursor_d[pk] as usize] = slot_k;
+        cursor_d[pk] += 1;
+        atom_dihedral_indices[cursor_d[pl] as usize] = slot_l;
+        cursor_d[pl] += 1;
+    }
+
     // Build the atom-to-exclusion indexing.
     let mut atom_excl_offsets = vec![0u32; particle_count + 1];
     for e in &effective {
@@ -1011,6 +1259,12 @@ pub(crate) fn parse_topology_file(
         atom_angle_indices,
         particle_count,
     };
+    let dihedral_list = DihedralList {
+        dihedrals,
+        atom_dihedral_offsets,
+        atom_dihedral_indices,
+        particle_count,
+    };
     let exclusion_list = ExclusionList {
         entries: effective,
         atom_excl_offsets,
@@ -1025,7 +1279,7 @@ pub(crate) fn parse_topology_file(
         group_constraints,
         particle_count,
     };
-    Ok((bond_list, angle_list, exclusion_list, constraint_list))
+    Ok((bond_list, angle_list, dihedral_list, exclusion_list, constraint_list))
 }
 
 // rq-42195e6f — connectivity-derived molecule partition. See

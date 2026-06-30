@@ -8,7 +8,7 @@ use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
 use crate::forces::{
-    AngleList, BondList, ConstraintList, ExclusionList, ForceField, ForceFieldError,
+    AngleList, BondList, ConstraintList, DihedralList, ExclusionList, ForceField, ForceFieldError,
     TopologyFileError,
     load_topology_file,
 };
@@ -168,6 +168,7 @@ pub struct SimulationSetup {
     pub constraint_list: ConstraintList,
     pub bond_list: BondList,
     pub angle_list: AngleList,
+    pub dihedral_list: DihedralList,
     pub exclusion_list: ExclusionList,
     pub masses: Vec<Real>,
     pub charges: Vec<Real>,
@@ -480,10 +481,11 @@ pub fn lint_simulation_with_registries(
             n,
             &bond_type_names,
             &angle_type_names,
+            &config.dihedral_types,
             &config.constraint_types,
             &registries.constraint_types,
         ) {
-            Ok((bond_list, angle_list, exclusion_list, constraint_list)) => {
+            Ok((bond_list, angle_list, dihedral_list, exclusion_list, constraint_list)) => {
                 // Cross-check integrator/constraint compatibility now that the
                 // constraint list is known.
                 if let Err(e) = config
@@ -502,15 +504,16 @@ pub fn lint_simulation_with_registries(
                     label: "topology",
                     status: LintStatus::Ok {
                         detail: format!(
-                            "{}: {} bonds, {} angles, {} constraint groups",
+                            "{}: {} bonds, {} angles, {} dihedrals, {} constraint groups",
                             path.display(),
                             bond_list.bonds.len(),
                             angle_list.angles.len(),
+                            dihedral_list.dihedrals.len(),
                             constraint_list.groups.len(),
                         ),
                     },
                 });
-                Some((bond_list, angle_list, exclusion_list, constraint_list))
+                Some((bond_list, angle_list, dihedral_list, exclusion_list, constraint_list))
             }
             Err(e) => {
                 stages.push(LintStage {
@@ -630,7 +633,7 @@ fn lint_gpu_full_setup(
     config: crate::io::Config,
     init: InitState,
     sim_box: crate::pbc::SimulationBox,
-    topology: Option<(BondList, AngleList, ExclusionList, ConstraintList)>,
+    topology: Option<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList)>,
     registries: &crate::Registries,
     gpu: crate::gpu::GpuContext,
 ) -> Result<(), (String, RunnerError)> {
@@ -639,6 +642,7 @@ fn lint_gpu_full_setup(
         (
             BondList::empty(n),
             AngleList::empty(n),
+            DihedralList::empty(n),
             ExclusionList::empty(n),
             ConstraintList::empty(n),
         )
@@ -852,13 +856,14 @@ fn simulation_setup_new_impl(
         config.bond_types.iter().map(|bt| bt.name()).collect();
     let angle_type_names: Vec<&str> =
         config.angle_types.iter().map(|at| at.name()).collect();
-    let topology: (BondList, AngleList, ExclusionList, ConstraintList) =
+    let topology: (BondList, AngleList, DihedralList, ExclusionList, ConstraintList) =
         match config.topology.as_ref() {
             Some(path) => load_topology_file(
                 path,
                 n,
                 &bond_type_names,
                 &angle_type_names,
+                &config.dihedral_types,
                 &config.constraint_types,
                 &registries.constraint_types,
             )
@@ -866,6 +871,7 @@ fn simulation_setup_new_impl(
             None => (
                 BondList::empty(n),
                 AngleList::empty(n),
+                DihedralList::empty(n),
                 ExclusionList::empty(n),
                 ConstraintList::empty(n),
             ),
@@ -894,14 +900,14 @@ fn simulation_setup_finish_gpu(
     registries: crate::Registries,
     init: InitState,
     sim_box: crate::pbc::SimulationBox,
-    topology: (BondList, AngleList, ExclusionList, ConstraintList),
+    topology: (BondList, AngleList, DihedralList, ExclusionList, ConstraintList),
     config_load_duration: Duration,
     init_load_duration: Duration,
     gpu: crate::gpu::GpuContext,
     gpu_init_duration: Duration,
 ) -> Result<SimulationSetup, RunnerError> {
     let n = init.particle_count;
-    let (bond_list, angle_list, exclusion_list, constraint_list) = topology;
+    let (bond_list, angle_list, dihedral_list, exclusion_list, constraint_list) = topology;
 
     // rq-637cd1a5 rq-02f4d342 rq-ea4205ec
     if config.spme.is_some() {
@@ -1039,11 +1045,13 @@ fn simulation_setup_finish_gpu(
         &config.pair_interactions,
         &config.bond_types,
         &config.angle_types,
+        &config.dihedral_types,
         config.coulomb.as_ref(),
         config.spme.as_ref(),
         &charges_for_force_field,
         &bond_list,
         &angle_list,
+        &dihedral_list,
         &exclusion_list,
         &config.neighbor_list,
     )
@@ -1059,6 +1067,7 @@ fn simulation_setup_finish_gpu(
         constraint_list,
         bond_list,
         angle_list,
+        dihedral_list,
         exclusion_list,
         masses,
         charges,

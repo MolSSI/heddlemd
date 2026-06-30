@@ -558,7 +558,7 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
     use std::sync::Arc;
     use cudarc::driver::CudaDevice;
     use heddle_md::Registries;
-    use heddle_md::forces::{ConstraintGroup as _ConstraintGroup, ConstraintList, GroupConstraint};
+    use heddle_md::forces::{ConstraintGroup as _ConstraintGroup, ConstraintList, DihedralList, GroupConstraint};
     use heddle_md::gpu::GpuContext;
     use heddle_md::integrator::{
         Constraint, ConstraintBuilder, ConstraintError, ConstraintRegistry,
@@ -977,7 +977,7 @@ fn build_sd_argon_pair(
     heddle_md::pbc::SimulationBox,
     heddle_md::timings::Timings,
 ) {
-    use heddle_md::forces::{ForceField, PotentialRegistry, BondList, AngleList, ExclusionList};
+    use heddle_md::forces::{AngleList, BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
     use heddle_md::gpu::{ParticleBuffers, init_device};
     use heddle_md::io::config::{NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     use heddle_md::minimizer::MinimizerRegistry;
@@ -1041,11 +1041,13 @@ fn build_sd_argon_pair(
         }],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )

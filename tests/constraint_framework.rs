@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use cudarc::driver::CudaDevice;
 
-use heddle_md::forces::{ConstraintGroup, ConstraintList, GroupConstraint};
+use heddle_md::forces::{ConstraintGroup, ConstraintList, DihedralList, GroupConstraint};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::integrator::{
     Constraint, ConstraintBuilder, ConstraintError, ConstraintRegistry,
@@ -542,7 +542,7 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
     // arguments and walks the plan without any constraint hooks. We
     // verify by running step() on a lossless-true VV (which would
     // *reject* step_with_constraint) and confirming the call succeeds.
-    use heddle_md::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::forces::{AngleList, BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
     use heddle_md::integrator::IntegratorStepExt;
     use heddle_md::io::config::NeighborListConfig;
     use heddle_md::state::ParticleState;
@@ -573,11 +573,13 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(1),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(1),
         &NeighborListConfig::AllPairs,
     )
@@ -596,7 +598,7 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
 #[cfg(not(feature = "f64"))]
 #[test]
 fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
-    use heddle_md::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::forces::{AngleList, BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
     use heddle_md::integrator::{IntegratorStepWithConstraintExt, StepError};
     use heddle_md::io::config::NeighborListConfig;
     use heddle_md::state::ParticleState;
@@ -661,11 +663,13 @@ fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(1),
         &AngleList::empty(0),
+        &DihedralList::empty(0),
         &ExclusionList::empty(1),
         &NeighborListConfig::AllPairs,
     )

@@ -287,8 +287,8 @@ fn tmp_topology(name: &str, body: &str) -> PathBuf {
 fn settle_row_expands_to_three_canonical_constraints() {
     let path = tmp_topology("expand", "[constraints]\n0 1 2 SPCE\n");
     let registry = ConstraintRegistry::with_builtins();
-    let (_b, _a, _e, cl) =
-        load_topology_file(&path, 3, &[], &[], &[spce_type()], &registry).unwrap();
+    let (_b, _a, _dl, _e, cl) =
+        load_topology_file(&path, 3, &[], &[], &[], &[spce_type()], &registry).unwrap();
     assert_eq!(cl.groups.len(), 1);
     assert_eq!(cl.groups[0].constraint_count, 3);
     let cs = &cl.group_constraints;
@@ -306,8 +306,8 @@ fn settle_row_expands_to_three_canonical_constraints() {
 fn settle_group_adds_implicit_exclusions() {
     let path = tmp_topology("excl", "[constraints]\n0 1 2 SPCE\n");
     let registry = ConstraintRegistry::with_builtins();
-    let (_b, _a, el, _cl) =
-        load_topology_file(&path, 3, &[], &[], &[spce_type()], &registry).unwrap();
+    let (_b, _a, _dl, el, _cl) =
+        load_topology_file(&path, 3, &[], &[], &[], &[spce_type()], &registry).unwrap();
     let has = |i: u32, j: u32| {
         el.entries
             .iter()
@@ -323,7 +323,7 @@ fn settle_group_adds_implicit_exclusions() {
 fn settle_row_wrong_atom_count_rejected_by_parser() {
     let path = tmp_topology("badrow", "[constraints]\n0 1 SPCE\n");
     let registry = ConstraintRegistry::with_builtins();
-    let err = load_topology_file(&path, 3, &[], &[], &[spce_type()], &registry).unwrap_err();
+    let err = load_topology_file(&path, 3, &[], &[], &[], &[spce_type()], &registry).unwrap_err();
     match err {
         TopologyFileError::InvalidConstraintRow { reason, .. } => {
             assert!(reason.contains('3'), "reason should name expected count 3: {reason}");

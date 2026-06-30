@@ -56,6 +56,7 @@ Sections:
 | `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
 | `[[bond_types]]` | no | per-bond-type parameters |
 | `[[angle_types]]` | no | per-angle-type parameters |
+| `[[dihedral_types]]` | no | per-dihedral-type parameters |
 | `[[constraint_types]]` | no | per-constraint-type parameters |
 | `[coulomb]` | no | truncated short-range Coulomb |
 | `[spme]` | no | smooth particle-mesh Ewald |
@@ -160,6 +161,21 @@ name = "HOH"
 potential = "harmonic"
 k_theta = 5.27e-19  # J/rad²  (75.9 kcal/mol/rad², flexible SPC)
 theta_0 = 1.911     # rad (~109.47°)
+
+# Dihedral (torsion) types are referenced from the `.topology` file's
+# [dihedrals] section. Each [[dihedral_types]] entry supplies one
+# Fourier term; a multi-term torsion is expressed by declaring one
+# dihedral_type per term and referencing each from its own
+# [dihedrals] row on the same (i,j,k,l) quadruple.
+[[dihedral_types]]
+name = "CT-CT-CT-CT_n3"
+potential = "periodic"
+k_phi = 6.276e-22   # J  (0.150 kcal/mol, AMBER n-butane n=3 term)
+n = 3
+phi_0 = 0.0         # rad
+# Optional fields with AMBER defaults:
+# scale_lj_14   = 0.5
+# scale_coul_14 = 0.8333
 
 # Constraint types are referenced from the `.topology` file's
 # [constraints] section. Each entry's `kind` selects the algorithm
@@ -738,6 +754,48 @@ Fields accepted for `potential = "harmonic"` (see
 Names must be unique within the array. Unknown fields for the chosen
 `potential` are rejected.
 
+#### `[[dihedral_types]]` (optional array of tables) <!-- rq-6d4a49ac -->
+
+Declares the parameter sets for dihedral (torsion) potentials
+referenced by name from the `.topology` file. The array is optional
+and may be empty. When supplied, every dihedral type's `name` field
+appears as the fifth column of one or more rows in the `.topology`
+file's `[dihedrals]` section. Dihedral types whose `name` is never
+used in the file are permitted (declared-but-unused).
+
+A single `(atom_i, atom_j, atom_k, atom_l)` quadruple may carry
+multiple Fourier terms by appearing once in `[dihedrals]` per term,
+with each row naming a distinct `[[dihedral_types]]` entry. This is
+the canonical multi-term representation.
+
+Common fields:
+
+- `name: String` — unique identifier within the `[[dihedral_types]]`
+  array. Empty strings are rejected. Case-sensitive.
+- `potential: String` — selects the dihedral potential. The
+  currently supported value is `"periodic"`. Future values
+  (`"ryckaert-bellemans"`, …) are reserved.
+
+Fields accepted for `potential = "periodic"` (see
+`forces/periodic-dihedral.md`):
+
+- `k_phi: f64` — torsion force constant in joules. Required. Finite.
+  May be zero or negative.
+- `n: u32` — multiplicity. Required. Integer in `[1, 6]`.
+- `phi_0: f64` — phase offset in radians. Required. Finite, in
+  `[−2π, 2π]`.
+- `scale_lj_14: f64` — optional. Default `0.5`. Finite, in
+  `[0.0, 1.0]`. Lennard-Jones scale factor applied to the implicit
+  1-4 exclusion derived from any `[dihedrals]` row that names this
+  type and is the first to introduce its `(atom_i, atom_l)` pair
+  (see `forces/topology.md`'s *Effective exclusions*).
+- `scale_coul_14: f64` — optional. Default `1.0 / 1.2 ≈ 0.83333`.
+  Finite, in `[0.0, 1.0]`. Coulomb scale factor applied to the same
+  implicit 1-4 exclusion.
+
+Names must be unique within the array. Unknown fields for the chosen
+`potential` are rejected.
+
 #### `[[constraint_types]]` (optional array of tables) <!-- rq-7e9cb164 -->
 
 Declares the parameter sets for rigid constraint groups referenced by
@@ -1180,6 +1238,8 @@ phase failures.
     array is absent.
   - `angle_types: Vec<AngleTypeConfig>` — empty when the
     `[[angle_types]]` array is absent.
+  - `dihedral_types: Vec<DihedralTypeConfig>` — empty when the
+    `[[dihedral_types]]` array is absent.
   - `constraint_types: Vec<NamedSlotConfig>` — empty when the
     `[[constraint_types]]` array is absent.
   - `coulomb: Option<CoulombConfig>` — `Some` when the `[coulomb]` table
@@ -1309,6 +1369,22 @@ phase failures.
 
   The `name` field is the lookup key referenced from the `.topology`
   file's `[angles]` section.
+
+- `DihedralTypeConfig` — tagged enum carrying the chosen <!-- rq-edfc2b75 -->
+  dihedral-potential parameters and the per-type 1-4 scale factors.
+  Variants:
+  - `Periodic { name: String, k_phi: f64, n: u32, phi_0: f64, scale_lj_14: f64, scale_coul_14: f64 }`
+    — selected by `potential = "periodic"`. `scale_lj_14` and
+    `scale_coul_14` carry the validated defaults (`0.5` and
+    `1.0 / 1.2`) when omitted from the TOML source.
+
+  The `name` field is the lookup key referenced from the
+  `.topology` file's `[dihedrals]` section. The enum is designed so
+  that future dihedral functional forms (Ryckaert-Bellemans, …)
+  land as additional variants without disturbing the
+  `Periodic` variant. Every variant carries `scale_lj_14` and
+  `scale_coul_14`, since the implicit 1-4 exclusion derivation is a
+  property of the dihedral type independent of the functional form.
 
 - `[[constraint_types]]` entries deserialise into `NamedSlotConfig` <!-- rq-ac8fc96a -->
   values (see `NamedSlotConfig` above). Each entry's `kind` selects
@@ -1457,6 +1533,8 @@ phase failures.
     entries share a `name`.
   - `DuplicateAngleTypeName { name: String }` — two `[[angle_types]]`
     entries share a `name`.
+  - `DuplicateDihedralTypeName { name: String }` — two
+    `[[dihedral_types]]` entries share a `name`.
   - `DuplicateConstraintTypeName { name: String }` — two
     `[[constraint_types]]` entries share a `name`.
   - `IncompatibleConstraint { integrator: String, phase: String }` —
@@ -2366,6 +2444,128 @@ Feature: TOML simulation config schema
     Given an [[angle_types]] entry with name=""
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].name", reason: _ })
+
+  # --- Dihedral types ---
+
+  @rq-5e5912cf
+  Scenario: dihedral_types is optional and defaults to empty
+    Given the Background config without an [[dihedral_types]] array
+    When load_config is called
+    Then it returns Ok(config)
+    And config.dihedral_types is empty
+
+  @rq-53e43a30
+  Scenario: Valid periodic dihedral_type is accepted
+    Given the Background config plus
+      [[dihedral_types]] name="CT-CT-CT-CT_n3" potential="periodic"
+        k_phi=6.276e-22 n=3 phi_0=0.0
+    When load_config is called
+    Then it returns Ok(config)
+    And config.dihedral_types has length 1
+    And config.dihedral_types[0] matches DihedralTypeConfig::Periodic {
+      name: "CT-CT-CT-CT_n3", k_phi: 6.276e-22, n: 3, phi_0: 0.0,
+      scale_lj_14: 0.5, scale_coul_14: ~0.8333 }
+
+  @rq-2a0dcb1e
+  Scenario: Periodic dihedral_type with explicit 1-4 scales overrides defaults
+    Given a [[dihedral_types]] entry with potential="periodic" k_phi=1.0 n=1
+      phi_0=0.0 scale_lj_14=0.25 scale_coul_14=0.75
+    When load_config is called
+    Then config.dihedral_types[0].scale_lj_14 equals 0.25
+    And config.dihedral_types[0].scale_coul_14 equals 0.75
+
+  @rq-cd2911bd
+  Scenario: dihedral_type missing potential field
+    Given the Background config plus an [[dihedral_types]] entry with name="X"
+      but no potential
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].potential" })
+
+  @rq-180d0e97
+  Scenario: dihedral_type unknown potential is rejected
+    Given an [[dihedral_types]] entry with potential="not-a-real-potential"
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].potential", reason: _ })
+
+  @rq-0c5e7b0d
+  Scenario: Periodic dihedral_type missing k_phi is rejected
+    Given an [[dihedral_types]] entry with potential="periodic", n=1, phi_0=0.0
+      (no k_phi)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].k_phi" })
+
+  @rq-c6575989
+  Scenario: Periodic dihedral_type missing n is rejected
+    Given an [[dihedral_types]] entry with potential="periodic", k_phi=1.0,
+      phi_0=0.0 (no n)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].n" })
+
+  @rq-17bee31c
+  Scenario: Periodic dihedral_type missing phi_0 is rejected
+    Given an [[dihedral_types]] entry with potential="periodic", k_phi=1.0, n=1
+      (no phi_0)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].phi_0" })
+
+  @rq-06369a61
+  Scenario: Periodic dihedral_type rejects n = 0
+    Given an [[dihedral_types]] entry with potential="periodic" n=0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].n", reason: _ })
+
+  @rq-378b96c9
+  Scenario: Periodic dihedral_type rejects n > 6
+    Given an [[dihedral_types]] entry with potential="periodic" n=7
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].n", reason: _ })
+
+  @rq-6afeb5c1
+  Scenario: Periodic dihedral_type rejects non-finite k_phi
+    Given an [[dihedral_types]] entry with potential="periodic" k_phi=nan n=1 phi_0=0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].k_phi", reason: _ })
+
+  @rq-c42b0c81
+  Scenario: Periodic dihedral_type rejects phi_0 outside [-2π, 2π]
+    Given an [[dihedral_types]] entry with potential="periodic" k_phi=1.0 n=1
+      phi_0=10.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].phi_0", reason: _ })
+
+  @rq-480f7a8b
+  Scenario: Periodic dihedral_type rejects scale_lj_14 outside [0, 1]
+    Given an [[dihedral_types]] entry with potential="periodic" k_phi=1.0 n=1
+      phi_0=0.0 scale_lj_14=1.5
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].scale_lj_14", reason: _ })
+
+  @rq-371e20eb
+  Scenario: Periodic dihedral_type rejects scale_coul_14 outside [0, 1]
+    Given an [[dihedral_types]] entry with potential="periodic" k_phi=1.0 n=1
+      phi_0=0.0 scale_coul_14=-0.1
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].scale_coul_14", reason: _ })
+
+  @rq-93536cac
+  Scenario: Periodic dihedral_type rejects extra fields
+    Given an [[dihedral_types]] entry with potential="periodic" and an unknown
+      field foo=1.0
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path: "dihedral_types[0]", message })
+    And message mentions "foo"
+
+  @rq-1d9fd409
+  Scenario: Reject duplicate dihedral_type names
+    Given two [[dihedral_types]] entries with the same name "CT-CT-CT-CT_n3"
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicateDihedralTypeName { name: "CT-CT-CT-CT_n3" })
+
+  @rq-bc1b494f
+  Scenario: Empty dihedral_type name rejected
+    Given an [[dihedral_types]] entry with name=""
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].name", reason: _ })
 
   # --- Neighbor list ---
 
