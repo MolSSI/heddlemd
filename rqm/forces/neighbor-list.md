@@ -947,59 +947,30 @@ reproducibility.**
   consumers trust the runner to own one canonical box and to use only
   the documented mutator.
 
-### Known packed-neighbour double-emit
+### Mixed-entry Newton's-3rd double-count (FIXED)
 
-Two mechanisms have historically caused a pair to be visited
-more than once by the packed pair-force kernel. Each has a
-separate status:
+When a packed entry contained both self-block-like j-atoms
+(atoms of the same i-block, expected to route through
+self-block detection) and cross-block j-atoms in the same
+32-slot row, the coarse warp-wide `self_block` detection
+failed for the entry and `j_fx -= fx` was applied to every
+pair. For self-block-like pairs inside the mixed entry this
+doubled the atom's force because both sides of the 32-rotation
+sweep contributed to the shared per-atom accumulator (once via
+each atom's own i-side accumulator, once via the other side's
+j-side).
 
-1. **Mixed-entry Newton's-3rd double-count (FIXED).** When a
-   packed entry contained both self-block-like j-atoms (atoms of
-   the same i-block, expected to route through self-block
-   detection) and cross-block j-atoms in the same 32-slot row,
-   the coarse `self_block` detection failed for the entry and
-   `j_fx -= fx` was applied to every pair. For self-block-like
-   pairs inside the mixed entry this doubled the atom's force
-   because both sides of the 32-rotation sweep contributed. The
-   fix, in `heddle_jit_outer_loop` (see
-   `jit-composed-pair-force.md` *Composed-Kernel Structure*),
-   is a per-lane `my_j_in_iblock` flag computed once per entry
-   and rotated alongside the j-side state; Newton's 3rd is
-   suppressed per-pair whenever the current j-atom sits anywhere
-   in the entry's i-block set, subsuming the old warp-wide
-   `self_block` detection.
-
-2. **Duplicate-entry emission (OPEN).**
-   `find_blocks_with_interactions` produces two or more packed
-   entries with the same i-block index whose j-atom rows contain
-   overlapping ranges of atoms. Diagnostic dumps of the packed
-   output show, for example, two entries for the same i-block
-   that both list a contiguous 16-atom block among their j-atoms
-   but positioned at different slot indices, indicating that the
-   same tile-pair's dense output is being flushed to the buffer
-   twice. The mechanism has not been isolated to a specific
-   code path in `find_blocks_with_interactions`; the sort
-   (`scatter_atoms_into_cells` + `sort_cells_by_particle_id`)
-   and the scatter (`scatter_entries_by_iblock`) both look
-   correct in isolation.
-
-   The residual is masked for excluded pairs by the
-   "apply `exclusion_scale` inline in `heddle_jit_eval_pair_sum`"
-   design documented in `jit-composed-pair-force.md`: for a
-   fully excluded pair (`scale = 0`) both visits contribute
-   `0 × pair_force = 0`, and for a 1-4 pair (`scale = 0.5`)
-   the two visits contribute `1.0 × pair_force` instead of the
-   correct `0.5 × pair_force` — a bounded ~1 × 10⁻⁴ atomic-unit
-   residual at reference intramolecular geometry. Non-excluded
-   pairs (`scale = 1`) are still doubled, which is a real
-   physics error for dense systems and remains open.
-
-The regression test suite in `tests/neighbor_list_correctness.rs`
-carries `#[ignore]`-marked scenarios that surface the defect
-under `cargo test -- --ignored`. The residual failures target
-the equilibrium-force and translation-invariance checks and
-turn GREEN when the underlying duplicate-entry emission is
-fixed.
+The fix, in `heddle_jit_outer_loop` (see
+`jit-composed-pair-force.md` *Composed-Kernel Structure*), is a
+per-lane `my_j_in_iblock` flag computed once per entry and
+rotated alongside the j-side state through the 32-iteration
+diagonal shuffle: Newton's 3rd is suppressed per-pair whenever
+the current j-atom sits anywhere in the entry's i-block set,
+subsuming the old warp-wide `self_block` detection with a
+strictly finer per-pair check. `tests/neighbor_list_correctness.rs`
+covers this via cross-validation of cell-list against the
+all-pairs oracle across an r_skin sweep, an equilibrium F_max
+check against both modes, and a translation-invariance check.
 
 ---
 

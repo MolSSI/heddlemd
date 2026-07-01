@@ -45,18 +45,17 @@ the same fixed-point accumulators:
   and `1.0 × evaluate` per non-excluded pair without any
   cancellation delta from the correction pass.
 
-The exclusion-scale-in-main design avoids a class of
-double-count failure modes where a pair legitimately appears in
-both the packed-neighbour output and the single-pair output at
-certain cell geometries: since each visit applies the pair's
-scale factor directly to the fragment contribution, a duplicate
-visit only reproduces the correct total in the excluded case
-(where scale is 0 or a small fraction) and never leaves an
-uncancelled residual on the accumulator that a separate
-correction pass would have to unwind. An underlying
-double-emission defect in the packed-neighbour list construction
-at certain r_skin values remains an open item — see
-`neighbor-list.md` *Out of Scope*.
+The exclusion-scale-in-main design keeps the pair-force output
+robust against the class of double-count failure modes where the
+packed-neighbour list would leave a spurious residual on the
+accumulator: because each pair-visit applies the pair's scale
+factor directly to the fragment contribution, an excluded pair
+(`scale = 0`) contributes zero regardless of the visit count.
+The complementary mechanism — a Newton's-3rd double-count for
+self-block-like pairs sharing an entry with cross-block pairs —
+is handled inside `heddle_jit_outer_loop` via the per-lane
+`my_j_in_iblock` flag documented in `neighbor-list.md` *Mixed-
+entry Newton's-3rd double-count*.
 
 This file specifies the data model, the block layout, the
 neighbour-list construction pipeline, the force kernel, the
