@@ -362,11 +362,11 @@
     "type": "scenario"
   },
   "rq-02abafdd": {
-    "decl": "#### Single-Pair and Exclusion-Correction Passes",
+    "decl": "#### Single-Pair Pass",
     "file": "forces/packed-neighbour-pair-force",
     "level": 4,
     "refs": [],
-    "title": "Single-Pair and Exclusion-Correction Passes",
+    "title": "Single-Pair Pass",
     "type": "section"
   },
   "rq-02bde767": {
@@ -425,7 +425,7 @@
     "type": "api-item"
   },
   "rq-0314caab": {
-    "decl": "Scenario: Single-pair and correction entry points carry no launch bounds",
+    "decl": "Scenario: Single-pair entry points carry no launch bounds",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -433,7 +433,7 @@
         "kind": "code"
       }
     ],
-    "title": "Single-pair and correction entry points carry no launch bounds",
+    "title": "Single-pair entry points carry no launch bounds",
     "type": "scenario"
   },
   "rq-032b4b79": {
@@ -661,14 +661,6 @@
     ],
     "title": "Explicit init velocities override sampled velocities",
     "type": "scenario"
-  },
-  "rq-04fdeac5": {
-    "decl": "### Exclusion-Correction Pass",
-    "file": "forces/packed-neighbour-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "Exclusion-Correction Pass",
-    "type": "section"
   },
   "rq-0519e35c": {
     "decl": "Scenario: New state has zero-initialised potential_energies and virials",
@@ -1823,13 +1815,6 @@
     ],
     "title": "StageStats",
     "type": "api-item"
-  },
-  "rq-0dc4e38e": {
-    "decl": "Scenario: Correction kernel is a no-op",
-    "file": "forces/jit-composed-pair-force",
-    "refs": [],
-    "title": "Correction kernel is a no-op",
-    "type": "scenario"
   },
   "rq-0dc50ce0": {
     "decl": "Scenario: Reject a phase name containing non-ASCII characters",
@@ -5217,6 +5202,18 @@
     "title": "minimum_image of a displacement that requires b-tilt cancellation",
     "type": "scenario"
   },
+  "rq-26204244": {
+    "decl": "Scenario: Snapshot's device readback is bounded to the counts and the four owned buffers",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Snapshot's device readback is bounded to the counts and the four owned buffers",
+    "type": "scenario"
+  },
   "rq-2647cb7e": {
     "decl": "### CUDA Kernels",
     "file": "forces/packed-neighbour-pair-force",
@@ -6572,13 +6569,6 @@
     "title": "supports_constraints == false suppresses all hook insertion",
     "type": "scenario"
   },
-  "rq-30a85bc9": {
-    "decl": "Scenario: excluded_pair_atoms is constant across the simulation",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "excluded_pair_atoms is constant across the simulation",
-    "type": "scenario"
-  },
   "rq-30c21c70": {
     "decl": "- `LintOverall` — `enum { Ok, Fail }`. `LintReport::overall` is `Ok`",
     "file": "simulation-runner",
@@ -7256,6 +7246,18 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Real-space slot produces zero force on an excluded pair (scale_coul=0)",
+    "type": "scenario"
+  },
+  "rq-372f4581": {
+    "decl": "Scenario: Packed-only neighbour list is enumerable",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Packed-only neighbour list is enumerable",
     "type": "scenario"
   },
   "rq-375aba37": {
@@ -8546,13 +8548,6 @@
     "title": "PostForcePerParticle",
     "type": "api-item"
   },
-  "rq-41ba5dca": {
-    "decl": "- `heddle_jit_composed_pair_force_correct_f` /",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "heddle_jit_composed_pair_force_correct_f",
-    "type": "api-item"
-  },
   "rq-41eb5e02": {
     "decl": "#### Other attributes",
     "file": "io/init-state-file",
@@ -8727,6 +8722,18 @@
     "refs": [],
     "title": "Diagnostic log columns",
     "type": "section"
+  },
+  "rq-44385733": {
+    "decl": "Scenario: ForceField carries no per-excluded-pair state",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ForceField carries no per-excluded-pair state",
+    "type": "scenario"
   },
   "rq-443a91da": {
     "decl": "# atom_j is the centre (vertex) atom; atom_i and atom_k are the wings.",
@@ -10098,6 +10105,18 @@
     "title": "Sub-step Execution",
     "type": "section"
   },
+  "rq-5214bef3": {
+    "decl": "Scenario: Composer emits no exclusion-correction entry points",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Composer emits no exclusion-correction entry points",
+    "type": "scenario"
+  },
   "rq-52204841": {
     "decl": "- `SettleParams` — typed deserialiser for the `[[constraint_types]]` entry",
     "file": "integration/settle",
@@ -10388,7 +10407,12 @@
   "rq-54aec894": {
     "decl": "Scenario: Packed-neighbour pass dispatches to the exclusion-scaled evaluator",
     "file": "forces/jit-composed-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Packed-neighbour pass dispatches to the exclusion-scaled evaluator",
     "type": "scenario"
   },
@@ -11670,6 +11694,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-5f067d09": {
+    "decl": "Scenario: Sparse-only neighbour list is enumerable",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Sparse-only neighbour list is enumerable",
+    "type": "scenario"
   },
   "rq-5f1d5034": {
     "decl": "Scenario: Reject `n_bins = 0`",
@@ -13630,6 +13666,18 @@
     "title": "Plan walk on empty Langevin state is a no-op",
     "type": "scenario"
   },
+  "rq-6eaf3e99": {
+    "decl": "- `PairSnapshot::iter(&self) -> impl Iterator<Item = (u32, u32)>`",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PairSnapshot",
+    "type": "api-item"
+  },
   "rq-6eb18608": {
     "decl": "- `lint_analyses_with_registries(config_path: &Path, registries: &Registries) -> LintReport`",
     "file": "analysis/framework",
@@ -14345,6 +14393,22 @@
       }
     ],
     "title": "integrator.execute receiving ForceEval with a class also surfaces UnexpectedSubStep",
+    "type": "scenario"
+  },
+  "rq-751f726a": {
+    "decl": "Scenario: len equals the number of pairs the iterator yields",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "len equals the number of pairs the iterator yields",
     "type": "scenario"
   },
   "rq-75297a48": {
@@ -16678,6 +16742,18 @@
     "title": "MissingPostForcePerParticleFragment",
     "type": "api-item"
   },
+  "rq-88b287d5": {
+    "decl": "Scenario: pair_snapshot returns all packed and sparse pairs, deduplicated, as (min, max)",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pair_snapshot returns all packed and sparse pairs, deduplicated, as (min, max)",
+    "type": "scenario"
+  },
   "rq-88e3ac79": {
     "decl": "Scenario: Switching integrator.kind changes the trajectory",
     "file": "simulation-runner",
@@ -18221,7 +18297,12 @@
   "rq-95f0812c": {
     "decl": "Scenario: Single-pair pass dispatches to the exclusion-scaled evaluator",
     "file": "forces/jit-composed-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Single-pair pass dispatches to the exclusion-scaled evaluator",
     "type": "scenario"
   },
@@ -19222,10 +19303,10 @@
     "type": "scenario"
   },
   "rq-9e08c8b0": {
-    "decl": "Scenario: Single-pair and exclusion-correction passes unaffected by SPC",
+    "decl": "Scenario: Single-pair pass unaffected by SPC",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Single-pair and exclusion-correction passes unaffected by SPC",
+    "title": "Single-pair pass unaffected by SPC",
     "type": "scenario"
   },
   "rq-9e09673b": {
@@ -19656,6 +19737,18 @@
     "refs": [],
     "title": "Step Plan",
     "type": "section"
+  },
+  "rq-a0ab0088": {
+    "decl": "- `PairSnapshot` — host-side owned enumeration of the pair set",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PairSnapshot",
+    "type": "api-item"
   },
   "rq-a0b746c6": {
     "decl": "Scenario: log_column_names returns [\"berendsen_conserved\"]",
@@ -21517,10 +21610,15 @@
     "type": "api-item"
   },
   "rq-b099ff28": {
-    "decl": "Scenario: Composer emits an exclusion-scaled evaluator and a no-op correction evaluator",
+    "decl": "Scenario: Composer emits an exclusion-scaled evaluator",
     "file": "forces/jit-composed-pair-force",
-    "refs": [],
-    "title": "Composer emits an exclusion-scaled evaluator and a no-op correction evaluator",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Composer emits an exclusion-scaled evaluator",
     "type": "scenario"
   },
   "rq-b0b4c220": {
@@ -22066,10 +22164,10 @@
     "type": "scenario"
   },
   "rq-b49bfdff": {
-    "decl": "Scenario: Packed-neighbour pass treats every pair as scale 1.0",
+    "decl": "Scenario: Packed-neighbour pass applies exclusion_scale inline",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Packed-neighbour pass treats every pair as scale 1.0",
+    "title": "Packed-neighbour pass applies exclusion_scale inline",
     "type": "scenario"
   },
   "rq-b4bb7096": {
@@ -22165,6 +22263,18 @@
     "refs": [],
     "title": "Skin-distance contract under batched replay",
     "type": "section"
+  },
+  "rq-b5b33e00": {
+    "decl": "- `NeighborListState::pair_snapshot(&self, device: &Arc<CudaDevice>)",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListState",
+    "type": "api-item"
   },
   "rq-b5c18e6b": {
     "decl": "- `NeighborListState` adds the fields documented under *Atom",
@@ -23439,13 +23549,6 @@
     "title": "Class-Combine Kernel",
     "type": "section"
   },
-  "rq-c123c82c": {
-    "decl": "Scenario: excluded_pair_atoms preserves canonical ExclusionList order",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "excluded_pair_atoms preserves canonical ExclusionList order",
-    "type": "scenario"
-  },
   "rq-c129167f": {
     "decl": "Scenario: A run with no Constraint slot active leaves constraint distances drifting",
     "file": "integration/settle",
@@ -24500,6 +24603,18 @@
     ],
     "title": "run_analyses_with_registries",
     "type": "api-item"
+  },
+  "rq-c9a8df0f": {
+    "decl": "Scenario: Empty neighbour list produces an empty snapshot",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Empty neighbour list produces an empty snapshot",
+    "type": "scenario"
   },
   "rq-c9ac8000": {
     "decl": "- `BondedPotential::bonded_scratch(&self) -> BondedScratchView<'_>`",
@@ -28167,6 +28282,18 @@
     "title": "File with velo:R:3:image:I:3 parses both blocks in order",
     "type": "scenario"
   },
+  "rq-e79cb5b5": {
+    "decl": "- `PairSnapshot::len(&self) -> usize` — returns the number of <!-- -->",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PairSnapshot",
+    "type": "api-item"
+  },
   "rq-e7b74f7a": {
     "decl": "### Influence function",
     "file": "forces/spme",
@@ -28912,6 +29039,22 @@
     "title": "Units",
     "type": "section"
   },
+  "rq-edbd7063": {
+    "decl": "Scenario: Iterating the same snapshot twice yields the same pair sequence",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Iterating the same snapshot twice yields the same pair sequence",
+    "type": "scenario"
+  },
   "rq-ede17d32": {
     "decl": "- `SimulationBox::flush_from_device(&mut self) -> Result<(), SimulationBoxError>`",
     "file": "simulation-box",
@@ -29627,6 +29770,18 @@
     "title": "lattice_device_mut bumps generation without updating host fields",
     "type": "scenario"
   },
+  "rq-f2641eaa": {
+    "decl": "Scenario: A pair reachable from both representations is yielded exactly once",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A pair reachable from both representations is yielded exactly once",
+    "type": "scenario"
+  },
   "rq-f2673343": {
     "decl": "### Forward FFT",
     "file": "forces/spme",
@@ -30072,6 +30227,19 @@
     ],
     "title": "Minimizer",
     "type": "api-item"
+  },
+  "rq-f6b6f93f": {
+    "decl": "### Iteration Semantics <!-- -->",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Iteration Semantics <!-- -->",
+    "type": "section"
   },
   "rq-f6d45062": {
     "decl": "## Real-space slot",

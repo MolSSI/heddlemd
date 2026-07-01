@@ -83,8 +83,6 @@ pub enum CutoffHandling {
 const MODULE_NAME: &str = "heddle_jit_composed_pair_force";
 const F_ENTRY: &str = "heddle_jit_composed_pair_force_f";
 const FEV_ENTRY: &str = "heddle_jit_composed_pair_force_fev";
-const F_CORRECT_ENTRY: &str = "heddle_jit_composed_pair_force_correct_f";
-const FEV_CORRECT_ENTRY: &str = "heddle_jit_composed_pair_force_correct_fev";
 const F_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_f";
 const FEV_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_fev";
 
@@ -837,19 +835,12 @@ pub struct JitComposedPairForce {
     pub fragment_labels: Vec<&'static str>,
     pub pair_force_f: CudaFunction,
     pub pair_force_fev: CudaFunction,
-    /// Per-pair exclusion-correction entry point (`AggregateLevel::ForcesOnly`).
-    /// Launched after the main pair-force kernel when the framework's
-    /// `excluded_pair_count` is non-zero; each thread handles one
-    /// excluded pair and contributes `(scale − 1) × evaluate` to both
-    /// atoms' fixed-point slots.
-    pub correction_f: CudaFunction,
-    /// `AggregateLevel::ForcesAndScalars` variant of `correction_f`.
-    pub correction_fev: CudaFunction,
     /// Per-pair single-pair entry point (`AggregateLevel::ForcesOnly`).
     /// Launched after the main pair-force kernel when the neighbour
     /// list's `single_pairs_count` is non-zero; each thread handles
-    /// one sparse-tile-extracted pair and contributes `+1 × evaluate`
-    /// to both atoms' fixed-point slots (Newton's 3rd via `±`).
+    /// one sparse-tile-extracted pair and contributes the fragment's
+    /// scale-multiplied per-pair contribution to both atoms'
+    /// fixed-point slots (Newton's 3rd via `±`).
     pub single_pair_f: CudaFunction,
     /// `AggregateLevel::ForcesAndScalars` variant of `single_pair_f`.
     pub single_pair_fev: CudaFunction,
@@ -898,8 +889,6 @@ impl JitComposedPairForce {
                 &[
                     F_ENTRY,
                     FEV_ENTRY,
-                    F_CORRECT_ENTRY,
-                    FEV_CORRECT_ENTRY,
                     F_SINGLE_ENTRY,
                     FEV_SINGLE_ENTRY,
                 ],
@@ -911,12 +900,6 @@ impl JitComposedPairForce {
         let pair_force_fev = device
             .get_func(MODULE_NAME, FEV_ENTRY)
             .expect("composed pair-force kernel _fev entry was just loaded");
-        let correction_f = device
-            .get_func(MODULE_NAME, F_CORRECT_ENTRY)
-            .expect("composed pair-force correction _f entry was just loaded");
-        let correction_fev = device
-            .get_func(MODULE_NAME, FEV_CORRECT_ENTRY)
-            .expect("composed pair-force correction _fev entry was just loaded");
         let single_pair_f = device
             .get_func(MODULE_NAME, F_SINGLE_ENTRY)
             .expect("composed pair-force single-pair _f entry was just loaded");
@@ -928,8 +911,6 @@ impl JitComposedPairForce {
             fragment_labels: fragments.iter().map(|f| f.label).collect(),
             pair_force_f,
             pair_force_fev,
-            correction_f,
-            correction_fev,
             single_pair_f,
             single_pair_fev,
         })
@@ -973,46 +954,6 @@ impl JitComposedPairForce {
         // Keep `builder.storage` alive across the launch so the
         // pointers in `kernel_params` remain valid until cuLaunchKernel
         // returns.
-        drop(builder.storage);
-        Ok(())
-    }
-
-    /// Launch the per-pair exclusion-correction kernel over
-    /// `excluded_pair_count` pairs. One thread per pair, block size
-    /// 256. `builder` must be pre-populated with the correction
-    /// kernel's common args (positions, excluded_pair_atoms,
-    /// excluded_pair_count, lattice, fixed-point accumulators), the
-    /// per-fragment args in canonical slot order, and the trailing
-    /// `n` arg.
-    ///
-    /// # Safety
-    /// `builder`'s argument list must match the correction kernel's
-    /// entry-point signature exactly.
-    pub unsafe fn launch_correction(
-        &self,
-        excluded_pair_count: u32,
-        use_fev: bool,
-        mut builder: ForceLaunchBuilder,
-    ) -> Result<(), GpuError> {
-        if excluded_pair_count == 0 {
-            drop(builder.storage);
-            return Ok(());
-        }
-        let block_size: u32 = 256;
-        let cfg = LaunchConfig {
-            grid_dim: (excluded_pair_count.div_ceil(block_size), 1, 1),
-            block_dim: (block_size, 1, 1),
-            shared_mem_bytes: 0,
-        };
-        let func = if use_fev {
-            self.correction_fev.clone()
-        } else {
-            self.correction_f.clone()
-        };
-        unsafe {
-            func.launch(cfg, &mut builder.kernel_params)
-                .map_err(GpuError::from)?;
-        }
         drop(builder.storage);
         Ok(())
     }
@@ -1183,11 +1124,10 @@ fn compose_source(
     // applied after this function returns; per-fragment cutoff guards
     // are emitted here according to each fragment's CutoffHandling.
     //
-    // No `exclusion_scale` is called here: the packed-neighbour list
-    // entries Loop 2 visits are implicitly scale 1.0 in this
-    // evaluator. Excluded pairs are corrected by the per-pair
-    // correction kernel, which calls each fragment's
-    // `exclusion_scale(i, j)` exactly once per excluded pair.
+    // Each fragment's `exclusion_scale(i, j)` is called and its
+    // scale multiplied into the fragment's `(factor, energy, virial)`
+    // inline. Non-excluded pairs get a multiply-by-1.0; excluded
+    // pairs contribute `scale × evaluate` directly.
     s.push_str("\ntemplate <bool WriteEv>\n");
     s.push_str("__device__ static inline void heddle_jit_eval_pair_sum(\n");
     s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
@@ -1252,32 +1192,9 @@ fn compose_source(
     }
     s.push_str("}\n");
 
-    // Per-pair correction body: retained as a no-op. The main
-    // pair-force kernel now applies each fragment's
-    // `exclusion_scale(i, j)` directly to its own contribution (see
-    // `heddle_jit_eval_pair_sum`), so no separate cancellation pass
-    // is required. The correction kernel launch site is preserved for
-    // interface compatibility with the JIT module handles; the
-    // per-pair correction body is emitted so that any downstream tool
-    // walking the source still finds a well-formed function, and it
-    // writes zero deltas.
     let _ = max_cutoff;
-    let _ = fragments;
-    s.push_str("\ntemplate <bool WriteEv>\n");
-    s.push_str("__device__ static inline void heddle_jit_eval_pair_correction(\n");
-    s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
-    s.push_str(
-        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j,\n",
-    );
-    s.push_str("    Real &factor, Real &energy, Real &virial)\n");
-    s.push_str("{\n");
-    s.push_str("    factor = R(0.0); energy = R(0.0); virial = R(0.0);\n");
-    s.push_str("    (void) composite; (void) r2; (void) inv_r; (void) r; (void) qi; (void) qj;\n");
-    s.push_str("    (void) i_type; (void) j_type; (void) i; (void) j;\n");
-    s.push_str("}\n");
 
     s.push_str(OUTER_LOOP_TEMPLATE);
-    s.push_str(CORRECTION_LOOP_TEMPLATE);
     s.push_str(SINGLE_PAIR_LOOP_TEMPLATE);
 
     // _f / _fev entry points. Each evaluates the single-periodic-copy
@@ -1288,9 +1205,6 @@ fn compose_source(
     // Copy Fast Path*.
     emit_entry_point(&mut s, fragments, F_ENTRY, false);
     emit_entry_point(&mut s, fragments, FEV_ENTRY, true);
-    // Per-pair correction entry points
-    emit_correction_entry_point(&mut s, fragments, F_CORRECT_ENTRY, false);
-    emit_correction_entry_point(&mut s, fragments, FEV_CORRECT_ENTRY, true);
     // Per-pair single-pair entry points
     emit_single_pair_entry_point(&mut s, fragments, F_SINGLE_ENTRY, false);
     emit_single_pair_entry_point(&mut s, fragments, FEV_SINGLE_ENTRY, true);
@@ -1319,51 +1233,6 @@ fn compose_source(
         .replace("/*HEDDLE_JIT_TYPE_LOAD_PERPAIR*/", perpair_load);
 
     s
-}
-
-/// Emit the per-pair correction entry point. Takes the
-/// `excluded_pair_atoms` / `excluded_pair_count` pair as common args
-/// (in place of the packed-neighbour-list inputs the main entry point
-/// uses) and dispatches `heddle_jit_correction_loop`.
-fn emit_correction_entry_point(
-    s: &mut String,
-    fragments: &[PairForceFragment],
-    entry_name: &str,
-    write_ev: bool,
-) {
-    s.push_str("\nextern \"C\" __global__ void ");
-    s.push_str(entry_name);
-    s.push_str("(\n");
-    s.push_str("    const Real4 *posq,\n");
-    s.push_str("    const unsigned int *type_indices,\n");
-    s.push_str("    const unsigned int *excluded_pair_atoms,\n");
-    s.push_str("    unsigned int excluded_pair_count,\n");
-    s.push_str("    const Real *lattice,\n");
-    s.push_str("    unsigned long long *fast_force_x_fp,\n");
-    s.push_str("    unsigned long long *fast_force_y_fp,\n");
-    s.push_str("    unsigned long long *fast_force_z_fp,\n");
-    s.push_str("    unsigned long long *fast_energy_fp,\n");
-    s.push_str("    unsigned long long *fast_virial_fp,\n");
-    for f in fragments {
-        s.push_str(&f.entry_point_args);
-    }
-    s.push_str("    unsigned int n)\n");
-    s.push_str("{\n");
-    s.push_str("    HeddleJitComposedPairFunc composite;\n");
-    for f in fragments {
-        s.push_str(&f.functor_init_source);
-    }
-    s.push_str("    heddle_jit_correction_loop<");
-    s.push_str(if write_ev { "true" } else { "false" });
-    s.push_str(">(\n");
-    s.push_str("        composite, excluded_pair_atoms, excluded_pair_count,\n");
-    s.push_str("        posq,\n");
-    s.push_str("        type_indices,\n");
-    s.push_str("        lattice,\n");
-    s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
-    s.push_str("        fast_energy_fp, fast_virial_fp,\n");
-    s.push_str("        n);\n");
-    s.push_str("}\n");
 }
 
 /// Emit the per-pair single-pair entry point. Common args take the
@@ -1420,8 +1289,8 @@ fn emit_entry_point(
     // rq-3d7e3ff7 — `__launch_bounds__` caps registers on the
     // packed-neighbour pass so the SM keeps at least
     // PACKED_MIN_BLOCKS_PER_SM resident blocks, raising the
-    // latency-hiding warp count. The single-pair and correction passes
-    // (one thread per pair, not occupancy-limited) carry no such bound.
+    // latency-hiding warp count. The single-pair pass (one thread
+    // per pair, not occupancy-limited) carries no such bound.
     s.push_str("\nextern \"C\" __global__ void __launch_bounds__(");
     s.push_str(&BLOCK_SIZE.to_string());
     s.push_str(", ");
@@ -1961,112 +1830,13 @@ __device__ static inline void heddle_jit_outer_loop(
 }
 "#;
 
-// Per-pair exclusion-correction outer loop. One thread per excluded
-// pair listed in `excluded_pair_atoms`. The kernel evaluates each
-// fragment, scales by `(exclusion_scale(i, j) - 1)`, and atomic-adds
-// the resulting fixed-point contribution to both atoms' slots so the
-// per-atom totals match `scale × evaluate` once the main pair-force
-// kernel's `+1.0 × evaluate` contribution is summed in.
-//
-// Newton's 3rd: the pair adds the same magnitude to atom i and the
-// negation to atom j (per component). No diagonal shuffle, no warp
-// cooperation — every excluded pair is independent.
-const CORRECTION_LOOP_TEMPLATE: &str = r#"
-template <bool WriteEv>
-__device__ static inline void heddle_jit_correction_loop(
-    const HeddleJitComposedPairFunc &composite,
-    const unsigned int *excluded_pair_atoms,
-    unsigned int excluded_pair_count,
-    const Real4 *posq,
-    const unsigned int *type_indices,
-    const Real *lattice,
-    unsigned long long *fast_force_x_fp,
-    unsigned long long *fast_force_y_fp,
-    unsigned long long *fast_force_z_fp,
-    unsigned long long *fast_energy_fp,
-    unsigned long long *fast_virial_fp,
-    unsigned int n)
-{
-  unsigned int pair_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (pair_idx >= excluded_pair_count) return;
-  unsigned int atom_i = excluded_pair_atoms[2u * pair_idx];
-  unsigned int atom_j = excluded_pair_atoms[2u * pair_idx + 1u];
-  if (atom_i >= n || atom_j >= n) return;
-
-  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
-  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
-
-  Real4 pq_i = posq[atom_i];
-  Real4 pq_j = posq[atom_j];
-  Real qi = pq_i.w;
-  Real qj = pq_j.w;
-  // Per-atom particle-type indices for this sparse pair. One thread
-  // per pair, so the indices are loaded directly (no amortization).
-  // rq-b10f28d7 rq-61fa8b93
-  unsigned int i_type = 0u;
-  unsigned int j_type = 0u;
-  /*HEDDLE_JIT_TYPE_LOAD_PERPAIR*/
-
-  Real dx = pq_i.x - pq_j.x;
-  Real dy = pq_i.y - pq_j.y;
-  Real dz = pq_i.z - pq_j.z;
-  heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
-  Real r2 = dx * dx + dy * dy + dz * dz;
-  Real inv_r = Real_rsqrt(r2);
-  Real r = r2 * inv_r;
-
-  // Outer max-cutoff mask: pairs past the global cutoff have already
-  // been suppressed by the main kernel's mask (so the correction
-  // applies `(scale − 1) × 0 = 0` here too). Match the same mask
-  // shape so the correction is bit-exact zero outside the cutoff.
-  Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
-
-  Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
-  heddle_jit_eval_pair_correction<WriteEv>(
-      composite, r2, inv_r, r, qi, qj, i_type, j_type, atom_i, atom_j, factor, energy, virial);
-  factor *= cutoff_mask;
-  if (WriteEv) {
-    energy *= cutoff_mask;
-    virial *= cutoff_mask;
-  }
-
-  Real fx = factor * dx;
-  Real fy = factor * dy;
-  Real fz = factor * dz;
-
-  // i-side: + (correction factor) × displacement.
-  heddle_jit_atomic_add_fp(fast_force_x_fp, atom_i,  fx);
-  heddle_jit_atomic_add_fp(fast_force_y_fp, atom_i,  fy);
-  heddle_jit_atomic_add_fp(fast_force_z_fp, atom_i,  fz);
-  // j-side: − (correction factor) × displacement (Newton's 3rd).
-  heddle_jit_atomic_add_fp(fast_force_x_fp, atom_j, -fx);
-  heddle_jit_atomic_add_fp(fast_force_y_fp, atom_j, -fy);
-  heddle_jit_atomic_add_fp(fast_force_z_fp, atom_j, -fz);
-
-  if (WriteEv) {
-    Real he = energy * R(0.5);
-    Real hw = virial * R(0.5);
-    heddle_jit_atomic_add_fp(fast_energy_fp, atom_i, he);
-    heddle_jit_atomic_add_fp(fast_energy_fp, atom_j, he);
-    heddle_jit_atomic_add_fp(fast_virial_fp, atom_i, hw);
-    heddle_jit_atomic_add_fp(fast_virial_fp, atom_j, hw);
-  }
-}
-"#;
-
 // Per-pair sparse-tile outer loop. One thread per entry in
 // `single_pair_atoms`. Reads the canonical (i, j) atom IDs, computes
-// (dx, dy, dz, r2, inv_r, r), invokes the no-exclusion evaluator
-// (heddle_jit_eval_pair_sum), applies the branchless max-cutoff
+// (dx, dy, dz, r2, inv_r, r), invokes the per-pair evaluator
+// (`heddle_jit_eval_pair_sum`, which multiplies by the fragment's
+// `exclusion_scale(i, j)` inline), applies the branchless max-cutoff
 // mask, and atomic-adds the per-fragment Newton's-3rd-law pair
 // contribution to both atoms' fixed-point slots.
-//
-// Treats every visited pair as scale 1.0 — same semantics as the
-// packed-neighbour pass. Excluded pairs that happen to land in
-// `single_pair_atoms` are corrected by the exclusion-correction
-// pass, which sees `(scale − 1.0) × evaluate`. Sum of all three
-// passes: `scale × evaluate` per excluded pair, `1.0 × evaluate`
-// per non-excluded pair.
 const SINGLE_PAIR_LOOP_TEMPLATE: &str = r#"
 template <bool WriteEv>
 __device__ static inline void heddle_jit_single_pair_loop(
@@ -2909,7 +2679,7 @@ mod launch_bounds_tests {
 
     // rq-0314caab
     #[test]
-    fn single_pair_and_correction_entry_points_have_no_launch_bounds() {
+    fn single_pair_entry_points_have_no_launch_bounds() {
         let src = composed_source_for_inspection();
         // Only the two packed-neighbour entry points carry launch bounds.
         assert_eq!(
@@ -2917,17 +2687,141 @@ mod launch_bounds_tests {
             2,
             "exactly the two packed-neighbour entry points carry launch bounds"
         );
-        for name in [
-            F_SINGLE_ENTRY,
-            FEV_SINGLE_ENTRY,
-            F_CORRECT_ENTRY,
-            FEV_CORRECT_ENTRY,
-        ] {
+        for name in [F_SINGLE_ENTRY, FEV_SINGLE_ENTRY] {
             assert!(
                 src.contains(&format!("void {name}(")),
                 "entry point {name} should be declared `void {name}(` with no launch bounds"
             );
         }
+    }
+
+    // rq-5214bef3
+    #[test]
+    fn composer_emits_no_correction_entry_points() {
+        let src = composed_source_for_inspection();
+        // No _correct_f / _correct_fev entry points appear anywhere in
+        // the emitted source, and no per-pair `heddle_jit_eval_pair_correction`
+        // function is emitted.
+        for needle in ["_correct_f", "_correct_fev", "heddle_jit_eval_pair_correction"] {
+            assert!(
+                !src.contains(needle),
+                "composed source unexpectedly contains `{needle}` — the correction pass is retired"
+            );
+        }
+        // The composed module exposes exactly four extern "C" entry
+        // points: the packed-neighbour `_f`/`_fev` and the single-pair
+        // `_single_f`/`_single_fev`.
+        let extern_c_count = src.matches("extern \"C\"").count();
+        assert_eq!(
+            extern_c_count, 4,
+            "composed source must expose exactly four extern \"C\" entry points; got {extern_c_count}",
+        );
+        for name in [F_ENTRY, FEV_ENTRY, F_SINGLE_ENTRY, FEV_SINGLE_ENTRY] {
+            assert!(
+                src.contains(&format!("{name}(")),
+                "expected entry point `{name}` in composed source"
+            );
+        }
+    }
+
+    fn minimal_fragment(label: &'static str) -> PairForceFragment {
+        let name: &'static str = Box::leak(format!("XSF_{label}").into_boxed_str());
+        let functor_source = format!(
+            r#"
+struct {n} {{
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const {{ return R(0.0); }}
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
+                                     Real &factor, Real &energy, Real &virial) const {{
+        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+    }}
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
+}};
+"#,
+            n = name
+        );
+        PairForceFragment {
+            label,
+            functor_struct_name: name,
+            functor_source,
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+            cutoff: CutoffHandling::Uniform(1.0 as Real),
+            consumes_type_index: false,
+        }
+    }
+
+    // rq-b099ff28
+    #[test]
+    fn composer_emits_exclusion_scaled_evaluator() {
+        // The composed source contains a per-pair evaluator that calls
+        // every fragment's `exclusion_scale(i, j)` and multiplies its
+        // `(factor, energy, virial)` by that scale inline. A single
+        // fragment is enough to observe one such call.
+        let src = compose_source(&[minimal_fragment("a")], 1.0 as Real);
+        assert!(
+            src.contains("heddle_jit_eval_pair_sum"),
+            "composer must emit the `heddle_jit_eval_pair_sum` evaluator"
+        );
+        assert!(
+            src.contains(".exclusion_scale("),
+            "evaluator must call `.exclusion_scale(i, j)` on the fragment"
+        );
+        assert!(
+            src.contains("ex_scale"),
+            "evaluator must multiply the fragment's contribution by the returned scale"
+        );
+    }
+
+    // rq-54aec894
+    #[test]
+    fn packed_neighbour_pass_dispatches_to_exclusion_scaled_evaluator() {
+        let src = composed_source_for_inspection();
+        // The packed-neighbour outer loop's inner body calls
+        // `heddle_jit_eval_pair_sum`. Since the composer templates this
+        // as `heddle_jit_eval_pair_sum<WriteEv>(...)`, look for that
+        // dispatch substring.
+        assert!(
+            src.contains("heddle_jit_eval_pair_sum<WriteEv>"),
+            "packed-neighbour outer loop must dispatch to `heddle_jit_eval_pair_sum<WriteEv>`"
+        );
+    }
+
+    // rq-95f0812c
+    #[test]
+    fn single_pair_pass_dispatches_to_exclusion_scaled_evaluator() {
+        let src = composed_source_for_inspection();
+        // The single-pair outer loop lives in `SINGLE_PAIR_LOOP_TEMPLATE`
+        // and dispatches the same evaluator. Confirm the evaluator name
+        // appears in the file (both outer loops share it) and the
+        // single-pair loop function is present.
+        assert!(
+            src.contains("heddle_jit_single_pair_loop"),
+            "composer must emit `heddle_jit_single_pair_loop`"
+        );
+        assert!(
+            src.contains("heddle_jit_eval_pair_sum<WriteEv>"),
+            "single-pair loop must dispatch to `heddle_jit_eval_pair_sum<WriteEv>`"
+        );
+    }
+
+    // rq-44385733
+    #[test]
+    fn force_field_has_no_excluded_pair_state() {
+        // The `ForceField` struct exposes no field named
+        // `excluded_pair_atoms` or `excluded_pair_count`. This test
+        // enforces the invariant at compile time via a source
+        // inspection: the shape check is not GPU-dependent so it can
+        // live in a pure unit test.
+        let src = std::fs::read_to_string("src/forces/mod.rs")
+            .expect("src/forces/mod.rs is present for inspection");
+        assert!(
+            !src.contains("excluded_pair_atoms"),
+            "src/forces/mod.rs unexpectedly references `excluded_pair_atoms`"
+        );
+        assert!(
+            !src.contains("excluded_pair_count"),
+            "src/forces/mod.rs unexpectedly references `excluded_pair_count`"
+        );
     }
 
     // rq-c406ffcd
@@ -3043,11 +2937,11 @@ struct {n} {{
         let inert = compose_source(&[frag("a", false)], 1.0 as Real);
         let n_consuming = consuming.matches("const unsigned int *type_indices,").count();
         let n_inert = inert.matches("const unsigned int *type_indices,").count();
-        // Six entry-point signatures (packed / correction / single-pair,
-        // each _f and _fev) plus their three loop-function signatures all
+        // Four entry-point signatures (packed / single-pair, each _f
+        // and _fev) plus their two loop-function signatures all
         // declare the common arg.
         assert!(
-            n_consuming >= 6,
+            n_consuming >= 4,
             "type_indices must be a common arg on every pair-force entry point"
         );
         // It is a common argument regardless of whether a fragment

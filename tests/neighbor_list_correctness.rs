@@ -34,7 +34,8 @@ use heddle_md::forces::topology::{Angle, Bond, Dihedral};
 use heddle_md::forces::{
     AggregateLevel, AngleList, BondList, DihedralList, Exclusion,
     ExclusionList, ForceField, HarmonicAngleBuilder, LennardJonesBuilder,
-    MorseBondedBuilder, PeriodicDihedralBuilder, PotentialRegistry,
+    MorseBondedBuilder, PairSnapshot, PeriodicDihedralBuilder,
+    PotentialRegistry,
 };
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{
@@ -1844,5 +1845,202 @@ fn translation_invariance_across_cell_boundary_shift() {
     assert!(
         (abs as f64) < 1.0e-5,
         "translation shift produced |ΔF_component| = {abs:e} au — much larger than legitimate float-rounding noise",
+    );
+}
+
+// --------------------------------------------------------------
+// PairSnapshot: canonical pair enumeration
+// (`rqm/forces/packed-neighbour-pair-force.md` — *Feature API* /
+// *Iteration Semantics* and their Gherkin scenarios)
+// --------------------------------------------------------------
+
+/// Build a `ForceField` on the default multi-molecule fixture and run
+/// a single force evaluation so the packed neighbour list is
+/// populated with both dense entries and sparse single-pairs.
+fn build_and_populate_packed_ff() -> (ForceField, ParticleBuffers) {
+    let gpu = init_device().unwrap();
+    let (state, lx, ly, lz) = small_multi_mol_state(42);
+    let sim_box = box_from_dims(&gpu, lx, ly, lz);
+    let (bl, al, dl, excl) = ethane_topology(64);
+    let r_skin = m_to_bohr(3.0e-10) as f64;
+    let mut ff = build_force_field(
+        &gpu,
+        &state,
+        &sim_box,
+        &bl,
+        &al,
+        &dl,
+        &excl,
+        &NeighborListConfig::CellList { r_skin },
+    );
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars)
+        .unwrap();
+    (ff, buffers)
+}
+
+/// Independent enumeration of the canonical unordered pair set from a
+/// populated `ForceField` — reads the packed and sparse buffers
+/// directly, in the same shape a downstream diagnostic would use if
+/// the snapshot API did not exist. Yields the reference set the
+/// `PairSnapshot` must match.
+fn reference_canonical_pair_set(ff: &ForceField) -> std::collections::BTreeSet<(u32, u32)> {
+    let n_atoms = ff.slots.len(); // unused – keep local scope tidy
+    let _ = n_atoms;
+    let nl = ff.neighbor_list.as_ref().expect("neighbour list present");
+    let packed = nl.packed.as_ref().expect("packed data present");
+    let device = &nl.device;
+    let counts = device
+        .dtoh_sync_copy(&packed.interaction_count)
+        .expect("interaction_count dtoh");
+    let n_entries = counts[0] as usize;
+    let n_singles = counts[1] as usize;
+    let sentinel = nl.particle_count as u32;
+
+    // Sorted particle IDs come from the cell-list.
+    let sorted_ids: Vec<u32> = if let heddle_md::forces::NeighborListMode::CellList(cl) = &nl.mode {
+        device
+            .dtoh_sync_copy(&cl.sorted_particle_ids)
+            .expect("sorted_particle_ids dtoh")
+    } else {
+        panic!("expected CellList mode")
+    };
+
+    let tiles: Vec<u32> = device
+        .dtoh_sync_copy(&packed.interacting_tiles)
+        .expect("interacting_tiles dtoh");
+    let atoms: Vec<u32> = device
+        .dtoh_sync_copy(&packed.sorted_interacting_atoms)
+        .expect("sorted_interacting_atoms dtoh");
+    let sparse: Vec<u32> = device
+        .dtoh_sync_copy(&packed.single_pair_atoms)
+        .expect("single_pair_atoms dtoh");
+
+    let mut out: std::collections::BTreeSet<(u32, u32)> = std::collections::BTreeSet::new();
+    for e in 0..n_entries {
+        let i_block = tiles[e] as usize;
+        for l in 0..32usize {
+            let sid_idx = i_block * 32 + l;
+            let i_atom = if sid_idx < sorted_ids.len() {
+                sorted_ids[sid_idx]
+            } else {
+                sentinel
+            };
+            if i_atom >= sentinel {
+                continue;
+            }
+            for r in 0..32usize {
+                let j_lane = (l + r) & 31;
+                let j_atom = atoms[e * 32 + j_lane];
+                if j_atom >= sentinel || j_atom == i_atom {
+                    continue;
+                }
+                let key = if i_atom < j_atom {
+                    (i_atom, j_atom)
+                } else {
+                    (j_atom, i_atom)
+                };
+                out.insert(key);
+            }
+        }
+    }
+    for k in 0..n_singles {
+        let a = sparse[2 * k];
+        let b = sparse[2 * k + 1];
+        if a >= sentinel || b >= sentinel || a == b {
+            continue;
+        }
+        let key = if a < b { (a, b) } else { (b, a) };
+        out.insert(key);
+    }
+    out
+}
+
+#[test] // rq-88b287d5
+fn pair_snapshot_matches_independent_canonical_enumeration() {
+    let (ff, _buffers) = build_and_populate_packed_ff();
+    let nl = ff.neighbor_list.as_ref().expect("neighbour list present");
+    let snapshot: PairSnapshot = nl
+        .pair_snapshot(&nl.device)
+        .expect("pair_snapshot dtoh");
+    let expected = reference_canonical_pair_set(&ff);
+    // Sanity: this fixture actually exercises both representations.
+    assert!(
+        !expected.is_empty(),
+        "test fixture must produce a non-empty pair set"
+    );
+    let actual: std::collections::BTreeSet<(u32, u32)> = snapshot.iter().collect();
+    assert_eq!(actual, expected);
+    for (i, j) in snapshot.iter() {
+        assert!(i < j, "yielded pair {:?} is not canonicalised (min < max)", (i, j));
+        assert!(
+            (j as usize) < nl.particle_count,
+            "yielded j = {j} out of range (n_atoms = {})",
+            nl.particle_count
+        );
+    }
+}
+
+#[test] // rq-edbd7063
+fn iterating_snapshot_twice_yields_same_pair_sequence() {
+    let (ff, _buffers) = build_and_populate_packed_ff();
+    let nl = ff.neighbor_list.as_ref().unwrap();
+    let snapshot = nl.pair_snapshot(&nl.device).unwrap();
+    let first: Vec<(u32, u32)> = snapshot.iter().collect();
+    let second: Vec<(u32, u32)> = snapshot.iter().collect();
+    assert_eq!(first, second);
+}
+
+#[test] // rq-751f726a
+fn snapshot_len_matches_iter_count_on_populated_fixture() {
+    let (ff, _buffers) = build_and_populate_packed_ff();
+    let nl = ff.neighbor_list.as_ref().unwrap();
+    let snapshot = nl.pair_snapshot(&nl.device).unwrap();
+    assert_eq!(snapshot.len(), snapshot.iter().count());
+}
+
+// rq-26204244 — the snapshot's dtoh surface is bounded to the live
+// interaction counts and the four owned buffers
+// (`interacting_tiles`, `sorted_interacting_atoms`,
+// `single_pair_atoms`, and `sorted_particle_ids`) and never touches
+// `neighbor_status`. Runtime instrumentation of CUDA driver calls is
+// not available in-tree; we assert the property by source inspection
+// instead.
+#[test] // rq-26204244
+fn pair_snapshot_body_uses_only_the_counts_and_four_owned_buffers() {
+    let src = std::fs::read_to_string("src/forces/neighbor_list.rs")
+        .expect("neighbor_list.rs is present for inspection");
+    let start = src
+        .find("pub fn pair_snapshot(")
+        .expect("pair_snapshot function present");
+    let body = &src[start..];
+    let end_marker = "impl PairSnapshot";
+    let end = body.find(end_marker).expect("PairSnapshot impl follows");
+    let body = &body[..end];
+    // Each of these buffer names must appear in the dtoh path.
+    for needle in [
+        "interaction_count",
+        "interacting_tiles",
+        "sorted_interacting_atoms",
+        "single_pair_atoms",
+        "sorted_particle_ids",
+    ] {
+        assert!(
+            body.contains(needle),
+            "pair_snapshot body must reference `{needle}` in its dtoh path"
+        );
+    }
+    // `neighbor_status` must not be read; it is a rebuild-time channel.
+    assert!(
+        !body.contains("neighbor_status"),
+        "pair_snapshot body must NOT reference `neighbor_status` (rebuild-time only)"
+    );
+    // Exactly five `dtoh_sync_copy` calls: one for the counts and one
+    // per owned buffer.
+    let n_dtoh = body.matches("dtoh_sync_copy").count();
+    assert_eq!(
+        n_dtoh, 5,
+        "pair_snapshot must issue exactly 5 dtoh_sync_copy calls; got {n_dtoh}",
     );
 }

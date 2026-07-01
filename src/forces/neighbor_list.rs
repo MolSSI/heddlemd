@@ -180,6 +180,33 @@ pub struct PreStepOutcome {
     pub reallocated: bool,
 }
 
+/// Host-side owned enumeration of the pair set represented by a
+/// `NeighborListState` at the time the snapshot was taken. See
+/// `rqm/forces/packed-neighbour-pair-force.md` *Feature API* and
+/// *Iteration Semantics*.
+///
+/// rq-a0ab0088
+#[derive(Debug, Clone)]
+pub struct PairSnapshot {
+    /// Per-entry i-block index; length equals `interacting_tiles_count`.
+    interacting_tiles: Vec<u32>,
+    /// Per-entry 32 j-atom IDs in the scattered i-block-contiguous
+    /// layout; length equals `interacting_tiles_count * 32`.
+    sorted_interacting_atoms: Vec<u32>,
+    /// Interleaved sparse-pair `[i0, j0, i1, j1, …]`; length equals
+    /// `2 * single_pairs_count`.
+    single_pair_atoms: Vec<u32>,
+    /// Cell-list sorted particle-ID view; length `n_blocks * 32`.
+    sorted_particle_ids: Vec<u32>,
+    /// Canonical `(min, max)` unordered pair list computed from the
+    /// four buffers at construction, deduplicated across the packed
+    /// dense and sparse representations, sorted in `(min, max)`
+    /// ascending order for deterministic iteration.
+    canonical_pairs: Vec<(u32, u32)>,
+    /// Number of real atoms; sentinel value for filtering.
+    n_atoms: u32,
+}
+
 // rq-b2d68288
 #[derive(Debug)]
 pub struct NeighborListState {
@@ -1325,6 +1352,206 @@ impl NeighborListState {
         }
         Ok(PreStepOutcome::default())
     }
+
+    /// Snapshot the pair set the packed-neighbour pipeline currently
+    /// represents. See `rqm/forces/packed-neighbour-pair-force.md`
+    /// *Feature API* / *Iteration Semantics*.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.mode` is `NeighborListMode::Trivial` or
+    /// `NeighborListMode::CellListOnly` — the snapshot API is scoped
+    /// to `CellList` mode.
+    // rq-b5b33e00
+    pub fn pair_snapshot(
+        &self,
+        device: &Arc<CudaDevice>,
+    ) -> Result<PairSnapshot, GpuError> {
+        let cl = match &self.mode {
+            NeighborListMode::CellList(cl) => cl,
+            NeighborListMode::Trivial => {
+                panic!("pair_snapshot requires NeighborListMode::CellList (got Trivial)");
+            }
+            NeighborListMode::CellListOnly(_) => {
+                panic!(
+                    "pair_snapshot requires NeighborListMode::CellList (got CellListOnly)"
+                );
+            }
+        };
+        let packed = self
+            .packed
+            .as_ref()
+            .expect("CellList mode always carries packed neighbour data");
+        let n_blocks = packed.n_blocks as usize;
+        let n_atoms = self.particle_count as u32;
+
+        // In `CellList` mode the live counts live on the device; read
+        // them as the first transfer so the remaining reads can be
+        // truncated to the live extent. In `Trivial` mode the counts
+        // are already host-cached by the rebuild, but the state is out
+        // of scope here — panic above catches that path.
+        let counts = device.dtoh_sync_copy(&packed.interaction_count)?;
+        let tiles_count = counts[0] as usize;
+        let singles_count = counts[1] as usize;
+
+        // Four host-facing device-to-host transfers, one per buffer,
+        // truncated to the live extent.
+        let interacting_tiles = if tiles_count == 0 {
+            Vec::new()
+        } else {
+            let sub = packed.interacting_tiles.slice(..tiles_count);
+            device.dtoh_sync_copy(&sub)?
+        };
+        let sorted_interacting_atoms = if tiles_count == 0 {
+            Vec::new()
+        } else {
+            let sub = packed.sorted_interacting_atoms.slice(..tiles_count * 32);
+            device.dtoh_sync_copy(&sub)?
+        };
+        let single_pair_atoms = if singles_count == 0 {
+            Vec::new()
+        } else {
+            let sub = packed.single_pair_atoms.slice(..singles_count * 2);
+            device.dtoh_sync_copy(&sub)?
+        };
+        let sorted_particle_ids = if n_blocks == 0 {
+            Vec::new()
+        } else {
+            let sub = cl.sorted_particle_ids.slice(..n_blocks * 32);
+            device.dtoh_sync_copy(&sub)?
+        };
+
+        let canonical_pairs = decode_canonical_pairs(
+            &interacting_tiles,
+            &sorted_interacting_atoms,
+            &single_pair_atoms,
+            &sorted_particle_ids,
+            n_atoms,
+        );
+
+        Ok(PairSnapshot {
+            interacting_tiles,
+            sorted_interacting_atoms,
+            single_pair_atoms,
+            sorted_particle_ids,
+            canonical_pairs,
+            n_atoms,
+        })
+    }
+}
+
+// rq-f6b6f93f — decode the four host-side buffers into the canonical
+// deduplicated pair list per *Iteration Semantics*: diagonal-shuffle
+// decode of the packed representation, plus the sparse pairs, filtered
+// against the sentinel `n_atoms`, and normalised to `(min, max)`.
+fn decode_canonical_pairs(
+    interacting_tiles: &[u32],
+    sorted_interacting_atoms: &[u32],
+    single_pair_atoms: &[u32],
+    sorted_particle_ids: &[u32],
+    n_atoms: u32,
+) -> Vec<(u32, u32)> {
+    use std::collections::BTreeSet;
+
+    let mut set: BTreeSet<(u32, u32)> = BTreeSet::new();
+
+    // Packed dense entries. For each entry `e` with i-block
+    // `interacting_tiles[e]`, iterate the 32 lanes (i-side) and, per
+    // lane, the 32 diagonal-shuffle rotations (j-side).
+    for (e, &i_block) in interacting_tiles.iter().enumerate() {
+        let i_block_start = (i_block as usize).checked_mul(32).expect("i-block index overflows usize");
+        for l in 0..32usize {
+            let sid_idx = i_block_start + l;
+            let i_atom = if sid_idx < sorted_particle_ids.len() {
+                sorted_particle_ids[sid_idx]
+            } else {
+                n_atoms
+            };
+            if i_atom >= n_atoms {
+                continue;
+            }
+            for r in 0..32usize {
+                let j_lane = (l + r) & 31;
+                let j_slot = e * 32 + j_lane;
+                let j_atom = if j_slot < sorted_interacting_atoms.len() {
+                    sorted_interacting_atoms[j_slot]
+                } else {
+                    n_atoms
+                };
+                if j_atom >= n_atoms || i_atom == j_atom {
+                    continue;
+                }
+                let key = if i_atom < j_atom {
+                    (i_atom, j_atom)
+                } else {
+                    (j_atom, i_atom)
+                };
+                set.insert(key);
+            }
+        }
+    }
+
+    // Sparse pairs.
+    for pair in single_pair_atoms.chunks_exact(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if a >= n_atoms || b >= n_atoms || a == b {
+            continue;
+        }
+        let key = if a < b { (a, b) } else { (b, a) };
+        set.insert(key);
+    }
+
+    set.into_iter().collect()
+}
+
+impl PairSnapshot {
+    /// Yields every unordered pair in the neighbour list exactly once
+    /// as a canonical `(u32, u32)` with `min < max`, in ascending
+    /// `(min, max)` order.
+    // rq-6eaf3e99
+    pub fn iter(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.canonical_pairs.iter().copied()
+    }
+
+    /// Number of canonical unordered pairs the iterator yields. O(1).
+    // rq-e79cb5b5
+    pub fn len(&self) -> usize {
+        self.canonical_pairs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.canonical_pairs.is_empty()
+    }
+
+    /// Live copy of `interacting_tiles`, truncated to
+    /// `interacting_tiles_count`. Exposed for tests and diagnostics.
+    pub fn interacting_tiles(&self) -> &[u32] {
+        &self.interacting_tiles
+    }
+
+    /// Live copy of `sorted_interacting_atoms`, truncated to
+    /// `interacting_tiles_count * 32`. Exposed for tests and
+    /// diagnostics.
+    pub fn sorted_interacting_atoms(&self) -> &[u32] {
+        &self.sorted_interacting_atoms
+    }
+
+    /// Live copy of `single_pair_atoms`, truncated to
+    /// `2 * single_pairs_count`. Exposed for tests and diagnostics.
+    pub fn single_pair_atoms(&self) -> &[u32] {
+        &self.single_pair_atoms
+    }
+
+    /// Live copy of `sorted_particle_ids`. Exposed for tests and
+    /// diagnostics.
+    pub fn sorted_particle_ids(&self) -> &[u32] {
+        &self.sorted_particle_ids
+    }
+
+    /// Sentinel value used for filtering (`n_atoms`).
+    pub fn n_atoms(&self) -> u32 {
+        self.n_atoms
+    }
 }
 
 // rq-dfad7218
@@ -1446,4 +1673,218 @@ crate::gpu_kernels! {
         SCATTER_POSITIONS_TO_TILE_ORDER = "scatter_positions_to_tile_order",
         FINALIZE_PACKED_FORCES          = "finalize_packed_forces",
     },
+}
+
+#[cfg(test)]
+mod pair_snapshot_decoder_tests {
+    use super::*;
+
+    // Small helper: build a `PairSnapshot` from hand-crafted host-side
+    // buffers via the decoder path, without any device access.
+    fn decode(
+        interacting_tiles: Vec<u32>,
+        sorted_interacting_atoms: Vec<u32>,
+        single_pair_atoms: Vec<u32>,
+        sorted_particle_ids: Vec<u32>,
+        n_atoms: u32,
+    ) -> PairSnapshot {
+        let canonical_pairs = decode_canonical_pairs(
+            &interacting_tiles,
+            &sorted_interacting_atoms,
+            &single_pair_atoms,
+            &sorted_particle_ids,
+            n_atoms,
+        );
+        PairSnapshot {
+            interacting_tiles,
+            sorted_interacting_atoms,
+            single_pair_atoms,
+            sorted_particle_ids,
+            canonical_pairs,
+            n_atoms,
+        }
+    }
+
+    // Two 32-atom i-blocks holding IDs [0..32) and [32..64).
+    fn two_full_iblocks_sorted_ids() -> Vec<u32> {
+        (0u32..64u32).collect()
+    }
+
+    // rq-c9a8df0f
+    #[test]
+    fn empty_neighbour_list_produces_empty_snapshot() {
+        let snap = decode(Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0);
+        assert_eq!(snap.len(), 0);
+        assert!(snap.is_empty());
+        assert_eq!(snap.iter().next(), None);
+    }
+
+    // rq-751f726a
+    #[test]
+    fn len_matches_iter_count() {
+        // One packed entry: i-block 0, j-atoms {5, 17, 23} on lanes
+        // {0, 1, 2}, sentinel elsewhere.
+        let mut ja = vec![64u32; 32];
+        ja[0] = 5;
+        ja[1] = 17;
+        ja[2] = 23;
+        let snap = decode(
+            vec![0u32],
+            ja,
+            Vec::new(),
+            two_full_iblocks_sorted_ids(),
+            64,
+        );
+        assert!(snap.len() > 0);
+        assert_eq!(snap.len(), snap.iter().count());
+    }
+
+    // rq-372f4581
+    #[test]
+    fn packed_only_neighbour_list_is_enumerable() {
+        // One packed entry pairing i-block 0 with j-atoms 32, 33, 34
+        // (from i-block 1), sentinel-padded on other lanes.
+        let mut ja = vec![64u32; 32];
+        ja[0] = 32;
+        ja[1] = 33;
+        ja[2] = 34;
+        let snap = decode(
+            vec![0u32],
+            ja,
+            Vec::new(),
+            two_full_iblocks_sorted_ids(),
+            64,
+        );
+        // Every (i, j) with i in i-block-0 (0..32) and j in {32, 33, 34}
+        // should appear once, canonicalised.
+        let pairs: Vec<(u32, u32)> = snap.iter().collect();
+        for i in 0u32..32 {
+            for &j in &[32u32, 33, 34] {
+                let key = if i < j { (i, j) } else { (j, i) };
+                assert!(
+                    pairs.contains(&key),
+                    "expected pair {:?} in packed-only snapshot",
+                    key
+                );
+            }
+        }
+        // No spurious pairs beyond the 32 × 3 = 96 canonical entries.
+        assert_eq!(pairs.len(), 32 * 3);
+        // Every yielded pair has i < j and both in-range.
+        for (i, j) in &pairs {
+            assert!(i < j);
+            assert!(*j < 64);
+        }
+    }
+
+    // rq-5f067d09
+    #[test]
+    fn sparse_only_neighbour_list_is_enumerable() {
+        // Three sparse pairs, some already canonical, one flipped, one
+        // duplicate that dedup must fold, plus a sentinel/self-pair
+        // that must be filtered.
+        let sparse = vec![
+            0, 5, // (0, 5)
+            7, 3, // (3, 7)  — reversed input, canonicalised on output
+            0, 5, // duplicate of (0, 5) — dedup folds
+            9, 9, // self-pair — filtered
+            2, 64, // sentinel j — filtered
+        ];
+        let snap = decode(
+            Vec::new(),
+            Vec::new(),
+            sparse,
+            two_full_iblocks_sorted_ids(),
+            64,
+        );
+        let pairs: Vec<(u32, u32)> = snap.iter().collect();
+        assert_eq!(pairs, vec![(0, 5), (3, 7)]);
+    }
+
+    // rq-f2641eaa
+    #[test]
+    fn pair_in_both_representations_yielded_once() {
+        // Packed entry contributes canonical pair (3, 32) among others.
+        let mut ja = vec![64u32; 32];
+        ja[3] = 32;
+        // Sparse-pair buffer also carries (3, 32).
+        let sparse = vec![3, 32];
+        let snap = decode(
+            vec![0u32],
+            ja,
+            sparse,
+            two_full_iblocks_sorted_ids(),
+            64,
+        );
+        let pairs: Vec<(u32, u32)> = snap.iter().collect();
+        let count = pairs.iter().filter(|&&p| p == (3, 32)).count();
+        assert_eq!(
+            count, 1,
+            "canonical pair (3, 32) reachable from both packed and sparse must be yielded exactly once"
+        );
+    }
+
+    // rq-edbd7063
+    #[test]
+    fn iterating_same_snapshot_twice_yields_same_sequence() {
+        let mut ja = vec![64u32; 32];
+        ja[0] = 32;
+        ja[1] = 33;
+        ja[5] = 40;
+        let sparse = vec![1, 15, 2, 3];
+        let snap = decode(
+            vec![0u32],
+            ja,
+            sparse,
+            two_full_iblocks_sorted_ids(),
+            64,
+        );
+        let first: Vec<(u32, u32)> = snap.iter().collect();
+        let second: Vec<(u32, u32)> = snap.iter().collect();
+        assert_eq!(first, second);
+    }
+
+    // rq-b5b33e00 — snapshot never emits an out-of-range or sentinel
+    // atom ID: the decoder filters both the i-side (via
+    // sorted_particle_ids) and the j-side (via the sentinel value
+    // n_atoms) before yielding.
+    #[test]
+    fn decoder_filters_sentinel_and_self_pairs() {
+        // I-block 0 carries only 3 real atoms (IDs 0, 1, 2); the other
+        // 29 lanes of sorted_particle_ids[0..32] are the sentinel.
+        let mut sorted_ids = vec![64u32; 64];
+        sorted_ids[0] = 0;
+        sorted_ids[1] = 1;
+        sorted_ids[2] = 2;
+        // j-atom slots hold [0, 1, 2, 3, sentinel, sentinel, ..., 5].
+        let mut ja = vec![64u32; 32];
+        ja[0] = 0;
+        ja[1] = 1;
+        ja[2] = 2;
+        ja[3] = 3;
+        ja[31] = 5;
+        let snap = decode(
+            vec![0u32],
+            ja,
+            Vec::new(),
+            sorted_ids,
+            64,
+        );
+        let pairs: Vec<(u32, u32)> = snap.iter().collect();
+        // Real i-atoms are {0, 1, 2}; real j-atoms are {0, 1, 2, 3, 5}.
+        // Legal pairs after (min, max) + i != j: (0,1), (0,2), (0,3),
+        // (0,5), (1,2), (1,3), (1,5), (2,3), (2,5).
+        let expected: Vec<(u32, u32)> = vec![
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (0, 5),
+            (1, 2),
+            (1, 3),
+            (1, 5),
+            (2, 3),
+            (2, 5),
+        ];
+        assert_eq!(pairs, expected);
+    }
 }

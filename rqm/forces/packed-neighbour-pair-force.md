@@ -34,23 +34,22 @@ the same fixed-point accumulators:
   applied inline (so excluded pairs contribute
   `scale × evaluate`). Same accumulator, same fixed-point
   semantics.
-- The **exclusion-correction pass** is retained as an ABI-stable
-  launch site over `ForceField.excluded_pair_atoms` (the topology
-  canonical excluded-pair list, documented in
-  `jit-composed-pair-force.md`), but its device body is a no-op —
-  the packed-neighbour and single-pair passes both call each
-  fragment's `exclusion_scale(i, j)` and multiply the fragment's
-  `(factor, energy, virial)` by that scale inline. Summed, the
-  two active passes yield `scale × evaluate` per excluded pair
-  and `1.0 × evaluate` per non-excluded pair without any
-  cancellation delta from the correction pass.
+
+Both passes apply the per-fragment exclusion scale inline via
+`exclusion_scale(i, j)`, which reads the per-atom exclusion table
+(`atom_excl_offsets`, `atom_excl_partners`, `atom_excl_scales`).
+Non-excluded pairs get a multiply-by-1.0 (a no-op); fully
+excluded pairs (`scale = 0`) contribute zero; OPLS-style
+fractional pairs (`scale = 0.5`) contribute half. No separate
+cancellation launch is issued.
 
 The exclusion-scale-in-main design keeps the pair-force output
-robust against the class of double-count failure modes where the
-packed-neighbour list would leave a spurious residual on the
-accumulator: because each pair-visit applies the pair's scale
-factor directly to the fragment contribution, an excluded pair
-(`scale = 0`) contributes zero regardless of the visit count.
+robust against the class of double-count failure modes where a
+separate cancellation pass would leave a spurious residual on
+the accumulator: because each pair-visit applies the pair's
+scale factor directly to the fragment contribution, an excluded
+pair (`scale = 0`) contributes zero regardless of the visit
+count.
 The complementary mechanism — a Newton's-3rd double-count for
 self-block-like pairs sharing an entry with cross-block pairs —
 is handled inside `heddle_jit_outer_loop` via the per-lane
@@ -257,25 +256,25 @@ rebuild.
 ## Exclusion Handling <!-- rq-03faaf24 -->
 
 The packed-neighbour data model carries no exclusion-tile, bitmask,
-or per-pair scale table. Excluded pairs flow through every pair
-pass as scale 1.0 and are corrected to the per-fragment scale by
-the exclusion-correction kernel documented in
-`jit-composed-pair-force.md` (*Correction-Pass Design*).
-
-The construction kernel does not filter excluded pairs out of
+or per-pair scale table on the neighbour-list side. The
+construction kernel does not filter excluded pairs out of
 `interacting_atoms`; doing so would require per-pair partner-list
-memory traffic at build time. Instead, the correction pass adds
-`(exclusion_scale(i, j) − 1.0) × evaluate(i, j)` once per
-canonical excluded pair, leaving `scale × evaluate` on the
-fixed-point accumulators after the main pair-force kernel has
-already added `1.0 × evaluate`.
+memory traffic at build time.
+
+Instead, both pair passes apply the per-fragment exclusion scale
+inline: each fragment's `evaluate(i, j)` output is multiplied by
+that fragment's `exclusion_scale(i, j)` before being folded into
+the fixed-point accumulator. Non-excluded pairs get a
+multiply-by-1.0; excluded pairs contribute
+`scale × evaluate(i, j)` directly, with no separate cancellation
+launch and no second pass over `atom_excl_partners`.
 
 Per-fragment exclusion scales are preserved end-to-end — an
 OPLS-style 1-4 exclusion where the Lennard-Jones contribution
 scales by `0.5` while the Coulomb contribution scales by `0.833`
-flows through the correction kernel naturally because each
-fragment's `exclusion_scale(i, j)` functor method returns its own
-per-pair value.
+threads through each fragment's own `exclusion_scale(i, j)`
+lookup, so the two contributions land on the accumulator with
+their respective scales without any cross-fragment coupling.
 
 ## Construction Pipeline <!-- rq-dbffee81 -->
 
@@ -574,10 +573,8 @@ For every entry `pos` in `[0, interaction_count[0])`:
   Shuffle* below). For each pair the lane invokes the composer's
   per-pair evaluator (`heddle_jit_eval_pair_sum`, see
   `jit-composed-pair-force.md`), which sums each fragment's
-  `evaluate(r², inv_r, r, i, j, …)` with no `exclusion_scale`
-  call. Every pair is implicitly scale 1.0 in this pass;
-  per-fragment exclusion scales are applied by the correction
-  pass.
+  `evaluate(r², inv_r, r, i, j, …)` and multiplies the result by
+  that fragment's `exclusion_scale(i, j)` inline.
 - AtomicAdd per-lane accumulators to the fixed-point buffer using
   i-atom and j-atom original IDs.
 
@@ -589,20 +586,12 @@ For every entry `k` in `[0, interaction_count[1])`:
   `atom_j = single_pair_atoms[2k + 1]`.
 - One thread per pair. The thread loads both positions, computes
   `(dx, dy, dz, r², inv_r, r)`, invokes the same
-  `heddle_jit_eval_pair_sum` evaluator (no `exclusion_scale`
-  call; implicit scale 1.0), and atomicAdds the per-fragment
+  `heddle_jit_eval_pair_sum` evaluator (which multiplies each
+  fragment's contribution by that fragment's
+  `exclusion_scale(i, j)` inline), and atomicAdds the per-fragment
   contribution to both atoms' fixed-point slots. Newton's 3rd is
   observed by adding `+(factor · d)` to atom `i` and
   `−(factor · d)` to atom `j` per component.
-
-### Exclusion-Correction Pass <!-- rq-04fdeac5 -->
-
-The correction pass walks `ForceField.excluded_pair_atoms` and
-adds `(exclusion_scale(i, j) − 1.0) × evaluate(i, j)` to each
-excluded pair's fixed-point slots. It is documented under
-*Correction-Pass Design* in `jit-composed-pair-force.md` and is
-not described further here; it shares the fixed-point accumulator
-and atom-ID conventions of the two passes above.
 
 ### Diagonal Shuffle <!-- rq-18847c46 -->
 
@@ -744,16 +733,15 @@ arguments and the `block_centre` / `block_bbox` device pointers
 remain valid across a captured graph replay; their contents are
 read at every invocation.
 
-#### Single-Pair and Exclusion-Correction Passes <!-- rq-02abafdd -->
+#### Single-Pair Pass <!-- rq-02abafdd -->
 
-The single-pair pass and the exclusion-correction pass continue
-to call `heddle_jit_triclinic_min_image` inside their per-pair
-evaluation. They do not partition atoms into blocks (each
-launches one thread per pair), so there is no per-block centre to
-wrap against. The marginal cost of the per-pair min-image call in
-these passes is small because each handles at most a few thousand
-pairs per step, compared with millions in the packed-neighbour
-pass.
+The single-pair pass calls `heddle_jit_triclinic_min_image`
+inside its per-pair evaluation. It does not partition atoms into
+blocks (it launches one thread per pair), so there is no
+per-block centre to wrap against. The marginal cost of the
+per-pair min-image call here is small because the pass handles
+at most a few thousand pairs per step, compared with millions
+in the packed-neighbour pass.
 
 ### Launch Configuration <!-- rq-8db4fbff -->
 
@@ -774,14 +762,10 @@ Each pass launches as a separate CUDA kernel on the
   `⌈interaction_count[1] / 256⌉` blocks of `256` threads, one
   thread per single-pair entry. Launched only when
   `interaction_count[1] > 0`.
-- **Exclusion-correction pass.** Grid
-  `⌈excluded_pair_count / 256⌉` blocks of `256` threads, one
-  thread per excluded pair. Launched only when
-  `excluded_pair_count > 0`.
 
-The three launches run in this order so the single-pair and
-correction passes observe the packed-neighbour pass's writes via
-the per-stream ordering of the default stream.
+The two launches run in this order so the single-pair pass
+observes the packed-neighbour pass's writes via the per-stream
+ordering of the default stream.
 
 ## JIT Composer Integration <!-- rq-ffbee244 -->
 
@@ -793,20 +777,16 @@ declaration. The functor's interface is
 `cutoff_squared(i_type, j_type, i, j) -> Real`,
 `evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, factor,
 energy, virial)`, and `exclusion_scale(i, j) -> Real`. The composer
-emits two per-pair evaluators:
+emits one per-pair evaluator:
 
 - `heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r, i,
   j, factor, energy, virial)` — sums each fragment's
-  contribution with no `exclusion_scale` call. Used by the
-  packed-neighbour pass's diagonal-shuffle inner loop and by the
-  single-pair pass's per-thread evaluation.
-- `heddle_jit_eval_pair_correction<WriteEv>(composite, r2,
-  inv_r, r, i, j, factor, energy, virial)` — sums each
-  fragment's contribution scaled by
-  `(exclusion_scale(i, j) − 1.0)`. Used by the exclusion-
-  correction pass.
+  contribution and multiplies the fragment's `(factor, energy,
+  virial)` by that fragment's `exclusion_scale(i, j)` inline.
+  Used by the packed-neighbour pass's diagonal-shuffle inner
+  loop and by the single-pair pass's per-thread evaluation.
 
-Both apply the cutoff handling described in
+The evaluator applies the cutoff handling described in
 `jit-composed-pair-force.md` (the per-fragment cutoff guard,
 collapsed when `CutoffHandling::Uniform(c)` matches the outer
 max-cutoff mask).
@@ -895,8 +875,7 @@ every step:
 | 3 | `cudaMemsetAsync` zeroing fast fixed-point buffers | Every step (or only when re-evaluating the Fast class) |
 | 4 | `heddle_jit_composed_pair_force_{f,fev}` (packed-neighbour pass) | Once per step; per-i-block SPC predicate inside the kernel selects between the min-image branch and the centre-wrap branch |
 | 5 | `heddle_jit_composed_pair_force_single_{f,fev}` (single-pair pass) | Once per step (only if `interaction_count[1] > 0`) |
-| 6 | `heddle_jit_composed_pair_force_correct_{f,fev}` (exclusion-correction pass) | Once per step (only if `excluded_pair_count > 0`) |
-| 7 | `finalize_fast_class_forces` | Once per step; converts fixed-point to Real and adds into `ParticleBuffers.forces_*` |
+| 6 | `finalize_fast_class_forces` | Once per step; converts fixed-point to Real and adds into `ParticleBuffers.forces_*` |
 
 When step 2 triggers a rebuild, the rebuild pipeline (steps 1–6 of
 *Construction Pipeline*, including the second `scatter` since
@@ -952,14 +931,7 @@ supporting this:
    force kernel processes entries via the fixed-point atomic
    accumulator, whose final per-particle sum is invariant under
    permutation of entries.**
-5. **Deterministic excluded-pair enumeration.** The exclusion-
-   correction pass's pair list (`ForceField.excluded_pair_atoms`)
-   is enumerated at `ForceField::new` time in the canonical order
-   of `ExclusionList.entries` and is constant across the
-   simulation. Each excluded pair contributes its correction
-   exactly once regardless of which warp first claimed the slot
-   in the packed-neighbour pass.
-6. **Bit-exact accumulation via integer atomics.** Per-particle
+5. **Bit-exact accumulation via integer atomics.** Per-particle
    force, energy, and virial accumulators are 64-bit unsigned
    integers interpreted as two's-complement signed integers.
    Integer addition is associative under two's-complement
@@ -967,7 +939,7 @@ supporting this:
    `unsigned long long` is the load-bearing primitive; its
    per-atom result is independent of how many warps wrote to that
    atom and in what order.
-7. **Deterministic conversion.** The fixed-point-to-real
+6. **Deterministic conversion.** The fixed-point-to-real
    conversion `(int64) sum / 2^32` is a deterministic function of
    the integer sum; the final `Real` addition into
    `ParticleBuffers.forces_*` happens in a kernel that reads each
@@ -1006,6 +978,19 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   the buffer that overflowed (`"interacting_tiles"` or
   `"single_pair_atoms"`). This is the only neighbour-overflow error;
   there is no per-particle neighbour cap to exceed.
+- `PairSnapshot` — host-side owned enumeration of the pair set <!-- rq-a0ab0088 -->
+  represented by a `NeighborListState` at the time the snapshot
+  was taken. Constructed by
+  `NeighborListState::pair_snapshot(&self, device)`; see
+  *Functions* below. The snapshot copies four device buffers to
+  the host (`interacting_tiles`, `sorted_interacting_atoms`,
+  `single_pair_atoms`, and the cell-list `sorted_particle_ids`)
+  after first reading the live interaction counts. It owns those
+  `Vec<u32>` buffers; iterating it involves no further device
+  access. A single snapshot may be iterated any number of times.
+  The snapshot is scoped to `NeighborListMode::CellList` neighbour
+  lists; `NeighborListMode::Trivial` is out of scope (see *Out of
+  Scope*).
 
 ### CUDA Kernels <!-- rq-2647cb7e -->
 
@@ -1049,11 +1034,6 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `heddle_jit_composed_pair_force_single_fev` — JIT-composed
   single-pair entry points; argument list documented under
   *Single-Pair Entry-Point Arguments*.
-- `heddle_jit_composed_pair_force_correct_f` / <!-- rq-41ba5dca -->
-  `heddle_jit_composed_pair_force_correct_fev` — JIT-composed
-  exclusion-correction entry points; argument list documented
-  under *Correction-Pass Design* in
-  `jit-composed-pair-force.md`.
 - `finalize_fast_class_forces(fast_force_*_fp, fast_energy_fp, <!-- rq-9c80a966 -->
   fast_virial_fp, particle_forces_x, particle_forces_y,
   particle_forces_z, particle_potential_energies,
@@ -1090,6 +1070,68 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   copies no interaction count to the host, and reports buffer growth
   through `PreStepOutcome.reallocated`. A steady-state (non-probe)
   rebuild issues no device-to-host transfer.
+- `NeighborListState::pair_snapshot(&self, device: &Arc<CudaDevice>) <!-- rq-b5b33e00 -->
+  -> Result<PairSnapshot, GpuError>` — first reads
+  `interaction_count` to obtain the live `interacting_tiles_count`
+  and `single_pairs_count`, then copies `interacting_tiles`
+  (length `interacting_tiles_count`), `sorted_interacting_atoms`
+  (length `interacting_tiles_count * 32`), `single_pair_atoms`
+  (length `2 * single_pairs_count`), and the cell-list
+  `sorted_particle_ids` (length `n_blocks * 32`) to the host, one
+  synchronous transfer per buffer, and wraps the results in a
+  `PairSnapshot`. Issues five host-facing `dtoh_sync_copy` calls
+  in total (one for the counts, one for each of the four owned
+  buffers) and does not read `neighbor_status`. Returns
+  `Err(GpuError)` if any transfer fails; on `Ok` the snapshot
+  owns every buffer it needs and requires no further device
+  access. Panics if the state is in `NeighborListMode::Trivial`
+  or `NeighborListMode::CellListOnly` (see *Out of Scope*).
+- `PairSnapshot::iter(&self) -> impl Iterator<Item = (u32, u32)>` <!-- rq-6eaf3e99 -->
+  — yields every unordered pair the pipeline processes for the
+  neighbour list captured in the snapshot, exactly once, as a
+  canonical `(u32, u32)` with `min < max`. Pairs enumerated from
+  the packed-neighbour representation are decoded from
+  `interacting_tiles` and `sorted_interacting_atoms` (see
+  *Iteration Semantics* below); pairs enumerated from the
+  sparse representation are decoded from
+  `single_pair_atoms`. Duplicates (a pair reachable from both
+  representations, or a pair reachable from more than one
+  entry / lane rotation of the packed representation) are
+  deduplicated so that the yielded set is exactly the pair set
+  the pipeline evaluates. Iteration is total: every yielded
+  pair carries two distinct in-range atom IDs
+  (`i < j < n_atoms`) and every such pair the neighbour list
+  contains appears in the iterator's output.
+- `PairSnapshot::len(&self) -> usize` — returns the number of <!-- --> <!-- rq-e79cb5b5 -->
+  unordered pairs the iterator would yield, computed on the
+  host from the snapshot's buffers. Consistent with
+  `iter().count()` by construction.
+
+### Iteration Semantics <!-- --> <!-- rq-f6b6f93f -->
+
+`PairSnapshot::iter` decodes the packed-neighbour representation
+in the same order the pair-force kernel evaluates it, so
+downstream diagnostic code observes the same pair set:
+
+- For each packed entry `e` in `[0, interacting_tiles_count)`,
+  the entry's i-block is `interacting_tiles[e]`. For each lane
+  `l` in `[0, 32)`, the lane's i-atom ID is
+  `sorted_particle_ids[i_block * 32 + l]` when that slot holds a
+  real atom (i.e., the value is less than `n_atoms`) and is
+  absent otherwise.
+- Within an entry, each lane pairs against 32 j-atoms via the
+  diagonal shuffle `j_lane = (l + r) & 31` for `r` in
+  `[0, 32)`. The j-atom ID is
+  `sorted_interacting_atoms[e * 32 + j_lane]`; a value equal
+  to the sentinel (`n_atoms`) or larger is treated as absent.
+- A `(i_atom, j_atom)` candidate is yielded only when both IDs
+  are real (`< n_atoms`) and distinct. The pair is normalised
+  to `(min, max)` before deduplication.
+- For each sparse entry `k` in `[0, single_pairs_count)`, the
+  atom IDs are `single_pair_atoms[2 * k]` and
+  `single_pair_atoms[2 * k + 1]`. The pair is normalised to
+  `(min, max)` and joined with the packed set through the same
+  dedup filter.
 
 ### Helper Functions in the JIT-Composed Source <!-- rq-49f2304c -->
 
@@ -1146,6 +1188,14 @@ and the per-slot helpers):
   shared scale is adequate for typical MD energy ranges but may
   saturate for unusually large systems; a separate finer scale
   for energies is deferred.
+- **`PairSnapshot` coverage of `NeighborListMode::Trivial`.** The
+  snapshot API enumerates the packed-neighbour representation
+  (packed dense entries plus sparse single-pairs). A
+  trivial-mode neighbour list writes an all-pairs list into the
+  same buffers via a distinct construction path; the snapshot
+  API is not required to reproduce that enumeration. Callers
+  that want an all-pairs oracle enumerate `(i, j)` directly for
+  `i < j < n_atoms` and do not need to walk `PackedNeighborData`.
 
 ## Gherkin Scenarios <!-- rq-9333127d -->
 
@@ -1411,26 +1461,25 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then no pair contribution is accumulated for that lane
 
   @rq-b49bfdff
-  Scenario: Packed-neighbour pass treats every pair as scale 1.0
+  Scenario: Packed-neighbour pass applies exclusion_scale inline
     Given a ForceField with at least one fast-class pair-force fragment
     And the JIT-composed packed-neighbour kernel source captured for inspection
-    Then the packed-neighbour pass's inner loop dispatches to heddle_jit_eval_pair_sum (no exclusion_scale calls)
-    And the source contains zero calls to composite.<any>.exclusion_scale inside the packed-neighbour outer loop
+    Then the packed-neighbour pass's inner loop dispatches to heddle_jit_eval_pair_sum
+    And every fragment's exclusion_scale(i, j) is loaded and multiplied into that fragment's (factor, energy, virial) exactly once per pair inside heddle_jit_eval_pair_sum
 
   @rq-80c6a964
   Scenario: Fully-excluded pair nets to zero on the fixed-point accumulator
     Given a pair (i, j) where every active fragment's exclusion_scale(i, j) returns 0.0
     And the pair is within HEDDLE_JIT_MAX_CUTOFF_SQUARED
-    When the packed-neighbour and exclusion-correction passes both run
-    Then the packed-neighbour pass adds +1.0 × evaluate(i, j) to atom i and -1.0 × evaluate(i, j) to atom j (Newton's 3rd)
-    And the exclusion-correction pass adds (0.0 - 1.0) × evaluate(i, j) = -evaluate(i, j) to atom i and +evaluate(i, j) to atom j
-    And the per-atom fixed-point slots sum to zero after both passes
+    When the packed-neighbour pass runs
+    Then it adds 0.0 × evaluate(i, j) to both atoms' fixed-point slots for the pair
+    And the per-atom fixed-point slots receive no net contribution from the pair
 
   @rq-8840662f
   Scenario: Per-fragment exclusion scale yields per-fragment net contribution
     Given a pair (i, j) where the LJ fragment's exclusion_scale(i, j) returns 0.5
     And the Coulomb fragment's exclusion_scale(i, j) returns 0.833
-    When the packed-neighbour and exclusion-correction passes both run
+    When the packed-neighbour pass runs
     Then the LJ contribution to atoms i and j is exactly 0.5 × the unexcluded LJ pair value
     And the Coulomb contribution to atoms i and j is exactly 0.833 × the unexcluded Coulomb pair value
 
@@ -1568,22 +1617,6 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then default_interacting_tiles_capacity(4) equals 16 (= 4 * 4)
     And the seed is not the 128 * n_blocks density heuristic
 
-  # --- Determinism of the excluded-pair list ---
-
-  @rq-c123c82c
-  Scenario: excluded_pair_atoms preserves canonical ExclusionList order
-    Given the topology contains exclusions in canonical (atom_i < atom_j) order
-    When ForceField::new constructs excluded_pair_atoms
-    Then excluded_pair_atoms[2k] = ExclusionList.entries[k].atom_i for every k
-    And excluded_pair_atoms[2k+1] = ExclusionList.entries[k].atom_j for every k
-    And excluded_pair_count = ExclusionList.entries.len()
-
-  @rq-30a85bc9
-  Scenario: excluded_pair_atoms is constant across the simulation
-    Given the topology does not change during the simulation
-    When 1000 steps run
-    Then excluded_pair_atoms is not modified after ForceField::new
-
   # --- Single-periodic-copy fast path ---
 
   @rq-7369ded0
@@ -1667,11 +1700,77 @@ Feature: Packed-Neighbour Pair-Force Architecture
     And no graph invalidation or re-capture is triggered
 
   @rq-9e08c8b0
-  Scenario: Single-pair and exclusion-correction passes unaffected by SPC
+  Scenario: Single-pair pass unaffected by SPC
     Given any simulation step
-    When the single-pair pass and the exclusion-correction pass run
-    Then both passes invoke heddle_jit_triclinic_min_image for every pair they evaluate
-    And neither pass reads block_centre or block_bbox
+    When the single-pair pass runs
+    Then it invokes heddle_jit_triclinic_min_image for every pair it evaluates
+    And it does not read block_centre or block_bbox
+
+  # --- PairSnapshot: canonical pair enumeration ---
+
+  @rq-88b287d5
+  Scenario: pair_snapshot returns all packed and sparse pairs, deduplicated, as (min, max)
+    Given a completed NeighborListState::rebuild in cell-list mode with
+      interacting_tiles_count > 0 and single_pairs_count > 0
+    When NeighborListState::pair_snapshot(&self, device) is called
+    And the returned PairSnapshot is iterated
+    Then every yielded (i, j) has i < j and both indices are less than n_atoms
+    And every unordered pair appears in the yielded set at most once
+    And the yielded set equals the union of the pairs decoded from
+      (interacting_tiles, sorted_interacting_atoms) via the diagonal
+      shuffle and the pairs decoded from single_pair_atoms, with the
+      sentinel value n_atoms filtered out
+
+  @rq-26204244
+  Scenario: Snapshot's device readback is bounded to the counts and the four owned buffers
+    Given a NeighborListState in cell-list mode with a completed rebuild
+    When NeighborListState::pair_snapshot is called
+    Then exactly five host-facing device-to-host copies occur — the
+      interaction_count word, the truncated interacting_tiles, the
+      truncated sorted_interacting_atoms, the truncated single_pair_atoms,
+      and the sorted-particle-ID view
+    And no read of neighbor_status is issued
+
+  @rq-edbd7063
+  Scenario: Iterating the same snapshot twice yields the same pair sequence
+    Given a PairSnapshot returned by NeighborListState::pair_snapshot
+    When .iter() is called twice and each iterator is fully consumed
+    Then both iterators yield the same sequence of (u32, u32) values in the same order
+
+  @rq-751f726a
+  Scenario: len equals the number of pairs the iterator yields
+    Given a PairSnapshot returned by NeighborListState::pair_snapshot
+    Then snapshot.len() equals snapshot.iter().count()
+
+  @rq-c9a8df0f
+  Scenario: Empty neighbour list produces an empty snapshot
+    Given a NeighborListState in cell-list mode with interacting_tiles_count = 0 and single_pairs_count = 0
+    When NeighborListState::pair_snapshot is called
+    Then snapshot.len() equals 0
+    And snapshot.iter().next() returns None
+
+  @rq-372f4581
+  Scenario: Packed-only neighbour list is enumerable
+    Given a NeighborListState in cell-list mode whose only pairs live in the packed dense entries
+      (interacting_tiles_count > 0, single_pairs_count = 0)
+    When the snapshot is iterated
+    Then the yielded set matches the diagonal-shuffle decoding of the packed entries
+      with sentinel and (i == j) values filtered
+
+  @rq-5f067d09
+  Scenario: Sparse-only neighbour list is enumerable
+    Given a NeighborListState in cell-list mode whose only pairs live in single_pair_atoms
+      (interacting_tiles_count = 0, single_pairs_count > 0)
+    When the snapshot is iterated
+    Then the yielded set equals the (min, max) canonicalisation of the pairs
+      encoded in single_pair_atoms
+
+  @rq-f2641eaa
+  Scenario: A pair reachable from both representations is yielded exactly once
+    Given a NeighborListState in cell-list mode in which a canonical pair (a, b) appears in
+      the packed dense entries and also in single_pair_atoms
+    When the snapshot is iterated
+    Then (a, b) is yielded exactly once
 
   # --- Out of scope ---
 
