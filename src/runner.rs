@@ -2775,6 +2775,7 @@ fn run_batched_graph_loop(
         let barostat_active = barostat_couples_per_step(barostat);
         let mut forces_only_launches: u32 = 0;
         let mut forces_and_scalars_launches: u32 = 0;
+        let batch_launch_started = Instant::now();
         for i in 1..=batch {
             let s = step + i;
             // rq-76db55bb — a step needs force-kernel scalars (total PE +
@@ -2802,6 +2803,7 @@ fn run_batched_graph_loop(
                 forces_only_launches += 1;
             }
         }
+        timings.record_host(HostStage::GRAPH_REPLAY_LAUNCH, batch_launch_started.elapsed());
         // rq-9ec19227 — advance per-stage sample counts per graph variant,
         // so a stage present only in the forces+scalars graph (the scalar
         // reductions, the `_fev` pair-force kernel) accrues samples only
@@ -2844,10 +2846,12 @@ fn run_batched_graph_loop(
 
         // Displacement check + neighbor-list rebuild (if triggered)
         // run at every batch boundary, outside the captured graph.
+        let pre_step_started = Instant::now();
         let reallocated = setup
             .force_field
             .run_neighbor_pre_step(&mut setup.buffers, &setup.sim_box, timings)
             .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Loop))?;
+        timings.record_host(HostStage::NEIGHBOR_PRE_STEP, pre_step_started.elapsed());
 
         // A rebuild that grew a packed-neighbour buffer reallocated it,
         // invalidating the device pointers and single-pair grid
@@ -2856,7 +2860,8 @@ fn run_batched_graph_loop(
         // re-capture driver error, finish the phase on the per-step
         // launch loop from the next un-run step. rq-67a09135 rq-1217c816
         if (reallocated || move_reallocated) && step < n_steps {
-            match capture_phase_graph(
+            let capture_started = Instant::now();
+            let capture_result = capture_phase_graph(
                 &mut setup.buffers,
                 &mut setup.sim_box,
                 &mut setup.force_field,
@@ -2870,7 +2875,9 @@ fn run_batched_graph_loop(
                 &device,
                 composed_post_force,
                 post_force_substep_index,
-            ) {
+            );
+            timings.record_host(HostStage::CUDA_GRAPH_CAPTURE, capture_started.elapsed());
+            match capture_result {
                 Ok(new_loop) => {
                     *graph_loop = new_loop;
                 }
@@ -2883,7 +2890,8 @@ fn run_batched_graph_loop(
             }
         }
 
-        handle_step_output(
+        let output_started = Instant::now();
+        let output_result = handle_step_output(
             setup,
             phase,
             step,
@@ -2899,7 +2907,9 @@ fn run_batched_graph_loop(
             log_extra_columns,
             frames_written,
             log_rows_written,
-        )?;
+        );
+        timings.record_host(HostStage::HANDLE_STEP_OUTPUT, output_started.elapsed());
+        output_result?;
 
         if progress_to_stdout && (step % progress_every == 0 || step == n_steps) {
             let pct = 100.0 * step as f64 / n_steps.max(1) as f64;

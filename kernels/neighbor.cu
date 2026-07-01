@@ -401,18 +401,25 @@ __device__ static inline Real packed_block_bbox_dist_sq(
 
 #define PACKED_NL_WARPS_PER_BLOCK 4
 #define PACKED_NL_BLOCK_SIZE (PACKED_NL_WARPS_PER_BLOCK * 32)
-#define PACKED_NL_BUFFER_SIZE 64
 
 // rq-bce26a14
 // Compile-time threshold for sparse-tile single-pair extraction.
 // When a candidate (i-block, j-block) pair produces
 // <= MAX_BITS_FOR_PAIRS j-atom hits, every (i_atom, j_atom) hit
 // is written individually to single_pair_atoms instead of being
-// merged into the packed-neighbour buffer.
+// emitted as a mostly-empty packed entry.
 #ifndef MAX_BITS_FOR_PAIRS
-#define MAX_BITS_FOR_PAIRS 3
+#define MAX_BITS_FOR_PAIRS 16
 #endif
 
+// rq-a4c22484 rq-560d3be9 rq-c37263fd rq-e1bd63f5
+// Each dense (i-block, j-block) tile-pair produces exactly one packed
+// entry. The entry carries `interacting_tiles[slot] = i_block` and
+// `interacting_j_blocks[slot] = j_block`; all 32 j-atom slots come
+// from the single j-block, with lanes that lack `any_hit` (or that
+// index past `n_atoms`) padded with the sentinel `n_atoms`. No
+// staging buffer is used, no cross-tile-pair aggregation happens,
+// and no end-of-sweep tail flush is issued.
 extern "C" __global__ void find_blocks_with_interactions(
     const Real4 *tile_sorted_posq,
     const unsigned int *sorted_particle_ids,
@@ -425,6 +432,7 @@ extern "C" __global__ void find_blocks_with_interactions(
     unsigned int max_entries,
     unsigned int max_single_pairs,
     unsigned int *interacting_tiles,
+    unsigned int *interacting_j_blocks,
     unsigned int *interacting_atoms,
     unsigned int *single_pair_atoms,
     unsigned int *interaction_count)
@@ -433,8 +441,6 @@ extern "C" __global__ void find_blocks_with_interactions(
   __shared__ Real warp_iy[PACKED_NL_WARPS_PER_BLOCK][TILE_SIZE];
   __shared__ Real warp_iz[PACKED_NL_WARPS_PER_BLOCK][TILE_SIZE];
   __shared__ unsigned int warp_iid[PACKED_NL_WARPS_PER_BLOCK][TILE_SIZE];
-  __shared__ unsigned int warp_buffer[PACKED_NL_WARPS_PER_BLOCK][PACKED_NL_BUFFER_SIZE];
-  __shared__ unsigned int warp_buf_len[PACKED_NL_WARPS_PER_BLOCK];
 
   unsigned int warp_in_block = threadIdx.x / 32u;
   unsigned int lane = threadIdx.x & 31u;
@@ -455,9 +461,6 @@ extern "C" __global__ void find_blocks_with_interactions(
   warp_iy[warp_in_block][lane] = iy;
   warp_iz[warp_in_block][lane] = iz;
   warp_iid[warp_in_block][lane] = iid;
-  if (lane == 0u) {
-    warp_buf_len[warp_in_block] = 0u;
-  }
   __syncwarp(0xFFFFFFFFu);
 
   Real cx_i = block_centre[b * 4u + 0u];
@@ -565,69 +568,44 @@ extern "C" __global__ void find_blocks_with_interactions(
           }
         }
       } else if (hits > MAX_BITS_FOR_PAIRS) {
-        // Dense-tile path: compact j-atoms with any_hit into the
-        // per-warp staging buffer; flushed in 32-atom chunks below.
-        if (any_hit) {
-          unsigned int prefix = __popc(hit_ballot & ((1u << lane) - 1u));
-          unsigned int buf_pos = warp_buf_len[warp_in_block] + prefix;
-          if (buf_pos < PACKED_NL_BUFFER_SIZE) {
-            warp_buffer[warp_in_block][buf_pos] = jid;
-          }
-        }
-        if (lane == 0u) {
-          warp_buf_len[warp_in_block] += hits;
-        }
-      }
-      __syncwarp(0xFFFFFFFFu);
-
-      // Flush in 32-atom chunks while buffer has >= 32 entries.
-      while (warp_buf_len[warp_in_block] >= TILE_SIZE) {
+        // Dense-tile path: emit exactly one packed entry per
+        // tile-pair. Every lane's j-atom (with `any_hit` and
+        // `j_slot < n_atoms`) becomes a real j-atom of the entry at
+        // its own lane index; lanes that don't hit or that index
+        // past `n_atoms` write the sentinel. Newton's-3rd is
+        // handled by the pair-force kernel via the entry's
+        // warp-uniform `self_block = (j_block == i_block)` gate.
+        // rq-560d3be9 rq-a4c22484 rq-c37263fd
         unsigned int slot;
         if (lane == 0u) {
           slot = atomicAdd(&interaction_count[0], 1u);
         }
         slot = __shfl_sync(0xFFFFFFFFu, slot, 0);
+        // `interaction_count[0]` accumulates the true required count
+        // even past capacity; entries beyond capacity are not written
+        // and the host learns about the overflow from
+        // set_neighbor_status_bits.
         if (slot < max_entries) {
           if (lane == 0u) {
             interacting_tiles[slot] = b;
+            interacting_j_blocks[slot] = jb;
           }
-          interacting_atoms[slot * TILE_SIZE + lane] = warp_buffer[warp_in_block][lane];
+          unsigned int emit;
+          if (any_hit && j_slot < n_atoms) {
+            emit = jid;
+          } else {
+            emit = n_atoms;
+          }
+          interacting_atoms[slot * TILE_SIZE + lane] = emit;
         }
-        // Shift remaining buffer down by 32.
-        unsigned int remaining = warp_buf_len[warp_in_block] - TILE_SIZE;
-        if (lane < remaining) {
-          unsigned int src = TILE_SIZE + lane;
-          warp_buffer[warp_in_block][lane] = warp_buffer[warp_in_block][src];
-        }
-        if (lane == 0u) {
-          warp_buf_len[warp_in_block] = remaining;
-        }
-        __syncwarp(0xFFFFFFFFu);
       }
+      __syncwarp(0xFFFFFFFFu);
     }
   }
 
-  // Flush the tail. Pad unused slots with n_atoms (sentinel).
-  unsigned int tail = warp_buf_len[warp_in_block];
-  if (tail > 0u) {
-    unsigned int slot;
-    if (lane == 0u) {
-      slot = atomicAdd(&interaction_count[0], 1u);
-    }
-    slot = __shfl_sync(0xFFFFFFFFu, slot, 0);
-    if (slot < max_entries) {
-      if (lane == 0u) {
-        interacting_tiles[slot] = b;
-      }
-      unsigned int v;
-      if (lane < tail) {
-        v = warp_buffer[warp_in_block][lane];
-      } else {
-        v = n_atoms; // sentinel
-      }
-      interacting_atoms[slot * TILE_SIZE + lane] = v;
-    }
-  }
+  // rq-e1bd63f5 — no tail flush: every dense tile-pair has already
+  // emitted its own entry directly. There is no per-warp staging
+  // buffer to drain at the end of the j_base sweep.
 }
 #undef MAX_BITS_FOR_PAIRS
 
@@ -688,24 +666,29 @@ extern "C" __global__ void histogram_entries_by_iblock(
 }
 
 // Scatter entries from the unordered (interacting_tiles,
-// interacting_atoms) layout into the i-block-sorted layout. For each
-// entry e, claims a destination slot inside its i-block's contiguous
-// range via `atomicAdd(&iblock_cursor[b], 1) + iblock_offset[b]`, then
-// copies the 32 packed j-atom IDs into sorted_interacting_atoms.
-// One warp per entry: lane k copies interacting_atoms[e*32+k] into
-// the destination row. The within-i-block entry order is unstable
-// (atomic-claimed slots below). Force-kernel determinism does not
-// depend on it: the pair kernel folds each i-atom's per-entry
-// contributions into a warp-resident i64 fixed-point accumulator,
-// and integer addition is associative regardless of entry order.
-// See rqm/forces/jit-composed-pair-force.md (rq-693544f8).
+// interacting_j_blocks, interacting_atoms) layout into the i-block-
+// sorted layout. For each entry e, claims a destination slot inside
+// its i-block's contiguous range via
+// `atomicAdd(&iblock_cursor[b], 1) + iblock_offset[b]`, then copies
+// the entry's j-block index into `sorted_interacting_j_blocks` and
+// the 32 packed j-atom IDs into `sorted_interacting_atoms`. One warp
+// per entry: lane k copies `interacting_atoms[e*32+k]` into the
+// destination row; lane 0 additionally writes the entry's j-block
+// index. The within-i-block entry order is unstable (atomic-claimed
+// slots below). Force-kernel determinism does not depend on it: the
+// pair kernel folds each i-atom's per-entry contributions into a
+// warp-resident i64 fixed-point accumulator, and integer addition is
+// associative regardless of entry order. See
+// rqm/forces/jit-composed-pair-force.md (rq-693544f8).
 extern "C" __global__ void scatter_entries_by_iblock(
-    const unsigned int *interacting_tiles,      // length = entry_count
-    const unsigned int *interacting_atoms,      // length = entry_count * 32
-    const unsigned int *entry_count_ptr,        // length 1
-    const unsigned int *iblock_offset,          // length = n_blocks + 1
-    unsigned int *iblock_cursor,                // length = n_blocks; init zero
-    unsigned int *sorted_interacting_atoms,     // length = entry_count * 32
+    const unsigned int *interacting_tiles,           // length = entry_count
+    const unsigned int *interacting_j_blocks,        // length = entry_count
+    const unsigned int *interacting_atoms,           // length = entry_count * 32
+    const unsigned int *entry_count_ptr,             // length 1
+    const unsigned int *iblock_offset,               // length = n_blocks + 1
+    unsigned int *iblock_cursor,                     // length = n_blocks; init zero
+    unsigned int *sorted_interacting_j_blocks,       // length = entry_count
+    unsigned int *sorted_interacting_atoms,          // length = entry_count * 32
     unsigned int n_blocks)
 {
   unsigned int e = blockIdx.x * (blockDim.x / 32u) + (threadIdx.x / 32u);
@@ -717,6 +700,7 @@ extern "C" __global__ void scatter_entries_by_iblock(
   unsigned int slot;
   if (lane == 0u) {
     slot = atomicAdd(&iblock_cursor[b], 1u) + iblock_offset[b];
+    sorted_interacting_j_blocks[slot] = interacting_j_blocks[e];
   }
   slot = __shfl_sync(0xFFFFFFFFu, slot, 0);
   sorted_interacting_atoms[slot * 32u + lane] =

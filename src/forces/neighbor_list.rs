@@ -103,8 +103,21 @@ pub struct PackedNeighborData {
     pub trivial_sorted_particle_ids: Option<CudaSlice<u32>>,
     /// Per-entry i-block index. Length `interacting_tiles_capacity`.
     pub interacting_tiles: CudaSlice<u32>,
+    /// Per-entry j-block index. Length `interacting_tiles_capacity`.
+    /// Every entry binds exactly one tile-pair `(interacting_tiles[e],
+    /// interacting_j_blocks[e])`; the construction sweep visits only
+    /// unordered tile-pairs with `j_block >= i_block`, and self-block
+    /// entries carry `interacting_j_blocks[e] == interacting_tiles[e]`.
+    /// See `rqm/forces/packed-neighbour-pair-force.md` *Neighbour List*.
+    /// rq-a4c22484
+    pub interacting_j_blocks: CudaSlice<u32>,
     /// Per-entry packed 32 individual j-atom IDs. Length
-    /// `interacting_tiles_capacity * 32`.
+    /// `interacting_tiles_capacity * 32`. Every real j-atom slot at
+    /// `pos * 32 + ℓ` is an atom in block `interacting_j_blocks[pos]`
+    /// (i.e., equals `sorted_particle_ids[j_slot]` for some `j_slot`
+    /// in `[interacting_j_blocks[pos] * 32,
+    /// (interacting_j_blocks[pos] + 1) * 32)`); unused slots carry
+    /// the sentinel `n_atoms`.
     pub interacting_atoms: CudaSlice<u32>,
     /// Live interaction counts: `[interacting_tiles_count,
     /// single_pairs_count]`. Read on the device by every downstream
@@ -151,6 +164,12 @@ pub struct PackedNeighborData {
     /// scatter pass at every rebuild; consumed by the JIT pair-force
     /// kernel in place of `interacting_atoms`.
     pub sorted_interacting_atoms: CudaSlice<u32>,
+    /// `interacting_j_blocks` re-arranged into the same i-block-sorted
+    /// layout as `sorted_interacting_atoms`. Length
+    /// `interacting_tiles_capacity`. Consumed by the JIT pair-force
+    /// kernel to compute the warp-uniform self-block predicate
+    /// `sorted_interacting_j_blocks[pos] == i_block`. rq-a4c22484
+    pub sorted_interacting_j_blocks: CudaSlice<u32>,
     /// Sparse-tile (i_atom, j_atom) pairs extracted at neighbour-list
     /// build time. Length `2 * single_pairs_capacity`. Interleaved
     /// `[i0, j0, i1, j1, …]` of original atom IDs. Consumed by the
@@ -312,6 +331,9 @@ fn alloc_packed_neighbor_data(
     let interacting_tiles = device
         .alloc_zeros::<u32>(cap_alloc)
         .map_err(GpuError::from)?;
+    let interacting_j_blocks = device
+        .alloc_zeros::<u32>(cap_alloc)
+        .map_err(GpuError::from)?;
     let interacting_atoms = device
         .alloc_zeros::<u32>(cap_alloc * 32)
         .map_err(GpuError::from)?;
@@ -329,6 +351,9 @@ fn alloc_packed_neighbor_data(
     let iblock_scan_block_totals = alloc_scan_block_totals(&device, n_blocks_alloc)?;
     let sorted_interacting_atoms = device
         .alloc_zeros::<u32>(cap_alloc * 32)
+        .map_err(GpuError::from)?;
+    let sorted_interacting_j_blocks = device
+        .alloc_zeros::<u32>(cap_alloc)
         .map_err(GpuError::from)?;
     // Single-pair initial capacity. An O(N) seed sharing the same
     // density heuristic as the tile list; the probe rebuild grows it to
@@ -352,6 +377,7 @@ fn alloc_packed_neighbor_data(
         block_bbox,
         trivial_sorted_particle_ids,
         interacting_tiles,
+        interacting_j_blocks,
         interacting_atoms,
         interaction_count,
         neighbor_status,
@@ -364,6 +390,7 @@ fn alloc_packed_neighbor_data(
         iblock_cursor,
         iblock_scan_block_totals,
         sorted_interacting_atoms,
+        sorted_interacting_j_blocks,
         single_pair_atoms,
         single_pairs_capacity,
         single_pairs_count: 0,
@@ -399,8 +426,10 @@ impl PackedNeighborData {
             .max(1);
         let new_alloc = new_cap as usize;
         self.interacting_tiles = device.alloc_zeros::<u32>(new_alloc)?;
+        self.interacting_j_blocks = device.alloc_zeros::<u32>(new_alloc)?;
         self.interacting_atoms = device.alloc_zeros::<u32>(new_alloc * 32)?;
         self.sorted_interacting_atoms = device.alloc_zeros::<u32>(new_alloc * 32)?;
+        self.sorted_interacting_j_blocks = device.alloc_zeros::<u32>(new_alloc)?;
         self.interacting_tiles_capacity = new_cap;
         Ok(())
     }
@@ -659,17 +688,20 @@ impl NeighborListState {
                 true,
             )?;
 
-            // Populate `interacting_tiles` and `interacting_atoms` for
-            // all-pairs enumeration. For each i_block and each j_block
-            // with j_block >= i_block, emit one entry with 32 packed
-            // j-atom IDs (drawn from j_block * 32 .. j_block * 32 + 32,
-            // sentinel-padded if past N).
+            // Populate `interacting_tiles`, `interacting_j_blocks`, and
+            // `interacting_atoms` for all-pairs enumeration. For each
+            // i_block and each j_block with j_block >= i_block, emit
+            // one entry that binds the tile-pair `(i_block, j_block)`
+            // and lists the 32 packed j-atom IDs of `j_block`
+            // (sentinel-padded past N). rq-a4c22484 rq-c37263fd
             let mut tiles_host: Vec<u32> = Vec::with_capacity(cap as usize);
+            let mut j_blocks_host: Vec<u32> = Vec::with_capacity(cap as usize);
             let mut atoms_host: Vec<u32> = Vec::with_capacity((cap as usize) * 32);
             let sentinel = particle_count as u32;
             for i_block in 0..n_blocks {
                 for j_block in i_block..n_blocks {
                     tiles_host.push(i_block);
+                    j_blocks_host.push(j_block);
                     for lane in 0..32u32 {
                         let atom = j_block * 32 + lane;
                         if atom < sentinel {
@@ -686,13 +718,22 @@ impl NeighborListState {
                     .htod_sync_copy_into(&tiles_host, &mut packed.interacting_tiles)
                     .map_err(GpuError::from)?;
                 device
+                    .htod_sync_copy_into(&j_blocks_host, &mut packed.interacting_j_blocks)
+                    .map_err(GpuError::from)?;
+                device
                     .htod_sync_copy_into(&atoms_host, &mut packed.interacting_atoms)
                     .map_err(GpuError::from)?;
                 // The all-pairs enumeration above already emits entries
-                // in i-block-sorted order, so `sorted_interacting_atoms`
-                // is the same content as `interacting_atoms`.
+                // in i-block-sorted order, so `sorted_interacting_*`
+                // is the same content as its raw counterpart.
                 device
                     .htod_sync_copy_into(&atoms_host, &mut packed.sorted_interacting_atoms)
+                    .map_err(GpuError::from)?;
+                device
+                    .htod_sync_copy_into(
+                        &j_blocks_host,
+                        &mut packed.sorted_interacting_j_blocks,
+                    )
                     .map_err(GpuError::from)?;
             }
             // The JIT pair-force kernel reads the entry count from device
@@ -1150,6 +1191,7 @@ impl NeighborListState {
                 max_entries,
                 max_single_pairs,
                 &mut packed.interacting_tiles,
+                &mut packed.interacting_j_blocks,
                 &mut packed.interacting_atoms,
                 &mut packed.single_pair_atoms,
                 &mut packed.interaction_count,
@@ -1222,10 +1264,12 @@ impl NeighborListState {
         crate::gpu::scatter_entries_by_iblock(
             &kernels,
             &packed.interacting_tiles,
+            &packed.interacting_j_blocks,
             &packed.interacting_atoms,
             &packed.interaction_count,
             &packed.iblock_offset,
             &mut packed.iblock_cursor,
+            &mut packed.sorted_interacting_j_blocks,
             &mut packed.sorted_interacting_atoms,
             n_blocks,
             packed.interacting_tiles_capacity,

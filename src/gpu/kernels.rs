@@ -2058,6 +2058,7 @@ pub fn compute_block_bbox(
 }
 
 #[allow(clippy::too_many_arguments)]
+// rq-a4c22484 rq-560d3be9
 pub fn find_blocks_with_interactions(
     kernels: &Kernels,
     tile_sorted_posq: &CudaSlice<Real4>,
@@ -2071,6 +2072,7 @@ pub fn find_blocks_with_interactions(
     max_entries: u32,
     max_single_pairs: u32,
     interacting_tiles: &mut CudaSlice<u32>,
+    interacting_j_blocks: &mut CudaSlice<u32>,
     interacting_atoms: &mut CudaSlice<u32>,
     single_pair_atoms: &mut CudaSlice<u32>,
     interaction_count: &mut CudaSlice<u32>,
@@ -2099,6 +2101,7 @@ pub fn find_blocks_with_interactions(
                 max_entries,
                 max_single_pairs,
                 &mut *interacting_tiles,
+                &mut *interacting_j_blocks,
                 &mut *interacting_atoms,
                 &mut *single_pair_atoms,
                 &mut *interaction_count,
@@ -2174,13 +2177,16 @@ pub fn histogram_entries_by_iblock(
 }
 
 #[allow(clippy::too_many_arguments)]
+// rq-a4c22484
 pub fn scatter_entries_by_iblock(
     kernels: &Kernels,
     interacting_tiles: &CudaSlice<u32>,
+    interacting_j_blocks: &CudaSlice<u32>,
     interacting_atoms: &CudaSlice<u32>,
     entry_count_ptr: &CudaSlice<u32>,
     iblock_offset: &CudaSlice<u32>,
     iblock_cursor: &mut CudaSlice<u32>,
+    sorted_interacting_j_blocks: &mut CudaSlice<u32>,
     sorted_interacting_atoms: &mut CudaSlice<u32>,
     n_blocks: u32,
     max_entry_count: u32,
@@ -2203,10 +2209,12 @@ pub fn scatter_entries_by_iblock(
             cfg,
             (
                 interacting_tiles,
+                interacting_j_blocks,
                 interacting_atoms,
                 entry_count_ptr,
                 iblock_offset,
                 &mut *iblock_cursor,
+                &mut *sorted_interacting_j_blocks,
                 &mut *sorted_interacting_atoms,
                 n_blocks,
             ),

@@ -363,11 +363,19 @@ The lane:
    equality (multiplying any finite value by `0.0f` yields `+0.0f`
    in IEEE-754, and subsequent adds with `+0.0f` are identity).
 7. The lane forms `(fx, fy, fz) = factor * (dx, dy, dz)` and adds
-   them to per-lane, per-entry `i_*` accumulators; it also subtracts
-   `(fx, fy, fz)` from per-lane, per-entry `j_*` accumulators
-   (Newton's 3rd, both directions computed inside the same
-   iteration). The `_fev` variant additionally adds `energy` and
-   `virial` to per-scalar accumulators on both sides.
+   them to per-lane, per-entry `i_*` accumulators. When the entry's
+   warp-uniform `self_block` predicate — computed once per entry as
+   `interacting_tiles[pos] == interacting_j_blocks[pos]` (see
+   `packed-neighbour-pair-force.md` *Diagonal Shuffle*) — is false,
+   the lane also subtracts `(fx, fy, fz)` from per-lane, per-entry
+   `j_*` accumulators (Newton's 3rd; both directions computed inside
+   the same iteration). When `self_block` is true, the j-side
+   accumulators are not updated because the same pair is enumerated
+   from both atoms' i-lanes over the 32-rotation sweep and each
+   atom's contribution reaches its own i-side accumulator directly.
+   The `_fev` variant additionally adds `energy` and `virial` to
+   per-scalar accumulators on both sides, gated by the same
+   `self_block` predicate on the j-side.
 
 The per-entry accumulators are floating-point and are summed over
 the entry's fixed 32-iteration diagonal-shuffle order, which is
@@ -376,10 +384,13 @@ deterministic. They reach the per-class fixed-point buffers
 `fast_total_potential_energies_fp` and `fast_total_virials_fp`) by
 two routes:
 
-- **j-side.** At the end of each entry the per-lane `j_*` float sum
-  is converted to fixed-point and atomicAdded to the j-atom's slot —
-  one atomic per (entry, lane). The j-atoms differ every entry, so
-  the j-side cannot be staged.
+- **j-side.** At the end of each entry, when `self_block == false`,
+  the per-lane `j_*` float sum is converted to fixed-point and
+  atomicAdded to the j-atom's slot — one atomic per (entry, lane).
+  When `self_block == true`, the per-lane `j_*` accumulators are
+  zero by construction (the inner loop's j-side update is gated by
+  `!self_block`) and no j-side atomicAdd is issued. The j-atoms
+  differ every entry, so the j-side cannot be staged.
 - **i-side.** Each entry's per-lane `i_*` float sum is converted to
   fixed-point and added into a **warp-resident i64 accumulator that
   persists across every entry the warp processes**; that accumulator

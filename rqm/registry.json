@@ -2836,10 +2836,15 @@
     "type": "scenario"
   },
   "rq-1470ef9f": {
-    "decl": "Scenario: interacting_atoms entries contain only real neighbours",
+    "decl": "Scenario: interacting_atoms entries contain only real neighbours from the entry's j-block",
     "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "interacting_atoms entries contain only real neighbours",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "interacting_atoms entries contain only real neighbours from the entry's j-block",
     "type": "scenario"
   },
   "rq-147f5ea6": {
@@ -7722,6 +7727,14 @@
     "title": "Functions and methods",
     "type": "section"
   },
+  "rq-3ae5d2dc": {
+    "decl": "### Tile-pair-per-entry invariant",
+    "file": "forces/neighbor-list",
+    "level": 3,
+    "refs": [],
+    "title": "Tile-pair-per-entry invariant",
+    "type": "section"
+  },
   "rq-3aef0b06": {
     "decl": "Scenario: rattle_velocities skips the velocity-level virial accumulation when dt <= 0",
     "file": "integration/shake",
@@ -10556,10 +10569,15 @@
     "type": "scenario"
   },
   "rq-560d3be9": {
-    "decl": "Scenario: Dense (i-block, j-block) candidate routes its hits to interacting_atoms",
+    "decl": "Scenario: Dense (i-block, j-block) candidate emits exactly one packed entry",
     "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Dense (i-block, j-block) candidate routes its hits to interacting_atoms",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Dense (i-block, j-block) candidate emits exactly one packed entry",
     "type": "scenario"
   },
   "rq-560dffb8": {
@@ -11075,6 +11093,22 @@
       }
     ],
     "title": "Captured graph includes the displacement-check kernel",
+    "type": "scenario"
+  },
+  "rq-59bf2ab2": {
+    "decl": "Scenario: Cross-block entry applies Newton's 3rd via the j-side atomicAdd",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Cross-block entry applies Newton's 3rd via the j-side atomicAdd",
     "type": "scenario"
   },
   "rq-59e60e89": {
@@ -15542,6 +15576,22 @@
     "refs": [],
     "title": "Registration",
     "type": "section"
+  },
+  "rq-7daaec2d": {
+    "decl": "Scenario: Packed-neighbour pass computes self_block from entry fields",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Packed-neighbour pass computes self_block from entry fields",
+    "type": "scenario"
   },
   "rq-7db97132": {
     "decl": "- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<bool, NeighborListError>`",
@@ -20088,6 +20138,26 @@
     "title": "Packed-Neighbour Pass",
     "type": "section"
   },
+  "rq-a4c22484": {
+    "decl": "Scenario: Every packed entry binds exactly one tile-pair",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Every packed entry binds exactly one tile-pair",
+    "type": "scenario"
+  },
   "rq-a4d5e711": {
     "decl": "- `SimulationBox::wrap_position_with_image_count(&self, position: [f32; 3]) -> ([f32; 3], [i32; 3])`",
     "file": "simulation-box",
@@ -21572,10 +21642,10 @@
     "type": "scenario"
   },
   "rq-b1060817": {
-    "decl": "Scenario: MAX_BITS_FOR_PAIRS equals 3",
+    "decl": "Scenario: MAX_BITS_FOR_PAIRS equals 16",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "MAX_BITS_FOR_PAIRS equals 3",
+    "title": "MAX_BITS_FOR_PAIRS equals 16",
     "type": "scenario"
   },
   "rq-b10ed5ec": {
@@ -23667,6 +23737,22 @@
       }
     ],
     "title": "Different seeds yield different post-call velocities",
+    "type": "scenario"
+  },
+  "rq-c37263fd": {
+    "decl": "Scenario: Self-block entries carry j_block equal to i_block",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Self-block entries carry j_block equal to i_block",
     "type": "scenario"
   },
   "rq-c38c8f3b": {
@@ -27454,6 +27540,18 @@
     "title": "volume returns lx * ly * lz regardless of tilts",
     "type": "scenario"
   },
+  "rq-e1bd63f5": {
+    "decl": "Scenario: No end-of-sweep tail flush is required",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "No end-of-sweep tail flush is required",
+    "type": "scenario"
+  },
   "rq-e1ceb5c0": {
     "decl": "## Trait Derivation",
     "file": "error-handling",
@@ -30411,6 +30509,22 @@
     ],
     "title": "log_column_values",
     "type": "api-item"
+  },
+  "rq-f9687fec": {
+    "decl": "Scenario: Self-block entry suppresses j-side atomicAdds",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Self-block entry suppresses j-side atomicAdds",
+    "type": "scenario"
   },
   "rq-f969ffbb": {
     "decl": "- `pub const REAL_FMT_DIGITS: usize;`",

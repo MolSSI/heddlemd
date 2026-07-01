@@ -54,12 +54,25 @@ impl HostStage {
     pub const TRAJECTORY_WRITE: HostStage = HostStage::new("trajectory_write");
     pub const LOG_WRITE: HostStage = HostStage::new("log_write");
     pub const NEIGHBOR_LIST_REBUILD: HostStage = HostStage::new("neighbor_list_rebuild");
+    // Host-side wall-clock at load-bearing runner call sites in the
+    // batched-graph loop, added so that `total_runtime` minus the sum of
+    // every measured stage points at the specific region carrying the
+    // unaccounted overhead. See `handle_step_output`, `graph_loop.launch`,
+    // `run_neighbor_pre_step`, and `capture_phase_graph` in `runner.rs`.
+    pub const GRAPH_REPLAY_LAUNCH: HostStage = HostStage::new("graph_replay_launch");
+    pub const NEIGHBOR_PRE_STEP: HostStage = HostStage::new("neighbor_pre_step");
+    pub const CUDA_GRAPH_CAPTURE: HostStage = HostStage::new("cuda_graph_capture");
+    pub const HANDLE_STEP_OUTPUT: HostStage = HostStage::new("handle_step_output");
     pub const TOTAL_RUNTIME: HostStage = HostStage::new("total_runtime");
 
     pub const ORDER: &'static [HostStage] = &[
         Self::HOST_TO_DEVICE_UPLOAD,
         Self::DEVICE_TO_HOST_DOWNLOAD,
         Self::NEIGHBOR_LIST_REBUILD,
+        Self::GRAPH_REPLAY_LAUNCH,
+        Self::NEIGHBOR_PRE_STEP,
+        Self::CUDA_GRAPH_CAPTURE,
+        Self::HANDLE_STEP_OUTPUT,
         Self::TRAJECTORY_WRITE,
         Self::LOG_WRITE,
         Self::VELOCITY_GENERATION,
@@ -478,6 +491,8 @@ impl Timings {
                 });
             }
         }
+        let mut host_sum_ns: u128 = 0;
+        let mut total_runtime_ns: u128 = 0;
         for &h in HostStage::ORDER {
             let acc = *self.host_acc.get(&h).expect("stage present");
             if acc.count > 0 {
@@ -488,7 +503,28 @@ impl Timings {
                     min_ns: acc.min_ns,
                     max_ns: acc.max_ns,
                 });
+                if h.name() == HostStage::TOTAL_RUNTIME.name() {
+                    total_runtime_ns = acc.total_ns;
+                } else {
+                    host_sum_ns = host_sum_ns.saturating_add(acc.total_ns);
+                }
             }
+        }
+        // Host-side wall clock inside `total_runtime` that is not
+        // covered by any recorded host stage. A large value points at a
+        // missing region between recorded call sites. Kernel stages are
+        // not subtracted because GPU work overlaps with host waiting
+        // and is not part of this residual.
+        if total_runtime_ns > host_sum_ns {
+            let unaccounted_ns = total_runtime_ns - host_sum_ns;
+            let ns_u64 = unaccounted_ns.min(u64::MAX as u128) as u64;
+            stages.push(StageStats {
+                name: "host_unaccounted".to_string(),
+                count: 1,
+                total_ns: unaccounted_ns,
+                min_ns: ns_u64,
+                max_ns: ns_u64,
+            });
         }
         Ok(TimingsReport { stages })
     }

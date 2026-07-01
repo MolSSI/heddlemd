@@ -1436,6 +1436,7 @@ fn emit_entry_point(
     s.push_str("    const Real *block_bbox,\n");
     s.push_str("    const unsigned int *sorted_particle_ids,\n");
     s.push_str("    const unsigned int *iblock_offset,\n");
+    s.push_str("    const unsigned int *sorted_interacting_j_blocks,\n");
     s.push_str("    const unsigned int *sorted_interacting_atoms,\n");
     s.push_str("    unsigned int n_iblocks,\n");
     s.push_str("    const Real *lattice,\n");
@@ -1463,6 +1464,7 @@ fn emit_entry_point(
     s.push_str("        block_centre,\n");
     s.push_str("        block_bbox,\n");
     s.push_str("        sorted_particle_ids,\n");
+    s.push_str("        sorted_interacting_j_blocks,\n");
     s.push_str("        sorted_interacting_atoms,\n");
     s.push_str("        lattice,\n");
     s.push_str(
@@ -1655,6 +1657,7 @@ __device__ static inline void heddle_jit_outer_loop(
     const Real *block_centre,
     const Real *block_bbox,
     const unsigned int *sorted_particle_ids,
+    const unsigned int *sorted_interacting_j_blocks,
     const unsigned int *sorted_interacting_atoms,
     const Real *lattice,
     unsigned long long *fast_force_x_fp,
@@ -1784,37 +1787,24 @@ __device__ static inline void heddle_jit_outer_loop(
     unsigned int j_type = 0u;
     /*HEDDLE_JIT_JTYPE_LOAD*/
 
-    // Per-lane `j_in_iblock` flag: does this lane's current j-atom
-    // sit anywhere in the i-block's 32-atom set? If yes, the pair
-    // (i-atom_of_some_lane, j-atom) will be visited from BOTH sides
-    // of the 32-rotation sweep — once as (this-lane's i, that j)
-    // and once as (that-lane's i, this j) — so applying Newton's
-    // 3rd via `j_fx -= fx` would double-count. Suppressing j-side
-    // for `j_in_iblock` pairs leaves each atom's contribution on
-    // its own i-side (`ei_fx`) accumulator exactly once, matching
-    // the "self-block, no Newton 3rd" convention but done per pair
-    // instead of per entry. This is what makes the packed kernel
-    // robust against mixed entries where a self-block-like set of
-    // j-atoms co-inhabits with cross-block j-atoms.
-    //
-    // Detection: iterate over each initial-lane m in [0, 32),
-    // broadcast that lane's `j_atom_id` to the whole warp, ballot
-    // whether any lane's `i_atom_id` matches, and record bit `m` in
-    // `j_in_iblock_ballot`. Then each lane extracts its own bit.
-    // The mask rotates alongside the j-side state through the
-    // 32-iteration loop, so at rotation `r` this lane's flag
-    // corresponds to the j-atom currently in this lane's registers.
-    unsigned int j_in_iblock_ballot = 0u;
-    #pragma unroll
-    for (unsigned int m = 0u; m < 32u; ++m) {
-      unsigned int j_m = __shfl_sync(0xFFFFFFFFu, j_atom_id, m);
-      bool match = i_valid && (j_m < n) && (i_atom_id == j_m);
-      unsigned int b = __ballot_sync(0xFFFFFFFFu, match ? 1u : 0u);
-      if (b != 0u) {
-        j_in_iblock_ballot |= (1u << m);
-      }
-    }
-    unsigned int my_j_in_iblock = (j_in_iblock_ballot >> lane) & 1u;
+    // Warp-uniform self-block predicate. Every packed entry binds
+    // exactly one tile-pair `(i_block, j_block)`; self-block appears
+    // as `sorted_interacting_j_blocks[e] == i_block`. Under
+    // `self_block == true` the pair (i-atom_of_some_lane, j-atom)
+    // is visited from BOTH sides of the 32-rotation sweep — once as
+    // (this-lane's i, that j) and once as (that-lane's i, this j) —
+    // so Newton's-3rd `j_fx -= fx` would double-count each atom.
+    // Suppressing j-side under self-block leaves each atom's
+    // contribution on its own i-side (`ei_fx`) accumulator exactly
+    // once. Under `self_block == false` the pair appears in the
+    // current entry only (the j-atom's i-block is a different i-block
+    // whose warp does not visit this tile-pair because the
+    // construction sweep only emits `j_block >= i_block`), so
+    // Newton's-3rd closes the pair via the explicit `j_fx -= fx`.
+    // rq-7daaec2d rq-f9687fec rq-59bf2ab2
+    unsigned int self_block_ui =
+        (sorted_interacting_j_blocks[e] == i_block) ? 1u : 0u;
+    bool self_block = (self_block_ui != 0u);
 
     // Per-entry j-side accumulator (reset every entry — different
     // j-atoms each time).
@@ -1870,21 +1860,19 @@ __device__ static inline void heddle_jit_outer_loop(
         // converted to fixed-point once after the loop; the j-side is
         // flushed per entry.
         ei_fx += fx;  ei_fy += fy;  ei_fz += fz;
-        if (my_j_in_iblock == 0u) {
+        if (!self_block) {
           j_fx -= fx;  j_fy -= fy;  j_fz -= fz;
         }
         if (WriteEv) {
           Real he = energy * R(0.5);
           Real hw = virial * R(0.5);
           ei_e += he;  ei_w += hw;
-          if (my_j_in_iblock == 0u) {
+          if (!self_block) {
             j_e += he;  j_w += hw;
           }
         }
       }
-      // Rotate j-side state by one lane. The `my_j_in_iblock`
-      // per-lane flag rotates alongside because it belongs to the
-      // j-atom currently at this lane.
+      // Rotate j-side state by one lane.
       unsigned int src_lane = (lane + 1u) & 31u;
       pj_x = __shfl_sync(0xFFFFFFFFu, pj_x, src_lane);
       pj_y = __shfl_sync(0xFFFFFFFFu, pj_y, src_lane);
@@ -1893,7 +1881,6 @@ __device__ static inline void heddle_jit_outer_loop(
       j_atom_id = __shfl_sync(0xFFFFFFFFu, j_atom_id, src_lane);
       j_valid = j_atom_id < n;
       /*HEDDLE_JIT_JTYPE_SHUFFLE*/
-      my_j_in_iblock = __shfl_sync(0xFFFFFFFFu, my_j_in_iblock, src_lane);
       j_fx = __shfl_sync(0xFFFFFFFFu, j_fx, src_lane);
       j_fy = __shfl_sync(0xFFFFFFFFu, j_fy, src_lane);
       j_fz = __shfl_sync(0xFFFFFFFFu, j_fz, src_lane);
@@ -1916,10 +1903,13 @@ __device__ static inline void heddle_jit_outer_loop(
       }
     }
 
-    // j-side global atomic, one per (entry, lane). j-atoms change
-    // every entry, so we have to flush per entry — the register
-    // staging only helps the i-side.
-    if (j_valid) {
+    // j-side global atomic, one per (entry, lane), skipped when the
+    // entry is a self-block tile-pair (Newton's-3rd is realised via
+    // the symmetric i-side enumeration under that branch, so the
+    // per-lane `j_*` accumulators are zero by construction here).
+    // j-atoms change every entry, so we have to flush per entry —
+    // the register staging only helps the i-side. rq-f9687fec rq-59bf2ab2
+    if (j_valid && !self_block) {
       heddle_jit_atomic_add_fp(fast_force_x_fp, j_atom_id, j_fx);
       heddle_jit_atomic_add_fp(fast_force_y_fp, j_atom_id, j_fy);
       heddle_jit_atomic_add_fp(fast_force_z_fp, j_atom_id, j_fz);

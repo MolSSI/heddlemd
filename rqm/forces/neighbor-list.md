@@ -947,30 +947,24 @@ reproducibility.**
   consumers trust the runner to own one canonical box and to use only
   the documented mutator.
 
-### Mixed-entry Newton's-3rd double-count (FIXED)
+### Tile-pair-per-entry invariant <!-- rq-3ae5d2dc -->
 
-When a packed entry contained both self-block-like j-atoms
-(atoms of the same i-block, expected to route through
-self-block detection) and cross-block j-atoms in the same
-32-slot row, the coarse warp-wide `self_block` detection
-failed for the entry and `j_fx -= fx` was applied to every
-pair. For self-block-like pairs inside the mixed entry this
-doubled the atom's force because both sides of the 32-rotation
-sweep contributed to the shared per-atom accumulator (once via
-each atom's own i-side accumulator, once via the other side's
-j-side).
-
-The fix, in `heddle_jit_outer_loop` (see
-`jit-composed-pair-force.md` *Composed-Kernel Structure*), is a
-per-lane `my_j_in_iblock` flag computed once per entry and
-rotated alongside the j-side state through the 32-iteration
-diagonal shuffle: Newton's 3rd is suppressed per-pair whenever
-the current j-atom sits anywhere in the entry's i-block set,
-subsuming the old warp-wide `self_block` detection with a
-strictly finer per-pair check. `tests/neighbor_list_correctness.rs`
-covers this via cross-validation of cell-list against the
-all-pairs oracle across an r_skin sweep, an equilibrium F_max
-check against both modes, and a translation-invariance check.
+The packed neighbour list carries exactly one tile-pair
+`(i_block, j_block)` per entry (see
+`packed-neighbour-pair-force.md` *Neighbour List*). The
+construction sweep visits each unordered tile-pair `(x, y)`
+with `y >= x` at most once and emits at most one packed entry
+per dense tile-pair; entries never mix j-atoms from different
+j-blocks. Under this invariant, the packed-pair-force kernel's
+`self_block` predicate is `(interacting_j_blocks[pos] ==
+interacting_tiles[pos])`, evaluated once per entry and uniform
+across the warp — no per-lane or per-pair intra-block-membership
+check is required, and Newton's 3rd applies exactly when
+`self_block == false`. `tests/neighbor_list_correctness.rs`
+covers the invariant via cross-validation of cell-list against
+the all-pairs oracle across an r_skin sweep, an equilibrium
+F_max check against both modes, and a translation-invariance
+check.
 
 ---
 

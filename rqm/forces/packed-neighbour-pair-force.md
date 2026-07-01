@@ -201,23 +201,36 @@ the pre-filter avoids one indirection per access:
 ## Neighbour List <!-- rq-21131a60 -->
 
 The packed neighbour list is a flat array of entries. Each entry
-binds one i-block to 32 j-atoms:
+binds one **tile-pair** `(i_block, j_block)` to up to 32 j-atoms
+drawn from that j-block, all of which interact with at least one
+i-atom in that i-block:
 
 - `interacting_tiles: CudaSlice<u32>` of length
   `interacting_tiles_capacity` — `interacting_tiles[pos]` is the
   i-block index for entry `pos`.
+- `interacting_j_blocks: CudaSlice<u32>` of length
+  `interacting_tiles_capacity` — `interacting_j_blocks[pos]` is
+  the j-block index for entry `pos`. The invariant
+  `interacting_j_blocks[pos] >= interacting_tiles[pos]` holds for
+  every entry: the construction sweep visits only unordered
+  tile-pairs `(x, y)` with `y >= x`, so each tile-pair is
+  discovered exactly once and self-block appears as
+  `interacting_j_blocks[pos] == interacting_tiles[pos]`.
 - `interacting_atoms: CudaSlice<u32>` of length
   `interacting_tiles_capacity · 32` — `interacting_atoms[pos·32 + ℓ]`
   is one **original atom ID** (not a block position) of a j-atom
-  that interacts with the i-block `interacting_tiles[pos]`. The 32
-  j-atoms in one entry may come from any combination of j-blocks;
-  the only guarantee is that every j-atom has passed the per-atom
-  cutoff test against at least one i-atom in
-  `interacting_tiles[pos]`. No padding, no mask.
+  that lives in block `interacting_j_blocks[pos]` and interacts
+  with at least one i-atom in block `interacting_tiles[pos]`. All
+  32 slots of a single entry are drawn from that one j-block:
+  every real j-atom slot equals
+  `sorted_particle_ids[j_slot]` for some
+  `j_slot ∈ [interacting_j_blocks[pos] · 32,
+  (interacting_j_blocks[pos] + 1) · 32)`, and unused slots carry
+  the sentinel value `N` (one past the largest valid atom ID).
 
-Padding values are reserved: a j-atom slot may carry `N` (i.e., one
-past the largest valid atom ID) to indicate "no atom" in the tail
-of the final partial entry. The kernel skips slots with value
+Two entries never mix j-atoms from different j-blocks. Sentinel
+padding is used for any tile-pair that produces fewer than 32
+surviving j-atom hits. The kernel skips slots whose value is
 `>= N`.
 
 When a candidate (i-block, j-block) pair produces no more than
@@ -237,7 +250,7 @@ packed-neighbour buffer:
   entries.
 
 `MAX_BITS_FOR_PAIRS` is a compile-time `#define` in
-`kernels/neighbor.cu` set to `3`. Below this threshold the
+`kernels/neighbor.cu` set to `16`. Below this threshold the
 single-pair pass amortises a full 32×32 = 1024-pair tile loop over
 just a handful of true interactions; above it the packed-
 neighbour pass is cheaper.
@@ -338,19 +351,25 @@ produced `sorted_particle_ids`:
      `single_pair_atoms[2 · slot]` and
      `single_pair_atoms[2 · slot + 1]`. The hits do NOT enter the
      packed-neighbour staging buffer.
-   - **Dense-tile path.** When `n_hits > MAX_BITS_FOR_PAIRS`,
-     the j-atoms with `any_hit` are compacted into a per-warp
-     staging buffer of size `BUFFER_SIZE` (default 256). When the
-     buffer reaches 32, the warp flushes 32 j-atoms into the
-     global `interacting_tiles[pos]` /
-     `interacting_atoms[pos · 32 + ℓ]` arrays, advancing
-     `interaction_count[0]` via `atomicAdd`.
-   - At the end of the i-block sweep, the partial tail of the
-     dense-path staging buffer is flushed; the final entry pads
-     unused slots with `N` (the sentinel "no atom" value) so the
-     force kernel's bounds check skips them.
+   - **Dense-tile path.** When `n_hits > MAX_BITS_FOR_PAIRS`, the
+     warp emits one packed entry for this tile-pair directly:
+     lane `0` calls `atomicAdd(&interaction_count[0], 1u)` and
+     broadcasts the returned `slot` to the warp; lane `0` writes
+     `interacting_tiles[slot] = b` (the i-block index) and
+     `interacting_j_blocks[slot] = jb` (the j-block index); every
+     lane writes `interacting_atoms[slot · 32 + lane] =
+     (any_hit && j_slot < n_atoms) ? jid : n_atoms`. Lanes with
+     `any_hit == false` (their j-atom did not survive the per-atom
+     refinement) and lanes in the partial last block
+     (`j_slot >= n_atoms`) both write the sentinel `n_atoms`.
+     The dense path uses no per-warp staging buffer and no
+     multi-tile-pair merge; every entry is a single tile-pair.
 
-   `MAX_BITS_FOR_PAIRS` is `3` (compile-time constant in
+   No end-of-sweep tail flush is issued — since every dense
+   tile-pair produces its own entry immediately, there is no
+   accumulated per-warp state to drain.
+
+   `MAX_BITS_FOR_PAIRS` is `16` (compile-time constant in
    `kernels/neighbor.cu`).
 
    As its final action the kernel writes the live counts to
@@ -562,14 +581,19 @@ finaliser converts to `Real` after all three have run.
 
 For every entry `pos` in `[0, interaction_count[0])`:
 
-- `x = interacting_tiles[pos]`.
+- `x = interacting_tiles[pos]`, `y = interacting_j_blocks[pos]`.
+- `self_block = (x == y)`. The check is warp-uniform because both
+  values are broadcast from the entry's fields, so every lane in
+  the warp branches the same way and no per-pair warp-divergent
+  test on the intra-block relationship is needed inside the
+  32-iteration loop.
 - Load 32 i-atoms of `x` (positions from
   `tile_sorted_positions_*[x · 32 + lane]`, original atom IDs from
   `sorted_particle_ids[x · 32 + lane]`).
 - Load 32 j-atoms from `interacting_atoms[pos · 32 + lane]`. Each
   is an original atom ID; load its position from
-  `positions_*[j_atom_id]`. If `j_atom_id >= N`, the slot is the
-  partial-tail padding; treat as inactive.
+  `positions_*[j_atom_id]`. If `j_atom_id >= N`, the slot is a
+  sentinel; treat as inactive.
 - Run the 32-iteration diagonal shuffle (described in *Diagonal
   Shuffle* below). For each pair the lane invokes the composer's
   per-pair evaluator (`heddle_jit_eval_pair_sum`, see
@@ -578,8 +602,13 @@ For every entry `pos` in `[0, interaction_count[0])`:
   call. Every pair is implicitly scale 1.0 in this pass;
   per-fragment exclusion scales are applied by the correction
   pass.
-- AtomicAdd per-lane accumulators to the fixed-point buffer using
-  i-atom and j-atom original IDs.
+- AtomicAdd per-lane i-side accumulators to the fixed-point
+  buffer indexed by the i-atom's original ID. When `self_block ==
+  false`, the pass additionally atomicAdds per-lane j-side
+  accumulators to the fixed-point buffer indexed by each lane's
+  original j-atom ID; when `self_block == true`, the j-side
+  atomicAdds are skipped. See *Diagonal Shuffle* below for how
+  the loop populates the per-lane accumulators under each branch.
 
 ### Single-Pair Pass <!-- rq-b28a6d96 -->
 
@@ -609,6 +638,9 @@ and atom-ID conventions of the two passes above.
 The packed-neighbour pass's 32-iteration inner loop pattern:
 
 ```text
+// self_block computed once at entry, warp-uniform:
+self_block = (interacting_tiles[pos] == interacting_j_blocks[pos])
+
 // initial j-side state per lane: lane ℓ holds j-atom ℓ
 i_lane = lane
 tj = lane
@@ -618,9 +650,12 @@ for t in 0..32:
         // evaluate pair (i_atom = lane, j_atom_lane = tj):
         compute delta, factor, energy, virial
         i_fx += factor * dx;   i_fy += factor * dy;   i_fz += factor * dz
-        j_fx -= factor * dx;   j_fy -= factor * dy;   j_fz -= factor * dz
-        i_e  += energy * 0.5;  j_e  += energy * 0.5
-        i_w  += virial * 0.5;  j_w  += virial * 0.5
+        i_e  += energy * 0.5
+        i_w  += virial * 0.5
+        if (!self_block):
+            j_fx -= factor * dx;   j_fy -= factor * dy;   j_fz -= factor * dz
+            j_e  += energy * 0.5
+            j_w  += virial * 0.5
     }
     // shuffle j-side state by one lane:
     j_atom_id, j_x, j_y, j_z, j_fx, j_fy, j_fz, j_e, j_w =
@@ -628,16 +663,27 @@ for t in 0..32:
     tj = (tj + 1) & 31
 ```
 
-The pair-skip predicate `i_atom_id != j_atom_id` covers the
-self-pair case when an i-block's atoms happen to appear in the
-same entry's j-atom list (e.g., when a sparse-tile boundary
-straddles the i-block); the single-pair pass uses the same
-predicate at the per-thread level.
+The `self_block` gate on the j-side accumulation is warp-uniform,
+so every lane in the warp branches the same way for the entire
+32-iteration loop. Under `self_block == true`, each lane
+processes each intra-block pair from its own i-atom's
+perspective (`ei_fx` accumulator), and the reverse-direction
+processing on some other lane's iteration accumulates the same
+physical pair into that other atom's `ei_fx` — Newton's 3rd
+is realised by the symmetric enumeration, not by explicit
+`j_fx -= …`. Under `self_block == false`, the pair (i-atom_of_lane,
+j-atom_of_lane) appears only in the current entry (the j-atom's
+i-block is a different i-block whose warp does not visit this
+tile-pair because `j_block ≥ i_block` in the construction sweep),
+and the explicit `j_fx -= …` closes the pair. The pair-skip
+predicate `i_atom_id != j_atom_id` covers the self-pair
+diagonal.
 
-After 32 iterations the j-side accumulators have rotated 32 times
-and are back at their starting lane. Lane ℓ's `j_*` accumulators
-hold the total contribution to the j-atom that started in lane ℓ
-(i.e., the j-atom at j-lane `ℓ` of the entry).
+After 32 iterations the j-side accumulators have rotated 32
+times and are back at their starting lane. Lane ℓ's `j_*`
+accumulators hold the total contribution to the j-atom that
+started in lane ℓ (i.e., the j-atom at j-lane `ℓ` of the entry);
+they are zero when `self_block == true`.
 
 The 32-iteration loop count is constant — no early exit. Per-pair
 gating is by `j_atom_id < N` (and by the optional
@@ -1036,7 +1082,7 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `*_overflow` bits of `neighbor_status` (see *Capacity*); it returns
   no count or status to the host. The `*_high_water_mark` arguments are
   `floor(capacity · tile_pair_fill_threshold)`, computed on the host
-  from the current capacities. The `MAX_BITS_FOR_PAIRS = 3` threshold
+  from the current capacities. The `MAX_BITS_FOR_PAIRS = 16` threshold
   is a compile-time `#define`.
 - `heddle_jit_composed_pair_force_f` / <!-- rq-42e29605 -->
   `heddle_jit_composed_pair_force_fev` — JIT-composed packed-
@@ -1242,36 +1288,64 @@ Feature: Packed-Neighbour Pair-Force Architecture
   # --- Neighbour-list construction ---
 
   @rq-1470ef9f
-  Scenario: interacting_atoms entries contain only real neighbours
+  Scenario: interacting_atoms entries contain only real neighbours from the entry's j-block
     Given the construction kernel has completed
     When for every entry pos in [0, interaction_count[0])
       and every lane L in [0, 32)
-    Then either interacting_atoms[pos*32 + L] >= N (the no-atom sentinel)
-    Or interacting_atoms[pos*32 + L] is an atom whose position is within
-      r_cut + r_skin of at least one atom in
+    Then either interacting_atoms[pos*32 + L] >= N (the sentinel)
+    Or interacting_atoms[pos*32 + L] equals sorted_particle_ids[interacting_j_blocks[pos] * 32 + m]
+      for some m in [0, 32)
+    And in the latter case, that atom's position is within r_cut + r_skin
+      of at least one atom in
       sorted_particle_ids[interacting_tiles[pos] * 32 .. (interacting_tiles[pos]+1) * 32]
       under minimum image
+
+  @rq-a4c22484
+  Scenario: Every packed entry binds exactly one tile-pair
+    Given the construction kernel has completed
+    When for every entry pos in [0, interaction_count[0])
+    Then interacting_tiles[pos] and interacting_j_blocks[pos] are both valid block indices
+    And interacting_j_blocks[pos] >= interacting_tiles[pos]
+    And no other entry pos' in [0, interaction_count[0]) shares the same
+      (interacting_tiles[pos'], interacting_j_blocks[pos']) tuple
+
+  @rq-c37263fd
+  Scenario: Self-block entries carry j_block equal to i_block
+    Given a self-block dense tile-pair (b, b) whose n_hits > MAX_BITS_FOR_PAIRS
+    When the construction kernel emits its packed entry at slot pos
+    Then interacting_tiles[pos] == interacting_j_blocks[pos] == b
 
   @rq-e8667000
   Scenario: Sparse (i-block, j-block) candidate routes its pairs to single_pair_atoms
     Given a candidate (i-block, j-block) pair that produces n_hits j-atoms with any_hit
-    And n_hits <= MAX_BITS_FOR_PAIRS (= 3)
+    And n_hits <= MAX_BITS_FOR_PAIRS (= 16)
     When the construction kernel processes this candidate
     Then for every j-atom with any_hit and every i-atom in its i_hit_mask, one (atom_i, atom_j) entry is written to single_pair_atoms (advancing interaction_count[1] by one per (i, j) hit)
     And no entry is written to interacting_atoms for this candidate
 
   @rq-560d3be9
-  Scenario: Dense (i-block, j-block) candidate routes its hits to interacting_atoms
-    Given a candidate (i-block, j-block) pair that produces n_hits j-atoms with any_hit
-    And n_hits > MAX_BITS_FOR_PAIRS (= 3)
+  Scenario: Dense (i-block, j-block) candidate emits exactly one packed entry
+    Given a candidate (i-block, j-block) tile-pair that produces n_hits j-atoms with any_hit
+    And n_hits > MAX_BITS_FOR_PAIRS (= 16)
     When the construction kernel processes this candidate
-    Then the surviving j-atoms enter the per-warp staging buffer and contribute to interacting_tiles / interacting_atoms when the buffer reaches 32
+    Then exactly one packed entry is emitted at slot pos = atomicAdd(&interaction_count[0], 1u)
+    And interacting_tiles[pos] == i-block, interacting_j_blocks[pos] == j-block
+    And for every lane L in [0, 32), interacting_atoms[pos*32 + L] equals
+      the L-th j-atom's original ID when that lane's any_hit is true and
+      j_slot = j-block*32 + L is within [0, n_atoms), and equals the
+      sentinel n_atoms otherwise
     And no entry is written to single_pair_atoms for this candidate
 
+  @rq-e1bd63f5
+  Scenario: No end-of-sweep tail flush is required
+    Given a warp completes its full j_base outer sweep for i-block b
+    Then no additional packed entry is emitted at the end of the sweep
+      (dense entries have already been written directly, one per tile-pair)
+
   @rq-b1060817
-  Scenario: MAX_BITS_FOR_PAIRS equals 3
+  Scenario: MAX_BITS_FOR_PAIRS equals 16
     Given the construction kernel's compiled source
-    Then `MAX_BITS_FOR_PAIRS` resolves to the literal 3
+    Then `MAX_BITS_FOR_PAIRS` resolves to the literal 16
 
   # --- Uniqueness: no duplicate pair emission ---
   #
@@ -1409,6 +1483,31 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Given an entry pos with interacting_atoms[pos*32 + lane] == N for some lane
     When the packed-neighbour kernel processes entry pos
     Then no pair contribution is accumulated for that lane
+
+  @rq-7daaec2d
+  Scenario: Packed-neighbour pass computes self_block from entry fields
+    Given an entry pos processed by the packed-neighbour kernel
+    When the kernel loads x = interacting_tiles[pos] and y = interacting_j_blocks[pos]
+    Then it evaluates the warp-uniform predicate self_block = (x == y)
+    And uses self_block to gate the j-side atomicAdds and the inner-loop
+      j-side accumulators
+
+  @rq-f9687fec
+  Scenario: Self-block entry suppresses j-side atomicAdds
+    Given a packed entry pos with interacting_tiles[pos] == interacting_j_blocks[pos]
+    When the kernel finishes the 32-iteration diagonal shuffle for entry pos
+    Then no lane issues atomicAdd for the j-side accumulators of this entry
+    And every intramolecular contribution is applied via the i-side
+      accumulator whose corresponding atom appears at both an i-lane and
+      a j-lane of the entry
+
+  @rq-59bf2ab2
+  Scenario: Cross-block entry applies Newton's 3rd via the j-side atomicAdd
+    Given a packed entry pos with interacting_tiles[pos] != interacting_j_blocks[pos]
+    When the kernel finishes the 32-iteration diagonal shuffle for entry pos
+    Then every lane issues an atomicAdd for the accumulated j-side value
+      at its original j-atom's fixed-point slot
+    And each pair contributes exactly once to each atom's total force
 
   @rq-b49bfdff
   Scenario: Packed-neighbour pass treats every pair as scale 1.0

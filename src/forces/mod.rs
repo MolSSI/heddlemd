@@ -951,6 +951,7 @@ impl ForceField {
             launch_builder.push_device_buffer(&packed.block_bbox);
             launch_builder.push_device_buffer(sorted_view);
             launch_builder.push_device_buffer(&packed.iblock_offset);
+            launch_builder.push_device_buffer(&packed.sorted_interacting_j_blocks);
             launch_builder.push_device_buffer(&packed.sorted_interacting_atoms);
             launch_builder.push_scalar(n_iblocks);
             launch_builder.push_device_buffer(sim_box.lattice_device());
@@ -978,7 +979,7 @@ impl ForceField {
 
             // Sparse-tile single-pair pass. The neighbour-list builder
             // routes (i-block, j-block) candidates with
-            // `n_hits <= MAX_BITS_FOR_PAIRS = 3` into
+            // `n_hits <= MAX_BITS_FOR_PAIRS = 16` into
             // `single_pair_atoms` instead of the packed buffer. The
             // launch covers `single_pairs_capacity` threads
             // unconditionally (so the kernel is captured into the
