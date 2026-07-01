@@ -26,9 +26,10 @@ exactly one of them:
   of all builders that activate, summed together. Used by the potential
   registry alone: a force field is an additive composition of many
   simultaneously-active potentials, each switched on by a distinct
-  configuration section (Lennard-Jones by `[[pair_interactions]]`, Coulomb by
-  `[coulomb]`, SPME by `[spme]`, Morse by the bond list, harmonic angles by
-  the angle list). The potential builder trait carries no kind key.
+  configuration section (Lennard-Jones by `[[pair_interactions]]`, SPME by
+  `[spme]`, Morse by the bond list, harmonic angles by the angle list,
+  periodic dihedrals by the dihedral list). The potential builder trait
+  carries no kind key.
 
 The generic container provides storage, registration, built-in population,
 cloning, and — for named-selection registries only — lookup by kind. The

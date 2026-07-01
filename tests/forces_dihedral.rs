@@ -150,7 +150,6 @@ fn run_dihedral(
         &[],
         dihedral_types,
         None,
-        None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(n),
@@ -663,8 +662,7 @@ fn empty_dihedral_list_is_a_noop() {
     registry.register(Box::new(PeriodicDihedralBuilder));
     let mut ff = ForceField::new(
         &registry, &gpu, n, &box_10(&gpu),
-        &[], &[], &[], &[], &[],
-        None, None, &[],
+        &[], &[], &[], &[], &[], None, &[],
         &BondList::empty(n), &AngleList::empty(n), &dl,
         &ExclusionList::empty(n), &NeighborListConfig::AllPairs,
     )
@@ -788,7 +786,6 @@ fn builder_returns_none_for_empty_dihedral_list() {
         bond_types: &[],
         angle_types: &[],
         dihedral_types: &[periodic_type("D", 1.0, 1, 0.0)],
-        coulomb_config: None,
         spme_config: None,
         charges: &[],
         bond_list: &BondList::empty(4),

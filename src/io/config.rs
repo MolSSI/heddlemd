@@ -77,8 +77,9 @@ pub enum ConfigError {
         kind_b: PathRole,
         path: PathBuf,
     },
-    #[error("config declares both [coulomb] and [spme]; only one electrostatics method may be active per run")]
-    ConflictingElectrostatics,
+    // rq-coulomb-retired
+    #[error("the pairwise `[coulomb]` slot has been retired; use `[spme]` for electrostatics")]
+    CoulombRetired,
     // rq-lossless_unsupported_in_f64
     #[error(
         "[integrator] lossless = true is not available in the f64 build (the velocity-Verlet \
@@ -516,14 +517,6 @@ pub enum NeighborListConfig {
     CellList { r_skin: f64 },
 }
 
-// CoulombConfig — parsed `[coulomb]` table; rq-846bdb8b
-// rq-793a7cbb
-#[derive(Debug, Clone, PartialEq)]
-pub struct CoulombConfig {
-    pub cutoff: f64,
-    pub r_switch: f64,
-}
-
 // SpmeConfig — parsed `[spme]` table; rq-7bd2d9ca rq-202493a5
 // rq-61889ff1 rq-a03de3d5
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -571,7 +564,6 @@ pub struct Config {
     pub angle_types: Vec<AngleTypeConfig>,
     pub dihedral_types: Vec<DihedralTypeConfig>,
     pub constraint_types: Vec<NamedSlotConfig>,
-    pub coulomb: Option<CoulombConfig>,
     pub spme: Option<SpmeConfig>,
     pub neighbor_list: NeighborListConfig,
     pub config_path: PathBuf,
@@ -664,8 +656,6 @@ struct RawConfig {
     dihedral_types: Vec<RawDihedralType>,
     #[serde(default)]
     constraint_types: Vec<NamedSlotConfig>,
-    #[serde(default)]
-    coulomb: Option<RawCoulombConfig>,
     #[serde(default)]
     spme: Option<RawSpmeConfig>,
     #[serde(default)]
@@ -826,14 +816,6 @@ impl From<RawDihedralType> for DihedralTypeConfig {
 }
 
 #[derive(Debug, Deserialize, crate::units::Convert)]
-#[serde(deny_unknown_fields)]
-struct RawCoulombConfig {
-    cutoff: crate::units::Length,
-    #[serde(default)]
-    r_switch: Option<crate::units::Length>,
-}
-
-#[derive(Debug, Deserialize, crate::units::Convert)]
 #[serde(tag = "mode", rename_all = "kebab-case", deny_unknown_fields)]
 enum RawNeighborList {
     // Empty-struct form (`AllPairs {}`) so `deny_unknown_fields` rejects
@@ -889,6 +871,17 @@ pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
 
     let raw_text = std::fs::read_to_string(path)
         .map_err(|e| ConfigError::Io(format!("{}: {}", path.display(), e)))?;
+
+    // The pairwise `[coulomb]` slot was retired after producing
+    // non-conservative forces at short intramolecular distances. Detect
+    // it up front so users see a friendly retirement notice rather than
+    // a silent field drop or a misleading downstream error.
+    if raw_text
+        .lines()
+        .any(|ln| ln.trim_start().starts_with("[coulomb]"))
+    {
+        return Err(ConfigError::CoulombRetired);
+    }
 
     let de = toml::Deserializer::new(&raw_text);
     let mut raw_config: RawConfig =
@@ -1183,11 +1176,6 @@ fn build_config(
     // (`convert_all_slot_params`), so no conversion happens here.
     let constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
 
-    let coulomb: Option<CoulombConfig> = raw.coulomb.map(|r| {
-        let cutoff = r.cutoff.0;
-        let r_switch = r.r_switch.map(|x| x.0).unwrap_or(0.9 * cutoff);
-        CoulombConfig { cutoff, r_switch }
-    });
     let spme = raw.spme.map(|s| SpmeConfig {
         alpha: s.alpha.0,
         r_cut_real: s.r_cut_real.0,
@@ -1195,19 +1183,14 @@ fn build_config(
         spline_order: s.spline_order,
     });
 
-    // Compute the maximum cutoff across pair_interactions, coulomb,
-    // and spme.r_cut_real; used to derive r_skin's default when
+    // Compute the maximum cutoff across pair_interactions and
+    // spme.r_cut_real; used to derive r_skin's default when
     // [neighbor_list] is absent or its r_skin field is omitted.
     let max_cutoff = {
         let mut m: f64 = 0.0;
         for p in &pair_interactions {
             if p.cutoff > m {
                 m = p.cutoff;
-            }
-        }
-        if let Some(c) = coulomb.as_ref() {
-            if c.cutoff > m {
-                m = c.cutoff;
             }
         }
         if let Some(s) = spme.as_ref() {
@@ -1410,7 +1393,6 @@ fn build_config(
         angle_types,
         dihedral_types,
         constraint_types,
-        coulomb,
         spme,
         neighbor_list,
         config_path: config_path.to_path_buf(),
@@ -1439,23 +1421,17 @@ impl Config {
         validate_angle_types(&self.angle_types)?;
         validate_dihedral_types(&self.dihedral_types)?;
         validate_constraint_type_names(&self.constraint_types)?;
-        if let Some(c) = &self.coulomb {
-            validate_coulomb(c)?;
-        }
         if let Some(s) = &self.spme {
             validate_spme(s)?;
         }
         validate_neighbor_list(&self.neighbor_list)?;
 
-        // Structural cross-validation: pair coverage, path collisions,
-        // and electrostatics exclusivity. The integrator/thermostat/
-        // barostat compatibility rules require builder predicates, so
-        // they live in `validate_against`.
+        // Structural cross-validation: pair coverage and path
+        // collisions. The integrator/thermostat/barostat compatibility
+        // rules require builder predicates, so they live in
+        // `validate_against`.
         check_pair_coverage(&self.particle_types, &self.pair_interactions)?;
         check_path_collisions(self)?;
-        if self.coulomb.is_some() && self.spme.is_some() {
-            return Err(ConfigError::ConflictingElectrostatics);
-        }
         Ok(())
     }
 
@@ -1992,21 +1968,6 @@ fn validate_dihedral_types(dts: &[DihedralTypeConfig]) -> Result<(), ConfigError
                 }
             }
         }
-    }
-    Ok(())
-}
-
-fn validate_coulomb(c: &CoulombConfig) -> Result<(), ConfigError> {
-    require_finite_positive("coulomb.cutoff", c.cutoff)?;
-    require_finite_positive("coulomb.r_switch", c.r_switch)?;
-    if c.r_switch > c.cutoff {
-        return Err(invalid(
-            "coulomb.r_switch",
-            format!(
-                "r_switch ({}) exceeds cutoff ({})",
-                c.r_switch, c.cutoff
-            ),
-        ));
     }
     Ok(())
 }

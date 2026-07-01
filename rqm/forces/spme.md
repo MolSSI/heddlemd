@@ -31,9 +31,7 @@ own, and the cuFFT-determinism precondition validated at device-init time.
 SPME contributes two `Potential` slots to the `ForceField`:
 
 - `SpmeRealSpaceState` — a pair-force slot using `erfc(α · r) / r`
-  screening over the shared neighbor list. Structurally similar to the
-  truncated Coulomb slot (`coulomb-pair-force.md`); differs only in the
-  functional form of the pair force. The slot exposes a CUDA source
+  screening over the shared neighbor list. The slot exposes a CUDA source
   fragment via `SpmeRealBuilder::pair_force_fragment` for participation
   in the JIT-composed pair-force kernel (see
   `jit-composed-pair-force.md`); when LJ is also configured, both
@@ -54,8 +52,7 @@ Both slots draw their per-particle charges from `posq.w` on
 constructed together when `[spme]` is present in the config; they
 share the parsed `alpha` but are otherwise independent.
 
-The `[spme]` and `[coulomb]` tables are mutually exclusive in the config
-(see `io/config-schema.md`).
+SPME is the only electrostatics path.
 
 ## Parameters <!-- rq-7bd2d9ca -->
 
@@ -81,8 +78,7 @@ required when the table is present.
 
 ## Real-space slot <!-- rq-f6d45062 -->
 
-The real-space slot is structurally analogous to `coulomb-pair-force.md`
-but evaluates `erfc(α · r) / r` instead of `1/r`. The slot uses the
+The real-space slot evaluates `erfc(α · r) / r` per pair. It uses the
 shared `NeighborListState` owned by `ForceField`, the per-particle
 charges carried in `posq.w` on `ParticleBuffers`, and the shared
 `DeviceExclusionList`'s `atom_excl_coul_scales` array.
@@ -211,11 +207,10 @@ implementation specifics:
 
 ### Real-space reproducibility <!-- rq-cf6116b8 -->
 
-Same as the truncated Coulomb pair force: the per-particle output is
-the deterministic warp-tree sum of its per-pair contributions,
-accumulated in the fixed lane-strided order specified by
-`pair-force-kernel.md`. Identical runs on the same GPU with identical
-inputs produce byte-identical `slot_force_*` outputs.
+The per-particle output is the deterministic warp-tree sum of its
+per-pair contributions, accumulated in the fixed lane-strided order
+specified by `pair-force-kernel.md`. Identical runs on the same GPU
+with identical inputs produce byte-identical `slot_force_*` outputs.
 
 ## Reciprocal-space pipeline <!-- rq-9ca00d25 -->
 
@@ -1317,7 +1312,6 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When ForceField::new is called
     Then the slot list contains SpmeRealSpaceState (label "spme_real")
     And the slot list contains SpmeReciprocalState (label "spme_reciprocal")
-    And the slot list does not contain CoulombState (truncated Coulomb)
 
   @rq-aeb23925
   Scenario: Reject grid dimension below 2*spline_order
@@ -1837,14 +1831,6 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When the full pipeline (spread + FFT + multiply + IFFT + gather) runs on each
     Then the per-particle force, energy, and virial buffers are byte-identical
       between the two runs
-
-  # --- Mutual exclusion with truncated Coulomb ---
-
-  @rq-203ecf81
-  Scenario: Reject a config that declares both [spme] and [coulomb]
-    Given a Config TOML with both [spme] and [coulomb] tables
-    When load_config is called
-    Then it returns Err(ConfigError::ConflictingElectrostatics { .. })
 
   # --- Box-compat check ---
 

@@ -361,13 +361,6 @@
     "title": "Empty registry produces a zero-slot ForceField",
     "type": "scenario"
   },
-  "rq-02a15197": {
-    "decl": "Scenario: Mixed charge magnitudes scale linearly",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Mixed charge magnitudes scale linearly",
-    "type": "scenario"
-  },
   "rq-02abafdd": {
     "decl": "#### Single-Pair and Exclusion-Correction Passes",
     "file": "forces/packed-neighbour-pair-force",
@@ -473,14 +466,6 @@
     "refs": [],
     "title": "A slow-class slot is not a JIT participant",
     "type": "scenario"
-  },
-  "rq-03423870": {
-    "decl": "## Reproducibility",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Reproducibility",
-    "type": "section"
   },
   "rq-037a9326": {
     "decl": "- `Timings::record_host(&mut self, stage: HostStage, duration: std::time::Duration)`",
@@ -1158,13 +1143,6 @@
     "title": "Reading Existing Requirements",
     "type": "section"
   },
-  "rq-0896c33a": {
-    "decl": "Scenario: Pair beyond cutoff contributes zero",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Pair beyond cutoff contributes zero",
-    "type": "scenario"
-  },
   "rq-08aba7ee": {
     "decl": "# Feature: Steepest-Descent Energy Minimizer",
     "file": "minimization/steepest-descent",
@@ -1723,7 +1701,7 @@
     "type": "scenario"
   },
   "rq-0cb544f4": {
-    "decl": "Scenario: Coulomb cutoff participates in box-too-small check",
+    "decl": "Scenario: SPME real-space cutoff participates in box-too-small check",
     "file": "simulation-runner",
     "refs": [
       {
@@ -1731,7 +1709,7 @@
         "kind": "code"
       }
     ],
-    "title": "Coulomb cutoff participates in box-too-small check",
+    "title": "SPME real-space cutoff participates in box-too-small check",
     "type": "scenario"
   },
   "rq-0d14734d": {
@@ -2663,13 +2641,6 @@
     "title": "__device__",
     "type": "api-item"
   },
-  "rq-13424eab": {
-    "decl": "- `CoulombBuilder` — `PotentialBuilder` that constructs the slot when",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "CoulombBuilder",
-    "type": "api-item"
-  },
   "rq-135a6e30": {
     "decl": "Scenario: Two registered kinds on a mixed-kind topology fan out",
     "file": "integration/constraint-framework",
@@ -3519,13 +3490,6 @@
     "file": "simulation-box",
     "refs": [],
     "title": "multiply_lattice_isotropic multiplies every device lattice component by the factor",
-    "type": "scenario"
-  },
-  "rq-1a0f3eef": {
-    "decl": "Scenario: Identical inputs produce byte-identical slot output",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Identical inputs produce byte-identical slot output",
     "type": "scenario"
   },
   "rq-1a2f0ba9": {
@@ -4446,13 +4410,6 @@
     "title": "`.xyz` trajectory",
     "type": "section"
   },
-  "rq-203ecf81": {
-    "decl": "Scenario: Reject a config that declares both [spme] and [coulomb]",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Reject a config that declares both [spme] and [coulomb]",
-    "type": "scenario"
-  },
   "rq-20464340": {
     "decl": "#### `mtk_velocity_half_kick`",
     "file": "integration/mtk-npt",
@@ -5146,13 +5103,6 @@
     "title": "Construction and Lifetime",
     "type": "section"
   },
-  "rq-25500ae7": {
-    "decl": "Scenario: Coulomb force is C¹ continuous at r_switch",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Coulomb force is C¹ continuous at r_switch",
-    "type": "scenario"
-  },
   "rq-25515b9a": {
     "decl": "- `__device__ static inline void",
     "file": "forces/packed-neighbour-pair-force",
@@ -5641,14 +5591,6 @@
     "refs": [],
     "title": "FragmentLoadFailed",
     "type": "api-item"
-  },
-  "rq-28d519b5": {
-    "decl": "#### `[coulomb]` (optional table)",
-    "file": "io/config-schema",
-    "level": 4,
-    "refs": [],
-    "title": "`[coulomb]` (optional table)",
-    "type": "section"
   },
   "rq-28fd5e34": {
     "decl": "Scenario: Reject a name containing non-ASCII characters",
@@ -7836,13 +7778,6 @@
     "title": "Types",
     "type": "section"
   },
-  "rq-3b7da473": {
-    "decl": "Scenario: Zero charges produce zero force",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Zero charges produce zero force",
-    "type": "scenario"
-  },
   "rq-3b9611f2": {
     "decl": "Scenario: SPME runs on a triclinic box with non-zero tilts",
     "file": "forces/spme",
@@ -8167,13 +8102,6 @@
     "title": "Frame Properties carries velo:R:3:image:I:3 when both flags are true",
     "type": "scenario"
   },
-  "rq-3df3ed61": {
-    "decl": "Scenario: Pair at exactly the cutoff contributes the smoothed (zero) value",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Pair at exactly the cutoff contributes the smoothed (zero) value",
-    "type": "scenario"
-  },
   "rq-3e0a3040": {
     "decl": "Scenario: Unknown minimizer kind in a populated registry reports UnknownKind",
     "file": "minimization/steepest-descent",
@@ -8405,14 +8333,6 @@
     "level": 2,
     "refs": [],
     "title": "Constraint-Type Validation",
-    "type": "section"
-  },
-  "rq-402e2963": {
-    "decl": "### Cutoff gating <!-- inline -->",
-    "file": "forces/coulomb-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "Cutoff gating <!-- inline -->",
     "type": "section"
   },
   "rq-408e4dc1": {
@@ -9303,14 +9223,6 @@
     "title": "Every governed error type implements std::error::Error",
     "type": "scenario"
   },
-  "rq-4968452d": {
-    "decl": "## Feature API",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Feature API",
-    "type": "section"
-  },
   "rq-4994ba90": {
     "decl": "Scenario: Reject missing comment line",
     "file": "io/init-state-file",
@@ -9856,13 +9768,6 @@
     "title": "BerendsenBarostatBuilder",
     "type": "api-item"
   },
-  "rq-4f23c656": {
-    "decl": "Scenario: Opposite-sign charges attract",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Opposite-sign charges attract",
-    "type": "scenario"
-  },
   "rq-4f5643f1": {
     "decl": "### Types",
     "file": "performance-analysis",
@@ -10366,13 +10271,6 @@
     "title": "Time-averaged kinetic energy tracks (3 N − n_constraints) / 2 · k_B · T",
     "type": "scenario"
   },
-  "rq-537cbe5e": {
-    "decl": "- `CoulombState::pair_force_fragment(&self) -> PairForceFragment` —",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "CoulombState",
-    "type": "api-item"
-  },
   "rq-53800cef": {
     "decl": "### CUDA Kernels",
     "file": "integration/shake",
@@ -10433,13 +10331,6 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Valid periodic dihedral_type is accepted",
-    "type": "scenario"
-  },
-  "rq-5444c7ae": {
-    "decl": "Scenario: Per-particle energy slot accumulates half the pair's potential energy",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Per-particle energy slot accumulates half the pair's potential energy",
     "type": "scenario"
   },
   "rq-545c961a": {
@@ -11169,13 +11060,6 @@
     "title": "Per-class accumulator buffers are sized particle_count regardless of slot count",
     "type": "scenario"
   },
-  "rq-59ea69fb": {
-    "decl": "Scenario: An exclusion entry on one pair does not attenuate other pairs",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "An exclusion entry on one pair does not attenuate other pairs",
-    "type": "scenario"
-  },
   "rq-59f42062": {
     "decl": "- `log_column_values(&self, ke, pe) -> Vec<f64>` — returns",
     "file": "integration/mc-barostat",
@@ -11270,14 +11154,6 @@
     ],
     "title": "andersen_resample on empty state is a no-op",
     "type": "scenario"
-  },
-  "rq-5ad9b8b9": {
-    "decl": "## Empty state",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Empty state",
-    "type": "section"
   },
   "rq-5aee0b50": {
     "decl": "Scenario: Two GPU runs produce byte-identical per-particle forces",
@@ -11852,14 +11728,6 @@
       }
     ],
     "title": "Per-Step Kernel Sequence",
-    "type": "section"
-  },
-  "rq-5f7aa9ac": {
-    "decl": "## Gherkin Scenarios",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Gherkin Scenarios",
     "type": "section"
   },
   "rq-5f8f7d00": {
@@ -12684,14 +12552,6 @@
     "title": "Empty State",
     "type": "section"
   },
-  "rq-66bcfbe3": {
-    "decl": "### Exclusion scaling <!-- inline -->",
-    "file": "forces/coulomb-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "Exclusion scaling <!-- inline -->",
-    "type": "section"
-  },
   "rq-66bf31c6": {
     "decl": "Scenario: Missing [integrator] section is rejected",
     "file": "io/config-schema",
@@ -12773,13 +12633,6 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Real-space slot with scale_coul = 1.0 reproduces the un-excluded value",
-    "type": "scenario"
-  },
-  "rq-67678030": {
-    "decl": "Scenario: Switching interval r_switch == cutoff selects hard-cutoff",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Switching interval r_switch == cutoff selects hard-cutoff",
     "type": "scenario"
   },
   "rq-6789ce57": {
@@ -13297,18 +13150,6 @@
     "refs": [],
     "title": "NHC conserved Hamiltonian",
     "type": "section"
-  },
-  "rq-6bdfdd6d": {
-    "decl": "- `CoulombParameters` — host-side parameter container. Fields:",
-    "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "src/forces/coulomb.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "CoulombParameters",
-    "type": "api-item"
   },
   "rq-6bef53e7": {
     "decl": "Scenario: SettleConstraintsState::new with an empty constraint list succeeds and is a no-op",
@@ -14716,13 +14557,6 @@
     "title": "Capture Lifecycle",
     "type": "section"
   },
-  "rq-76a6be2f": {
-    "decl": "Scenario: Zero particles is a no-op",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Zero particles is a no-op",
-    "type": "scenario"
-  },
   "rq-76abf8d7": {
     "decl": "Scenario: settle_positions restores exact rigidity in a single evaluation",
     "file": "integration/settle",
@@ -15141,18 +14975,6 @@
     "title": "Spread sum integrates to total charge",
     "type": "scenario"
   },
-  "rq-793a7cbb": {
-    "decl": "- `CoulombConfig`",
-    "file": "io/config-schema",
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "CoulombConfig",
-    "type": "api-item"
-  },
   "rq-794e4d2e": {
     "decl": "Scenario: Trajectory cadence shrinks the effective batch",
     "file": "cuda-graphs",
@@ -15181,7 +15003,7 @@
     "type": "scenario"
   },
   "rq-79938dbf": {
-    "decl": "- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
+    "decl": "- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], dihedral_types: &[DihedralTypeConfig], spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, dihedral_list: &DihedralList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
     "file": "forces/framework",
     "refs": [
       {
@@ -16262,13 +16084,6 @@
     "title": "CLI",
     "type": "section"
   },
-  "rq-82e4f74e": {
-    "decl": "Scenario: Same-sign charges repel",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Same-sign charges repel",
-    "type": "scenario"
-  },
   "rq-83088c2f": {
     "decl": "Scenario: Real-space slot matches the closed-form erfc force for an isolated pair",
     "file": "forces/spme",
@@ -16396,30 +16211,6 @@
     ],
     "title": "Analysis",
     "type": "api-item"
-  },
-  "rq-846bdb8b": {
-    "decl": "# Feature: Truncated Coulomb Pair Force",
-    "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "src/forces/coulomb.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/forces/spme.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/cufft.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Feature: Truncated Coulomb Pair Force",
-    "type": "file"
   },
   "rq-8471c200": {
     "decl": "Scenario: constraint_virial_scatter additively writes per-atom virial into particle_virials",
@@ -17283,13 +17074,6 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
-  },
-  "rq-8c96d3c7": {
-    "decl": "Scenario: Coulomb and LJ exclusions are independent",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Coulomb and LJ exclusions are independent",
-    "type": "scenario"
   },
   "rq-8cda2c89": {
     "decl": "- `plan(dt)` — returns the fourteen-element `StepPlan` defined in",
@@ -18898,13 +18682,6 @@
     "title": "TrajectoryReaderError",
     "type": "api-item"
   },
-  "rq-9af1f9dc": {
-    "decl": "Scenario: Minimum-image works for a triclinic box",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Minimum-image works for a triclinic box",
-    "type": "scenario"
-  },
   "rq-9b03044f": {
     "decl": "### Runner-Driven Constraint Hooks",
     "file": "integration/velocity-verlet",
@@ -20163,14 +19940,6 @@
     ],
     "title": "Reject non-positive tau",
     "type": "scenario"
-  },
-  "rq-a3fdbd7c": {
-    "decl": "### Types",
-    "file": "forces/coulomb-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "Types",
-    "type": "section"
   },
   "rq-a403f778": {
     "decl": "Scenario: Open creates a new trajectory file",
@@ -21572,14 +21341,6 @@
     "title": "Real-space slot produces zero outside r_cut_real",
     "type": "scenario"
   },
-  "rq-af7718be": {
-    "decl": "### Force evaluation <!-- inline -->",
-    "file": "forces/coulomb-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "Force evaluation <!-- inline -->",
-    "type": "section"
-  },
   "rq-af9257bb": {
     "decl": "Scenario: rescale_isotropic multiplies all six lattice parameters",
     "file": "integration/berendsen-barostat",
@@ -21674,13 +21435,6 @@
       }
     ],
     "title": "Angle row with atom index out of range",
-    "type": "scenario"
-  },
-  "rq-b07abbd4": {
-    "decl": "Scenario: Pair inside the inner plateau is unsmoothed",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Pair inside the inner plateau is unsmoothed",
     "type": "scenario"
   },
   "rq-b08937a3": {
@@ -23376,14 +23130,6 @@
     "title": "Reject an output_path equal to the simulation's log file",
     "type": "scenario"
   },
-  "rq-bee8e566": {
-    "decl": "## Out of Scope",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Out of Scope",
-    "type": "section"
-  },
   "rq-bef900e1": {
     "decl": "Scenario: rescale_velocities on empty state is a no-op",
     "file": "integration/nose-hoover-chain",
@@ -23490,23 +23236,6 @@
     "refs": [],
     "title": "BarostatPeriodicity",
     "type": "api-item"
-  },
-  "rq-bfd7004c": {
-    "decl": "## Algorithm",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [
-      {
-        "file": "src/forces/coulomb.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Algorithm",
-    "type": "section"
   },
   "rq-c00689e6": {
     "decl": "- `Builtins` — the per-trait built-in roster.",
@@ -24126,13 +23855,6 @@
     "title": "Influence buffers are reused when sim_box generation is unchanged",
     "type": "scenario"
   },
-  "rq-c4d4608f": {
-    "decl": "Scenario: Pair with Coulomb exclusion scale 0.0 contributes nothing",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Pair with Coulomb exclusion scale 0.0 contributes nothing",
-    "type": "scenario"
-  },
   "rq-c4f93cfa": {
     "decl": "Scenario: A bonded slot's functor_init_source uses local-functor initialisation",
     "file": "forces/jit-composed-intramolecular",
@@ -24645,13 +24367,6 @@
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
     "title": "step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
-    "type": "scenario"
-  },
-  "rq-c95dd6c9": {
-    "decl": "Scenario: Exclusion scaling multiplies the switched force, energy, and virial",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Exclusion scaling multiplies the switched force, energy, and virial",
     "type": "scenario"
   },
   "rq-c9618bdd": {
@@ -25751,13 +25466,6 @@
     "title": "vv_kick_drift produces the exact half-step kinematics under a constant force",
     "type": "scenario"
   },
-  "rq-d26e9f9c": {
-    "decl": "Scenario: Pair with Coulomb exclusion scale 0.5 contributes half",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Pair with Coulomb exclusion scale 0.5 contributes half",
-    "type": "scenario"
-  },
   "rq-d278bb01": {
     "decl": "- `Angle` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`",
     "file": "forces/topology",
@@ -25896,18 +25604,6 @@
     ],
     "title": "Construct PeriodicDihedralState",
     "type": "scenario"
-  },
-  "rq-d340b338": {
-    "decl": "- `CoulombState` — implements the `Potential` trait with",
-    "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "src/forces/coulomb.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "CoulombState",
-    "type": "api-item"
   },
   "rq-d34ff8f7": {
     "decl": "Scenario: Trajectory-only steps do not trigger force-kernel scalars in graph mode",
@@ -26117,13 +25813,6 @@
     ],
     "title": "CRescaleBarostatBuilder",
     "type": "api-item"
-  },
-  "rq-d52bcc88": {
-    "decl": "Scenario: Pair inside the switching interval is smoothed",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Pair inside the switching interval is smoothed",
-    "type": "scenario"
   },
   "rq-d532de58": {
     "decl": "Scenario: Reject non-positive tau",
@@ -27573,13 +27262,6 @@
     "title": "LogWriter",
     "type": "api-item"
   },
-  "rq-e1204b7f": {
-    "decl": "Scenario: Coulomb force decays toward zero just inside r_cut",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Coulomb force decays toward zero just inside r_cut",
-    "type": "scenario"
-  },
   "rq-e1258ceb": {
     "decl": "Scenario: Downstream kernels launch over capacity and read the live count from the device",
     "file": "forces/packed-neighbour-pair-force",
@@ -27961,13 +27643,6 @@
     ],
     "title": "LogWriter",
     "type": "api-item"
-  },
-  "rq-e412e54a": {
-    "decl": "Scenario: Per-particle virial slot accumulates half the pair's scalar virial",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Per-particle virial slot accumulates half the pair's scalar virial",
-    "type": "scenario"
   },
   "rq-e43528db": {
     "decl": "## Algorithm",
@@ -28459,10 +28134,6 @@
         "kind": "code"
       },
       {
-        "file": "src/forces/coulomb.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/forces/lj.rs",
         "kind": "code"
       },
@@ -28481,14 +28152,6 @@
     ],
     "title": "PotentialBuilder",
     "type": "api-item"
-  },
-  "rq-e858417a": {
-    "decl": "## Newton's third law",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Newton's third law",
-    "type": "section"
   },
   "rq-e8667000": {
     "decl": "Scenario: Sparse (i-block, j-block) candidate routes its pairs to single_pair_atoms",
@@ -29219,13 +28882,6 @@
     "title": "run_md_phase from a constructed setup matches run_simulation_with_registries",
     "type": "scenario"
   },
-  "rq-ee4ebbda": {
-    "decl": "Scenario: A neutral system with [coulomb] present still launches and produces zeros",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "A neutral system with [coulomb] present still launches and produces zeros",
-    "type": "scenario"
-  },
   "rq-ee50492a": {
     "decl": "Scenario: SI-mode trajectory frame converts velocities to m/s",
     "file": "io/unit-system",
@@ -29313,13 +28969,6 @@
     "refs": [],
     "title": "Types",
     "type": "section"
-  },
-  "rq-ef3083cd": {
-    "decl": "Scenario: Pair across the periodic boundary uses minimum-image displacement",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Pair across the periodic boundary uses minimum-image displacement",
-    "type": "scenario"
   },
   "rq-ef4d2caf": {
     "decl": "### Reproducibility",
@@ -29803,13 +29452,6 @@
     "title": "Determinism",
     "type": "section"
   },
-  "rq-f1dffc21": {
-    "decl": "Scenario: Pair with Coulomb exclusion scale 1.0 reproduces the un-excluded value",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Pair with Coulomb exclusion scale 1.0 reproduces the un-excluded value",
-    "type": "scenario"
-  },
   "rq-f20e017d": {
     "decl": "Scenario: Open refuses to overwrite an existing file",
     "file": "io/log-output",
@@ -30268,13 +29910,6 @@
     "title": "a non-positive proposed volume is rejected without a trial energy",
     "type": "scenario"
   },
-  "rq-f652bf7c": {
-    "decl": "Scenario: Forces on the two members of a non-boundary pair are equal and opposite",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Forces on the two members of a non-boundary pair are equal and opposite",
-    "type": "scenario"
-  },
   "rq-f660b144": {
     "decl": "- `DihedralPotential` — capability trait a dihedral slot implements,",
     "file": "forces/framework",
@@ -30675,14 +30310,6 @@
     "refs": [],
     "title": "Graph-mode run with a mid-phase re-capture is byte-identical to per-step",
     "type": "scenario"
-  },
-  "rq-f9a9c569": {
-    "decl": "## Parameters",
-    "file": "forces/coulomb-pair-force",
-    "level": 2,
-    "refs": [],
-    "title": "Parameters",
-    "type": "section"
   },
   "rq-f9e0aa11": {
     "decl": "Scenario: Two GPU runs produce byte-identical packed neighbour lists",

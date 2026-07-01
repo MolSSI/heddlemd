@@ -19,7 +19,8 @@
       "Bash(rm -f water.out.*.log water.out.*.timings water.out.*.minlog)",
       "Bash(timeout 600 ../../target/release/heddlemd run water.in.toml)",
       "Bash(timeout 200 ../../target/release/heddlemd run water.in.toml)",
-      "Bash(perl -0pi -e 's/\\(\\\\nuse heddle_md::\\)/\\\\nuse heddle_md::registry::KindedBuilder;\\\\1/' tests/shake.rs)"
+      "Bash(perl -0pi -e 's/\\(\\\\nuse heddle_md::\\)/\\\\nuse heddle_md::registry::KindedBuilder;\\\\1/' tests/shake.rs)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

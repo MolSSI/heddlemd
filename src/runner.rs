@@ -609,9 +609,6 @@ fn compute_cutoff_max(config: &crate::io::Config) -> f64 {
         .iter()
         .map(|p| p.cutoff)
         .fold(0.0, f64::max);
-    if let Some(c) = config.coulomb.as_ref() {
-        cutoff_max = cutoff_max.max(c.cutoff);
-    }
     if let Some(s) = config.spme.as_ref() {
         cutoff_max = cutoff_max.max(s.r_cut_real);
     }
@@ -825,9 +822,6 @@ fn simulation_setup_new_impl(
             .iter()
             .map(|p| p.cutoff)
             .fold(0.0, f64::max);
-        if let Some(c) = config.coulomb.as_ref() {
-            cutoff_max = cutoff_max.max(c.cutoff);
-        }
         if let Some(s) = config.spme.as_ref() {
             cutoff_max = cutoff_max.max(s.r_cut_real);
         }
@@ -1046,7 +1040,6 @@ fn simulation_setup_finish_gpu(
         &config.bond_types,
         &config.angle_types,
         &config.dihedral_types,
-        config.coulomb.as_ref(),
         config.spme.as_ref(),
         &charges_for_force_field,
         &bond_list,

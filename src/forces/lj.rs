@@ -260,9 +260,17 @@ pub fn lj_pair_force_fragment(
         factor = R(24.0) * epsilon * inv_r2 * (R(2.0) * sr12 - sr6);
         energy = R(4.0) * epsilon * (sr12 - sr6);
         Real r_s2 = r_switch * r_switch;
-        if (r2 > r_s2) {
-            Real r_c2 = cutoff * cutoff;
-            Real delta = r_c2 - r_s2;
+        Real r_c2 = cutoff * cutoff;
+        Real delta = r_c2 - r_s2;
+        // Skip the switch polynomial when there is no switching
+        // window (r_switch == cutoff for this type pair). With
+        // delta == 0, `1 / delta` would produce inf/NaN; the outer-
+        // loop cutoff_mask handles the hard discontinuity at r =
+        // cutoff. The Rust-side `switch_degenerate` shortcut already
+        // elides this branch when EVERY pair-type has r_switch ==
+        // cutoff, but this in-kernel guard catches mixed-mode
+        // configurations where only some pair-types are degenerate.
+        if (delta > R(0.0) && r2 > r_s2) {
             Real inv_delta = R(1.0) / delta;
             Real tau = (r2 - r_s2) * inv_delta;
             Real one_minus_tau = R(1.0) - tau;

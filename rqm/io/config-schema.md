@@ -58,7 +58,6 @@ Sections:
 | `[[angle_types]]` | no | per-angle-type parameters |
 | `[[dihedral_types]]` | no | per-dihedral-type parameters |
 | `[[constraint_types]]` | no | per-constraint-type parameters |
-| `[coulomb]` | no | truncated short-range Coulomb |
 | `[spme]` | no | smooth particle-mesh Ewald |
 | `[neighbor_list]` | no | non-bonded pair-evaluation algorithm |
 
@@ -146,7 +145,7 @@ r_switch = 9.0e-10  # m  (defaults to 0.9 * cutoff when omitted)
 
 # Optional: path to a .topology file declaring bonds, angles, and
 # explicit non-bonded exclusions. When omitted, no bonded forces are
-# computed and the LJ / Coulomb kernels see no exclusions.
+# computed and the LJ / SPME real-space kernels see no exclusions.
 topology = "argon.in.topology"
 
 [[bond_types]]
@@ -293,8 +292,8 @@ and ordering invariants hold regardless of the chosen unit system.
 - `topology: String` — optional path to a `.topology` file (see
   `forces/topology.md`). Resolved relative to the config file's
   directory; absolute paths are honored as-is. When omitted, no
-  bonded forces are computed and the LJ and Coulomb kernels see an
-  empty exclusion list. When supplied, the file is loaded after the
+  bonded forces are computed and the LJ and SPME real-space kernels
+  see an empty exclusion list. When supplied, the file is loaded after the
   init file (so atom-index bounds checking has access to the
   particle count).
 
@@ -673,7 +672,7 @@ Common fields:
 - `potential: String` — selects the pair potential. The only supported
   value in `[[pair_interactions]]` is `"lennard-jones"`. Electrostatic
   pair interactions are configured globally through the top-level
-  `[coulomb]` table (see below) rather than per type pair, since the
+  `[spme]` table (see below) rather than per type pair, since the
   Coulomb pair magnitude is constructed from per-particle charges and
   carries no per-pair parameters. Future values
   (`"buckingham"`, ...) for `[[pair_interactions]]` are reserved.
@@ -858,33 +857,15 @@ The runner enforces this **per phase** (see *Validation*) and surfaces
 failures as
 `ConfigError::IncompatibleConstraint { integrator: <kind name>, phase: <phase name> }`.
 
-#### `[coulomb]` (optional table) <!-- rq-28d519b5 -->
-
-Activates the truncated Coulomb pair-force slot (see
-`forces/coulomb-pair-force.md`). The slot is present iff this table is
-present. The kernel computes pair contributions from the per-particle
-charges carried by `ParticleBuffers` (sourced from each particle type's
-`charge` field in `[[particle_types]]`); the table carries only the
-real-space cutoff parameters that apply uniformly to every pair.
-
-- `cutoff: f64` — pair distance in metres beyond which the Coulomb
-  force is treated as zero. Required when the table is present. Finite,
-  strictly positive.
-- `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
-  switching function applied over `[r_switch, cutoff]` (see
-  `forces/coulomb-pair-force.md`). Finite, strictly positive, and
-  `r_switch <= cutoff`. Defaults to `0.9 * cutoff` when omitted.
-  Setting `r_switch = cutoff` selects the hard-cutoff degenerate case
-  in which no smoothing is applied.
-
-The `[coulomb]` and `[spme]` tables are mutually exclusive: a config
-declaring both is rejected with `ConfigError::ConflictingElectrostatics`.
-
 Cross-validation alongside the other pair potentials feeds into the
 neighbor list's box-compatibility check: the shared neighbor list's
-search radius is `max(pair_interactions.cutoff_max, coulomb.cutoff,
-spme.r_cut_real) + r_skin`, and the simulation box's minimum
-perpendicular width must be at least `3 *` that value.
+search radius is `max(pair_interactions.cutoff_max, spme.r_cut_real) +
+r_skin`, and the simulation box's minimum perpendicular width must be
+at least `3 *` that value.
+
+The top-level `[coulomb]` table used by earlier versions of the config
+is retired. A config file that declares `[coulomb]` is rejected at load
+time with `ConfigError::CoulombRetired`; use `[spme]` instead.
 
 #### `[spme]` (optional table) <!-- rq-08131b48 -->
 
@@ -911,9 +892,6 @@ every grid cell.
 - `spline_order: u32` — B-spline interpolation order. Optional;
   defaults to `4` when omitted. Accepted values are `4`, `5`, `6`,
   `7`, `8`.
-
-The `[spme]` and `[coulomb]` tables are mutually exclusive (see
-above).
 
 #### `[neighbor_list]` (optional table) <!-- rq-adddaf1a -->
 
@@ -948,7 +926,7 @@ Cross-validation:
 - The simulation box's minimum perpendicular width satisfies
   `min_perpendicular_width >= 3 * (cutoff_max + r_skin)` where
   `cutoff_max` is the largest cutoff among `[[pair_interactions]]`
-  and the `[coulomb]` table's `cutoff` (when present). The box is
+  and the `[spme]` table's `r_cut_real` (when present). The box is
   read from the init file, so this check is performed by the runner,
   not by `load_config`. See `simulation-runner.md` for the
   runner-side validation and the corresponding `RunnerError` variant.
@@ -1135,8 +1113,8 @@ path:
    slots of different `kind`s may share a numerical seed.
 8. Every `[[constraint_types]]` entry has a unique `name`; duplicates
    surface as `DuplicateConstraintTypeName { name }`.
-9. The electrostatics tables are mutually exclusive: declaring both
-   `[coulomb]` and `[spme]` surfaces as `ConflictingElectrostatics`.
+9. The retired `[coulomb]` table triggers `CoulombRetired` at load
+   time before the rest of the config is parsed.
 
 `Config::validate_against(&self, registries: &Registries)` checks,
 per phase, in declaration order:
@@ -1242,18 +1220,14 @@ phase failures.
     `[[dihedral_types]]` array is absent.
   - `constraint_types: Vec<NamedSlotConfig>` — empty when the
     `[[constraint_types]]` array is absent.
-  - `coulomb: Option<CoulombConfig>` — `Some` when the `[coulomb]` table
-    is present in the config, `None` otherwise. Mutually exclusive with
-    `spme`.
   - `spme: Option<SpmeConfig>` — `Some` when the `[spme]` table is
-    present in the config, `None` otherwise. Mutually exclusive with
-    `coulomb`.
+    present in the config, `None` otherwise.
   - `neighbor_list: NeighborListConfig` — defaults to
     `NeighborListConfig::CellList { r_skin: 0.3 * max_cutoff }` when the
     `[neighbor_list]` table is omitted from the
     config, where `max_cutoff` is the largest cutoff across
-    `[[pair_interactions]]`, the `[coulomb]` table, and the `[spme]`
-    table's `r_cut_real` (whichever are present).
+    `[[pair_interactions]]` and the `[spme]` table's `r_cut_real`
+    (whichever are present).
   - `config_path: PathBuf` — the absolute path of the source config file,
     retained for error messages and default output-path derivation.
 
@@ -1397,11 +1371,6 @@ phase failures.
   `ShakeParams { atoms: u32, constraints: Vec<{ i: u32, j: u32, d: f64 }> }`
   (see `integration/shake.md`).
 
-- `CoulombConfig` <!-- rq-793a7cbb -->
-  - `cutoff: f64` — real-space cutoff in metres.
-  - `r_switch: f64` — populated from the optional `r_switch` field with
-    the documented default `0.9 * cutoff`.
-
 - `SpmeConfig` <!-- rq-a03de3d5 -->
   - `alpha: f64` — Ewald splitting parameter (1/m).
   - `r_cut_real: f64` — real-space cutoff in metres.
@@ -1410,8 +1379,8 @@ phase failures.
     field with the documented default `4`.
 
 - `NeighborListConfig` — tagged enum selecting the algorithm used by <!-- rq-a8320030 -->
-  every short-range pair-force slot (Lennard-Jones, truncated Coulomb,
-  SPME real-space) to enumerate non-bonded pairs. Variants:
+  every short-range pair-force slot (Lennard-Jones and SPME real-space)
+  to enumerate non-bonded pairs. Variants:
   - `AllPairs` — selected by `mode = "all-pairs"`. Carries no
     parameters; pair-force slots use the O(N²) kernel.
   - `CellList { r_skin: f64 }` — selected by `mode = "cell-list"` (and
@@ -1508,8 +1477,9 @@ phase failures.
     `PhaseTrajectory { phase: String }` /
     `PhaseLog { phase: String }` /
     `PhaseTimings { phase: String }` for per-phase outputs.
-  - `ConflictingElectrostatics` — the config declares both `[coulomb]`
-    and `[spme]`. Only one electrostatics method may be active per run.
+  - `CoulombRetired` — the config declares a top-level `[coulomb]`
+    table. The truncated Coulomb slot has been retired; use `[spme]`
+    instead.
   - `EmptyPhases` — the merged phase sequence
     (`[[phase]]` ∪ `[[minimization]]`) is empty. A simulation
     requires at least one phase of either kind.
@@ -1604,8 +1574,8 @@ phase failures.
     into Hartree atomic units as it builds the `Config` (both typed
     fields and the unit-bearing fields of open-shaped slot `params`
     — see `unit-system.md`), fills in field-derived defaults
-    (`r_switch = 0.9 * cutoff` for `[[pair_interactions]]` and
-    `[coulomb]`, `r_skin = 0.3 * max_cutoff` for the `cell-list`
+    (`r_switch = 0.9 * cutoff` for `[[pair_interactions]]`,
+    `r_skin = 0.3 * max_cutoff` for the `cell-list`
     `[neighbor_list]` mode, `[output]` defaults derived from
     `<config-root>` per *Config filename convention*), resolves every
     supplied path against `path.parent()` (or `"."` if `path` has no
@@ -1623,7 +1593,7 @@ phase failures.
     declaration order: deserialiser errors first (top-level fields,
     then `[simulation]`, then `[integrator]`, then
     `[[particle_types]]`, then `[[pair_interactions]]`, then
-    `[bond_types]` / `[angle_types]` / `[coulomb]` / `[spme]` /
+    `[bond_types]` / `[angle_types]` / `[spme]` /
     `[neighbor_list]` / `[output]`); then `Config::validate`'s
     field-domain checks in the same declaration order; then
     `Config::validate`'s structural cross-validation rules in the
@@ -1647,7 +1617,7 @@ phase failures.
     documented for that check (`InvalidValue` for per-field domain
     failures; `DuplicateTypeName`, `UnknownTypeInPair`,
     `MissingPairInteraction`, `DuplicatePairInteraction`,
-    `PathCollision`, `ConflictingElectrostatics`,
+    `PathCollision`, `CoulombRetired`,
     `IncompatibleThermostat`, `IncompatibleBarostat`,
     `DuplicateBondTypeName`, or `DuplicateAngleTypeName` for the
     cross-validation rules).

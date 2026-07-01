@@ -87,10 +87,9 @@ identifying metadata. The snippet:
        // the outer loop loads once per atom and threads into every
        // fragment, so a fragment that needs them does not re-load
        // per-atom data inside the inner loop, and a fragment that
-       // does not simply ignores them. SPME-real and truncated
-       // Coulomb read `qi` / `qj`; Lennard-Jones reads `i_type` /
-       // `j_type` to index its per-type-pair tables and ignores the
-       // charges.
+       // does not simply ignores them. SPME-real reads `qi` / `qj`;
+       // Lennard-Jones reads `i_type` / `j_type` to index its
+       // per-type-pair tables and ignores the charges.
        __device__ inline void evaluate(
            Real r2, Real inv_r, Real r,
            Real qi, Real qj,
@@ -1012,8 +1011,7 @@ range as follows:
 
 The composed-kernel launch is recorded in `timings` under
 `KernelStage::JitComposedPairForce`. The per-slot
-`KernelStage::LjPairForce`, `KernelStage::CoulombPairForce`,
-`KernelStage::SpmeRealPairForce`, and
+`KernelStage::LjPairForce`, `KernelStage::SpmeRealPairForce`, and
 `KernelStage::LjSpmeRealFusedPairForce` stages no longer appear in
 runs where the composed kernel covers their contribution.
 
@@ -1111,7 +1109,7 @@ Feature: JIT-composed pair-force kernel
 
   @rq-044f47ec
   Scenario: Composed kernel is not compiled when no fast-class pair-force slot is present
-    Given a config with no [[pair_interactions]] entries and no [coulomb] / [spme] tables
+    Given a config with no [[pair_interactions]] entries and no [spme] table
     And PotentialRegistry::with_builtins()
     When ForceField::new(...) is called
     Then it returns Ok(force_field)
@@ -1225,7 +1223,7 @@ Feature: JIT-composed pair-force kernel
 
   @rq-847450dd
   Scenario: Composed-kernel output equals standalone-kernel output within f32 round-off
-    Given a ForceField configuration with LennardJones, Coulomb (no SPME), particle_count = 64
+    Given a ForceField configuration with LennardJones and SPME-real active, particle_count = 64
     And the same physical state evaluated two ways: (a) via the JIT-composed pair-force kernel, (b) via per-slot kernels followed by class-combine
     When each path runs to completion
     And the per-particle forces, energies, and virials are downloaded from each
@@ -1275,7 +1273,7 @@ Feature: JIT-composed pair-force kernel
   @rq-e7fc1920
   Scenario: Per-fragment exclusion tables apply independently to that fragment's contribution
     Given a ForceField with LJ and SPME-real both active
-    And a pair (i, j) whose LJ exclusion scale is 0.5 and Coulomb exclusion scale is 0.0
+    And a pair (i, j) whose LJ exclusion scale is 0.5 and SPME-real exclusion scale is 0.0
     When force_field.step(...) is called
     Then the LJ contribution to the pair force is 0.5 * the unscaled LJ pair force
     And the SPME-real contribution to the pair force is zero by bit-exact equality

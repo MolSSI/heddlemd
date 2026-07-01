@@ -106,42 +106,61 @@ the packed list yields, where `j` is a neighbour atom distinct from `i`:
    potential `U_lj(r)`.
 
 5. Apply the CHARMM-style C¹ switching function `S(r²)` defined over
-   `[r_switch, r_cut]`. Let `r_s2 = switch * switch` and
-   `r_c2 = cutoff * cutoff`. The polynomial is evaluated in normalised
-   form so the only place the cutoff-width factor appears is `1/delta`
-   (not `1/delta³`), which keeps the arithmetic in range for f32 even
-   at SI-scale lengths where `delta ≈ 10⁻¹⁹ m²` and `delta³` underflows
-   the normal range. Two branches:
+   `[r_switch, r_cut]`. Let `r_s2 = switch * switch`,
+   `r_c2 = cutoff * cutoff`, and `delta = r_c2 - r_s2`. The polynomial
+   is evaluated in normalised form so the only place the cutoff-width
+   factor appears is `1/delta` (not `1/delta³`), which keeps the
+   arithmetic in range for f32 even at SI-scale lengths where
+   `delta ≈ 10⁻¹⁹ m²` and `delta³` underflows the normal range.
 
-   - If `r2 <= r_s2`, the unmodified pair is fully inside the inner
-     plateau:
+   The polynomial branch runs only when **both** `delta > 0` (a
+   non-degenerate switching window exists) and `r2 > r_s2` (the pair
+   has entered the switching region). Otherwise `S = 1`, the chain-
+   rule correction is zero, and `factor` / `energy` are unchanged.
+   The two-pronged guard:
 
-     ```
-     // S = 1, dS/d(r²) = 0; factor and energy are unchanged.
-     ```
+   - `delta > 0` distinguishes a genuine smooth-switch configuration
+     (`r_switch < cutoff`) from the hard-cutoff degenerate case
+     (`r_switch = cutoff`) — `1/delta` would otherwise yield inf/NaN.
+     The Rust-side `switch_degenerate` flag already elides the entire
+     polynomial body of the kernel when **every** registered pair-
+     type uses `r_switch = cutoff`; the in-kernel `delta > 0` guard
+     additionally catches mixed configurations where only some pair-
+     types are degenerate.
+   - `r2 > r_s2` is the usual inner-plateau / switching-region split:
+     pairs at `r² ≤ r_s2` are inside the plateau where `S = 1`.
 
-   - Otherwise (`r_s2 < r2`, with `r2 <= r_c2` guaranteed by step 3):
+   When both guards pass:
 
-     ```
-     delta        = r_c2 - r_s2
-     inv_delta    = 1.0f / delta
-     tau          = (r2 - r_s2) * inv_delta            // in [0, 1]
-     one_minus    = 1.0f - tau
-     S            = one_minus * one_minus * (1.0f + 2.0f * tau)
-     chain_coeff  = 12.0f * tau * one_minus * inv_delta  // = -2 * dS/d(r²)
-     factor       = S * factor + chain_coeff * energy
-     energy       = S * energy
-     ```
+   ```
+   inv_delta    = 1.0f / delta
+   tau          = (r2 - r_s2) * inv_delta            // in [0, 1]
+   one_minus    = 1.0f - tau
+   S            = one_minus * one_minus * (1.0f + 2.0f * tau)
+   chain_coeff  = 12.0f * tau * one_minus * inv_delta  // = -2 * dS/d(r²)
+   factor       = S * factor + chain_coeff * energy
+   energy       = S * energy
+   ```
 
-     With `tau = (r² − r_s2) / delta` the polynomial reduces to
-     `S(tau) = (1 − tau)² (1 + 2 tau)` and
-     `dS/d(r²) = −6 tau (1 − tau) / delta`. `S` satisfies
-     `S(tau=0) = 1`, `S(tau=1) = 0`, and has zero derivative at both
-     endpoints, making the resulting force C¹ continuous at `r_switch`
-     and at `r_cut`. The `factor` update is the chain-rule consequence
-     of multiplying the unswitched potential by `S(r²)`:
-     `F_new = S · F_lj − (dS/dr) · U_lj · r̂`, which when expressed via
-     `r²` collapses to `factor_new = S · factor + (−2 · dS/d(r²)) · U_lj`.
+   With `tau = (r² − r_s2) / delta` the polynomial reduces to
+   `S(tau) = (1 − tau)² (1 + 2 tau)` and
+   `dS/d(r²) = −6 tau (1 − tau) / delta`. `S` satisfies
+   `S(tau=0) = 1`, `S(tau=1) = 0`, and has zero derivative at both
+   endpoints, making the resulting force C¹ continuous at `r_switch`
+   and at `r_cut`. The `factor` update is the chain-rule consequence
+   of multiplying the unswitched potential by `S(r²)`:
+   `F_new = S · F_lj − (dS/dr) · U_lj · r̂`, which when expressed via
+   `r²` collapses to `factor_new = S · factor + (−2 · dS/d(r²)) · U_lj`.
+
+   The hard-cutoff degenerate case (`r_switch = cutoff`) is
+   supported but is **not energy-conserving** under conservative-
+   integrator conditions, because the pair potential has a step
+   discontinuity at `r = cutoff`. A pair crossing the cutoff
+   therefore injects a finite non-conservative impulse per crossing.
+   Use a strict `r_switch < cutoff` whenever energy conservation
+   matters; the `0.9 · cutoff` rule of thumb gives a smooth switching
+   window that restores Verlet's quadratic-in-`dt` energy-drift
+   bound.
 
 6. Compute the per-component contribution `(fx, fy, fz) = factor *
    (dx, dy, dz)` using the post-switching `factor`, and the scalar pair

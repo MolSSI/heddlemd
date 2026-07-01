@@ -1527,10 +1527,10 @@ Feature: heddlemd run simulation runner
     And stderr contains "CellListBoxTooSmall" and "a" and "2"
 
   @rq-0cb544f4
-  Scenario: Coulomb cutoff participates in box-too-small check
+  Scenario: SPME real-space cutoff participates in box-too-small check
     Given tmp/sim.in.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
       and one [[pair_interactions]] with cutoff=5.0e-10
-      and a [coulomb] table with cutoff=2.0e-9 (the larger of the two)
+      and a [spme] table with r_cut_real=2.0e-9 (the larger of the two)
     And tmp/sim.in.xyz has an orthorhombic box with lx=ly=lz=5.0e-9
       (so 3*(2.0e-9 + 1.0e-10) = 6.3e-9 > 5.0e-9)
     When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]

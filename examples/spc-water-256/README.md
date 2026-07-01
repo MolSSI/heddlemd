@@ -1,7 +1,7 @@
 # 256-molecule flexible-SPC water
 
 A small example that exercises the full simulation pipeline on a system
-with intramolecular bonds, angles, and Coulomb electrostatics. 256 water
+with intramolecular bonds, angles, and SPME electrostatics. 256 water
 molecules (768 atoms) in a (2.0 × 2.0 × 8.0) nm box.
 
 ## Layout
@@ -53,11 +53,12 @@ A run produces three files in this directory:
 - Angle forces use the `harmonic` `[[angle_types]]` variant with the
   flexible-SPC bend stiffness k_θ = 5.27 × 10⁻¹⁹ J/rad² (Toukan-Rahman,
   75.9 kcal/mol/rad²) at θ₀ = 1.911 rad.
-- Coulomb electrostatics use the truncated `[coulomb]` slot with a
-  6 Å real-space cutoff. SPME is not configured (the box's
-  perpendicular widths are small enough that a 6 Å cutoff captures the
-  dominant interactions, and the example is primarily a kernel
-  exercise rather than a converged liquid-water calculation).
+- Coulomb electrostatics use SPME: real-space Ewald cutoff = 6 Å
+  (matching the LJ cutoff so both share the neighbour list),
+  α = 5.83 × 10⁹ m⁻¹ (= 3.5 / r_cut_real), a 20 × 20 × 80 FFT grid
+  (~1 Å spacing, small-prime-factored for cuFFT), and spline order
+  four. The pairwise `[coulomb]` slot was retired; SPME is the only
+  electrostatics option.
 
 ## Notes
 

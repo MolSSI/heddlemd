@@ -6,7 +6,7 @@ topology = "spc.in.topology"
 seed = 1
 temperature = 300.0
 
-# Single-phase NVE run with flexible SPC bonds.
+# Single-phase NVE run with flexible SPC bonds + SPME electrostatics.
 [[phase]]
 name = "run"
 n_steps = 100
@@ -32,14 +32,16 @@ mass = 1.6735e-27   # kg
 charge = 6.569e-20     # C (+0.41 · elementary charge)
 
 # LJ on O–O only; both other pair interactions carry a negligibly small
-# epsilon (the loader rejects exactly zero).
+# epsilon (the loader rejects exactly zero). `r_switch = 0.9 · cutoff`
+# gives a smooth switching window so the pair potential goes
+# continuously to zero at the cutoff (see `rqm/forces/lj-pair-force.md`).
 [[pair_interactions]]
 between = ["O", "O"]
 potential = "lennard-jones"
 sigma = 3.166e-10
 epsilon = 6.502e-22
 cutoff = 6.0e-10
-r_switch = 6.0e-10
+r_switch = 5.4e-10
 
 [[pair_interactions]]
 between = ["H", "H"]
@@ -47,7 +49,7 @@ potential = "lennard-jones"
 sigma = 1.0e-10
 epsilon = 1.0e-30
 cutoff = 6.0e-10
-r_switch = 6.0e-10
+r_switch = 5.4e-10
 
 [[pair_interactions]]
 between = ["H", "O"]
@@ -55,12 +57,18 @@ potential = "lennard-jones"
 sigma = 1.0e-10
 epsilon = 1.0e-30
 cutoff = 6.0e-10
-r_switch = 6.0e-10
+r_switch = 5.4e-10
 
-# Short-range Coulomb (no SPME on this small box).
-[coulomb]
-cutoff = 6.0e-10
-r_switch = 6.0e-10
+# SPME electrostatics. Real-space Ewald cutoff matches the LJ cutoff
+# so the same neighbour list serves both, plus a reciprocal-space
+# grid with ~1 Å spacing over the 2 × 2 × 8 nm box (small-prime-
+# factored for cuFFT). α ≈ 3.5 / r_cut_real is the standard rule of
+# thumb; adjust jointly with `grid` for a converged split.
+[spme]
+alpha = 5.83e9              # 1/m  (≈ 3.5 / r_cut_real)
+r_cut_real = 6.0e-10        # m  (matches the LJ cutoff)
+grid = [20, 20, 80]         # 1 Å spacing; 20 = 2² · 5, 80 = 2⁴ · 5
+spline_order = 4
 
 # Morse bond tuned so U''(r_e) = 2·D_e·a² matches the OH harmonic
 # stiffness k_b ≈ 800 J/m² inferred from the gas-phase OH stretching

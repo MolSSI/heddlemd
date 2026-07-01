@@ -1043,7 +1043,6 @@ fn build_sd_argon_pair(
         &[],
         &[],
         None,
-        None,
         &[],
         &BondList::empty(2),
         &AngleList::empty(0),

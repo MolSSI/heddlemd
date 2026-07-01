@@ -89,12 +89,10 @@ The two universal physical-constant prefactors take their unit values:
   coefficients, or in the barostat-virial coupling. The relation
   `T = 2 · K / N_thermal_dof` holds directly with all three quantities
   in atomic units.
-- **Coulomb prefactor `1 / (4πε₀) = 1` exactly.** The truncated
-  short-range Coulomb pair force and the SPME real-/reciprocal-space
-  kernels carry no permittivity constant; the force on particle `i`
-  from particle `j` is `F = q_i · q_j · r̂ / r²` (with the appropriate
-  switching window and Ewald split applied as documented in
-  `coulomb-pair-force.md` and `spme.md`).
+- **Coulomb prefactor `1 / (4πε₀) = 1` exactly.** The SPME real- and
+  reciprocal-space kernels carry no permittivity constant; the force
+  on particle `i` from particle `j` is `F = q_i · q_j · r̂ / r²` (with
+  the Ewald split applied as documented in `spme.md`).
 
 Wall-clock timing data (kernel-stage durations recorded in the
 `.timings` file, runner-side host timers) remains in SI seconds /
@@ -127,7 +125,7 @@ Input-side conversion targets:
 - Every unit-bearing scalar in the loaded `Config` (typed fields under
   `[simulation]`, `[[phase]]`, `[[particle_types]]`,
   `[[pair_interactions]]`, `[[bond_types]]`, `[[angle_types]]`,
-  `[coulomb]`, `[spme]`, `[neighbor_list]`). Each such scalar has a
+  `[spme]`, `[neighbor_list]`). Each such scalar has a
   dimensioned newtype (see *Dimensioned Types and the Convert Trait*),
   and the whole `Config` is rescaled by one recursive `Convert`
   pass during load.

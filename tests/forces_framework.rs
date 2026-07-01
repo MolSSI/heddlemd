@@ -110,7 +110,6 @@ fn lj_only_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         None,
-        None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
@@ -133,7 +132,6 @@ fn lj_and_morse_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[morse_bond_type()],
         &[],
         &[],
-        None,
         None,
         &[],
         &single_bond_list(n),
@@ -158,7 +156,6 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         None,
-        None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
@@ -180,7 +177,6 @@ fn morse_only_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[morse_bond_type()],
         &[],
         &[],
-        None,
         None,
         &[],
         &single_bond_list(n),
@@ -392,7 +388,6 @@ fn build_with(
         &[],
         &[],
         None,
-        None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
@@ -440,7 +435,6 @@ fn bond_types_declared_with_no_bonds_omits_morse_slot() {
         &[morse_bond_type()],
         &[],
         &[],
-        None,
         None,
         &[],
         &BondList::empty(n),
@@ -577,7 +571,6 @@ fn lj_mixed_type_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         &[],
-        None,
         None,
         &[],
         &BondList::empty(n),
@@ -833,7 +826,6 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
         &[],
         &[],
         None,
-        None,
         &[],
         &single_bond_list(n),
         &AngleList::empty(0),
@@ -867,7 +859,6 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
         &[],
         &[],
         None,
-        None,
         &[],
         &single_bond_list(n),
         &AngleList::empty(0),
@@ -891,17 +882,16 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
 
 // rq-053a026c
 #[test]
-fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
+fn registry_with_builtins_exposes_six_builders_in_evaluation_order() {
     let r = PotentialRegistry::with_builtins();
-    assert_eq!(r.builders().len(), 7);
+    assert_eq!(r.builders().len(), 6);
     let names: Vec<String> = r.builders().iter().map(|b| format!("{:?}", b)).collect();
     assert!(names[0].contains("LennardJones"), "builder 0 = {}", names[0]);
-    assert!(names[1].contains("Coulomb"), "builder 1 = {}", names[1]);
-    assert!(names[2].contains("SpmeReal"), "builder 2 = {}", names[2]);
-    assert!(names[3].contains("SpmeReciprocal"), "builder 3 = {}", names[3]);
-    assert!(names[4].contains("MorseBonded"), "builder 4 = {}", names[4]);
-    assert!(names[5].contains("HarmonicAngle"), "builder 5 = {}", names[5]);
-    assert!(names[6].contains("PeriodicDihedral"), "builder 6 = {}", names[6]);
+    assert!(names[1].contains("SpmeReal"), "builder 1 = {}", names[1]);
+    assert!(names[2].contains("SpmeReciprocal"), "builder 2 = {}", names[2]);
+    assert!(names[3].contains("MorseBonded"), "builder 3 = {}", names[3]);
+    assert!(names[4].contains("HarmonicAngle"), "builder 4 = {}", names[4]);
+    assert!(names[5].contains("PeriodicDihedral"), "builder 5 = {}", names[5]);
 }
 
 // rq-78ad9477
@@ -916,8 +906,8 @@ fn registry_new_starts_empty() {
 fn register_appends_a_builder_at_the_end() {
     let mut r = PotentialRegistry::with_builtins();
     r.register(Box::new(StubBuilder::new("custom")));
-    assert_eq!(r.builders().len(), 8);
-    let last = format!("{:?}", r.builders()[7]);
+    assert_eq!(r.builders().len(), 7);
+    let last = format!("{:?}", r.builders()[6]);
     assert!(last.contains("custom"), "last builder = {}", last);
 }
 
@@ -1009,7 +999,6 @@ impl PotentialBuilder for InspectBuilder {
         let _ = cx.pair_interactions;
         let _ = cx.bond_types;
         let _ = cx.angle_types;
-        let _ = cx.coulomb_config;
         let _ = cx.spme_config;
         let _ = cx.charges;
         let _ = cx.bond_list;
@@ -1538,7 +1527,6 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
         &[],
         &[],
         None,
-        None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),
@@ -1874,7 +1862,6 @@ fn build_with_spme(
         &[],
         &[],
         &[],
-        None,
         spme_config,
         charges,
         &BondList::empty(n),

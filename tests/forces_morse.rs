@@ -96,7 +96,6 @@ fn run_morse(
         &[],
         &[],
         None,
-        None,
         &[],
         bonds,
         &AngleList::empty(0),

@@ -1,5 +1,4 @@
 pub mod angle;
-pub mod coulomb;
 pub mod dihedral;
 pub mod jit_composed;
 pub mod lj;
@@ -17,7 +16,7 @@ use crate::gpu::{
 };
 use crate::registry::{Builtins, Registry};
 use crate::io::config::{
-    AngleTypeConfig, BondTypeConfig, CoulombConfig, DihedralTypeConfig, NeighborListConfig,
+    AngleTypeConfig, BondTypeConfig, DihedralTypeConfig, NeighborListConfig,
     PairInteractionConfig, ParticleTypeConfig, SpmeConfig,
 };
 use crate::pbc::SimulationBox;
@@ -25,7 +24,6 @@ use crate::timings::{KernelStage, Timings, TimingsError};
 use crate::precision::Real;
 
 pub use angle::{HarmonicAngleBuilder, HarmonicAngleState};
-pub use coulomb::{CoulombBuilder, CoulombParameters, CoulombState};
 pub use dihedral::{PeriodicDihedralBuilder, PeriodicDihedralState};
 pub use jit_composed::{
     AngleForceFragment, AngleScratchView, ArgKind, BondedForceFragment, BondedScratchView,
@@ -243,7 +241,6 @@ pub struct PotentialBuildContext<'a> {
     pub bond_types: &'a [BondTypeConfig],
     pub angle_types: &'a [AngleTypeConfig],
     pub dihedral_types: &'a [DihedralTypeConfig],
-    pub coulomb_config: Option<&'a CoulombConfig>,
     pub spme_config: Option<&'a SpmeConfig>,
     pub charges: &'a [Real],
     pub bond_list: &'a BondList,
@@ -279,7 +276,6 @@ impl Builtins for dyn PotentialBuilder {
     fn builtins() -> Vec<Box<dyn PotentialBuilder>> {
         vec![
             Box::new(LennardJonesBuilder),
-            Box::new(CoulombBuilder),
             Box::new(SpmeRealBuilder),
             Box::new(SpmeReciprocalBuilder),
             Box::new(MorseBondedBuilder),
@@ -372,7 +368,6 @@ impl ForceField {
         bond_types: &[BondTypeConfig],
         angle_types: &[AngleTypeConfig],
         dihedral_types: &[DihedralTypeConfig],
-        coulomb_config: Option<&CoulombConfig>,
         spme_config: Option<&SpmeConfig>,
         charges: &[Real],
         bond_list: &BondList,
@@ -393,7 +388,6 @@ impl ForceField {
             bond_types,
             angle_types,
             dihedral_types,
-            coulomb_config,
             spme_config,
             charges,
             bond_list,

@@ -754,7 +754,6 @@ fn end_to_end_w_per_particle_virial_equals_half_over_n_times_sum_of_partials() {
         &[],
         &[],
         &[],
-        None,
         Some(&spme_cfg),
         &charges,
         &BondList::empty(n),

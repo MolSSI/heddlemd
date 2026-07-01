@@ -64,7 +64,6 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         None,
-        None,
         &[],
         &BondList::empty(n),
         &AngleList::empty(0),

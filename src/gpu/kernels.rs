@@ -172,8 +172,7 @@ fn htod_or_empty(
 
 /// Coulomb prefactor `k_C = 1 / (4 π ε₀)`. In the engine's internal
 /// Hartree atomic units `k_C = 1` exactly, so no permittivity factor
-/// appears in the pair-force or SPME kernels. See
-/// `forces/coulomb-pair-force.md`. rq-bfd7004c
+/// appears in the SPME kernels. See `forces/spme.md`. rq-bfd7004c
 pub const K_COULOMB_F32: Real = 1.0;
 
 

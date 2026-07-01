@@ -121,7 +121,6 @@ fn run_angle(
         angle_types,
         &[],
         None,
-        None,
         &[],
         &BondList::empty(n),
         angles,

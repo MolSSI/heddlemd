@@ -6,8 +6,8 @@ from the TOML config (`io/config-schema.md`) and consumed by the
 (`harmonic-angle.md`), every dihedral slot (`periodic-dihedral.md` and any
 future dihedral functional forms), the `Constraint` slot
 (`integration/constraint-framework.md`, `integration/shake.md`), and the
-Lennard-Jones and Coulomb slots' exclusion logic (`lj-pair-force.md`,
-`coulomb-pair-force.md`). The file lists bond instances, angle instances,
+Lennard-Jones and SPME real-space slots' exclusion logic
+(`lj-pair-force.md`, `spme.md`). The file lists bond instances, angle instances,
 dihedral instances, per-pair non-bonded exclusions, and rigid constraint
 groups; bond, angle, dihedral, and constraint *types* (parameters) live in
 the config alongside particle types.
@@ -282,21 +282,21 @@ preceding layer has already produced an entry for the same canonical
 (1-2 from bonds, 1-3 from angles, 1-3 from constraints, scaled 1-4
 from dihedrals) as the only default behaviour that affects simulation
 results without an explicit user declaration. They are documented
-here, in `lj-pair-force.md`, and in `coulomb-pair-force.md`.
+here, in `lj-pair-force.md`, and in `spme.md`.
 
 The result is the set of `(i, j, scale_lj, scale_coul)` tuples
-consulted by the LJ and Coulomb pair-force kernels. The LJ kernel
-reads `scale_lj`; the Coulomb kernel reads `scale_coul`. Explicit
-entries take precedence over every implicit source; an explicit entry
-with `scale = 1.0` therefore *keeps* the corresponding non-bonded
-contribution for a bonded, angle-coupled, dihedral-coupled, or
-constraint-coupled pair, which is unusual physics but is the user's
+consulted by the LJ and SPME real-space pair-force kernels. The LJ
+kernel reads `scale_lj`; the SPME real-space kernel reads `scale_coul`.
+Explicit entries take precedence over every implicit source; an
+explicit entry with `scale = 1.0` therefore *keeps* the corresponding
+non-bonded contribution for a bonded, angle-coupled, dihedral-coupled,
+or constraint-coupled pair, which is unusual physics but is the user's
 deliberate override.
 
 Effective exclusions for pairs that are neither bonded, angle-coupled,
 dihedral-coupled, constraint-coupled, nor explicitly listed are absent
-from the list; the LJ and Coulomb kernels treat them as `scale = 1.0`
-(no scaling).
+from the list; the LJ and SPME real-space kernels treat them as
+`scale = 1.0` (no scaling).
 
 ### Empty file <!-- rq-1c794f95 -->
 
@@ -428,7 +428,7 @@ For `E` effective exclusions, the host-side `ExclusionList` carries:
 - `atom_excl_lj_scales: Vec<f32>` — length `2 * E`, parallel to
   `atom_excl_partners`. Consumed by the LJ kernel.
 - `atom_excl_coul_scales: Vec<f32>` — length `2 * E`, parallel to
-  `atom_excl_partners`. Consumed by the Coulomb kernel.
+  `atom_excl_partners`. Consumed by the SPME real-space kernel.
 
 Pair-potential CUDA kernels consult this per-atom lookup table through
 the shared device helper `exclusion_scale` declared in
@@ -481,8 +481,8 @@ exclusion-partner count (≤ a few entries for typical bonded systems).
 `exclusion_scale` is the canonical device-side reader of the
 exclusion-list buffers described in *Exclusion list* above. Each
 pair-potential kernel passes the per-potential scale array appropriate
-to itself: the LJ kernel passes `atom_excl_lj_scales`, the Coulomb
-kernel passes `atom_excl_coul_scales`. Pair-potential `.cu` files
+to itself: the LJ kernel passes `atom_excl_lj_scales`, the SPME
+real-space kernel passes `atom_excl_coul_scales`. Pair-potential `.cu` files
 `#include "exclusions.cuh"` and call `exclusion_scale(...)` at the
 point they want to scale a pair's contribution by the effective
 exclusion factor; nvcc inlines the body into each translation unit.

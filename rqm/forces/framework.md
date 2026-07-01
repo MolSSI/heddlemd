@@ -46,17 +46,15 @@ order; the registry is the single canonical source of slot ordering, and
 | Builder | `label()` of the slot it builds | Activation condition (`build(cx)` returns `Some(_)` iff …) | `frequency_class()` | `displaces()` | Implementation file |
 | --- | --- | --- | --- | --- | --- |
 | `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `Fast` | `&[]` | `lj-pair-force.md` |
-| `CoulombBuilder` | `"coulomb"` | `cx.coulomb_config.is_some()` | `Fast` | `&[]` | `coulomb-pair-force.md` |
 | `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `Fast` | `&[]` | `spme.md` |
 | `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `Slow` | `&[]` | `spme.md` |
 | `MorseBondedBuilder` | `"morse_bonded"` | `!cx.bond_list.is_empty()` | `Fast` | `&[]` | `morse-bonded.md` |
 | `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `Fast` | `&[]` | `harmonic-angle.md` |
+| `PeriodicDihedralBuilder` | `"periodic_dihedral"` | `!cx.dihedral_list.is_empty()` | `Fast` | `&[]` | `periodic-dihedral.md` |
 
 The two SPME builders share the same activation condition; they always
 appear together because the Ewald split is exact only when both halves
-are evaluated. The `[coulomb]` and `[spme]` tables are mutually exclusive
-at config load (see `io/config-schema.md`); a `ForceField` therefore
-contains at most one electrostatics path.
+are evaluated. SPME is the sole electrostatics path.
 
 A `ForceField` with zero slots is a valid configuration. `step()` writes
 zeros into `particle_buffers.forces_*` and returns without launching any
@@ -69,11 +67,11 @@ builder). The canonical built-in order is the order of the six rows
 above:
 
 1. `LennardJones`
-2. `Coulomb`
-3. `SpmeRealSpace`
-4. `SpmeReciprocal`
-5. `MorseBonded`
-6. `HarmonicAngle`
+2. `SpmeRealSpace`
+3. `SpmeReciprocal`
+4. `MorseBonded`
+5. `HarmonicAngle`
+6. `PeriodicDihedral`
 
 A built-in potential is added by writing a `PotentialBuilder` and inserting
 it at the appropriate position in `PotentialRegistry::with_builtins()`.
@@ -127,9 +125,9 @@ no composite were registered.
 two evaluation cadences:
 
 - `Fast` — short-range and inexpensive contributions: short-range pair
-  forces (LJ, Coulomb, SPME real-space), bonded pair forces, three-body
-  angle forces. A RESPA-style integrator evaluates Fast slots once per
-  inner step.
+  forces (LJ, SPME real-space), bonded pair forces, three-body angle
+  forces, four-body dihedral forces. A RESPA-style integrator evaluates
+  Fast slots once per inner step.
 - `Slow` — long-range and expensive contributions: SPME reciprocal-space
   (the FFT pipeline). A RESPA-style integrator evaluates Slow slots once
   per outer step.
@@ -800,11 +798,12 @@ the additive identity. The rest of the pipeline runs normally.
       pub pair_interactions: &'a [PairInteractionConfig],
       pub bond_types: &'a [BondTypeConfig],
       pub angle_types: &'a [AngleTypeConfig],
-      pub coulomb_config: Option<&'a CoulombConfig>,
+      pub dihedral_types: &'a [DihedralTypeConfig],
       pub spme_config: Option<&'a SpmeConfig>,
       pub charges: &'a [f32],
       pub bond_list: &'a BondList,
       pub angle_list: &'a AngleList,
+      pub dihedral_list: &'a DihedralList,
       pub exclusion_list: &'a ExclusionList,
       pub neighbor_list_config: &'a NeighborListConfig,
   }
@@ -872,8 +871,8 @@ the additive identity. The rest of the pipeline runs normally.
   registry: it carries no keyed `lookup`, and registration order is the
   slot evaluation order. `with_builtins()` pre-populates the six built-in
   builders in canonical evaluation order — `LennardJonesBuilder`,
-  `CoulombBuilder`, `SpmeRealBuilder`, `SpmeReciprocalBuilder`,
-  `MorseBondedBuilder`, `HarmonicAngleBuilder`. `ForceField::new`
+  `SpmeRealBuilder`, `SpmeReciprocalBuilder`, `MorseBondedBuilder`,
+  `HarmonicAngleBuilder`, `PeriodicDihedralBuilder`. `ForceField::new`
   iterates `registry.builders()` and builds each against the
   `PotentialBuildContext`, collecting every builder that activates.
 
@@ -887,7 +886,7 @@ the additive identity. The rest of the pipeline runs normally.
 
 ### Functions and methods <!-- rq-17abcb76 -->
 
-- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
+- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], dihedral_types: &[DihedralTypeConfig], spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, dihedral_list: &DihedralList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
   - Builds a `PotentialBuildContext` populated from every parameter
     listed above (apart from `registry`).
   - Iterates `registry.builders` in registration order. For each builder,
@@ -1277,11 +1276,11 @@ Feature: Pluggable potential slot framework
 
   @rq-d93afc32
   Scenario: First slot in class adds into a zeroed accumulator, subsequent slots add on top
-    Given a constructed ForceField with three Fast slots in canonical order LJ, Coulomb, Morse
+    Given a constructed ForceField with three Fast slots in canonical order LJ, SpmeReal, Morse
     And a particle_count of 1 with a known per-particle force_x contribution per slot
     When force_field.step(...) is called with ForcesAndScalars
     And fast_total_forces_x is downloaded
-    Then fast_total_forces_x[0] equals lj_force_x + coulomb_force_x + morse_force_x
+    Then fast_total_forces_x[0] equals lj_force_x + spme_real_force_x + morse_force_x
       within f32 round-off, in that addition order
 
   @rq-7b99234a
@@ -1311,8 +1310,8 @@ Feature: Pluggable potential slot framework
     Given a PotentialRegistry constructed via PotentialRegistry::with_builtins()
     Then registry.builders has length 6
     And the builders' debug type names (or kind tags) are, in order,
-      LennardJonesBuilder, CoulombBuilder, SpmeRealBuilder,
-      SpmeReciprocalBuilder, MorseBondedBuilder, HarmonicAngleBuilder
+      LennardJonesBuilder, SpmeRealBuilder, SpmeReciprocalBuilder,
+      MorseBondedBuilder, HarmonicAngleBuilder, PeriodicDihedralBuilder
 
   @rq-78ad9477
   Scenario: PotentialRegistry::new starts empty
@@ -1373,10 +1372,10 @@ Feature: Pluggable potential slot framework
   Scenario: PotentialBuildContext exposes every parsed-config input by reference
     Given a custom builder whose build(cx) records pointer identity for
       cx.particle_types, cx.pair_interactions, cx.bond_types, cx.angle_types,
-      cx.coulomb_config, cx.spme_config, cx.charges, cx.bond_list,
-      cx.angle_list, cx.exclusion_list, cx.neighbor_list_config
-    When ForceField::new(&registry, gpu, n, sim_box, pts, pairs, bts, ats,
-      coul, spme, charges, bonds, angles, excl, nl_config) is called
+      cx.dihedral_types, cx.spme_config, cx.charges, cx.bond_list,
+      cx.angle_list, cx.dihedral_list, cx.exclusion_list, cx.neighbor_list_config
+    When ForceField::new(&registry, gpu, n, sim_box, pts, pairs, bts, ats, dts,
+      spme, charges, bonds, angles, dihs, excl, nl_config) is called
     Then the recorded pointers match the addresses of the function arguments
       passed in by the caller
 
@@ -1457,7 +1456,6 @@ Feature: Pluggable potential slot framework
   Scenario: Built-in potentials report their canonical class
     Given a ForceField with every built-in slot present
     Then slot "lennard_jones"     reports frequency_class() == Fast
-    And  slot "coulomb"           reports frequency_class() == Fast
     And  slot "spme_real"         reports frequency_class() == Fast
     And  slot "spme_reciprocal"   reports frequency_class() == Slow
     And  slot "morse_bonded"      reports frequency_class() == Fast
