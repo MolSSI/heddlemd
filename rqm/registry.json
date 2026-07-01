@@ -239,6 +239,14 @@
     "title": "SD on empty buffers converges immediately",
     "type": "scenario"
   },
+  "rq-0174962e": {
+    "decl": "### Rust Launch Helpers",
+    "file": "forces/harmonic-bond",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
+  },
   "rq-01784049": {
     "decl": "Scenario: draw_counter starts at 0 and increments per plan walk",
     "file": "integration/langevin-baoab",
@@ -520,6 +528,18 @@
     "file": "forces/spme",
     "refs": [],
     "title": "sorted_atom_index is a permutation of [0, N)",
+    "type": "scenario"
+  },
+  "rq-03ce839c": {
+    "decl": "Scenario: Valid harmonic bond_type is accepted",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Valid harmonic bond_type is accepted",
     "type": "scenario"
   },
   "rq-03d70e2d": {
@@ -2061,6 +2081,18 @@
     "title": "[barostat] kind = \"berendsen\" with all required fields accepted",
     "type": "scenario"
   },
+  "rq-0fdb2912": {
+    "decl": "Scenario: harmonic bond_type rejects non-positive k",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "harmonic bond_type rejects non-positive k",
+    "type": "scenario"
+  },
   "rq-0fe74db3": {
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/settle",
@@ -2390,6 +2422,14 @@
     "title": "Barostat",
     "type": "api-item"
   },
+  "rq-1185d826": {
+    "decl": "## Out of Scope",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-118a47d5": {
     "decl": "Scenario: LJ with a uniform type_cutoff table reports CutoffHandling::Uniform",
     "file": "forces/jit-composed-pair-force",
@@ -2555,6 +2595,18 @@
     "refs": [],
     "title": "Functions",
     "type": "section"
+  },
+  "rq-1286e57c": {
+    "decl": "Scenario: A stretched bond's energy matches the half-convention closed form",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A stretched bond's energy matches the half-convention closed form",
+    "type": "scenario"
   },
   "rq-12872970": {
     "decl": "## Parameters",
@@ -3642,6 +3694,18 @@
     "title": "Two independent runs of the same composed configuration are byte-identical",
     "type": "scenario"
   },
+  "rq-1b14dbf1": {
+    "decl": "Scenario: A stretched bond's virial equals r * F_mag",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A stretched bond's virial equals r * F_mag",
+    "type": "scenario"
+  },
   "rq-1b34278b": {
     "decl": "### Row ordering",
     "file": "performance-analysis",
@@ -3906,6 +3970,14 @@
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-1ca1e95a": {
+    "decl": "## Launch Configuration",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
     "type": "section"
   },
   "rq-1ca7df49": {
@@ -4286,6 +4358,14 @@
     "title": "SlotConfig",
     "type": "api-item"
   },
+  "rq-1f923a98": {
+    "decl": "## Force Accumulation",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Force Accumulation",
+    "type": "section"
+  },
   "rq-1fc57c00": {
     "decl": "- `run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError>`",
     "file": "simulation-runner",
@@ -4299,7 +4379,7 @@
     "type": "api-item"
   },
   "rq-1fc667cd": {
-    "decl": "Scenario: Config bond_type with potential != \"morse\" is rejected",
+    "decl": "Scenario: Config bond_type with an unknown potential is rejected",
     "file": "forces/morse-bonded",
     "refs": [
       {
@@ -4307,7 +4387,7 @@
         "kind": "code"
       }
     ],
-    "title": "Config bond_type with potential != \"morse\" is rejected",
+    "title": "Config bond_type with an unknown potential is rejected",
     "type": "scenario"
   },
   "rq-1fcaf334": {
@@ -6251,6 +6331,18 @@
     "title": "Berendsen barostat composes with langevin-baoab integrator",
     "type": "scenario"
   },
+  "rq-2d7a2cab": {
+    "decl": "Scenario: Minimum image is applied",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Minimum image is applied",
+    "type": "scenario"
+  },
   "rq-2d7dd2a1": {
     "decl": "Scenario: Load a topology file containing a dihedral",
     "file": "forces/topology",
@@ -7105,6 +7197,18 @@
     "title": "lan_drift_half advances positions by v * dt/2",
     "type": "scenario"
   },
+  "rq-358e14aa": {
+    "decl": "Scenario: harmonic bond_type missing k is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "harmonic bond_type missing k is rejected",
+    "type": "scenario"
+  },
   "rq-3597f2a0": {
     "decl": "- `apply(&mut self, ...) -> Result<(), BarostatError>` — `McBarostat`",
     "file": "integration/mc-barostat",
@@ -7846,6 +7950,14 @@
     ],
     "title": "Open with extra columns appends them to the header",
     "type": "scenario"
+  },
+  "rq-3bbb75a7": {
+    "decl": "### PTX Module Loading",
+    "file": "forces/harmonic-bond",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
   },
   "rq-3bc18e1a": {
     "decl": "Scenario: Max cutoff is the largest reported by any consumer",
@@ -8671,6 +8783,14 @@
     "title": "ForceField with only a bonded potential owns no neighbor list",
     "type": "scenario"
   },
+  "rq-43517384": {
+    "decl": "## Determinism",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-43567b30": {
     "decl": "Scenario: First bin's `r` column equals 0.5 · Δr",
     "file": "analysis/rdf",
@@ -9019,6 +9139,18 @@
     "title": "CudaDevice",
     "type": "api-item"
   },
+  "rq-46ef4201": {
+    "decl": "Scenario: harmonic bonded force on zero harmonic bonds is a no-op",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "harmonic bonded force on zero harmonic bonds is a no-op",
+    "type": "scenario"
+  },
   "rq-470019c7": {
     "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
     "file": "integration/berendsen",
@@ -9234,6 +9366,23 @@
     ],
     "title": "minimum_image after set_lattice reflects new tilts",
     "type": "scenario"
+  },
+  "rq-4943810f": {
+    "decl": "## Parameters",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/harmonic_bond.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-4943ddd3": {
     "decl": "- `BLOCK_SIZE: u32` — threads per block, `WARPS_PER_BLOCK × 32`.",
@@ -10350,6 +10499,14 @@
     "title": "Image columns appear after pos (and after velo when present) in each data row",
     "type": "scenario"
   },
+  "rq-53c2227c": {
+    "decl": "## Algorithm",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-53d48fb8": {
     "decl": "- `Minimizer::step(&mut self, buffers, sim_box, force_field, constraint, timings)`",
     "file": "minimization/steepest-descent",
@@ -10741,6 +10898,18 @@
       }
     ],
     "title": "Reject non-positive lattice diagonal",
+    "type": "scenario"
+  },
+  "rq-5728ee79": {
+    "decl": "Scenario: A system with only Morse bonds does not construct a HarmonicBondState",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A system with only Morse bonds does not construct a HarmonicBondState",
     "type": "scenario"
   },
   "rq-572a0431": {
@@ -11372,6 +11541,18 @@
     "title": "set_lattice uploads the new lattice to the device buffer on success",
     "type": "scenario"
   },
+  "rq-5c4d167d": {
+    "decl": "Scenario: Degenerate geometry produces zero energy and virial in addition to zero force",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Degenerate geometry produces zero energy and virial in addition to zero force",
+    "type": "scenario"
+  },
   "rq-5c607daa": {
     "decl": "- `PostForceBindContext<'a>` — context passed to every active",
     "file": "integration/jit-composed-post-force",
@@ -11678,6 +11859,18 @@
       }
     ],
     "title": "lan_drift_half leaves velocities, forces, masses unchanged",
+    "type": "scenario"
+  },
+  "rq-5e8cef9e": {
+    "decl": "Scenario: reduce on zero particles is a no-op",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "reduce on zero particles is a no-op",
     "type": "scenario"
   },
   "rq-5ec02591": {
@@ -12547,6 +12740,18 @@
     "refs": [],
     "title": "Config",
     "type": "api-item"
+  },
+  "rq-65d5cf1c": {
+    "decl": "Scenario: Two independent calls produce byte-identical accumulators",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two independent calls produce byte-identical accumulators",
+    "type": "scenario"
   },
   "rq-6606584b": {
     "decl": "Scenario: Config rejected by load_config",
@@ -13455,6 +13660,18 @@
     "title": "`[[dihedral_types]]` (optional array of tables)",
     "type": "section"
   },
+  "rq-6d5b52f0": {
+    "decl": "Scenario: Atom with two harmonic bonds receives the sum of contributions",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Atom with two harmonic bonds receives the sum of contributions",
+    "type": "scenario"
+  },
   "rq-6d65f104": {
     "decl": "## Host / device synchronisation <!-- new -->",
     "file": "simulation-box",
@@ -14248,6 +14465,14 @@
     ],
     "title": "Construct on particle_count == 0 with an empty list",
     "type": "scenario"
+  },
+  "rq-74524d21": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-7453115b": {
     "decl": "- `TimingsReport` — public, `Clone`, `Debug`. Carries an ordered",
@@ -15512,6 +15737,13 @@
     "title": "Reduction summation order follows sorted atom_dihedral_indices",
     "type": "scenario"
   },
+  "rq-7d440d75": {
+    "decl": "- `HarmonicBondState` — implements the `Potential` trait with",
+    "file": "forces/harmonic-bond",
+    "refs": [],
+    "title": "HarmonicBondState",
+    "type": "api-item"
+  },
   "rq-7d4c470a": {
     "decl": "Scenario: Construct velocity-Verlet (lossless) via the integrator registry",
     "file": "integration/framework",
@@ -15919,11 +16151,35 @@
     "title": "Fully-excluded pair nets to zero on the fixed-point accumulator",
     "type": "scenario"
   },
+  "rq-80d00b52": {
+    "decl": "Scenario: harmonic bond_type missing r0 is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "harmonic bond_type missing r0 is rejected",
+    "type": "scenario"
+  },
   "rq-80dcfa97": {
     "decl": "Scenario: Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
+    "type": "scenario"
+  },
+  "rq-80eff754": {
+    "decl": "Scenario: Newton's third law holds for the framework's combined force",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Newton's third law holds for the framework's combined force",
     "type": "scenario"
   },
   "rq-8114b8c4": {
@@ -16544,6 +16800,18 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-86fb06cd": {
+    "decl": "Scenario: Stretched bond produces an attractive force",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Stretched bond produces an attractive force",
+    "type": "scenario"
+  },
   "rq-870a3aa5": {
     "decl": "Scenario: units field defaulting to SI when absent",
     "file": "io/unit-system",
@@ -16997,6 +17265,18 @@
     "title": "Slot apply methods perform scalar prep only",
     "type": "scenario"
   },
+  "rq-8a7c1b6a": {
+    "decl": "Scenario: Force magnitude matches the closed-form harmonic expression",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Force magnitude matches the closed-form harmonic expression",
+    "type": "scenario"
+  },
   "rq-8a7ef593": {
     "decl": "Scenario: Composed kernel is not compiled when no integrator is active",
     "file": "integration/jit-composed-post-force",
@@ -17277,6 +17557,14 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-8da40a65": {
+    "decl": "## Empty State",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
+  },
   "rq-8db4fbff": {
     "decl": "### Launch Configuration",
     "file": "forces/packed-neighbour-pair-force",
@@ -17405,6 +17693,18 @@
     "file": "forces/framework",
     "refs": [],
     "title": "step_class with N=0 launches no kernels",
+    "type": "scenario"
+  },
+  "rq-8eb932b7": {
+    "decl": "Scenario: Two atoms at equilibrium distance produce zero force",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two atoms at equilibrium distance produce zero force",
     "type": "scenario"
   },
   "rq-8ee27e27": {
@@ -18620,6 +18920,18 @@
     "title": "Plan with a single Drift sub-step fires before_drift and after_drift around it",
     "type": "scenario"
   },
+  "rq-990d287d": {
+    "decl": "Scenario: Harmonic slot selects only harmonic bonds from a mixed list",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Harmonic slot selects only harmonic bonds from a mixed list",
+    "type": "scenario"
+  },
   "rq-9913daee": {
     "decl": "## Compatibility Rules",
     "file": "integration/framework",
@@ -19055,6 +19367,14 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-9c9c1fef": {
+    "decl": "### Source Fragment",
+    "file": "forces/harmonic-bond",
+    "level": 3,
+    "refs": [],
+    "title": "Source Fragment",
+    "type": "section"
+  },
   "rq-9ca00d25": {
     "decl": "## Reciprocal-space pipeline",
     "file": "forces/spme",
@@ -19402,6 +19722,18 @@
     "file": "forces/framework",
     "refs": [],
     "title": "Active LJ + SPME-real configuration fuses both fragments into one composed kernel",
+    "type": "scenario"
+  },
+  "rq-9e91d178": {
+    "decl": "Scenario: harmonic bond_type rejects non-positive r0",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "harmonic bond_type rejects non-positive r0",
     "type": "scenario"
   },
   "rq-9e9db6d9": {
@@ -19922,6 +20254,18 @@
     "refs": [],
     "title": "`rescale_velocities`",
     "type": "section"
+  },
+  "rq-a21c5539": {
+    "decl": "Scenario: harmonic bond_type rejects extra fields",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "harmonic bond_type rejects extra fields",
+    "type": "scenario"
   },
   "rq-a2454a72": {
     "decl": "Scenario: apply_post on empty CSVR state is a no-op",
@@ -22780,6 +23124,13 @@
     "title": "Reject `between` referencing an undeclared type",
     "type": "scenario"
   },
+  "rq-ba36ddba": {
+    "decl": "- `HarmonicBondState` — implements `Potential` with `label() == \"harmonic_bond\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "HarmonicBondState",
+    "type": "api-item"
+  },
   "rq-ba37ec6b": {
     "decl": "Scenario: Angles are sorted by (atom_j, atom_i, atom_k)",
     "file": "forces/topology",
@@ -23300,6 +23651,14 @@
     "title": "step(ForcesAndScalars) refreshes potential_energies and virials",
     "type": "scenario"
   },
+  "rq-bed893e5": {
+    "decl": "### Types",
+    "file": "forces/harmonic-bond",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-bedbd6d9": {
     "decl": "Scenario: Reject an output_path equal to the simulation's log file",
     "file": "analysis/framework",
@@ -23803,6 +24162,34 @@
     "refs": [],
     "title": "__device__",
     "type": "api-item"
+  },
+  "rq-c3d498ad": {
+    "decl": "Scenario: Compressed bond produces a repulsive force",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Compressed bond produces a repulsive force",
+    "type": "scenario"
+  },
+  "rq-c3da9ee1": {
+    "decl": "# Feature: Harmonic Bonded Potential",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "src/forces/harmonic_bond.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Harmonic Bonded Potential",
+    "type": "file"
   },
   "rq-c406ffcd": {
     "decl": "Scenario: The user guide documents the launch-configuration tuning constants",
@@ -24414,6 +24801,18 @@
     "title": "draw_counter starts at 0 and increments by 1 per apply_post",
     "type": "scenario"
   },
+  "rq-c82ac64c": {
+    "decl": "Scenario: Selected reduction map matches a subset build",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Selected reduction map matches a subset build",
+    "type": "scenario"
+  },
   "rq-c83742c0": {
     "decl": "## CUDA Kernels and launch helpers",
     "file": "integration/mc-barostat",
@@ -24697,6 +25096,19 @@
     ],
     "title": "log_column_values returns ke + pe − cumulative_injection",
     "type": "scenario"
+  },
+  "rq-ca10a975": {
+    "decl": "### Prefactor collapse",
+    "file": "forces/harmonic-bond",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Prefactor collapse",
+    "type": "section"
   },
   "rq-ca13c67e": {
     "decl": "Scenario: A custom analysis builder composes with the built-ins",
@@ -25993,6 +26405,14 @@
     "title": "Initial sorted_atom_index is the identity permutation",
     "type": "scenario"
   },
+  "rq-d504d070": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
+  },
   "rq-d5085350": {
     "decl": "Scenario: Pair `between` is normalised to lexicographic order",
     "file": "io/config-schema",
@@ -26269,6 +26689,18 @@
     "refs": [],
     "title": "Once-only setup",
     "type": "section"
+  },
+  "rq-d757f7a1": {
+    "decl": "Scenario: A mixed Morse-and-harmonic system routes each bond to exactly one slot",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A mixed Morse-and-harmonic system routes each bond to exactly one slot",
+    "type": "scenario"
   },
   "rq-d764ea16": {
     "decl": "### CUDA Kernels",
@@ -27225,6 +27657,14 @@
     "title": "build.rs compiles a .cu file to PTX",
     "type": "scenario"
   },
+  "rq-de977e05": {
+    "decl": "## Feature API",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-deace09f": {
     "decl": "Scenario: SimulationSetup::run_all_phases composes per-phase functions",
     "file": "simulation-runner",
@@ -27674,6 +28114,18 @@
       }
     ],
     "title": "Intramolecular exclusion holds when the molecule straddles a cell boundary",
+    "type": "scenario"
+  },
+  "rq-e2b77f30": {
+    "decl": "Scenario: Construct HarmonicBondState from an all-harmonic bond list",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct HarmonicBondState from an all-harmonic bond list",
     "type": "scenario"
   },
   "rq-e2bb500b": {
@@ -29379,6 +29831,18 @@
     "title": "Rescale skipped when K == 0",
     "type": "scenario"
   },
+  "rq-eff785d2": {
+    "decl": "Scenario: r below the degenerate threshold produces zero force, not NaN",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "r below the degenerate threshold produces zero force, not NaN",
+    "type": "scenario"
+  },
   "rq-f001eaf8": {
     "decl": "- `PairInteractionConfig`",
     "file": "io/config-schema",
@@ -29643,6 +30107,14 @@
     ],
     "title": "Feature: SHAKE + RATTLE Constraint Algorithm",
     "type": "file"
+  },
+  "rq-f184f707": {
+    "decl": "### Reduction Kernel",
+    "file": "forces/harmonic-bond",
+    "level": 3,
+    "refs": [],
+    "title": "Reduction Kernel",
+    "type": "section"
   },
   "rq-f1850393": {
     "decl": "Scenario: Header line has the documented column names in the documented order",
@@ -30074,6 +30546,18 @@
     "title": "Load a valid minimal analysis file with implicit pairing",
     "type": "scenario"
   },
+  "rq-f523bca1": {
+    "decl": "Scenario: Diatomic equilibrium gives zero net force on both atoms",
+    "file": "forces/harmonic-bond",
+    "refs": [
+      {
+        "file": "tests/forces_harmonic_bond.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Diatomic equilibrium gives zero net force on both atoms",
+    "type": "scenario"
+  },
   "rq-f5984310": {
     "decl": "## Feature API",
     "file": "io/unit-system",
@@ -30189,6 +30673,27 @@
     ],
     "title": "SI-mode writer multiplies velocities by the velocity factor",
     "type": "scenario"
+  },
+  "rq-f62d94d2": {
+    "decl": "## Per-Potential Bond Selection",
+    "file": "forces/harmonic-bond",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/harmonic_bond.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Per-Potential Bond Selection",
+    "type": "section"
   },
   "rq-f632c56c": {
     "decl": "Scenario: a non-positive proposed volume is rejected without a trial energy",
@@ -31243,6 +31748,27 @@
     ],
     "title": "Reject image column declared without all three components",
     "type": "scenario"
+  },
+  "rq-febe169b": {
+    "decl": "### Per-Potential Bond Selection",
+    "file": "forces/morse-bonded",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/morse.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Per-Potential Bond Selection",
+    "type": "section"
   },
   "rq-fec7ae1c": {
     "decl": "### Rust Launch Helpers",

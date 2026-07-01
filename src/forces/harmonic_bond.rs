@@ -1,10 +1,15 @@
+//! Harmonic (Hooke's-law) bonded potential slot.
+//!
+//! Parallels the Morse slot (`morse.rs`): the per-bond contribution is a
+//! functor composed into the JIT bonded module, and the per-atom
+//! reduction reuses the shape-universal `reduce_bond_forces` kernel. See
+//! `rqm/forces/harmonic-bond.md`.
+
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 
-use crate::gpu::{
-    GpuContext, GpuError, Kernels, ParticleBuffers, reduce_bond_forces,
-};
+use crate::gpu::{GpuContext, GpuError, Kernels, ParticleBuffers, reduce_bond_forces};
 use crate::io::config::BondTypeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -18,17 +23,16 @@ use super::{
 };
 use crate::precision::Real;
 
-// rq-2361f2b8 rq-ec18d174
+// rq-c3da9ee1
 #[derive(Debug)]
-pub struct MorseBondedState {
+pub struct HarmonicBondState {
     pub device: Arc<CudaDevice>,
     pub kernels: Arc<Kernels>,
     pub bonds: CudaSlice<u32>,
     pub atom_bond_offsets: CudaSlice<u32>,
     pub atom_bond_indices: CudaSlice<u32>,
-    pub bond_de: CudaSlice<Real>,
-    pub bond_a: CudaSlice<Real>,
-    pub bond_re: CudaSlice<Real>,
+    pub bond_k: CudaSlice<Real>,
+    pub bond_r0: CudaSlice<Real>,
     pub bond_pair_x: CudaSlice<Real>,
     pub bond_pair_y: CudaSlice<Real>,
     pub bond_pair_z: CudaSlice<Real>,
@@ -38,7 +42,7 @@ pub struct MorseBondedState {
     pub particle_count: usize,
 }
 
-impl MorseBondedState {
+impl HarmonicBondState {
     pub fn new(
         gpu: &GpuContext,
         bond_list: &BondList,
@@ -48,46 +52,45 @@ impl MorseBondedState {
         let kernels = gpu.kernels.clone();
         let particle_count = bond_list.particle_count;
 
-        // rq-febe169b — select only the bonds whose type is Morse and
+        // rq-f62d94d2 — select only the bonds whose type is harmonic and
         // rebuild this slot's own reduction map over that subset.
-        let morse_list =
-            bond_list.filter_by_type_index(|ti| is_morse(bond_types, ti));
-        let bond_count = morse_list.bonds.len();
+        let harmonic_list =
+            bond_list.filter_by_type_index(|ti| is_harmonic(bond_types, ti));
+        let bond_count = harmonic_list.bonds.len();
 
         let mut bonds_flat: Vec<u32> = Vec::with_capacity(3 * bond_count);
-        for b in &morse_list.bonds {
+        for b in &harmonic_list.bonds {
             bonds_flat.push(b.atom_i);
             bonds_flat.push(b.atom_j);
             bonds_flat.push(b.bond_type_index);
         }
 
-        // The parameter table is addressed by the global `bond_type_index`
-        // and is therefore sized to the full `[[bond_types]]` array; rows
-        // for non-Morse types hold placeholders this slot never reads.
-        let mut de_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
-        let mut a_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
-        let mut re_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
+        // rq-4943810f — the parameter table is addressed by the global
+        // `bond_type_index` and is therefore sized to the full
+        // `[[bond_types]]` array; rows for non-harmonic types hold
+        // placeholders this slot never reads. `k` is stored directly (not
+        // `k/2`): the analytic derivative absorbs the ½ convention, so the
+        // force path carries no half-factor (see *Prefactor collapse*).
+        let mut k_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
+        let mut r0_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
         for bt in bond_types {
             match bt {
-                BondTypeConfig::Morse { de, a, re, .. } => {
-                    de_vec.push(*de as Real);
-                    a_vec.push(*a as Real);
-                    re_vec.push(*re as Real);
+                BondTypeConfig::Harmonic { k, r0, .. } => {
+                    k_vec.push(*k as Real);
+                    r0_vec.push(*r0 as Real);
                 }
-                BondTypeConfig::Harmonic { .. } => {
-                    de_vec.push(0.0);
-                    a_vec.push(0.0);
-                    re_vec.push(0.0);
+                BondTypeConfig::Morse { .. } => {
+                    k_vec.push(0.0);
+                    r0_vec.push(0.0);
                 }
             }
         }
 
         let bonds = htod_or_empty_u32(&device, &bonds_flat)?;
-        let atom_bond_offsets = htod_or_empty_u32(&device, &morse_list.atom_bond_offsets)?;
-        let atom_bond_indices = htod_or_empty_u32(&device, &morse_list.atom_bond_indices)?;
-        let bond_de = htod_or_empty(&device, &de_vec)?;
-        let bond_a = htod_or_empty(&device, &a_vec)?;
-        let bond_re = htod_or_empty(&device, &re_vec)?;
+        let atom_bond_offsets = htod_or_empty_u32(&device, &harmonic_list.atom_bond_offsets)?;
+        let atom_bond_indices = htod_or_empty_u32(&device, &harmonic_list.atom_bond_indices)?;
+        let bond_k = htod_or_empty(&device, &k_vec)?;
+        let bond_r0 = htod_or_empty(&device, &r0_vec)?;
 
         let bond_pair_len = 2 * bond_count;
         let bond_pair_x = device.alloc_zeros::<Real>(bond_pair_len).map_err(GpuError::from)?;
@@ -98,15 +101,14 @@ impl MorseBondedState {
         let bond_pair_virial =
             device.alloc_zeros::<Real>(bond_pair_len).map_err(GpuError::from)?;
 
-        Ok(MorseBondedState {
+        Ok(HarmonicBondState {
             device,
             kernels,
             bonds,
             atom_bond_offsets,
             atom_bond_indices,
-            bond_de,
-            bond_a,
-            bond_re,
+            bond_k,
+            bond_r0,
             bond_pair_x,
             bond_pair_y,
             bond_pair_z,
@@ -118,7 +120,7 @@ impl MorseBondedState {
     }
 }
 
-impl Potential for MorseBondedState {
+impl Potential for HarmonicBondState {
     fn label(&self) -> &'static str {
         LABEL
     }
@@ -142,10 +144,10 @@ impl Potential for MorseBondedState {
             return Ok(());
         }
         // The per-bond contribution kernel runs from the framework's
-        // JIT-composed bonded module dispatch *before* this method;
-        // by the time we get here, the slot's bond-pair scratch
-        // buffer holds the per-bond contributions. Only the per-atom
-        // reduction is the slot's responsibility.
+        // JIT-composed bonded module dispatch *before* this method; by
+        // the time we get here, the slot's bond-pair scratch buffer holds
+        // the per-bond contributions. Only the per-atom reduction is the
+        // slot's responsibility, and it reuses the universal kernel.
         let write_scalars = matches!(level, AggregateLevel::ForcesAndScalars);
         timings.kernel_start(KernelStage::REDUCE_BOND_FORCES)?;
         reduce_bond_forces(
@@ -174,9 +176,9 @@ impl Potential for MorseBondedState {
     }
 }
 
-impl BondedPotential for MorseBondedState {
+impl BondedPotential for HarmonicBondState {
     fn bonded_force_fragment(&self) -> BondedForceFragment {
-        morse_bonded_force_fragment()
+        harmonic_bonded_force_fragment()
     }
 
     fn bonded_scratch(&self) -> BondedScratchView<'_> {
@@ -196,35 +198,40 @@ impl BondedPotential for MorseBondedState {
         _ctx: &ForceLaunchContext<'_>,
         builder: &mut ForceLaunchBuilder,
     ) {
-        // Validated against `morse_arg_schema()` — the same schema that
+        // Validated against `harmonic_arg_schema()` — the same schema that
         // generates the fragment's entry-point args and functor-init
         // source — so the binding cannot drift from the kernel signature.
-        let schema = morse_arg_schema();
+        let schema = harmonic_arg_schema();
         let mut b = KernelArgBinder::new(&schema, LABEL, builder);
-        b.buffer("morse_bond_de", &self.bond_de);
-        b.buffer("morse_bond_a", &self.bond_a);
-        b.buffer("morse_bond_re", &self.bond_re);
+        b.buffer("harmonic_bond_k", &self.bond_k);
+        b.buffer("harmonic_bond_r0", &self.bond_r0);
         b.finish();
     }
 }
 
 /// The slot's stable label, shared by `Potential::label`, the fragment,
 /// and the argument schema.
-const LABEL: &str = "morse_bonded";
+const LABEL: &str = "harmonic_bond";
 
-/// Single source of truth for the Morse per-bond kernel arguments. The
+/// Single source of truth for the harmonic per-bond kernel arguments. The
 /// fragment's `entry_point_args` and `functor_init_source` are generated
-/// from this list (local-functor init), and `bind_bonded_force_args` is
-/// validated against it, so the three pieces cannot drift apart.
-fn morse_arg_schema() -> KernelArgSchema {
+/// from this list, and `bind_bonded_force_args` is validated against it,
+/// so the three pieces cannot drift apart.
+fn harmonic_arg_schema() -> KernelArgSchema {
     use KernelArgType::ConstPtrReal;
     KernelArgSchema::intramolecular(
         LABEL,
         vec![
-            KernelArg::new("morse_bond_de", ConstPtrReal, "bond_de"),
-            KernelArg::new("morse_bond_a", ConstPtrReal, "bond_a"),
-            KernelArg::new("morse_bond_re", ConstPtrReal, "bond_re"),
+            KernelArg::new("harmonic_bond_k", ConstPtrReal, "bond_k"),
+            KernelArg::new("harmonic_bond_r0", ConstPtrReal, "bond_r0"),
         ],
+    )
+}
+
+fn is_harmonic(bond_types: &[BondTypeConfig], ti: u32) -> bool {
+    matches!(
+        bond_types.get(ti as usize),
+        Some(BondTypeConfig::Harmonic { .. })
     )
 }
 
@@ -250,47 +257,39 @@ fn htod_or_empty(
     }
 }
 
-// rq-e8550f96
+// rq-c3da9ee1
 #[derive(Debug, Clone)]
-pub struct MorseBondedBuilder;
+pub struct HarmonicBondBuilder;
 
-impl PotentialBuilder for MorseBondedBuilder {
+impl PotentialBuilder for HarmonicBondBuilder {
     fn build(
         &self,
         cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        // Active only when at least one bond uses a Morse bond type.
-        let has_morse = cx
+        // Active only when at least one bond uses a harmonic bond type.
+        let has_harmonic = cx
             .bond_list
             .bonds
             .iter()
-            .any(|b| is_morse(cx.bond_types, b.bond_type_index));
-        if !has_morse {
+            .any(|b| is_harmonic(cx.bond_types, b.bond_type_index));
+        if !has_harmonic {
             return Ok(None);
         }
-        let state = MorseBondedState::new(cx.gpu, cx.bond_list, cx.bond_types)?;
+        let state = HarmonicBondState::new(cx.gpu, cx.bond_list, cx.bond_types)?;
         Ok(Some(Box::new(state)))
     }
 }
 
-/// Whether the bond type at global index `ti` selects `potential = "morse"`.
-fn is_morse(bond_types: &[BondTypeConfig], ti: u32) -> bool {
-    matches!(
-        bond_types.get(ti as usize),
-        Some(BondTypeConfig::Morse { .. })
-    )
-}
-
-/// Morse per-bond force fragment for the JIT-composed bonded module.
+/// Harmonic per-bond force fragment for the JIT-composed bonded module.
 /// The functor exposes `evaluate(r2, r, bond_type_index, dx, dy, dz,
 /// fmag, u_k, w_k)` per the contract in
 /// `rqm/forces/jit-composed-intramolecular.md`.
-pub fn morse_bonded_force_fragment() -> BondedForceFragment {
+// rq-ca10a975
+pub fn harmonic_bonded_force_fragment() -> BondedForceFragment {
     let functor_source = r#"
-struct MorsePairFunctor {
-    const Real *bond_de;
-    const Real *bond_a;
-    const Real *bond_re;
+struct HarmonicPairFunctor {
+    const Real *bond_k;
+    const Real *bond_r0;
 
     __device__ inline void evaluate(
         Real r2, Real r,
@@ -301,72 +300,71 @@ struct MorsePairFunctor {
         Real &w_k) const
     {
         (void) dx; (void) dy; (void) dz;
-        Real de = bond_de[bond_type_index];
-        Real a  = bond_a[bond_type_index];
-        Real re = bond_re[bond_type_index];
-        Real e  = Real_exp(-a * (r - re));
-        Real one_minus_e = R(1.0) - e;
-        // F_radial = -dU/dr = -2*De*a*(1 - e)*e. fmag here is the
-        // per-component factor produced by dividing by r (so that
-        // the outer-loop body multiplying by (dx, dy, dz) gives the
-        // Cartesian force on atom_i).
-        fmag = -R(2.0) * de * a * one_minus_e * e / r;
-        u_k  = de * one_minus_e * one_minus_e;
+        // Defensive guard for a near-degenerate bond length; the force
+        // direction is undefined as r -> 0. (The composed outer loop
+        // already returns early on r2 == 0.)
+        if (r < R(1.0e-7)) {
+            fmag = R(0.0);
+            u_k  = R(0.0);
+            w_k  = R(0.0);
+            return;
+        }
+        Real k  = bond_k[bond_type_index];
+        Real r0 = bond_r0[bond_type_index];
+        Real dr = r - r0;
+        // F_radial = -dU/dr = -k*dr for U = 1/2 k dr^2. `fmag` is the
+        // per-component factor produced by dividing by r, so the
+        // outer-loop body multiplying by (dx, dy, dz) yields the
+        // Cartesian force on atom_i. The 1/2 convention is absorbed
+        // analytically here (no half-factor in the force); it survives
+        // only as the 0.5 literal in the energy term below.
+        fmag = -k * dr / r;
+        u_k  = R(0.5) * k * dr * dr;
         w_k  = fmag * r2;
     }
 };
 "#;
     // `entry_point_args` and `functor_init_source` are generated from
-    // `morse_arg_schema()`, the same schema `bind_bonded_force_args` is
-    // validated against; the functor field names in `functor_source`
-    // above must match the schema's `functor_field` entries.
-    let schema = morse_arg_schema();
+    // `harmonic_arg_schema()`, the same schema `bind_bonded_force_args` is
+    // validated against; the functor field names in `functor_source` above
+    // must match the schema's `functor_field` entries.
+    let schema = harmonic_arg_schema();
     BondedForceFragment {
         label: LABEL,
-        functor_struct_name: "MorsePairFunctor",
+        functor_struct_name: "HarmonicPairFunctor",
         functor_source: functor_source.to_string(),
         entry_point_args: schema.entry_point_args(),
         functor_init_source: schema.functor_init_source(),
     }
 }
 
-// rq-2093594f
-crate::gpu_kernels! {
-    module: "morse",
-    ptx: crate::kernels::MORSE,
-    struct: MorseKernels,
-    kernels: [reduce_bond_forces],
-    stages: {
-        REDUCE_BOND_FORCES = "reduce_bond_forces",
-    },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // The CUDA argument declarations and local-functor initialisation
-    // the bonded composer expects for the Morse slot. The
-    // schema-generated output must equal these so the composed bonded
-    // module compiles to the same per-bond kernel.
-    const EXPECTED_ENTRY_POINT_ARGS: &str = r#"    const Real *morse_bond_de,
-    const Real *morse_bond_a,
-    const Real *morse_bond_re,
+    // The CUDA argument declarations and local-functor initialisation the
+    // bonded composer expects for the harmonic slot. The schema-generated
+    // output must equal these so the composed bonded module compiles to
+    // the expected per-bond kernel.
+    const EXPECTED_ENTRY_POINT_ARGS: &str = r#"    const Real *harmonic_bond_k,
+    const Real *harmonic_bond_r0,
 "#;
 
-    const EXPECTED_FUNCTOR_INIT_SOURCE: &str = r#"    functor.bond_de = morse_bond_de;
-    functor.bond_a = morse_bond_a;
-    functor.bond_re = morse_bond_re;
+    const EXPECTED_FUNCTOR_INIT_SOURCE: &str = r#"    functor.bond_k = harmonic_bond_k;
+    functor.bond_r0 = harmonic_bond_r0;
 "#;
 
     #[test]
     fn generated_entry_point_args_match_expected() {
-        assert_eq!(morse_arg_schema().entry_point_args(), EXPECTED_ENTRY_POINT_ARGS);
+        assert_eq!(
+            harmonic_arg_schema().entry_point_args(),
+            EXPECTED_ENTRY_POINT_ARGS
+        );
     }
 
     #[test]
     fn generated_functor_init_source_is_local_functor() {
-        let init = morse_arg_schema().functor_init_source();
+        let init = harmonic_arg_schema().functor_init_source();
         assert_eq!(init, EXPECTED_FUNCTOR_INIT_SOURCE);
         // Intramolecular slots use a local `functor`, never the
         // pair-force composite member.

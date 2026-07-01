@@ -1,5 +1,6 @@
 pub mod angle;
 pub mod dihedral;
+pub mod harmonic_bond;
 pub mod jit_composed;
 pub mod lj;
 pub mod morse;
@@ -38,6 +39,7 @@ pub use spme::{
     SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,
     SpmeRealBuilder, SpmeReciprocalBuilder,
 };
+pub use harmonic_bond::{HarmonicBondBuilder, HarmonicBondState};
 pub use lj::{LennardJonesBuilder, LennardJonesState};
 pub use morse::{MorseBondedBuilder, MorseBondedState};
 pub use topology::{
@@ -279,6 +281,7 @@ impl Builtins for dyn PotentialBuilder {
             Box::new(SpmeRealBuilder),
             Box::new(SpmeReciprocalBuilder),
             Box::new(MorseBondedBuilder),
+            Box::new(HarmonicBondBuilder),
             Box::new(HarmonicAngleBuilder),
             Box::new(PeriodicDihedralBuilder),
         ]

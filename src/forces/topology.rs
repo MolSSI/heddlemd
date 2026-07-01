@@ -71,6 +71,50 @@ impl BondList {
     pub fn is_empty(&self) -> bool {
         self.bonds.is_empty()
     }
+
+    // rq-febe169b rq-f62d94d2
+    /// Produce a sub-list holding only the bonds whose `bond_type_index`
+    /// satisfies `keep`, preserving the original `(atom_i, atom_j)` sort
+    /// order, with a per-atom reduction map (`atom_bond_offsets` /
+    /// `atom_bond_indices`) rebuilt over the subset. When `keep` accepts
+    /// every bond the result equals `self`. Used by each bonded slot to
+    /// select the bonds of its own `potential` (see `morse-bonded.md`
+    /// and `harmonic-bond.md`).
+    pub fn filter_by_type_index<F: Fn(u32) -> bool>(&self, keep: F) -> BondList {
+        let bonds: Vec<Bond> = self
+            .bonds
+            .iter()
+            .copied()
+            .filter(|b| keep(b.bond_type_index))
+            .collect();
+        let particle_count = self.particle_count;
+        let mut atom_bond_offsets = vec![0u32; particle_count + 1];
+        for b in &bonds {
+            atom_bond_offsets[b.atom_i as usize + 1] += 1;
+            atom_bond_offsets[b.atom_j as usize + 1] += 1;
+        }
+        for i in 1..=particle_count {
+            atom_bond_offsets[i] += atom_bond_offsets[i - 1];
+        }
+        let mut atom_bond_indices = vec![0u32; bonds.len() * 2];
+        let mut cursor: Vec<u32> = atom_bond_offsets[..particle_count].to_vec();
+        for (k, b) in bonds.iter().enumerate() {
+            let slot_i = (2 * k) as u32;
+            let slot_j = (2 * k + 1) as u32;
+            let pi = b.atom_i as usize;
+            let pj = b.atom_j as usize;
+            atom_bond_indices[cursor[pi] as usize] = slot_i;
+            cursor[pi] += 1;
+            atom_bond_indices[cursor[pj] as usize] = slot_j;
+            cursor[pj] += 1;
+        }
+        BondList {
+            bonds,
+            atom_bond_offsets,
+            atom_bond_indices,
+            particle_count,
+        }
+    }
 }
 
 // rq-07d003c4

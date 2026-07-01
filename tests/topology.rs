@@ -1093,3 +1093,57 @@ fn atom_dihedral_offsets_correct() {
     assert_eq!(dl.atom_dihedral_offsets, vec![0, 1, 3, 5, 7, 8]);
     assert_eq!(dl.atom_dihedral_indices.len(), 8);
 }
+
+// =================================================================
+// Per-potential bond selection (BondList::filter_by_type_index)
+// =================================================================
+
+// rq-febe169b rq-f62d94d2
+#[test]
+fn filter_by_type_index_selects_subset_and_rebuilds_map() {
+    use heddle_md::forces::{Bond, BondList};
+    // 4 atoms; bonds of two types. type 0 kept, type 1 dropped.
+    let bonds = vec![
+        Bond { atom_i: 0, atom_j: 1, bond_type_index: 0 },
+        Bond { atom_i: 1, atom_j: 2, bond_type_index: 1 },
+        Bond { atom_i: 2, atom_j: 3, bond_type_index: 0 },
+    ];
+    // A deliberately-empty CSR in the input is irrelevant: the filter
+    // rebuilds its own map over the selected subset.
+    let full = BondList {
+        bonds,
+        atom_bond_offsets: vec![0; 5],
+        atom_bond_indices: vec![],
+        particle_count: 4,
+    };
+    let kept = full.filter_by_type_index(|ti| ti == 0);
+    // Two bonds survive, in original order: (0,1) and (2,3).
+    assert_eq!(kept.bonds.len(), 2);
+    assert_eq!((kept.bonds[0].atom_i, kept.bonds[0].atom_j), (0, 1));
+    assert_eq!((kept.bonds[1].atom_i, kept.bonds[1].atom_j), (2, 3));
+    // Reduction map is rebuilt over the subset: atoms 0,1,2,3 each in one
+    // kept bond; slot indices are 0/1 for bond 0 and 2/3 for bond 1.
+    assert_eq!(kept.atom_bond_offsets, vec![0, 1, 2, 3, 4]);
+    assert_eq!(kept.atom_bond_indices, vec![0, 1, 2, 3]);
+    assert_eq!(kept.particle_count, 4);
+}
+
+// rq-febe169b rq-f62d94d2
+#[test]
+fn filter_by_type_index_keep_all_equals_original_bonds() {
+    use heddle_md::forces::{Bond, BondList};
+    let bonds = vec![
+        Bond { atom_i: 0, atom_j: 1, bond_type_index: 0 },
+        Bond { atom_i: 1, atom_j: 2, bond_type_index: 1 },
+    ];
+    let full = BondList {
+        bonds: bonds.clone(),
+        atom_bond_offsets: vec![0, 1, 3, 4],
+        atom_bond_indices: vec![0, 1, 2, 3],
+        particle_count: 3,
+    };
+    let kept = full.filter_by_type_index(|_| true);
+    assert_eq!(kept.bonds.len(), 2);
+    assert_eq!(kept.atom_bond_offsets, full.atom_bond_offsets);
+    assert_eq!(kept.atom_bond_indices, full.atom_bond_indices);
+}

@@ -357,6 +357,18 @@ For `B` bonds among `N` particles, the host-side `BondList` carries:
   index, so the reduction's summation order is deterministic across
   runs.
 
+The `BondList` is potential-agnostic: it holds every bond regardless of
+its type's `potential`, and `bond_type_index` is a global index into the
+config's `[[bond_types]]` array. When more than one bond potential is
+active (e.g. Morse and harmonic bonds in the same system), each bonded
+slot selects the bonds whose type uses its own `potential`, preserving
+the `(atom_i, atom_j)` sort order, and derives its own device bond array
+plus its own `atom_bond_offsets` / `atom_bond_indices` reduction map over
+that subset — built exactly as above but restricted to the selected
+bonds. Every bond is owned by exactly one bonded slot; when a single bond
+potential is active, its subset is the whole list and its derived map
+equals the fields above. See `morse-bonded.md` and `harmonic-bond.md`.
+
 The atom-to-bond indexing is built at load time and uploaded to the
 device once. Bonds are immutable for the lifetime of a run; no
 recomputation is necessary.

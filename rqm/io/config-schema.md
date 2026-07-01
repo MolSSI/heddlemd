@@ -709,9 +709,10 @@ Common fields:
 
 - `name: String` — unique identifier within the `[[bond_types]]` array.
   Empty strings are rejected. Case-sensitive.
-- `potential: String` — selects the bonded potential. In schema v1 the
-  only supported value is `"morse"`. Future values (`"harmonic"`,
-  `"fene"`, ...) are reserved.
+- `potential: String` — selects the bonded potential. The supported
+  values are `"morse"` and `"harmonic"`. Future values (`"fene"`, ...)
+  are reserved. A system may mix bond types of different potentials; each
+  bond is routed to the matching potential slot by its type.
 
 Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
 
@@ -721,6 +722,14 @@ Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
   strictly positive.
 - `re: f64` — Morse equilibrium distance in metres. Required. Finite,
   strictly positive.
+
+Fields accepted for `potential = "harmonic"` (see
+`forces/harmonic-bond.md`):
+
+- `k: f64` — bond force constant in joules per metre², in the
+  `U = ½ k (r − r_0)²` convention. Required. Finite, strictly positive.
+- `r0: f64` — equilibrium distance in metres. Required. Finite, strictly
+  positive.
 
 Names must be unique within the array. Unknown fields for the chosen
 `potential` are rejected.
@@ -1332,6 +1341,9 @@ phase failures.
   parameters. Variants:
   - `Morse { name: String, de: f64, a: f64, re: f64 }` — selected by
     `potential = "morse"`.
+  - `Harmonic { name: String, k: f64, r0: f64 }` — selected by
+    `potential = "harmonic"`. `k` uses the `U = ½ k (r − r_0)²`
+    convention.
 
   The `name` field is the lookup key referenced from the `.topology`
   file's `[bonds]` section.
@@ -2297,7 +2309,7 @@ Feature: TOML simulation config schema
 
   @rq-3f01c746
   Scenario: bond_type unknown potential is rejected
-    Given a [[bond_types]] entry with potential="harmonic"
+    Given a [[bond_types]] entry with potential="fene"
     When load_config is called
     Then it returns Err(ConfigError::Parse { path, .. })
     And path equals "bond_types[0].potential"
@@ -2329,6 +2341,46 @@ Feature: TOML simulation config schema
   @rq-a208c9ba
   Scenario: Morse bond_type rejects extra fields
     Given a [[bond_types]] entry with potential="morse" and an unknown field stiffness=1.0
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "bond_types[0]"
+
+  @rq-03ce839c
+  Scenario: Valid harmonic bond_type is accepted
+    Given the Background config plus
+      [[bond_types]] name="CT-CT" potential="harmonic" k=2.0e5 r0=1.526e-10
+    When load_config is called
+    Then it returns Ok(config)
+    And config.bond_types has length 1
+    And config.bond_types[0] matches BondTypeConfig::Harmonic { name: "CT-CT", k: 2.0e5, r0: 1.526e-10 }
+
+  @rq-358e14aa
+  Scenario: harmonic bond_type missing k is rejected
+    Given a [[bond_types]] entry with potential="harmonic", r0=1.0e-10 (no k)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "bond_types[0].k" })
+
+  @rq-80d00b52
+  Scenario: harmonic bond_type missing r0 is rejected
+    Given a [[bond_types]] entry with potential="harmonic", k=2.0e5 (no r0)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "bond_types[0].r0" })
+
+  @rq-0fdb2912
+  Scenario: harmonic bond_type rejects non-positive k
+    Given a [[bond_types]] entry with potential="harmonic", k=0.0, r0=1.0e-10
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].k", reason: _ })
+
+  @rq-9e91d178
+  Scenario: harmonic bond_type rejects non-positive r0
+    Given a [[bond_types]] entry with potential="harmonic", k=2.0e5, r0=0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].r0", reason: _ })
+
+  @rq-a21c5539
+  Scenario: harmonic bond_type rejects extra fields
+    Given a [[bond_types]] entry with potential="harmonic", k=2.0e5, r0=1.0e-10 and an unknown field de=1.0
     When load_config is called
     Then it returns Err(ConfigError::Parse { path, message })
     And path equals "bond_types[0]"

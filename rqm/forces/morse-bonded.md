@@ -5,9 +5,11 @@ in the system's bond list (see `topology.md`). Bonds are pairs of atoms whose
 distance interaction is described by the Morse functional form with
 per-bond-type parameters. The slot plugs into the pluggable potential
 framework (`framework.md`); selection is implicit — the slot is present
-whenever the config's `topology` field references a non-empty `.topology`
-file whose `[bonds]` section is non-empty and at least one
-`[[bond_types]]` entry has `potential = "morse"`.
+whenever the config's `topology` field references a `.topology` file whose
+`[bonds]` section names at least one bond whose `[[bond_types]]` entry has
+`potential = "morse"`. A system may mix Morse and harmonic
+(`harmonic-bond.md`) bonds; each bond is routed to the matching potential
+slot by its type (see *Per-Potential Bond Selection*).
 
 ## Algorithm <!-- rq-cbeeea3c -->
 
@@ -106,14 +108,34 @@ The parameter table on the device is three `CudaSlice<f32>` arrays
 upload time. Each bond carries a `bond_type_index` (see `topology.md`)
 into this table.
 
-In v1 the only supported `potential` value for bond types is `"morse"`;
-other values are rejected at config-load time. Future bonded potentials
-(harmonic, cosine, etc.) will add new `potential` values and reuse the
-existing `BondList` / `BondPairBuffer` / reduction infrastructure.
+The supported `potential` values for bond types are `"morse"` and
+`"harmonic"` (`harmonic-bond.md`); other values are rejected at
+config-load time. Additional bonded potentials (FENE, cosine, etc.) add
+new `potential` values and reuse the existing `BondList` /
+`BondPairBuffer` / reduction infrastructure.
+
+### Per-Potential Bond Selection <!-- rq-febe169b -->
+
+The parsed `BondList` (see `topology.md`) is potential-agnostic: it holds
+every bond, each carrying a global `bond_type_index` into the config's
+`[[bond_types]]` array. `MorseBondedState::new` selects the bonds whose
+type uses `potential == "morse"`, preserving the `BondList`'s
+`(atom_i, atom_j)` sort order, and builds its own device bond array and
+its own `atom_bond_offsets` / `atom_bond_indices` reduction map over that
+subset (constructed exactly as the shared `BondList` builds its map, but
+restricted to the selected bonds). The harmonic slot performs the
+mirror-image selection, so every bond is owned by exactly one bonded slot
+and none is evaluated twice. When every bond is Morse, the subset is the
+whole list and the derived map equals the shared `BondList`'s map.
+
+The `bond_type_index` in each selected triple remains the global index;
+the parameter table is sized to the full `[[bond_types]]` array length and
+addressed by that index, so no remapping is performed. Rows for
+non-Morse bond types are present but never read.
 
 ## Empty State <!-- rq-21acd57c -->
 
-When the bond list is empty (`bond_list.is_empty()`), the
+When no bond uses a Morse bond type (the selected subset is empty), the
 `MorseBondedState` is not constructed by the `ForceField` and the slot
 is absent from the slot list. The framework's combiner handles
 slot-presence correctly (see `framework.md`).
@@ -155,10 +177,13 @@ constructed.
   Constructor:
 
   - `MorseBondedState::new(device: Arc<CudaDevice>, bond_list: &BondList, bond_types: &[BondTypeConfig]) -> Result<MorseBondedState, GpuError>`
-    - Filters `bond_types` to entries with `potential == "morse"` and
-      uploads their parameters.
-    - Uploads `bond_list.bonds`, `bond_list.atom_bond_offsets`, and
-      `bond_list.atom_bond_indices` to device memory.
+    - Selects the bonds of `bond_list` whose type uses
+      `potential == "morse"` and builds the slot's own device bond array
+      and `atom_bond_offsets` / `atom_bond_indices` reduction map over
+      that subset (see *Per-Potential Bond Selection*).
+    - Uploads the `bond_types` parameters into a table addressed by the
+      global `bond_type_index`; Morse rows are populated and other rows
+      hold placeholder values that this slot never reads.
     - Allocates the five per-bond `bond_pair_*` buffers (force x/y/z,
       half-energy, half-virial), each of length `2 * B`. Per-atom
       output is added into the framework-supplied `SlotOutputView`
@@ -305,9 +330,10 @@ The reduction is launched through the framework's
 
 ## Out of Scope <!-- rq-c79e35dc -->
 
-- Other bonded potentials (harmonic bonds, FENE, Buckingham, etc.).
-  Each lands as a new `potential` value in `[[bond_types]]` with its
-  own kernel.
+- Other bonded potentials (harmonic bonds — see `harmonic-bond.md`;
+  FENE; Buckingham; class-2 quartic bonds). Each non-Morse potential
+  lands as a new `potential` value in `[[bond_types]]` with its own
+  kernel.
 - Angle, dihedral, and improper potentials.
 - Per-bond parameter overrides (every bond gets its parameters via its
   bond type).
@@ -472,8 +498,8 @@ Feature: Morse bonded potential
   # --- Rejection of non-Morse bond types in v1 ---
 
   @rq-1fc667cd
-  Scenario: Config bond_type with potential != "morse" is rejected
-    Given a [[bond_types]] entry with potential="harmonic"
+  Scenario: Config bond_type with an unknown potential is rejected
+    Given a [[bond_types]] entry with potential="fene"
     When the config is loaded
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].potential", reason: _ })
 

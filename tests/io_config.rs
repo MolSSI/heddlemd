@@ -1521,6 +1521,7 @@ fn valid_morse_bond_type_accepted() {
             assert_eq!(*a, 1.9e10);
             assert_eq!(*re, 3.4e-10);
         }
+        other => panic!("expected Morse, got {other:?}"),
     }
 }
 
@@ -1544,7 +1545,7 @@ fn bond_type_missing_potential() {
 fn bond_type_unknown_potential() {
     let dir = tmp_path("bond_type_unknown");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"ArAr\"\npotential = \"harmonic\"\n",
+        "{}\n[[bond_types]]\nname = \"ArAr\"\npotential = \"fene\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -4487,4 +4488,99 @@ cutoff = 1.0e-9
         ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.tau"),
         other => panic!("expected InvalidValue on thermostat.tau, got {other:?}"),
     }
+}
+
+// =================================================================
+// Harmonic bond_type schema
+// =================================================================
+
+fn config_with_bond_types(block: &str) -> String {
+    format!("{}\n{}", minimal_config(), block)
+}
+
+// rq-03ce839c
+#[test]
+fn valid_harmonic_bond_type_is_accepted() {
+    let dir = tmp_path("harmonic_bond_valid");
+    let cfg_str = config_with_bond_types(
+        "[[bond_types]]\nname = \"CT-CT\"\npotential = \"harmonic\"\nk = 500.0\nr0 = 2.0\n",
+    );
+    let path = write_config(&dir, &cfg_str);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.bond_types.len(), 1);
+    match &cfg.bond_types[0] {
+        heddle_md::io::config::BondTypeConfig::Harmonic { name, k, r0 } => {
+            assert_eq!(name, "CT-CT");
+            assert_eq!(*k, 500.0);
+            assert_eq!(*r0, 2.0);
+        }
+        other => panic!("expected Harmonic, got {other:?}"),
+    }
+}
+
+// rq-358e14aa
+#[test]
+fn harmonic_bond_type_missing_k_is_rejected() {
+    let dir = tmp_path("harmonic_bond_missing_k");
+    let cfg_str = config_with_bond_types(
+        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nr0 = 2.0\n",
+    );
+    let path = write_config(&dir, &cfg_str);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "bond_types[0].k"),
+        other => panic!("expected MissingField bond_types[0].k, got {other:?}"),
+    }
+}
+
+// rq-80d00b52
+#[test]
+fn harmonic_bond_type_missing_r0_is_rejected() {
+    let dir = tmp_path("harmonic_bond_missing_r0");
+    let cfg_str = config_with_bond_types(
+        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nk = 500.0\n",
+    );
+    let path = write_config(&dir, &cfg_str);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "bond_types[0].r0"),
+        other => panic!("expected MissingField bond_types[0].r0, got {other:?}"),
+    }
+}
+
+// rq-0fdb2912
+#[test]
+fn harmonic_bond_type_rejects_non_positive_k() {
+    let dir = tmp_path("harmonic_bond_neg_k");
+    let cfg_str = config_with_bond_types(
+        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nk = 0.0\nr0 = 2.0\n",
+    );
+    let path = write_config(&dir, &cfg_str);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "bond_types[0].k"),
+        other => panic!("expected InvalidValue bond_types[0].k, got {other:?}"),
+    }
+}
+
+// rq-9e91d178
+#[test]
+fn harmonic_bond_type_rejects_non_positive_r0() {
+    let dir = tmp_path("harmonic_bond_neg_r0");
+    let cfg_str = config_with_bond_types(
+        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nk = 500.0\nr0 = 0.0\n",
+    );
+    let path = write_config(&dir, &cfg_str);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "bond_types[0].r0"),
+        other => panic!("expected InvalidValue bond_types[0].r0, got {other:?}"),
+    }
+}
+
+// rq-a21c5539
+#[test]
+fn harmonic_bond_type_rejects_extra_fields() {
+    let dir = tmp_path("harmonic_bond_extra");
+    let cfg_str = config_with_bond_types(
+        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nk = 500.0\nr0 = 2.0\nde = 1.0\n",
+    );
+    let path = write_config(&dir, &cfg_str);
+    assert_parse(&load_config(&path).unwrap_err(), "bond_types[0]");
 }

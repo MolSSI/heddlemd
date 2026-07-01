@@ -71,6 +71,8 @@ pub enum Dimension {
     InversePressure,
     Temperature,
     Velocity,
+    /// A harmonic force constant (energy per length², e.g. J/m² → E_h/a₀²).
+    Stiffness,
 }
 
 impl UnitSystem {
@@ -101,6 +103,7 @@ impl UnitSystem {
             Dimension::InversePressure => 1.0 / PRESSURE_AU_TO_PA,
             Dimension::Temperature => TEMPERATURE_AU_TO_K,
             Dimension::Velocity => VELOCITY_AU_TO_M_PER_S,
+            Dimension::Stiffness => ENERGY_HARTREE_TO_J / (LENGTH_BOHR_TO_M * LENGTH_BOHR_TO_M),
         }
     }
 
@@ -176,6 +179,7 @@ dimensioned_scalars! {
     InversePressure => InversePressure,
     Temperature => Temperature,
     Velocity => Velocity,
+    Stiffness => Stiffness,
 }
 
 // rq-bf5df23e

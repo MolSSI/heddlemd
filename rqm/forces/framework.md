@@ -37,7 +37,7 @@ forces (e.g. short-range pair).
 
 ## Slots <!-- rq-cc73f184 -->
 
-`PotentialRegistry::with_builtins()` registers six built-in `PotentialBuilder`s,
+`PotentialRegistry::with_builtins()` registers seven built-in `PotentialBuilder`s,
 each of which contributes at most one slot to the `ForceField` when its activation
 condition is met. The registry's registration order is the slot evaluation
 order; the registry is the single canonical source of slot ordering, and
@@ -48,7 +48,8 @@ order; the registry is the single canonical source of slot ordering, and
 | `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `Fast` | `&[]` | `lj-pair-force.md` |
 | `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `Fast` | `&[]` | `spme.md` |
 | `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `Slow` | `&[]` | `spme.md` |
-| `MorseBondedBuilder` | `"morse_bonded"` | `!cx.bond_list.is_empty()` | `Fast` | `&[]` | `morse-bonded.md` |
+| `MorseBondedBuilder` | `"morse_bonded"` | `cx.bond_list` contains ≥1 bond whose type uses `potential = "morse"` | `Fast` | `&[]` | `morse-bonded.md` |
+| `HarmonicBondBuilder` | `"harmonic_bond"` | `cx.bond_list` contains ≥1 bond whose type uses `potential = "harmonic"` | `Fast` | `&[]` | `harmonic-bond.md` |
 | `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `Fast` | `&[]` | `harmonic-angle.md` |
 | `PeriodicDihedralBuilder` | `"periodic_dihedral"` | `!cx.dihedral_list.is_empty()` | `Fast` | `&[]` | `periodic-dihedral.md` |
 
@@ -63,15 +64,16 @@ slot kernels.
 When multiple slots are present, they appear in the `ForceField`'s slot
 list in the order their builders are registered (after displacement
 resolution suppresses any constituents claimed by another active
-builder). The canonical built-in order is the order of the six rows
+builder). The canonical built-in order is the order of the seven rows
 above:
 
 1. `LennardJones`
 2. `SpmeRealSpace`
 3. `SpmeReciprocal`
 4. `MorseBonded`
-5. `HarmonicAngle`
-6. `PeriodicDihedral`
+5. `HarmonicBond`
+6. `HarmonicAngle`
+7. `PeriodicDihedral`
 
 A built-in potential is added by writing a `PotentialBuilder` and inserting
 it at the appropriate position in `PotentialRegistry::with_builtins()`.
@@ -707,10 +709,20 @@ the additive identity. The rest of the pipeline runs normally.
 
 - `MorseBondedState` — implements `Potential` with `label() == "morse_bonded"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-2361f2b8 -->
   Owns the slot's `BondPairBuffer`, the bond index/offset tables, and
-  the per-bond-type parameter table. Construction requires a non-empty
-  bond list; see `morse-bonded.md`. Its `compute` runs the bonded
-  contribution kernel followed by the bonded reduction kernel and
-  writes its per-particle output into the `SlotOutputView` it receives.
+  the per-bond-type parameter table. Construction requires at least one
+  bond whose type selects `potential = "morse"`; see `morse-bonded.md`.
+  Its `compute` runs the bonded contribution kernel followed by the
+  bonded reduction kernel and writes its per-particle output into the
+  `SlotOutputView` it receives.
+
+- `HarmonicBondState` — implements `Potential` with `label() == "harmonic_bond"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-ba36ddba -->
+  Owns the slot's `BondPairBuffer`, the bond index/offset tables filtered
+  to its selected bonds, and the per-bond-type parameter table.
+  Construction requires at least one bond whose type selects
+  `potential = "harmonic"`; see `harmonic-bond.md`. Its `compute` runs
+  the bonded contribution kernel followed by the shared bonded reduction
+  kernel and writes its per-particle output into the `SlotOutputView` it
+  receives.
 
 - `HarmonicAngleState` — implements `Potential` with `label() == "harmonic_angle"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-454ad2cf -->
   Owns the slot's `AnglePairBuffer`, the angle index/offset tables,
@@ -869,10 +881,11 @@ the additive identity. The rest of the pipeline runs normally.
 - `PotentialRegistry` — `Registry<dyn PotentialBuilder>` (the generic <!-- rq-50f0a96a -->
   container; see `registry-framework.md`). A compositional-activation
   registry: it carries no keyed `lookup`, and registration order is the
-  slot evaluation order. `with_builtins()` pre-populates the six built-in
+  slot evaluation order. `with_builtins()` pre-populates the seven built-in
   builders in canonical evaluation order — `LennardJonesBuilder`,
   `SpmeRealBuilder`, `SpmeReciprocalBuilder`, `MorseBondedBuilder`,
-  `HarmonicAngleBuilder`, `PeriodicDihedralBuilder`. `ForceField::new`
+  `HarmonicBondBuilder`, `HarmonicAngleBuilder`, `PeriodicDihedralBuilder`.
+  `ForceField::new`
   iterates `registry.builders()` and builds each against the
   `PotentialBuildContext`, collecting every builder that activates.
 

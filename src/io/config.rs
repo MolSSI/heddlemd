@@ -437,12 +437,22 @@ pub enum BondTypeConfig {
         a: f64,
         re: f64,
     },
+    // rq-c3da9ee1
+    Harmonic {
+        name: String,
+        /// Force constant in atomic units (E_h/a₀²), in the
+        /// `U = ½ k (r − r_0)²` convention.
+        k: f64,
+        /// Equilibrium distance in Bohr (a₀).
+        r0: f64,
+    },
 }
 
 impl BondTypeConfig {
     pub fn name(&self) -> &str {
         match self {
             BondTypeConfig::Morse { name, .. } => name,
+            BondTypeConfig::Harmonic { name, .. } => name,
         }
     }
 }
@@ -729,6 +739,11 @@ enum RawBondType {
         a: crate::units::InverseLength,
         re: crate::units::Length,
     },
+    Harmonic {
+        name: String,
+        k: crate::units::Stiffness,
+        r0: crate::units::Length,
+    },
 }
 
 impl From<RawBondType> for BondTypeConfig {
@@ -739,6 +754,11 @@ impl From<RawBondType> for BondTypeConfig {
                 de: de.0,
                 a: a.0,
                 re: re.0,
+            },
+            RawBondType::Harmonic { name, k, r0 } => BondTypeConfig::Harmonic {
+                name,
+                k: k.0,
+                r0: r0.0,
             },
         }
     }
@@ -1873,6 +1893,21 @@ fn validate_bond_types(bts: &[BondTypeConfig]) -> Result<(), ConfigError> {
                 require_finite_positive(&format!("bond_types[{i}].de"), *de)?;
                 require_finite_positive(&format!("bond_types[{i}].a"), *a)?;
                 require_finite_positive(&format!("bond_types[{i}].re"), *re)?;
+            }
+            // rq-4943810f
+            BondTypeConfig::Harmonic { name, k, r0 } => {
+                if name.is_empty() {
+                    return Err(invalid(
+                        format!("bond_types[{i}].name"),
+                        "name must not be empty",
+                    ));
+                }
+                if seen.iter().any(|n| *n == name) {
+                    return Err(ConfigError::DuplicateBondTypeName { name: name.clone() });
+                }
+                seen.push(name);
+                require_finite_positive(&format!("bond_types[{i}].k"), *k)?;
+                require_finite_positive(&format!("bond_types[{i}].r0"), *r0)?;
             }
         }
     }
