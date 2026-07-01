@@ -1199,11 +1199,18 @@ fn compose_source(
     s.push_str("    factor = R(0.0); energy = R(0.0); virial = R(0.0);\n");
     for f in fragments {
         let field = functor_field_name(f.label);
+        // Each fragment's contribution is scaled by its own
+        // `exclusion_scale(i, j)` inside the main pair-force accumulator.
+        // For non-excluded pairs the helper returns 1.0 and the multiply
+        // is a no-op; for excluded pairs the scale is applied here so no
+        // separate cancellation pass is needed. See
+        // `rqm/forces/jit-composed-pair-force.md` *Exclusion handling*.
         let body = format!(
             "Real s_factor, s_energy, s_virial;\n            \
              composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy, s_virial);\n            \
-             factor += s_factor;\n            \
-             if (WriteEv) {{ energy += s_energy; virial += s_virial; }}",
+             Real ex_scale = composite.{f}.exclusion_scale(i, j);\n            \
+             factor += s_factor * ex_scale;\n            \
+             if (WriteEv) {{ energy += s_energy * ex_scale; virial += s_virial * ex_scale; }}",
             f = field
         );
         match f.cutoff {
@@ -1238,13 +1245,17 @@ fn compose_source(
     }
     s.push_str("}\n");
 
-    // Per-pair correction body: each fragment's contribution scaled by
-    // `(exclusion_scale(i, j) - 1.0)`. The correction kernel calls
-    // this for every excluded pair once; the main pair-force kernel
-    // already added the +1.0 contribution, so summing the two gives
-    // the per-fragment-scaled contribution `scale × evaluate`. Fully
-    // excluded pairs (`scale = 0`) net to zero; OPLS-style fractional
-    // 1-4 scales (`scale = 0.5`) net to half the unexcluded value.
+    // Per-pair correction body: retained as a no-op. The main
+    // pair-force kernel now applies each fragment's
+    // `exclusion_scale(i, j)` directly to its own contribution (see
+    // `heddle_jit_eval_pair_sum`), so no separate cancellation pass
+    // is required. The correction kernel launch site is preserved for
+    // interface compatibility with the JIT module handles; the
+    // per-pair correction body is emitted so that any downstream tool
+    // walking the source still finds a well-formed function, and it
+    // writes zero deltas.
+    let _ = max_cutoff;
+    let _ = fragments;
     s.push_str("\ntemplate <bool WriteEv>\n");
     s.push_str("__device__ static inline void heddle_jit_eval_pair_correction(\n");
     s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
@@ -1254,39 +1265,8 @@ fn compose_source(
     s.push_str("    Real &factor, Real &energy, Real &virial)\n");
     s.push_str("{\n");
     s.push_str("    factor = R(0.0); energy = R(0.0); virial = R(0.0);\n");
-    for f in fragments {
-        let field = functor_field_name(f.label);
-        let body = format!(
-            "Real s_factor, s_energy, s_virial;\n            \
-             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy, s_virial);\n            \
-             Real correction_scale = composite.{f}.exclusion_scale(i, j) - R(1.0);\n            \
-             factor += s_factor * correction_scale;\n            \
-             if (WriteEv) {{ energy += s_energy * correction_scale; virial += s_virial * correction_scale; }}",
-            f = field
-        );
-        match f.cutoff {
-            CutoffHandling::Uniform(c) if c == max_cutoff => {
-                s.push_str(&format!("    {{\n        {body}\n    }}\n", body = body));
-            }
-            CutoffHandling::Uniform(c) => {
-                let c_sq = (c as f64) * (c as f64);
-                s.push_str(&format!(
-                    "    {{\n        if (r2 <= R({c_sq:.17e})) {{\n            \
-                     {body}\n        }}\n    }}\n",
-                    c_sq = c_sq,
-                    body = body,
-                ));
-            }
-            CutoffHandling::PerPair => {
-                s.push_str(&format!(
-                    "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i_type, j_type, i, j);\n        \
-                     if (r2 <= cut2) {{\n            {body}\n        }}\n    }}\n",
-                    f = field,
-                    body = body,
-                ));
-            }
-        }
-    }
+    s.push_str("    (void) composite; (void) r2; (void) inv_r; (void) r; (void) qi; (void) qj;\n");
+    s.push_str("    (void) i_type; (void) j_type; (void) i; (void) j;\n");
     s.push_str("}\n");
 
     s.push_str(OUTER_LOOP_TEMPLATE);

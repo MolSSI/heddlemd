@@ -641,13 +641,14 @@ impl NeighborListState {
             None
         } else {
             let n_blocks = ((particle_count as u32) + 31) / 32;
-            // Trivial mode: every i-block is interacting with every
-            // j-block (including itself). Each i-block sees ceil(N/32)
-            // packed entries, each containing up to 32 j-atoms drawn
-            // from j-blocks j_block = (entry / 1) (one j-block per
-            // entry; we just pack atom IDs sequentially).
-            let entries_per_block = n_blocks;
-            let total_entries = (entries_per_block as u64) * (n_blocks as u64);
+            // Trivial mode: enumerate the upper-triangular set of
+            // (i_block, j_block) tile pairs with j_block >= i_block.
+            // That totals n_blocks * (n_blocks + 1) / 2 entries, which
+            // is the emission count of the loop below and therefore
+            // the exact size the packed buffers must be sized to
+            // (cudarc's `htod_sync_copy_into` requires the host and
+            // device slices to have equal length).
+            let total_entries = (n_blocks as u64) * (n_blocks as u64 + 1) / 2;
             let cap = total_entries.min(u32::MAX as u64).max(1) as u32;
             let mut packed = alloc_packed_neighbor_data(
                 &device,

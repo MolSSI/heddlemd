@@ -30,15 +30,30 @@ the same fixed-point accumulators:
 - The **single-pair pass** walks `single_pairs` — individual
   (atom_i, atom_j) pairs extracted at neighbour-list build time
   from sparse (i-block, j-block) candidates. One thread per pair
-  evaluates the pair as scale 1.0. Same accumulator, same fixed-
-  point semantics.
-- The **exclusion-correction pass** walks the topology's canonical
-  excluded-pair list (`excluded_pair_atoms` on `ForceField`,
-  documented in `jit-composed-pair-force.md`) and adds
-  `(exclusion_scale(i, j) − 1.0) × evaluate(i, j)` to each
-  excluded pair's contribution. Summing the three passes yields
-  `scale × evaluate` per excluded pair and `1.0 × evaluate` per
-  non-excluded pair.
+  evaluates the pair with each fragment's `exclusion_scale(i, j)`
+  applied inline (so excluded pairs contribute
+  `scale × evaluate`). Same accumulator, same fixed-point
+  semantics.
+- The **exclusion-correction pass** is retained as an ABI-stable
+  launch site over `ForceField.excluded_pair_atoms` (the topology
+  canonical excluded-pair list, documented in
+  `jit-composed-pair-force.md`), but its device body is a no-op —
+  the packed-neighbour and single-pair passes both call each
+  fragment's `exclusion_scale(i, j)` and multiply the fragment's
+  `(factor, energy, virial)` by that scale inline. Summed, the
+  two active passes yield `scale × evaluate` per excluded pair
+  and `1.0 × evaluate` per non-excluded pair without any
+  cancellation delta from the correction pass.
+
+The exclusion-scale-in-main design avoids a class of
+double-count failure modes where a pair legitimately appears in
+both the packed-neighbour output and the single-pair output at
+certain cell geometries: since each visit applies the pair's
+scale factor directly to the fragment contribution, a duplicate
+visit only reproduces the correct total in the excluded case
+(where scale is 0 or a small fraction) and never leaves an
+uncancelled residual on the accumulator that a separate
+correction pass would have to unwind.
 
 This file specifies the data model, the block layout, the
 neighbour-list construction pipeline, the force kernel, the

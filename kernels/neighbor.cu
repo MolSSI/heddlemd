@@ -536,12 +536,24 @@ extern "C" __global__ void find_blocks_with_interactions(
         // single_pair_atoms. Each lane with any_hit iterates the set
         // bits of its i_hit_mask; for each set bit, atomically claim a
         // slot and write the canonical (i, j) atom IDs.
+        //
+        // For self-block tile-pairs (jb == b), the pair (a, b) with a, b
+        // both in the block is discovered twice — once from lane b's
+        // sweep of `i_hit_mask` (finding a) and once from lane a's sweep
+        // (finding b). Emit only when `aid < jid` so the pair reaches
+        // single_pair_atoms exactly once. Non-self-block tile-pairs are
+        // naturally single-emit because the outer loop iterates
+        // `j_block >= b`.
+        bool self_block_tile = (jb == b);
         if (any_hit) {
           unsigned int local_mask = i_hit_mask;
           while (local_mask != 0u) {
             unsigned int m = (unsigned int) __ffs((int) local_mask) - 1u;
             local_mask &= local_mask - 1u;
             unsigned int aid = warp_iid[warp_in_block][m];
+            if (self_block_tile && aid >= jid) {
+              continue;
+            }
             unsigned int slot = atomicAdd(&interaction_count[1], 1u);
             // interaction_count[1] accumulates the true required count even
             // past capacity; entries beyond capacity are not written. The

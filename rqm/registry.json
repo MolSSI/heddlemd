@@ -1825,10 +1825,10 @@
     "type": "api-item"
   },
   "rq-0dc4e38e": {
-    "decl": "Scenario: Exclusion-correction pass dispatches to the correction evaluator",
+    "decl": "Scenario: Correction kernel is a no-op",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Exclusion-correction pass dispatches to the correction evaluator",
+    "title": "Correction kernel is a no-op",
     "type": "scenario"
   },
   "rq-0dc50ce0": {
@@ -10362,10 +10362,10 @@
     "type": "section"
   },
   "rq-54aec894": {
-    "decl": "Scenario: Packed-neighbour pass dispatches to the no-exclusion evaluator",
+    "decl": "Scenario: Packed-neighbour pass dispatches to the exclusion-scaled evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Packed-neighbour pass dispatches to the no-exclusion evaluator",
+    "title": "Packed-neighbour pass dispatches to the exclusion-scaled evaluator",
     "type": "scenario"
   },
   "rq-54b99519": {
@@ -18159,10 +18159,10 @@
     "type": "scenario"
   },
   "rq-95f0812c": {
-    "decl": "Scenario: Single-pair pass dispatches to the no-exclusion evaluator",
+    "decl": "Scenario: Single-pair pass dispatches to the exclusion-scaled evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Single-pair pass dispatches to the no-exclusion evaluator",
+    "title": "Single-pair pass dispatches to the exclusion-scaled evaluator",
     "type": "scenario"
   },
   "rq-963604a4": {
@@ -21457,10 +21457,10 @@
     "type": "api-item"
   },
   "rq-b099ff28": {
-    "decl": "Scenario: Composer emits a no-exclusion evaluator and a correction evaluator",
+    "decl": "Scenario: Composer emits an exclusion-scaled evaluator and a no-op correction evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Composer emits a no-exclusion evaluator and a correction evaluator",
+    "title": "Composer emits an exclusion-scaled evaluator and a no-op correction evaluator",
     "type": "scenario"
   },
   "rq-b0b4c220": {
@@ -26624,11 +26624,11 @@
     "type": "scenario"
   },
   "rq-dbf9c9cf": {
-    "decl": "### Correction-Pass Design",
+    "decl": "### Exclusion Handling",
     "file": "forces/jit-composed-pair-force",
     "level": 3,
     "refs": [],
-    "title": "Correction-Pass Design",
+    "title": "Exclusion Handling",
     "type": "section"
   },
   "rq-dbffee81": {

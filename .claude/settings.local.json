@@ -20,7 +20,13 @@
       "Bash(timeout 600 ../../target/release/heddlemd run water.in.toml)",
       "Bash(timeout 200 ../../target/release/heddlemd run water.in.toml)",
       "Bash(perl -0pi -e 's/\\(\\\\nuse heddle_md::\\)/\\\\nuse heddle_md::registry::KindedBuilder;\\\\1/' tests/shake.rs)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(cp /tmp/eth3072.bak /work/examples/ethane-3072/ethane.in.toml)",
+      "Bash(rm -f /work/examples/ethane-3072/no_dih.* /work/examples/ethane-3072/ethane.out.*)",
+      "Bash(cp ethane.in.toml /tmp/eth3072.bak)",
+      "Bash(sed -i 's/r_skin = 3.0e-10/r_skin = 5.0e-11/' ethane.in.toml)",
+      "Bash(rm -f ethane.out.*)",
+      "Bash(../../target/release/heddlemd run *)"
     ]
   }
 }
