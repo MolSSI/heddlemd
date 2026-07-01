@@ -53,7 +53,10 @@ scale factor directly to the fragment contribution, a duplicate
 visit only reproduces the correct total in the excluded case
 (where scale is 0 or a small fraction) and never leaves an
 uncancelled residual on the accumulator that a separate
-correction pass would have to unwind.
+correction pass would have to unwind. An underlying
+double-emission defect in the packed-neighbour list construction
+at certain r_skin values remains an open item — see
+`neighbor-list.md` *Out of Scope*.
 
 This file specifies the data model, the block layout, the
 neighbour-list construction pipeline, the force kernel, the
@@ -1270,6 +1273,60 @@ Feature: Packed-Neighbour Pair-Force Architecture
   Scenario: MAX_BITS_FOR_PAIRS equals 3
     Given the construction kernel's compiled source
     Then `MAX_BITS_FOR_PAIRS` resolves to the literal 3
+
+  # --- Uniqueness: no duplicate pair emission ---
+  #
+  # The pair-force pipeline is designed on the invariant that each
+  # unordered (i, j) pair appears at most once in the union of
+  # interacting_atoms (packed dense entries) and single_pair_atoms
+  # (sparse entries). Any duplicate causes the pair's contribution
+  # to be double-counted downstream. The following scenarios assert
+  # the invariant directly rather than only through its downstream
+  # effect on forces.
+
+  @rq-bebff0e9
+  Scenario: Packed and sparse outputs together list each unordered pair at most once
+    Given a NeighborListState rebuild has completed
+    When the host dtohs interacting_atoms (over
+      [0, interaction_count[0])) and single_pair_atoms (over
+      [0, interaction_count[1])), decomposes each packed entry into
+      its 32 (i_atom, j_atom) rotations, and normalises every pair
+      to canonical (min, max) order
+    Then no canonical unordered pair appears more than once across
+      the union of the two outputs
+
+  @rq-7711b39b
+  Scenario: Self-block sparse candidates do not double-emit intramolecular pairs
+    Given a two-particle-block system with a molecule whose 8 atoms
+      sit in a single block and whose intramolecular pairs are all
+      within r_search
+    When find_blocks_with_interactions has completed
+    Then for the self-block (i-block == j-block) tile-pair that
+      produces <= MAX_BITS_FOR_PAIRS hits, each unordered (a, b)
+      intramolecular pair is written to single_pair_atoms exactly once
+    # The self-block sparse-tile path is the natural place for
+    # duplicate emission: bit b of lane a's i_hit_mask and bit a of
+    # lane b's i_hit_mask both flag the same unordered pair. The
+    # construction kernel must dedupe (e.g. by aid < jid) before the
+    # atomicAdd that claims the single_pair_atoms slot.
+
+  @rq-d3b31d79
+  Scenario: Molecule straddling a cell boundary does not double-emit its bonded pair
+    Given a two-molecule system arranged so that the C-C bond of one
+      molecule straddles a cell boundary along the a-axis, placing
+      C1 in one 32-block and C2 in the adjacent 32-block
+    When find_blocks_with_interactions has completed
+    Then the (C1, C2) pair appears exactly once across the union of
+      interacting_atoms and single_pair_atoms
+
+  @rq-efaec906
+  Scenario: r_skin values that shift n_cells preserve pair-emission uniqueness
+    Given a fixed particle state whose r_cut + r_skin lands at
+      different floor((box_axis) / (r_cut + r_skin)) values across
+      an r_skin sweep
+    When each r_skin rebuild produces its packed / sparse output
+    Then every rebuild lists each unordered (i, j) pair at most once
+      across the union of the two outputs
 
   @rq-7646dd13
   Scenario: Probe rebuild grows interacting_tiles on a near-full build

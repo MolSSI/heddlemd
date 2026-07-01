@@ -947,6 +947,35 @@ reproducibility.**
   consumers trust the runner to own one canonical box and to use only
   the documented mutator.
 
+### Known packed-neighbour double-emit
+
+A known defect in `find_blocks_with_interactions` emits some
+unordered pairs twice at certain cell-layout combinations —
+specifically at `r_skin` values (and molecule-position shifts)
+that shift the cell-count layout along an axis. The mechanism
+has been isolated: the main pair-force kernel visits the
+duplicated pair twice, and the exclusion-correction pass — which
+was designed on the invariant "every pair visited exactly once"
+— under-cancels the excluded fraction, leaving a spurious
+residual on the affected atoms.
+
+The residual is bounded by the multiplicity of the visit (2×
+instead of 1×) times the pair's `scale × pair_force` and is
+masked in practice by the "apply `exclusion_scale` inline in
+`heddle_jit_eval_pair_sum`" design documented in
+`jit-composed-pair-force.md`: for a fully excluded pair
+(`scale = 0`) the two visits contribute `2 × 0 × pair_force = 0`
+regardless of the multiplicity, and for a 1-4 pair
+(`scale = 0.5`) the two visits contribute `1.0 × pair_force`
+instead of the correct `0.5 × pair_force`.
+
+The regression test suite in `tests/neighbor_list_correctness.rs`
+carries `#[ignore]`-marked scenarios that surface the defect
+under `cargo test -- --ignored`. Fixing the underlying construction
+is out of scope for this file; the fix belongs in
+`kernels/neighbor.cu::find_blocks_with_interactions` or the
+`scatter_entries_by_iblock` reorganisation pass.
+
 ---
 
 ## Gherkin Scenarios <!-- rq-c4645fa6 -->
@@ -1190,6 +1219,58 @@ Feature: Cell-list neighbor list
       one in mode = "cell-list" with r_skin = 0.3, the other in mode = "all-pairs"
     When both run a single force evaluation
     Then the resulting forces_* agree componentwise within 1e-4 relative error
+
+  # --- Cross-validation with the all-pairs oracle ---
+  #
+  # The all-pairs (trivial) neighbour list enumerates every pair by
+  # construction, so it serves as an oracle for the cell-list build.
+  # Any packed-neighbour defect — dropped pairs, doubled pairs, wrong
+  # sort order, off-by-one in a boundary check — surfaces as a
+  # per-atom force disagreement between the two modes.
+
+  @rq-6eca8f0e
+  Scenario: Cell-list forces match all-pairs forces on a multi-molecule intramolecular-exclusion system
+    Given a ForceField configuration with at least 500 molecules of a
+      polyatomic species (>= 3 atoms per molecule) with intramolecular
+      bond, angle, and (if declared by the species) dihedral exclusions
+    And two ForceField instances built from byte-identical inputs, one
+      in mode = "cell-list" with the default r_skin and one in
+      mode = "all-pairs"
+    When both run a single force evaluation on identical particle positions
+    Then per-atom forces_* agree componentwise within 1e-4 relative error
+    And in particular F_max in the cell-list run is not more than 1e-6
+      absolute in any component that is zero (to within f32 rounding) in
+      the all-pairs run
+
+  @rq-d991a151
+  Scenario: Cell-list forces match all-pairs forces across an r_skin sweep
+    Given a ForceField configuration whose box, particle_count, and
+      cutoffs admit r_skin values in some non-degenerate range
+      [r_skin_min, r_skin_max]
+    And an all-pairs reference run over the same particle state
+    When ForceField::new is constructed with mode = "cell-list" for
+      each r_skin in a sweep sampling at least eight values covering
+      the range (including at least one value that lands the r_search
+      floor between two integer cell counts along each box axis)
+    Then every cell-list run's per-atom forces_* agree with the
+      all-pairs reference within 1e-4 relative error
+    # r_skin is a rebuild-frequency parameter, not a physics parameter:
+    # any observable difference in forces across r_skin values is a bug
+    # in the packed-neighbour build or its downstream consumers.
+
+  @rq-c90fb1bd
+  Scenario: r_skin-invariance under a repeated force evaluation
+    Given two ForceField instances with mode = "cell-list", identical
+      particle state, identical parameters, and r_skin values
+      r_skin_a and r_skin_b whose r_search rounds to different
+      n_cells layouts along at least one box axis
+    When both instances run a single force evaluation
+    Then their per-atom forces_* agree componentwise within 1e-4
+      relative error
+    And F_max in each run is at thermal-scale (below the intramolecular
+      LJ-at-bond-distance magnitude by at least six orders of magnitude)
+      when the initial state places every intramolecular bond at its
+      reference geometry
 
   # --- Trivial mode ---
 

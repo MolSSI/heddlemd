@@ -1382,6 +1382,70 @@ Feature: JIT-composed pair-force kernel
     When ForceField::step(...) is called on each
     Then the per-particle forces, energies, and virials are byte-identical between the two runs
 
+  # --- Exclusion coverage at scale ---
+  #
+  # The per-fragment exclusion-scale lookup runs inside the main
+  # evaluator, so every pair-visit — including duplicated visits and
+  # visits at unusual r_skin values — is multiplied by the pair's
+  # scale before it reaches the accumulator. These scenarios exercise
+  # the invariant on multi-molecule systems where an unshielded
+  # intramolecular pair would produce forces four to six orders of
+  # magnitude above thermal.
+
+  @rq-2bdda1ea
+  Scenario: Equilibrium multi-molecule system reports thermal-scale F_max at t = 0
+    Given a ForceField configuration with at least 500 molecules of a
+      polyatomic species (>= 3 atoms per molecule) whose intramolecular
+      bond, angle, and (if declared) dihedral entries are all at their
+      reference values in the initial state
+    And the species declares the corresponding bond, angle, and
+      dihedral exclusions in its topology
+    When ForceField::step is called on the initial state
+    Then F_max across every particle's force magnitude is below the
+      unshielded LJ pair force at the smallest intramolecular bond
+      distance by at least six orders of magnitude
+    # An unshielded intramolecular LJ pair at bond distance produces
+    # forces on the order of 1e-5 N; a correctly-scaled system at
+    # equilibrium geometry produces only thermal-scale residuals near
+    # 1e-11 N. The six-order gap distinguishes "exclusion applied" from
+    # "exclusion not applied" without depending on the exact residual
+    # magnitude.
+
+  @rq-841a4bd3
+  Scenario: Cell-list forces at equilibrium match all-pairs forces to f32 tolerance
+    Given the same equilibrium multi-molecule system from the previous scenario
+    And a companion ForceField instance with mode = "all-pairs"
+    When ForceField::step is called on the initial state in both instances
+    Then per-atom forces_* agree componentwise within 1e-4 relative error
+    And F_max in the cell-list run is not more than 1e-6 absolute in any
+      component that is zero (to within f32 rounding) in the all-pairs
+      run
+
+  @rq-e2b3da89
+  Scenario: Intramolecular exclusion holds when the molecule straddles a cell boundary
+    Given a system with a polyatomic molecule placed so that its
+      intramolecular pairs span two adjacent atom-blocks under the
+      cell-list sort
+    And the molecule's bonded, angle, and dihedral exclusions are
+      declared in the topology
+    When ForceField::step is called
+    Then the per-atom force on every atom of the molecule agrees within
+      1e-4 relative error with the same-system all-pairs computation
+    And every bonded intramolecular pair contributes zero to F_max
+      within f32 rounding
+
+  @rq-392fb4a3
+  Scenario: Straddling-molecule invariance across a molecule-position shift
+    Given a two-molecule system placed at an initial offset such that
+      one molecule sits fully inside one atom-block
+    And a second run with every atom translated by a small offset such
+      that the same molecule straddles a cell boundary
+    When ForceField::step is called on both runs
+    Then per-atom forces_* on the translated atoms differ from the
+      unshifted per-atom forces_* by no more than 1e-4 relative error
+      (after undoing the translation), reflecting the physical
+      translation-invariance of the pair force
+
   @rq-c156295f
   Scenario: Repeated runs of a disordered system are byte-identical
     Given a disordered (liquid-like) fast-class configuration that spans

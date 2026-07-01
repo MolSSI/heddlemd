@@ -5987,6 +5987,18 @@
     "title": "Construct with matching arrays and explicit unique IDs",
     "type": "scenario"
   },
+  "rq-2bdda1ea": {
+    "decl": "Scenario: Equilibrium multi-molecule system reports thermal-scale F_max at t = 0",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Equilibrium multi-molecule system reports thermal-scale F_max at t = 0",
+    "type": "scenario"
+  },
   "rq-2be0d376": {
     "decl": "## Physical Constants Source",
     "file": "io/unit-system",
@@ -7525,6 +7537,18 @@
       }
     ],
     "title": "Each constraint group is one molecule",
+    "type": "scenario"
+  },
+  "rq-392fb4a3": {
+    "decl": "Scenario: Straddling-molecule invariance across a molecule-position shift",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Straddling-molecule invariance across a molecule-position shift",
     "type": "scenario"
   },
   "rq-3933f0c3": {
@@ -13639,6 +13663,18 @@
     "title": "`Time`",
     "type": "section"
   },
+  "rq-6eca8f0e": {
+    "decl": "Scenario: Cell-list forces match all-pairs forces on a multi-molecule intramolecular-exclusion system",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Cell-list forces match all-pairs forces on a multi-molecule intramolecular-exclusion system",
+    "type": "scenario"
+  },
   "rq-6ed7e318": {
     "decl": "Scenario: Builder Err short-circuits ForceField::new",
     "file": "forces/framework",
@@ -14597,6 +14633,18 @@
     ],
     "title": "Batched Replay Loop",
     "type": "section"
+  },
+  "rq-7711b39b": {
+    "decl": "Scenario: Self-block sparse candidates do not double-emit intramolecular pairs",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Self-block sparse candidates do not double-emit intramolecular pairs",
+    "type": "scenario"
   },
   "rq-77292dee": {
     "decl": "Scenario: rescale_positions multiplies every position component by the factor",
@@ -16192,6 +16240,18 @@
     ],
     "title": "Integrator",
     "type": "api-item"
+  },
+  "rq-841a4bd3": {
+    "decl": "Scenario: Cell-list forces at equilibrium match all-pairs forces to f32 tolerance",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Cell-list forces at equilibrium match all-pairs forces to f32 tolerance",
+    "type": "scenario"
   },
   "rq-8443c065": {
     "decl": "Scenario: step() with two fast-class pair-force slots launches the composed kernel once, not twice",
@@ -23099,6 +23159,18 @@
     "title": "Constraint-derived implicit exclusion is overridden by an explicit entry",
     "type": "scenario"
   },
+  "rq-bebff0e9": {
+    "decl": "Scenario: Packed and sparse outputs together list each unordered pair at most once",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Packed and sparse outputs together list each unordered pair at most once",
+    "type": "scenario"
+  },
   "rq-bec7b519": {
     "decl": "- `ParticleStateError` — error type returned by construction and host↔device",
     "file": "particle-state",
@@ -24367,6 +24439,18 @@
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
     "title": "step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
+    "type": "scenario"
+  },
+  "rq-c90fb1bd": {
+    "decl": "Scenario: r_skin-invariance under a repeated force evaluation",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "r_skin-invariance under a repeated force evaluation",
     "type": "scenario"
   },
   "rq-c9618bdd": {
@@ -25643,6 +25727,18 @@
     "title": "set_lattice leaves the device buffer unchanged on validation failure",
     "type": "scenario"
   },
+  "rq-d3b31d79": {
+    "decl": "Scenario: Molecule straddling a cell boundary does not double-emit its bonded pair",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Molecule straddling a cell boundary does not double-emit its bonded pair",
+    "type": "scenario"
+  },
   "rq-d3bd619e": {
     "decl": "Scenario: Velocity-Verlet plan walk launches vv_kick_drift, force pipeline, and vv_kick",
     "file": "integration/framework",
@@ -26319,6 +26415,18 @@
       }
     ],
     "title": "Registries::new() starts every inner registry empty",
+    "type": "scenario"
+  },
+  "rq-d991a151": {
+    "decl": "Scenario: Cell-list forces match all-pairs forces across an r_skin sweep",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Cell-list forces match all-pairs forces across an r_skin sweep",
     "type": "scenario"
   },
   "rq-d998b5c0": {
@@ -27439,6 +27547,18 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Box-generation refresh handles tilt mutation",
+    "type": "scenario"
+  },
+  "rq-e2b3da89": {
+    "decl": "Scenario: Intramolecular exclusion holds when the molecule straddles a cell boundary",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Intramolecular exclusion holds when the molecule straddles a cell boundary",
     "type": "scenario"
   },
   "rq-e2bb500b": {
@@ -29071,6 +29191,18 @@
       }
     ],
     "title": "Cell-list neighbor mode records the neighbor-list host stages",
+    "type": "scenario"
+  },
+  "rq-efaec906": {
+    "decl": "Scenario: r_skin values that shift n_cells preserve pair-emission uniqueness",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "r_skin values that shift n_cells preserve pair-emission uniqueness",
     "type": "scenario"
   },
   "rq-efba2cce": {

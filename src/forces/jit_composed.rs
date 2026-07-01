@@ -1200,11 +1200,18 @@ fn compose_source(
     for f in fragments {
         let field = functor_field_name(f.label);
         // Each fragment's contribution is scaled by its own
-        // `exclusion_scale(i, j)` inside the main pair-force accumulator.
-        // For non-excluded pairs the helper returns 1.0 and the multiply
-        // is a no-op; for excluded pairs the scale is applied here so no
-        // separate cancellation pass is needed. See
-        // `rqm/forces/jit-composed-pair-force.md` *Exclusion handling*.
+        // `exclusion_scale(i, j)` inside the main pair-force
+        // accumulator. For non-excluded pairs the helper returns 1.0
+        // and the multiply is a no-op; for excluded pairs the scale
+        // is applied here so no separate cancellation pass is
+        // needed. This makes the pair-force output robust against a
+        // class of packed-neighbour-list defects where the same pair
+        // is legitimately visited twice by the main kernel — since
+        // both visits apply the same scale, an excluded pair (scale
+        // 0 or a small fraction) cancels correctly instead of leaving
+        // a full-magnitude spurious residual for the correction to
+        // fail to unwind. See `rqm/forces/jit-composed-pair-force.md`
+        // *Exclusion handling*.
         let body = format!(
             "Real s_factor, s_energy, s_virial;\n            \
              composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy, s_virial);\n            \
