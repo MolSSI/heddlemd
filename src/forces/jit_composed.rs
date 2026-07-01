@@ -1201,17 +1201,17 @@ fn compose_source(
         let field = functor_field_name(f.label);
         // Each fragment's contribution is scaled by its own
         // `exclusion_scale(i, j)` inside the main pair-force
-        // accumulator. For non-excluded pairs the helper returns 1.0
-        // and the multiply is a no-op; for excluded pairs the scale
-        // is applied here so no separate cancellation pass is
-        // needed. This makes the pair-force output robust against a
-        // class of packed-neighbour-list defects where the same pair
-        // is legitimately visited twice by the main kernel — since
-        // both visits apply the same scale, an excluded pair (scale
-        // 0 or a small fraction) cancels correctly instead of leaving
-        // a full-magnitude spurious residual for the correction to
-        // fail to unwind. See `rqm/forces/jit-composed-pair-force.md`
-        // *Exclusion handling*.
+        // accumulator. This makes the pair-force output robust
+        // against the residual packed-neighbour double-emission
+        // defect documented in `rqm/forces/neighbor-list.md` (*Out of
+        // Scope: Known packed-neighbour double-emit*): a pair
+        // visited N times still resolves to `N × scale × pair_force`,
+        // which for excluded pairs (`scale ∈ {0, 0.5}`) is either
+        // zero or a bounded small residual regardless of the
+        // duplicate count. Non-excluded pairs (`scale = 1`) can
+        // still be over-counted by the duplicate-emit defect —
+        // that fix belongs in the neighbour-list construction and
+        // is tracked as an open item.
         let body = format!(
             "Real s_factor, s_energy, s_virial;\n            \
              composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy, s_virial);\n            \
@@ -1784,14 +1784,37 @@ __device__ static inline void heddle_jit_outer_loop(
     unsigned int j_type = 0u;
     /*HEDDLE_JIT_JTYPE_LOAD*/
 
-    // Self-block detection. For self-block entries, the j-atoms ARE
-    // the i-block's atoms in the same lane order. Newton's 3rd via
-    // j-side accumulation would double-count, so we disable j-side
-    // for self-block.
-    bool self_per_lane = i_valid && j_valid && (i_atom_id == j_atom_id);
-    bool self_block = (__all_sync(0xFFFFFFFFu,
-                                   (self_per_lane || !i_valid || !j_valid) ? 1 : 0) != 0)
-                      && (__any_sync(0xFFFFFFFFu, self_per_lane ? 1 : 0) != 0);
+    // Per-lane `j_in_iblock` flag: does this lane's current j-atom
+    // sit anywhere in the i-block's 32-atom set? If yes, the pair
+    // (i-atom_of_some_lane, j-atom) will be visited from BOTH sides
+    // of the 32-rotation sweep — once as (this-lane's i, that j)
+    // and once as (that-lane's i, this j) — so applying Newton's
+    // 3rd via `j_fx -= fx` would double-count. Suppressing j-side
+    // for `j_in_iblock` pairs leaves each atom's contribution on
+    // its own i-side (`ei_fx`) accumulator exactly once, matching
+    // the "self-block, no Newton 3rd" convention but done per pair
+    // instead of per entry. This is what makes the packed kernel
+    // robust against mixed entries where a self-block-like set of
+    // j-atoms co-inhabits with cross-block j-atoms.
+    //
+    // Detection: iterate over each initial-lane m in [0, 32),
+    // broadcast that lane's `j_atom_id` to the whole warp, ballot
+    // whether any lane's `i_atom_id` matches, and record bit `m` in
+    // `j_in_iblock_ballot`. Then each lane extracts its own bit.
+    // The mask rotates alongside the j-side state through the
+    // 32-iteration loop, so at rotation `r` this lane's flag
+    // corresponds to the j-atom currently in this lane's registers.
+    unsigned int j_in_iblock_ballot = 0u;
+    #pragma unroll
+    for (unsigned int m = 0u; m < 32u; ++m) {
+      unsigned int j_m = __shfl_sync(0xFFFFFFFFu, j_atom_id, m);
+      bool match = i_valid && (j_m < n) && (i_atom_id == j_m);
+      unsigned int b = __ballot_sync(0xFFFFFFFFu, match ? 1u : 0u);
+      if (b != 0u) {
+        j_in_iblock_ballot |= (1u << m);
+      }
+    }
+    unsigned int my_j_in_iblock = (j_in_iblock_ballot >> lane) & 1u;
 
     // Per-entry j-side accumulator (reset every entry — different
     // j-atoms each time).
@@ -1847,19 +1870,21 @@ __device__ static inline void heddle_jit_outer_loop(
         // converted to fixed-point once after the loop; the j-side is
         // flushed per entry.
         ei_fx += fx;  ei_fy += fy;  ei_fz += fz;
-        if (!self_block) {
+        if (my_j_in_iblock == 0u) {
           j_fx -= fx;  j_fy -= fy;  j_fz -= fz;
         }
         if (WriteEv) {
           Real he = energy * R(0.5);
           Real hw = virial * R(0.5);
           ei_e += he;  ei_w += hw;
-          if (!self_block) {
+          if (my_j_in_iblock == 0u) {
             j_e += he;  j_w += hw;
           }
         }
       }
-      // Rotate j-side state by one lane.
+      // Rotate j-side state by one lane. The `my_j_in_iblock`
+      // per-lane flag rotates alongside because it belongs to the
+      // j-atom currently at this lane.
       unsigned int src_lane = (lane + 1u) & 31u;
       pj_x = __shfl_sync(0xFFFFFFFFu, pj_x, src_lane);
       pj_y = __shfl_sync(0xFFFFFFFFu, pj_y, src_lane);
@@ -1868,6 +1893,7 @@ __device__ static inline void heddle_jit_outer_loop(
       j_atom_id = __shfl_sync(0xFFFFFFFFu, j_atom_id, src_lane);
       j_valid = j_atom_id < n;
       /*HEDDLE_JIT_JTYPE_SHUFFLE*/
+      my_j_in_iblock = __shfl_sync(0xFFFFFFFFu, my_j_in_iblock, src_lane);
       j_fx = __shfl_sync(0xFFFFFFFFu, j_fx, src_lane);
       j_fy = __shfl_sync(0xFFFFFFFFu, j_fy, src_lane);
       j_fz = __shfl_sync(0xFFFFFFFFu, j_fz, src_lane);

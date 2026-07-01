@@ -949,32 +949,57 @@ reproducibility.**
 
 ### Known packed-neighbour double-emit
 
-A known defect in `find_blocks_with_interactions` emits some
-unordered pairs twice at certain cell-layout combinations —
-specifically at `r_skin` values (and molecule-position shifts)
-that shift the cell-count layout along an axis. The mechanism
-has been isolated: the main pair-force kernel visits the
-duplicated pair twice, and the exclusion-correction pass — which
-was designed on the invariant "every pair visited exactly once"
-— under-cancels the excluded fraction, leaving a spurious
-residual on the affected atoms.
+Two mechanisms have historically caused a pair to be visited
+more than once by the packed pair-force kernel. Each has a
+separate status:
 
-The residual is bounded by the multiplicity of the visit (2×
-instead of 1×) times the pair's `scale × pair_force` and is
-masked in practice by the "apply `exclusion_scale` inline in
-`heddle_jit_eval_pair_sum`" design documented in
-`jit-composed-pair-force.md`: for a fully excluded pair
-(`scale = 0`) the two visits contribute `2 × 0 × pair_force = 0`
-regardless of the multiplicity, and for a 1-4 pair
-(`scale = 0.5`) the two visits contribute `1.0 × pair_force`
-instead of the correct `0.5 × pair_force`.
+1. **Mixed-entry Newton's-3rd double-count (FIXED).** When a
+   packed entry contained both self-block-like j-atoms (atoms of
+   the same i-block, expected to route through self-block
+   detection) and cross-block j-atoms in the same 32-slot row,
+   the coarse `self_block` detection failed for the entry and
+   `j_fx -= fx` was applied to every pair. For self-block-like
+   pairs inside the mixed entry this doubled the atom's force
+   because both sides of the 32-rotation sweep contributed. The
+   fix, in `heddle_jit_outer_loop` (see
+   `jit-composed-pair-force.md` *Composed-Kernel Structure*),
+   is a per-lane `my_j_in_iblock` flag computed once per entry
+   and rotated alongside the j-side state; Newton's 3rd is
+   suppressed per-pair whenever the current j-atom sits anywhere
+   in the entry's i-block set, subsuming the old warp-wide
+   `self_block` detection.
+
+2. **Duplicate-entry emission (OPEN).**
+   `find_blocks_with_interactions` produces two or more packed
+   entries with the same i-block index whose j-atom rows contain
+   overlapping ranges of atoms. Diagnostic dumps of the packed
+   output show, for example, two entries for the same i-block
+   that both list a contiguous 16-atom block among their j-atoms
+   but positioned at different slot indices, indicating that the
+   same tile-pair's dense output is being flushed to the buffer
+   twice. The mechanism has not been isolated to a specific
+   code path in `find_blocks_with_interactions`; the sort
+   (`scatter_atoms_into_cells` + `sort_cells_by_particle_id`)
+   and the scatter (`scatter_entries_by_iblock`) both look
+   correct in isolation.
+
+   The residual is masked for excluded pairs by the
+   "apply `exclusion_scale` inline in `heddle_jit_eval_pair_sum`"
+   design documented in `jit-composed-pair-force.md`: for a
+   fully excluded pair (`scale = 0`) both visits contribute
+   `0 × pair_force = 0`, and for a 1-4 pair (`scale = 0.5`)
+   the two visits contribute `1.0 × pair_force` instead of the
+   correct `0.5 × pair_force` — a bounded ~1 × 10⁻⁴ atomic-unit
+   residual at reference intramolecular geometry. Non-excluded
+   pairs (`scale = 1`) are still doubled, which is a real
+   physics error for dense systems and remains open.
 
 The regression test suite in `tests/neighbor_list_correctness.rs`
 carries `#[ignore]`-marked scenarios that surface the defect
-under `cargo test -- --ignored`. Fixing the underlying construction
-is out of scope for this file; the fix belongs in
-`kernels/neighbor.cu::find_blocks_with_interactions` or the
-`scatter_entries_by_iblock` reorganisation pass.
+under `cargo test -- --ignored`. The residual failures target
+the equilibrium-force and translation-invariance checks and
+turn GREEN when the underlying duplicate-entry emission is
+fixed.
 
 ---
 

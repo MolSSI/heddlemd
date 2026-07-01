@@ -1086,6 +1086,197 @@ fn straddling_molecule_does_not_double_emit_bond() {
     );
 }
 
+/// Diagnostic: dump every packed-list pair visit-count over a
+/// range of r_skin values for a larger system. Prints the atoms
+/// and entries of any duplicate emissions, which surfaces the
+/// residual open packed-neighbour double-emit bug when it fires.
+#[test]
+#[ignore = "diagnostic only; prints pair visit counts to stdout"]
+fn diagnose_pair_visits_at_scale() {
+    let gpu = init_device().unwrap();
+    // 8 × 8 × 8 = 512 molecules × 8 = 4096 atoms at 10 Å spacing —
+    // 8 nm box, matches ethane-3072's atom density.
+    let (state, lx, ly, lz) = ethane_state(8, 8, 8, 10.0e-10, 42);
+    let sim_box = box_from_dims(&gpu, lx, ly, lz);
+    let (bl, al, dl, excl) = ethane_topology(512);
+    let n = state.positions_x.len();
+    for &r_skin_m in &[3.0e-10, 5.0e-10] {
+        let r_skin = m_to_bohr(r_skin_m) as f64;
+        let mut ff = build_force_field(
+            &gpu,
+            &state,
+            &sim_box,
+            &bl,
+            &al,
+            &dl,
+            &excl,
+            &NeighborListConfig::CellList { r_skin },
+        );
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut timings = Timings::new(&gpu).unwrap();
+        ff.step(
+            &mut buffers,
+            &sim_box,
+            &mut timings,
+            AggregateLevel::ForcesAndScalars,
+        )
+        .unwrap();
+        let counts = enumerate_pair_visits(&ff, n);
+        let worst = max_pair_visits(&counts);
+        let over = counts.values().filter(|&&c| c > 2).count();
+        // Also count packed-only and single-pair-only separately.
+        let (packed_only_counts, single_counts) =
+            enumerate_pair_visits_split(&ff, n);
+        let packed_worst = packed_only_counts.values().copied().max().unwrap_or(0);
+        let single_worst = single_counts.values().copied().max().unwrap_or(0);
+        println!(
+            "r_skin={r_skin_m:e} m  ->  worst_visits={worst}  pairs_over_2={over}  packed_worst={packed_worst}  single_worst={single_worst}",
+        );
+        if over > 0 {
+            for (&(i, j), &c) in counts.iter().filter(|&(_, &c)| c > 2).take(3) {
+                let p = packed_only_counts.get(&(i, j)).copied().unwrap_or(0);
+                let s = single_counts.get(&(i, j)).copied().unwrap_or(0);
+                println!("  duplicate: pair ({i}, {j}) visited {c} times (packed={p}, single={s})");
+                let entries = find_entries_containing_pair(&ff, n, (i, j));
+                for (entry_idx, i_block, l, r, j_lane_atom) in &entries {
+                    println!("    entry {entry_idx}: i_block={i_block}, i_lane={l}, r={r}, j_atom={j_lane_atom}");
+                }
+            }
+        }
+    }
+}
+
+fn find_entries_containing_pair(
+    ff: &ForceField,
+    n_atoms: usize,
+    target: (u32, u32),
+) -> Vec<(usize, usize, usize, usize, u32)> {
+    let mut out = Vec::new();
+    let sentinel = n_atoms as u32;
+    let nl = ff.neighbor_list.as_ref().unwrap();
+    let packed_d = nl.packed.as_ref().unwrap();
+    let device = &nl.device;
+    let counts_host = device.dtoh_sync_copy(&packed_d.interaction_count).unwrap();
+    let n_entries = counts_host[0] as usize;
+    let sorted_ids_host: Vec<u32> = match &nl.mode {
+        heddle_md::forces::NeighborListMode::CellList(cl)
+        | heddle_md::forces::NeighborListMode::CellListOnly(cl) => {
+            device.dtoh_sync_copy(&cl.sorted_particle_ids).unwrap()
+        }
+        _ => panic!(),
+    };
+    let interacting_tiles_host: Vec<u32> =
+        device.dtoh_sync_copy(&packed_d.interacting_tiles).unwrap();
+    let sorted_interacting_host: Vec<u32> = device
+        .dtoh_sync_copy(&packed_d.sorted_interacting_atoms)
+        .unwrap();
+    let n_blocks = packed_d.n_blocks as usize;
+    for e in 0..n_entries {
+        let i_block = interacting_tiles_host[e] as usize;
+        if i_block >= n_blocks {
+            continue;
+        }
+        for l in 0..32 {
+            let i_atom = sorted_ids_host[i_block * 32 + l];
+            if i_atom >= sentinel {
+                continue;
+            }
+            for r in 0..32 {
+                let j_lane = (l + r) & 31;
+                let j_atom = sorted_interacting_host[e * 32 + j_lane];
+                if j_atom >= sentinel || i_atom == j_atom {
+                    continue;
+                }
+                let key = if i_atom < j_atom {
+                    (i_atom, j_atom)
+                } else {
+                    (j_atom, i_atom)
+                };
+                if key == target {
+                    out.push((e, i_block, l, r, j_atom));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn enumerate_pair_visits_split(
+    ff: &ForceField,
+    n_atoms: usize,
+) -> (HashMap<(u32, u32), usize>, HashMap<(u32, u32), usize>) {
+    let mut packed: HashMap<(u32, u32), usize> = HashMap::new();
+    let mut single: HashMap<(u32, u32), usize> = HashMap::new();
+    let sentinel = n_atoms as u32;
+    let nl = ff.neighbor_list.as_ref().expect("neighbour list present");
+    let packed_d = nl.packed.as_ref().expect("packed data");
+    let device = &nl.device;
+    let counts_host = device.dtoh_sync_copy(&packed_d.interaction_count).unwrap();
+    let n_entries = counts_host[0] as usize;
+    let n_singles = counts_host[1] as usize;
+    let sorted_ids_host: Vec<u32> = match &nl.mode {
+        heddle_md::forces::NeighborListMode::CellList(cl)
+        | heddle_md::forces::NeighborListMode::CellListOnly(cl) => {
+            device.dtoh_sync_copy(&cl.sorted_particle_ids).unwrap()
+        }
+        heddle_md::forces::NeighborListMode::Trivial => device
+            .dtoh_sync_copy(
+                packed_d
+                    .trivial_sorted_particle_ids
+                    .as_ref()
+                    .expect("trivial permutation"),
+            )
+            .unwrap(),
+    };
+    let interacting_tiles_host: Vec<u32> =
+        device.dtoh_sync_copy(&packed_d.interacting_tiles).unwrap();
+    let sorted_interacting_host: Vec<u32> = device
+        .dtoh_sync_copy(&packed_d.sorted_interacting_atoms)
+        .unwrap();
+    let n_blocks = packed_d.n_blocks as usize;
+    for e in 0..n_entries {
+        let i_block = interacting_tiles_host[e] as usize;
+        if i_block >= n_blocks {
+            continue;
+        }
+        for l in 0..32 {
+            let i_atom = sorted_ids_host[i_block * 32 + l];
+            if i_atom >= sentinel {
+                continue;
+            }
+            for r in 0..32 {
+                let j_lane = (l + r) & 31;
+                let j_atom = sorted_interacting_host[e * 32 + j_lane];
+                if j_atom >= sentinel || i_atom == j_atom {
+                    continue;
+                }
+                let key = if i_atom < j_atom {
+                    (i_atom, j_atom)
+                } else {
+                    (j_atom, i_atom)
+                };
+                *packed.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+    let single_pair_host: Vec<u32> =
+        device.dtoh_sync_copy(&packed_d.single_pair_atoms).unwrap();
+    for k in 0..n_singles {
+        let i_atom = single_pair_host[2 * k];
+        let j_atom = single_pair_host[2 * k + 1];
+        if i_atom >= sentinel || j_atom >= sentinel || i_atom == j_atom {
+            continue;
+        }
+        let key = if i_atom < j_atom {
+            (i_atom, j_atom)
+        } else {
+            (j_atom, i_atom)
+        };
+        *single.entry(key).or_insert(0) += 1;
+    }
+    (packed, single)
+}
+
 /// rq-efaec906 — r_skin values that shift n_cells preserve
 /// pair-emission uniqueness.
 #[test]
