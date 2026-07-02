@@ -1,0 +1,2432 @@
+schema_version = 1
+units = "si"
+init = "chignolin.in.xyz"
+topology = "chignolin.in.topology"
+
+[simulation]
+seed = 1
+temperature = 300.0
+
+[[minimization]]
+name = "min"
+[minimization.algorithm]
+kind = "steepest-descent"
+force_tolerance = 1.0e-9
+energy_tolerance = 1.0e-5
+max_iterations = 20000
+
+[[phase]]
+name = "equil"
+n_steps = 2000
+dt = 1.0e-15
+[phase.integrator]
+kind = "velocity-verlet"
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 11
+
+[[phase]]
+name = "prod"
+n_steps = 2000
+dt = 1.0e-15
+[phase.integrator]
+kind = "velocity-verlet"
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 12
+
+[[particle_types]]
+name = "t0"
+mass = 2.326415232e-26
+
+[[particle_types]]
+name = "t1"
+mass = 1.673823379e-27
+
+[[particle_types]]
+name = "t2"
+mass = 1.994307419e-26
+
+[[particle_types]]
+name = "t3"
+mass = 1.673823379e-27
+
+[[particle_types]]
+name = "t4"
+mass = 1.994307419e-26
+
+[[particle_types]]
+name = "t5"
+mass = 2.656862507e-26
+
+[[particle_types]]
+name = "t6"
+mass = 1.673823379e-27
+
+[[particle_types]]
+name = "t7"
+mass = 1.673823379e-27
+
+[[particle_types]]
+name = "t8"
+mass = 2.656862507e-26
+
+[[particle_types]]
+name = "t9"
+mass = 1.673823379e-27
+
+[[particle_types]]
+name = "t10"
+mass = 1.673823379e-27
+
+[[particle_types]]
+name = "t11"
+mass = 1.673823379e-27
+
+[[particle_types]]
+name = "t12"
+mass = 2.656767856e-26
+
+[[particle_types]]
+name = "t13"
+mass = 1.673735371e-27
+
+[[particle_types]]
+name = "t14"
+mass = 3.817579314e-26
+
+[[particle_types]]
+name = "t15"
+mass = 5.886610991e-26
+
+[[pair_interactions]]
+between = ["t0", "t0"]
+potential = "lennard-jones"
+sigma = 3.249998524e-10
+epsilon = 1.181108228e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t1"]
+potential = "lennard-jones"
+sigma = 2.159538493e-10
+epsilon = 3.589343815e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t2"]
+potential = "lennard-jones"
+sigma = 3.324834016e-10
+epsilon = 9.474883858e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t3"]
+potential = "lennard-jones"
+sigma = 2.604987852e-10
+epsilon = 3.589343815e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t4"]
+potential = "lennard-jones"
+sigma = 3.324834016e-10
+epsilon = 8.400680348e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t5"]
+potential = "lennard-jones"
+sigma = 3.104960212e-10
+epsilon = 1.312728402e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t6"]
+potential = "lennard-jones"
+sigma = 2.949765656e-10
+epsilon = 3.589343815e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t7"]
+potential = "lennard-jones"
+sigma = 2.924820492e-10
+epsilon = 3.508414229e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t8"]
+potential = "lennard-jones"
+sigma = 3.158235956e-10
+epsilon = 1.313978024e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t10"]
+potential = "lennard-jones"
+sigma = 2.860675784e-10
+epsilon = 3.589343815e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t11"]
+potential = "lennard-jones"
+sigma = 2.880275556e-10
+epsilon = 3.508414229e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t12"]
+potential = "lennard-jones"
+sigma = 3.200375465e-10
+epsilon = 1.116829889e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t14"]
+potential = "lennard-jones"
+sigma = 2.844639607e-10
+epsilon = 8.470685748e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t0", "t15"]
+potential = "lennard-jones"
+sigma = 3.863827741e-10
+epsilon = 5.404248733e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t1"]
+potential = "lennard-jones"
+sigma = 1.069078462e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t2"]
+potential = "lennard-jones"
+sigma = 2.234373985e-10
+epsilon = 2.879381836e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t3"]
+potential = "lennard-jones"
+sigma = 1.514527821e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t4"]
+potential = "lennard-jones"
+sigma = 2.234373985e-10
+epsilon = 2.552935399e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t5"]
+potential = "lennard-jones"
+sigma = 2.014500181e-10
+epsilon = 3.989332610e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t6"]
+potential = "lennard-jones"
+sigma = 1.859305625e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t7"]
+potential = "lennard-jones"
+sigma = 1.834360461e-10
+epsilon = 1.066193988e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t8"]
+potential = "lennard-jones"
+sigma = 2.067775925e-10
+epsilon = 3.993130167e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t10"]
+potential = "lennard-jones"
+sigma = 1.770215753e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t11"]
+potential = "lennard-jones"
+sigma = 1.789815525e-10
+epsilon = 1.066193988e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t12"]
+potential = "lennard-jones"
+sigma = 2.109915434e-10
+epsilon = 3.394004343e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t14"]
+potential = "lennard-jones"
+sigma = 1.754179576e-10
+epsilon = 2.574209779e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t1", "t15"]
+potential = "lennard-jones"
+sigma = 2.773367710e-10
+epsilon = 1.642331017e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t2"]
+potential = "lennard-jones"
+sigma = 3.399669508e-10
+epsilon = 7.600778830e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t3"]
+potential = "lennard-jones"
+sigma = 2.679823344e-10
+epsilon = 2.879381836e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t4"]
+potential = "lennard-jones"
+sigma = 3.399669508e-10
+epsilon = 6.739049713e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t5"]
+potential = "lennard-jones"
+sigma = 3.179795705e-10
+epsilon = 1.053074464e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t6"]
+potential = "lennard-jones"
+sigma = 3.024601148e-10
+epsilon = 2.879381836e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t7"]
+potential = "lennard-jones"
+sigma = 2.999655984e-10
+epsilon = 2.814459892e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t8"]
+potential = "lennard-jones"
+sigma = 3.233071448e-10
+epsilon = 1.054076915e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t10"]
+potential = "lennard-jones"
+sigma = 2.935511276e-10
+epsilon = 2.879381836e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t11"]
+potential = "lennard-jones"
+sigma = 2.955111048e-10
+epsilon = 2.814459892e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t12"]
+potential = "lennard-jones"
+sigma = 3.275210957e-10
+epsilon = 8.959241193e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t14"]
+potential = "lennard-jones"
+sigma = 2.919475099e-10
+epsilon = 6.795208244e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t2", "t15"]
+potential = "lennard-jones"
+sigma = 3.938663233e-10
+epsilon = 4.335303733e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t3"]
+potential = "lennard-jones"
+sigma = 1.959977180e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t4"]
+potential = "lennard-jones"
+sigma = 2.679823344e-10
+epsilon = 2.552935399e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t5"]
+potential = "lennard-jones"
+sigma = 2.459949541e-10
+epsilon = 3.989332610e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t6"]
+potential = "lennard-jones"
+sigma = 2.304754984e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t7"]
+potential = "lennard-jones"
+sigma = 2.279809820e-10
+epsilon = 1.066193988e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t8"]
+potential = "lennard-jones"
+sigma = 2.513225284e-10
+epsilon = 3.993130167e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t10"]
+potential = "lennard-jones"
+sigma = 2.215665112e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t11"]
+potential = "lennard-jones"
+sigma = 2.235264884e-10
+epsilon = 1.066193988e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t12"]
+potential = "lennard-jones"
+sigma = 2.555364793e-10
+epsilon = 3.394004343e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t14"]
+potential = "lennard-jones"
+sigma = 2.199628935e-10
+epsilon = 2.574209779e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t3", "t15"]
+potential = "lennard-jones"
+sigma = 3.218817069e-10
+epsilon = 1.642331017e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t4"]
+potential = "lennard-jones"
+sigma = 3.399669508e-10
+epsilon = 5.975018093e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t5"]
+potential = "lennard-jones"
+sigma = 3.179795705e-10
+epsilon = 9.336834192e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t6"]
+potential = "lennard-jones"
+sigma = 3.024601148e-10
+epsilon = 2.552935399e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t7"]
+potential = "lennard-jones"
+sigma = 2.999655984e-10
+epsilon = 2.495373902e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t8"]
+potential = "lennard-jones"
+sigma = 3.233071448e-10
+epsilon = 9.345722185e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t10"]
+potential = "lennard-jones"
+sigma = 2.935511276e-10
+epsilon = 2.552935399e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t11"]
+potential = "lennard-jones"
+sigma = 2.955111048e-10
+epsilon = 2.495373902e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t12"]
+potential = "lennard-jones"
+sigma = 3.275210957e-10
+epsilon = 7.943498046e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t14"]
+potential = "lennard-jones"
+sigma = 2.919475099e-10
+epsilon = 6.024809719e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t4", "t15"]
+potential = "lennard-jones"
+sigma = 3.938663233e-10
+epsilon = 3.843793910e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t5"]
+potential = "lennard-jones"
+sigma = 2.959921901e-10
+epsilon = 1.459016046e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t6"]
+potential = "lennard-jones"
+sigma = 2.804727344e-10
+epsilon = 3.989332610e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t7"]
+potential = "lennard-jones"
+sigma = 2.779782180e-10
+epsilon = 3.899384404e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t8"]
+potential = "lennard-jones"
+sigma = 3.013197644e-10
+epsilon = 1.460404924e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t10"]
+potential = "lennard-jones"
+sigma = 2.715637473e-10
+epsilon = 3.989332610e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t11"]
+potential = "lennard-jones"
+sigma = 2.735237244e-10
+epsilon = 3.899384404e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t12"]
+potential = "lennard-jones"
+sigma = 3.055337154e-10
+epsilon = 1.241287022e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t14"]
+potential = "lennard-jones"
+sigma = 2.699601296e-10
+epsilon = 9.414640844e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t5", "t15"]
+potential = "lennard-jones"
+sigma = 3.718789429e-10
+epsilon = 6.006486649e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t6"]
+potential = "lennard-jones"
+sigma = 2.649532788e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t7"]
+potential = "lennard-jones"
+sigma = 2.624587624e-10
+epsilon = 1.066193988e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t8"]
+potential = "lennard-jones"
+sigma = 2.858003088e-10
+epsilon = 3.993130167e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t10"]
+potential = "lennard-jones"
+sigma = 2.560442916e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t11"]
+potential = "lennard-jones"
+sigma = 2.580042688e-10
+epsilon = 1.066193988e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t12"]
+potential = "lennard-jones"
+sigma = 2.900142597e-10
+epsilon = 3.394004343e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t14"]
+potential = "lennard-jones"
+sigma = 2.544406739e-10
+epsilon = 2.574209779e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t6", "t15"]
+potential = "lennard-jones"
+sigma = 3.563594873e-10
+epsilon = 1.642331017e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t7"]
+potential = "lennard-jones"
+sigma = 2.599642460e-10
+epsilon = 1.042154319e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t8"]
+potential = "lennard-jones"
+sigma = 2.833057924e-10
+epsilon = 3.903096337e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t10"]
+potential = "lennard-jones"
+sigma = 2.535497752e-10
+epsilon = 1.066193988e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t11"]
+potential = "lennard-jones"
+sigma = 2.555097524e-10
+epsilon = 1.042154319e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t12"]
+potential = "lennard-jones"
+sigma = 2.875197433e-10
+epsilon = 3.317479111e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t14"]
+potential = "lennard-jones"
+sigma = 2.519461575e-10
+epsilon = 2.516168604e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t7", "t15"]
+potential = "lennard-jones"
+sigma = 3.538649708e-10
+epsilon = 1.605301081e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t8", "t8"]
+potential = "lennard-jones"
+sigma = 3.066473388e-10
+epsilon = 1.461795124e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t8", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t8", "t10"]
+potential = "lennard-jones"
+sigma = 2.768913216e-10
+epsilon = 3.993130167e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t8", "t11"]
+potential = "lennard-jones"
+sigma = 2.788512988e-10
+epsilon = 3.903096337e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t8", "t12"]
+potential = "lennard-jones"
+sigma = 3.108612897e-10
+epsilon = 1.242468638e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t8", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t8", "t14"]
+potential = "lennard-jones"
+sigma = 2.752877039e-10
+epsilon = 9.423602903e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t8", "t15"]
+potential = "lennard-jones"
+sigma = 3.772065173e-10
+epsilon = 6.012204392e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t9", "t9"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t9", "t10"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t9", "t11"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t9", "t12"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t9", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t9", "t14"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t9", "t15"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t10", "t10"]
+potential = "lennard-jones"
+sigma = 2.471353044e-10
+epsilon = 1.090788187e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t10", "t11"]
+potential = "lennard-jones"
+sigma = 2.490952816e-10
+epsilon = 1.066193988e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t10", "t12"]
+potential = "lennard-jones"
+sigma = 2.811052725e-10
+epsilon = 3.394004343e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t10", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t10", "t14"]
+potential = "lennard-jones"
+sigma = 2.455316867e-10
+epsilon = 2.574209779e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t10", "t15"]
+potential = "lennard-jones"
+sigma = 3.474505001e-10
+epsilon = 1.642331017e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t11", "t11"]
+potential = "lennard-jones"
+sigma = 2.510552588e-10
+epsilon = 1.042154319e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t11", "t12"]
+potential = "lennard-jones"
+sigma = 2.830652497e-10
+epsilon = 3.317479111e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t11", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t11", "t14"]
+potential = "lennard-jones"
+sigma = 2.474916639e-10
+epsilon = 2.516168604e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t11", "t15"]
+potential = "lennard-jones"
+sigma = 3.494104773e-10
+epsilon = 1.605301081e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t12", "t12"]
+potential = "lennard-jones"
+sigma = 3.150752407e-10
+epsilon = 1.056049709e-21
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t12", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t12", "t14"]
+potential = "lennard-jones"
+sigma = 2.795016548e-10
+epsilon = 8.009693609e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t12", "t15"]
+potential = "lennard-jones"
+sigma = 3.814204682e-10
+epsilon = 5.110138403e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t13", "t13"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t13", "t14"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t13", "t15"]
+potential = "lennard-jones"
+sigma = 1.000000000e-10
+epsilon = 1.000000000e-30
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t14", "t14"]
+potential = "lennard-jones"
+sigma = 2.439280690e-10
+epsilon = 6.075016274e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t14", "t15"]
+potential = "lennard-jones"
+sigma = 3.458468824e-10
+epsilon = 3.875825403e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[pair_interactions]]
+between = ["t15", "t15"]
+potential = "lennard-jones"
+sigma = 4.477656957e-10
+epsilon = 2.472754290e-22
+cutoff = 9.000000000e-10
+r_switch = 9.000000000e-10
+
+[[bond_types]]
+name = "b0"
+potential = "harmonic"
+k = 6.030599657e+02
+r0 = 1.010000000e-10
+
+[[bond_types]]
+name = "b1"
+potential = "harmonic"
+k = 4.724432911e+02
+r0 = 1.090000000e-10
+
+[[bond_types]]
+name = "b2"
+potential = "harmonic"
+k = 5.099608465e+02
+r0 = 1.080000000e-10
+
+[[bond_types]]
+name = "b3"
+potential = "harmonic"
+k = 7.684151176e+02
+r0 = 9.600000000e-11
+
+[[bond_types]]
+name = "b4"
+potential = "harmonic"
+k = 4.404838920e+02
+r0 = 1.522000000e-10
+
+[[bond_types]]
+name = "b5"
+potential = "harmonic"
+k = 7.920372821e+02
+r0 = 1.229000000e-10
+
+[[bond_types]]
+name = "b6"
+potential = "harmonic"
+k = 4.307571183e+02
+r0 = 1.526000000e-10
+
+[[bond_types]]
+name = "b7"
+potential = "harmonic"
+k = 5.099608465e+02
+r0 = 1.471000000e-10
+
+[[bond_types]]
+name = "b8"
+potential = "harmonic"
+k = 4.404838920e+02
+r0 = 1.510000000e-10
+
+[[bond_types]]
+name = "b9"
+potential = "harmonic"
+k = 6.516938339e+02
+r0 = 1.400000000e-10
+
+[[bond_types]]
+name = "b10"
+potential = "harmonic"
+k = 6.516938339e+02
+r0 = 1.409000000e-10
+
+[[bond_types]]
+name = "b11"
+potential = "harmonic"
+k = 6.252925911e+02
+r0 = 1.364000000e-10
+
+[[bond_types]]
+name = "b12"
+potential = "harmonic"
+k = 6.808741548e+02
+r0 = 1.335000000e-10
+
+[[bond_types]]
+name = "b13"
+potential = "harmonic"
+k = 4.682746738e+02
+r0 = 1.449000000e-10
+
+[[bond_types]]
+name = "b14"
+potential = "harmonic"
+k = 9.115376440e+02
+r0 = 1.250000000e-10
+
+[[bond_types]]
+name = "b15"
+potential = "harmonic"
+k = 4.446525093e+02
+r0 = 1.410000000e-10
+
+[[bond_types]]
+name = "b16"
+potential = "harmonic"
+k = 4.404838920e+02
+r0 = 1.495000000e-10
+
+[[bond_types]]
+name = "b17"
+potential = "harmonic"
+k = 7.586883439e+02
+r0 = 1.352000000e-10
+
+[[bond_types]]
+name = "b18"
+potential = "harmonic"
+k = 5.933331920e+02
+r0 = 1.381000000e-10
+
+[[bond_types]]
+name = "b19"
+potential = "harmonic"
+k = 6.211239739e+02
+r0 = 1.419000000e-10
+
+[[bond_types]]
+name = "b20"
+potential = "harmonic"
+k = 6.516938339e+02
+r0 = 1.404000000e-10
+
+[[bond_types]]
+name = "b21"
+potential = "harmonic"
+k = 5.391411675e+02
+r0 = 1.459000000e-10
+
+[[bond_types]]
+name = "b22"
+potential = "harmonic"
+k = 5.947227311e+02
+r0 = 1.380000000e-10
+
+[[angle_types]]
+name = "a0"
+potential = "harmonic"
+k_theta = 6.947695457e-19
+theta_0 = 1.911135531e+00
+
+[[angle_types]]
+name = "a1"
+potential = "harmonic"
+k_theta = 1.111631273e-18
+theta_0 = 1.940806128e+00
+
+[[angle_types]]
+name = "a2"
+potential = "harmonic"
+k_theta = 4.863386820e-19
+theta_0 = 1.911135531e+00
+
+[[angle_types]]
+name = "a3"
+potential = "harmonic"
+k_theta = 1.111631273e-18
+theta_0 = 2.101376419e+00
+
+[[angle_types]]
+name = "a4"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 2.035053908e+00
+
+[[angle_types]]
+name = "a5"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 1.989675347e+00
+
+[[angle_types]]
+name = "a6"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 1.939060799e+00
+
+[[angle_types]]
+name = "a7"
+potential = "harmonic"
+k_theta = 6.947695457e-19
+theta_0 = 2.094395102e+00
+
+[[angle_types]]
+name = "a8"
+potential = "harmonic"
+k_theta = 6.947695457e-19
+theta_0 = 2.127556358e+00
+
+[[angle_types]]
+name = "a9"
+potential = "harmonic"
+k_theta = 1.111631273e-18
+theta_0 = 2.145009651e+00
+
+[[angle_types]]
+name = "a10"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 2.094395102e+00
+
+[[angle_types]]
+name = "a11"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 2.094395102e+00
+
+[[angle_types]]
+name = "a12"
+potential = "harmonic"
+k_theta = 6.947695457e-19
+theta_0 = 1.972222055e+00
+
+[[angle_types]]
+name = "a13"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 1.921607506e+00
+
+[[angle_types]]
+name = "a14"
+potential = "harmonic"
+k_theta = 1.111631273e-18
+theta_0 = 1.914626189e+00
+
+[[angle_types]]
+name = "a15"
+potential = "harmonic"
+k_theta = 6.947695457e-19
+theta_0 = 2.060186649e+00
+
+[[angle_types]]
+name = "a16"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 2.042035225e+00
+
+[[angle_types]]
+name = "a17"
+potential = "harmonic"
+k_theta = 1.111631273e-18
+theta_0 = 2.199114858e+00
+
+[[angle_types]]
+name = "a18"
+potential = "harmonic"
+k_theta = 6.947695457e-19
+theta_0 = 2.059488517e+00
+
+[[angle_types]]
+name = "a19"
+potential = "harmonic"
+k_theta = 5.558156366e-19
+theta_0 = 1.911135531e+00
+
+[[angle_types]]
+name = "a20"
+potential = "harmonic"
+k_theta = 7.642465003e-19
+theta_0 = 1.893682238e+00
+
+[[angle_types]]
+name = "a21"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 2.017600615e+00
+
+[[angle_types]]
+name = "a22"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 2.181661565e+00
+
+[[angle_types]]
+name = "a23"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 2.244493418e+00
+
+[[angle_types]]
+name = "a24"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 1.897172897e+00
+
+[[angle_types]]
+name = "a25"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 1.898918226e+00
+
+[[angle_types]]
+name = "a26"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 2.354449161e+00
+
+[[angle_types]]
+name = "a27"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 1.857030324e+00
+
+[[angle_types]]
+name = "a28"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 1.947787445e+00
+
+[[angle_types]]
+name = "a29"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 1.822123739e+00
+
+[[angle_types]]
+name = "a30"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 2.141518992e+00
+
+[[angle_types]]
+name = "a31"
+potential = "harmonic"
+k_theta = 9.726773640e-19
+theta_0 = 2.317797247e+00
+
+[[angle_types]]
+name = "a32"
+potential = "harmonic"
+k_theta = 6.947695457e-19
+theta_0 = 2.148500309e+00
+
+[[angle_types]]
+name = "a33"
+potential = "harmonic"
+k_theta = 8.754096276e-19
+theta_0 = 2.028072591e+00
+
+[[dihedral_types]]
+name = "d0"
+potential = "periodic"
+k_phi = 1.080752627e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d1"
+potential = "periodic"
+k_phi = 4.863386820e-23
+n = 4
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d2"
+potential = "periodic"
+k_phi = 1.333957528e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d3"
+potential = "periodic"
+k_phi = 2.014831683e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d4"
+potential = "periodic"
+k_phi = 8.337234548e-23
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d5"
+potential = "periodic"
+k_phi = 1.736923864e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d6"
+potential = "periodic"
+k_phi = 3.334893819e-22
+n = 4
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d7"
+potential = "periodic"
+k_phi = 4.793909865e-22
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d8"
+potential = "periodic"
+k_phi = 8.337234548e-23
+n = 4
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d9"
+potential = "periodic"
+k_phi = 3.258469169e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d10"
+potential = "periodic"
+k_phi = 3.821232501e-22
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d11"
+potential = "periodic"
+k_phi = 2.918032092e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d12"
+potential = "periodic"
+k_phi = 1.875877773e-21
+n = 2
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d13"
+potential = "periodic"
+k_phi = 5.558156366e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d14"
+potential = "periodic"
+k_phi = 1.250585182e-20
+n = 2
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d15"
+potential = "periodic"
+k_phi = 1.389539091e-20
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d16"
+potential = "periodic"
+k_phi = 2.779078183e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d17"
+potential = "periodic"
+k_phi = 1.389539091e-21
+n = 2
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d18"
+potential = "periodic"
+k_phi = 1.389539091e-21
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d19"
+potential = "periodic"
+k_phi = 2.518539603e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d20"
+potential = "periodic"
+k_phi = 4.516002047e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d21"
+potential = "periodic"
+k_phi = 6.134815089e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d22"
+potential = "periodic"
+k_phi = 3.821232501e-21
+n = 3
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d23"
+potential = "periodic"
+k_phi = 1.097735882e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d24"
+potential = "periodic"
+k_phi = 3.126462956e-21
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d25"
+potential = "periodic"
+k_phi = 5.558156366e-21
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d26"
+potential = "periodic"
+k_phi = 5.558156366e-22
+n = 3
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d27"
+potential = "periodic"
+k_phi = 6.183448957e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d28"
+potential = "periodic"
+k_phi = 4.029663365e-22
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d29"
+potential = "periodic"
+k_phi = 4.495158961e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d30"
+potential = "periodic"
+k_phi = 1.496533601e-20
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d31"
+potential = "periodic"
+k_phi = 2.153785592e-22
+n = 4
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d32"
+potential = "periodic"
+k_phi = 5.342777806e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d33"
+potential = "periodic"
+k_phi = 1.069945100e-21
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d34"
+potential = "periodic"
+k_phi = 3.188992215e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d35"
+potential = "periodic"
+k_phi = 2.945822874e-21
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d36"
+potential = "periodic"
+k_phi = 1.389539091e-20
+n = 2
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d37"
+potential = "periodic"
+k_phi = 1.111631273e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d38"
+potential = "periodic"
+k_phi = 1.250585182e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d39"
+potential = "periodic"
+k_phi = 1.736923864e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d40"
+potential = "periodic"
+k_phi = 1.389539091e-21
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d41"
+potential = "periodic"
+k_phi = 1.042154319e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d42"
+potential = "periodic"
+k_phi = 5.419202457e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d43"
+potential = "periodic"
+k_phi = 1.000468146e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d44"
+potential = "periodic"
+k_phi = 1.278375964e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d45"
+potential = "periodic"
+k_phi = 6.947695457e-22
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d46"
+potential = "periodic"
+k_phi = 3.890709456e-22
+n = 4
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d47"
+potential = "periodic"
+k_phi = 4.224198838e-21
+n = 3
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d48"
+potential = "periodic"
+k_phi = 1.542388391e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d49"
+potential = "periodic"
+k_phi = 9.497499690e-21
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d50"
+potential = "periodic"
+k_phi = 1.007415841e-21
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d51"
+potential = "periodic"
+k_phi = 2.730444315e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d52"
+potential = "periodic"
+k_phi = 2.924979787e-21
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d53"
+potential = "periodic"
+k_phi = 4.446525093e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d54"
+potential = "periodic"
+k_phi = 2.709601228e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d55"
+potential = "periodic"
+k_phi = 6.600310684e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d56"
+potential = "periodic"
+k_phi = 2.188524069e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d57"
+potential = "periodic"
+k_phi = 4.168617274e-23
+n = 2
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d58"
+potential = "periodic"
+k_phi = 4.682746738e-21
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d59"
+potential = "periodic"
+k_phi = 6.947695457e-24
+n = 4
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d60"
+potential = "periodic"
+k_phi = 1.028258928e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d61"
+potential = "periodic"
+k_phi = 1.500702219e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d62"
+potential = "periodic"
+k_phi = 2.341373369e-21
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d63"
+potential = "periodic"
+k_phi = 9.032004094e-23
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d64"
+potential = "periodic"
+k_phi = 1.639656128e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d65"
+potential = "periodic"
+k_phi = 1.743871560e-21
+n = 2
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d66"
+potential = "periodic"
+k_phi = 4.168617274e-23
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d67"
+potential = "periodic"
+k_phi = 1.736923864e-21
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d68"
+potential = "periodic"
+k_phi = 1.083840491e-21
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d69"
+potential = "periodic"
+k_phi = 8.267757594e-22
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d70"
+potential = "periodic"
+k_phi = 4.842543734e-21
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d71"
+potential = "periodic"
+k_phi = 7.781418912e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d72"
+potential = "periodic"
+k_phi = 2.007883987e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d73"
+potential = "periodic"
+k_phi = 2.820764356e-21
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d74"
+potential = "periodic"
+k_phi = 1.157949243e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d75"
+potential = "periodic"
+k_phi = 3.334893819e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d76"
+potential = "periodic"
+k_phi = 5.488679411e-22
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d77"
+potential = "periodic"
+k_phi = 4.467368179e-21
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d78"
+potential = "periodic"
+k_phi = 2.153785592e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d79"
+potential = "periodic"
+k_phi = 1.625760737e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d80"
+potential = "periodic"
+k_phi = 2.174628678e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d81"
+potential = "periodic"
+k_phi = 5.488679411e-22
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d82"
+potential = "periodic"
+k_phi = 6.600310684e-22
+n = 4
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d83"
+potential = "periodic"
+k_phi = 5.690162579e-21
+n = 3
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d84"
+potential = "periodic"
+k_phi = 2.834659746e-21
+n = 2
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d85"
+potential = "periodic"
+k_phi = 2.535908842e-21
+n = 1
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d86"
+potential = "periodic"
+k_phi = 5.141294638e-22
+n = 4
+phi_0 = 0.000000000e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d87"
+potential = "periodic"
+k_phi = 2.452536496e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d88"
+potential = "periodic"
+k_phi = 1.181108228e-22
+n = 1
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d89"
+potential = "periodic"
+k_phi = 4.533371286e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d90"
+potential = "periodic"
+k_phi = 1.163738989e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d91"
+potential = "periodic"
+k_phi = 1.042154319e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d92"
+potential = "periodic"
+k_phi = 2.084308637e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d93"
+potential = "periodic"
+k_phi = 2.431693410e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d94"
+potential = "periodic"
+k_phi = 1.059523557e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d95"
+potential = "periodic"
+k_phi = 7.295080230e-20
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d96"
+potential = "periodic"
+k_phi = 7.642465003e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[dihedral_types]]
+name = "d97"
+potential = "periodic"
+k_phi = 6.947695457e-21
+n = 2
+phi_0 = 3.141592654e+00
+scale_lj_14 = 1.0
+scale_coul_14 = 1.0
+
+[[constraint_types]]
+name = "TIP3P"
+kind = "settle"
+d_OH = 9.572000000e-11
+d_HH = 1.513900655e-10
+
+[spme]
+alpha = 3.888888889e+09
+r_cut_real = 9.000000000e-10
+grid = [32, 32, 32]
+spline_order = 5
+
+[neighbor_list]
+mode = "cell-list"
+r_skin = 1.176035767e-10
