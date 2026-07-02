@@ -99,16 +99,33 @@ step,time,kinetic_energy,temperature
 
 ### Extra columns
 
-Some integrators append diagnostic columns. The Nosé-Hoover chain
-thermostat, for example, adds `nhc_conserved`, giving a header of
+The integrator, thermostat, and barostat each append their own
+diagnostic columns, in that order (integrator first, then thermostat,
+then barostat). The header row is always self-describing, so the exact
+set depends on the phase's slot composition:
+
+| Slot | Kind | Appended column(s) |
+|------|------|--------------------|
+| Integrator | `mtk-npt` | `mtk_npt_conserved` |
+| Thermostat | `nose-hoover-chain` | `nhc_conserved` |
+| Thermostat | `csvr` | `csvr_conserved` |
+| Thermostat | `andersen` | `andersen_conserved` |
+| Thermostat | `berendsen` | `berendsen_conserved` |
+| Barostat | `berendsen` / `c-rescale` | `pressure`, `box_volume` |
+| Barostat | `monte-carlo` | `mc_conserved` |
+
+For example, a `velocity-verlet` + `nose-hoover-chain` + `c-rescale`
+phase writes:
 
 ```
-step,time,kinetic_energy,temperature,nhc_conserved
+step,time,kinetic_energy,temperature,nhc_conserved,pressure,box_volume
 ```
 
-When the chosen integrator declares no extras (the default for
-`velocity-verlet` and `langevin-baoab`), the header is exactly the four
-columns above.
+The `*_conserved` columns report the slot's extended-system conserved
+quantity — a useful drift check for a well-behaved run. When every slot
+declares no extras (e.g. plain `velocity-verlet`, or `langevin-baoab`
+which owns a thermostat but adds no column), the header is exactly the
+four base columns.
 
 ### Temperature convention
 

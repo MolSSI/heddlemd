@@ -139,8 +139,8 @@ report.
    `min_perpendicular_width ≥ 3 · (cutoff_max + r_skin)`. For
    all-pairs mode, reported as `not applicable`.
 5. **`topology`** — loads the topology file (when supplied) and
-   reports the bond/angle/constraint-group counts. When the config
-   omits `topology`, reported as `not supplied`.
+   reports the bond, angle, dihedral, and constraint-group counts. When
+   the config omits `topology`, reported as `not supplied`.
 6. **`gpu`** — only attempted with `--with-gpu`. Runs `init_device`
    (including the cuFFT smoke test for SPME configs), allocates the
    particle buffers, constructs every slot, and constructs the force

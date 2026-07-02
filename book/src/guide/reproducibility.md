@@ -77,6 +77,18 @@ first. Three invariants close this:
 The host-side reductions that produce log values (`compute_kinetic_energy`)
 sum in particle-ID order for the same reason.
 
+### Fast math and the guarantee
+
+`[simulation].fast_math` (default `true`) builds the JIT kernels with
+`nvcc`'s `--use_fast_math`. It does **not** weaken the same-GPU
+guarantee: the deterministic fixed-point force accumulation above does
+not depend on the per-pair division/transcendental precision, so a
+`fast_math` run is still byte-identical to itself run-to-run. What
+changes is *which* f32 trajectory you get — a `fast_math = true` run and
+a `fast_math = false` run follow different (each independently
+reproducible) trajectories, so compare a reference trajectory only
+against a binary built with the same setting.
+
 ## Lossless integrator mode
 
 The velocity-Verlet integrator has an opt-in `lossless` mode, enabled

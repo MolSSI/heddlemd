@@ -56,6 +56,11 @@
 
 - `c-rescale` — stochastic isotropic cell-rescaling barostat
   (Bernetti-Bussi 2020). Samples the canonical NpT distribution exactly.
+- `monte-carlo` — Metropolis Monte-Carlo barostat: periodic isotropic
+  trial volume moves that rigidly scale molecular centres of mass and
+  accept/reject against the NpT weight. Samples the canonical NpT
+  distribution, needs no per-step virial, and (because it scales whole
+  molecules) composes cleanly with rigid-water constraints.
 - `berendsen` — deterministic isotropic weak-coupling barostat.
   **Equilibration only.**
 
@@ -79,52 +84,80 @@
 
 - **Lennard-Jones** — per type-pair `(σ, ε)`, cutoff with CHARMM-style
   C¹ switching function over `[r_switch, cutoff]` (or hard cutoff when
-  `r_switch = cutoff`).
-- **Truncated Coulomb (`[coulomb]`)** — per-particle charges from
-  `[[particle_types]]`; same C¹ switching function over
-  `[r_switch, cutoff]`.
+  `r_switch = cutoff`). This is the only `[[pair_interactions]]`
+  potential; electrostatics is configured globally through SPME (below),
+  not per type pair.
 
 ## Electrostatics
 
 - **Smooth Particle-Mesh Ewald (`[spme]`)** — real-space `erfc`-screened
   pair force plus reciprocal-space spread / FFT / multiply / IFFT /
-  gather pipeline. Configurable splitting parameter `α`, real-space
-  cutoff, FFT grid, and B-spline order (`4, 5, 6, 7, 8`). Mutually
-  exclusive with `[coulomb]`.
+  gather pipeline. Per-particle charges come from
+  `[[particle_types]].charge`. Configurable splitting parameter `α`,
+  real-space cutoff, FFT grid, and B-spline order (`4, 5, 6, 7, 8`).
+  Requires the `cell-list` neighbor mode. (The earlier top-level
+  `[coulomb]` truncated-Coulomb slot has been retired; a config that
+  declares it is rejected at load time — use `[spme]`.)
 - **cuFFT determinism smoke test** at startup when SPME is configured,
   surfaces a `CuFftNonDeterministic` error before any integration step
   if the FFT library would break bit-exactness on the current GPU.
 
 ## Bonded interactions
 
-- **Bonds: Morse** — `(D_e, a, r_e)` per `[[bond_types]]` entry.
-- **Angles: Harmonic** — `(k_θ, θ_0)` per `[[angle_types]]` entry.
+- **Bonds: harmonic** — `U = ½ k (r − r₀)²`; `(k, r₀)` per
+  `[[bond_types]]` entry with `potential = "harmonic"`. The stiff-spring
+  form used by the AMBER and CHARMM force fields.
+- **Bonds: Morse** — `(D_e, a, r_e)` per `[[bond_types]]` entry with
+  `potential = "morse"`. Harmonic and Morse bonds may coexist in one
+  system; each bond is routed to the matching potential by its bond type.
+- **Angles: harmonic** — `(k_θ, θ_0)` per `[[angle_types]]` entry.
+- **Dihedrals: periodic** — `U = k_φ · (1 + cos(n·φ − φ₀))`;
+  `(k_φ, n, φ₀)` per `[[dihedral_types]]` entry with
+  `potential = "periodic"` (multiplicity `n ∈ [1, 6]`). A multi-term
+  torsion is expressed by naming the same `(i, j, k, l)` quadruple once
+  per Fourier term.
 - **Per-bond / per-angle exclusions** auto-derived (1-2 and 1-3) from
   the topology file, with optional explicit overrides.
 - **Long-range / 1-4 LJ + Coulomb scaling** in the four-column
-  exclusion form.
+  exclusion form; periodic dihedrals additionally derive scaled 1-4
+  exclusions from their per-type `scale_lj_14` / `scale_coul_14`.
 
 ## Rigid constraints
 
+Constraint groups are declared per `[[constraint_types]]` entry (its
+`kind` field selects the algorithm) and instantiated by `[constraints]`
+rows in the topology file.
+
+- `settle` — analytical (non-iterative) constraint for a symmetric
+  three-atom rigid water molecule (Miyamoto & Kollman 1992). Holds the
+  three intramolecular distances (`O–H₁`, `O–H₂`, `H₁–H₂`) rigid with a
+  closed-form position reset and a direct 3×3 velocity solve — one thread
+  per molecule, no iteration, no tolerance. The fast path for rigid
+  SPC/E, TIP3P, and similar water. A constraint type carries `d_OH` and
+  `d_HH` (with `d_HH < 2·d_OH`); each `[constraints]` row lists the three
+  atoms in canonical order (oxygen, then the two hydrogens). See
+  `rqm/integration/settle.md`.
 - `shake` — iterative SHAKE (Gauss-Seidel position projection) paired
-  with iterative RATTLE for the matching velocity projection. Handles
-  arbitrary rigid clusters up to 8 atoms / 12 constraint pairs per
-  group, with per-pair target distances declared on the constraint
-  type. A constraint type carries `atoms = <N>` and a
+  with iterative RATTLE for the matching velocity projection. The
+  general fallback for arbitrary rigid clusters up to 8 atoms / 12
+  constraint pairs per group, with per-pair target distances declared on
+  the constraint type. A constraint type carries `atoms = <N>` and a
   `constraints = [{ i, j, d }, ...]` array; each `[constraints]`
   topology row then lists the global atom indices for one group of
-  that type. Rigid SPC/E water is a three-atom group with three
-  pairs `O–H₁`, `O–H₂`, `H₁–H₂`. See `rqm/integration/shake.md`.
-- Compatible with the lossy `velocity-verlet` integrator and with the
-  `steepest-descent` minimizer (position-only projection in the
-  latter). Langevin BAOAB, MTK NpT, and the lossless velocity-Verlet
-  variant reject topologies that declare any constraint group.
+  that type. See `rqm/integration/shake.md`.
+- Both algorithms are compatible with the lossy `velocity-verlet`
+  integrator and with the `steepest-descent` minimizer (position-only
+  projection in the latter). Langevin BAOAB, MTK NpT, and the lossless
+  velocity-Verlet variant reject topologies that declare any constraint
+  group.
 
 ## Neighbor lists
 
 - `cell-list` (default) — spatial hashing with skin distance, periodic
   rebuild triggered by a per-step max-displacement check. Configurable
-  `r_skin` and `max_neighbors`.
+  `r_skin`. The packed-neighbour buffers size themselves to the actual
+  interaction count plus a growth margin, so there is no per-particle
+  `max_neighbors` cap to configure.
 - `all-pairs` — O(N²) kernel, no neighbor list. Useful for small
   systems and as a reference.
 - **Pre-flight box-vs-cutoff sanity check.** The runner verifies
@@ -163,9 +196,16 @@
 
 ## Configuration and ergonomics
 
-- **TOML config**, SI units throughout, strict per-field validation.
+- **TOML config** with a top-level `units = "si" | "atomic"` selector
+  (SI by default; `atomic` accepts and emits Hartree atomic units for
+  the config, init file, and every output). Strict per-field validation.
 - **Tagged-enum selection** for integrator / thermostat / barostat /
   constraint kinds; per-kind parameter validation via builder traits.
+- **Execution knobs** under `[simulation]`: `fast_math` (default `true` —
+  builds JIT kernels with `--use_fast_math`; stays bit-reproducible
+  run-to-run), `graph_batch_size` (CUDA-graph step-replay batch, default
+  `5`), and `cuda_graphs_disable` (per-step launch loop with full
+  per-kernel timings, for diagnostics).
 - **Open registries.** Custom integrator, thermostat, barostat,
   constraint, potential, and **analysis** builders can be registered
   alongside the built-ins via `Registries::register_*`.
@@ -206,8 +246,10 @@
 The following are **not** part of the engine in its current form:
 
 - f64 storage / f64 force kernels (reserved for a future feature flag).
-- Buckingham, FENE, Coulomb-Wolf, or other potentials beyond those
-  listed above.
+- Buckingham, FENE, Coulomb-Wolf, or other pair/bond potentials beyond
+  those listed above.
+- Ryckaert-Bellemans and improper dihedrals (only the periodic torsion
+  form is implemented today).
 - Anisotropic / flexible-cell NpT.
 - Cross-hardware bit-wise reproducibility (CUDA permits FMA
   contraction differences between GPUs; only same-GPU runs match

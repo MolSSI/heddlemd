@@ -47,17 +47,35 @@ arbitrary user-supplied paths.
 
 ## Units
 
-All quantities are SI throughout:
+The top-level `units` field selects the unit system used by the config
+file, the referenced init (`.in.xyz`) file, and **every output file the
+run produces**. Two values are accepted:
 
-- length — metres
-- mass — kilograms
-- time — seconds
-- energy — joules
-- charge — coulombs
-- temperature — kelvin
+- `units = "si"` — the default (equivalent to omitting the field). SI
+  throughout:
 
-No alternative unit systems and no unit suffixes are supported in
-schema v1.
+  | Quantity    | SI unit  |
+  |-------------|----------|
+  | length      | metres   |
+  | mass        | kilograms|
+  | time        | seconds  |
+  | energy      | joules   |
+  | charge      | coulombs |
+  | temperature | kelvin   |
+  | pressure    | pascals  |
+
+- `units = "atomic"` — Hartree atomic units (length in Bohr radii, mass
+  in electron masses, time in atomic time units, energy in Hartrees,
+  temperature as `k_B · T` in Hartrees, and so on).
+
+The comparison is case-sensitive; any other value is rejected
+(`UnknownUnits`). The engine stores and computes in atomic units
+internally regardless — the loader converts every unit-bearing value at
+the I/O boundary, and threads the chosen system back through to every
+output writer so your view stays consistent end to end. All field
+descriptions below name their **SI** form for clarity; in `atomic` mode
+you write (and read) the corresponding atomic-unit quantity instead. No
+unit suffixes are supported in either mode.
 
 ## Path resolution
 
@@ -181,18 +199,25 @@ the bundled `examples/spc-water-8192/water.in.toml`.
 | Field            | Type   | Required | Default | Notes |
 |------------------|--------|----------|---------|-------|
 | `schema_version` | u64    | yes      | —       | must be `1` |
+| `units`          | string | no       | `"si"`  | `"si"` or `"atomic"`; see [Units](#units) |
 | `init`           | string | yes      | —       | path to the init file |
 | `topology`       | string | no       | none    | path to a `.topology` file (bonded forces, exclusions, constraints) |
 
 When `topology` is omitted no bonded forces are evaluated and the
-LJ/Coulomb kernels see no exclusion list.
+LJ and SPME real-space kernels see no exclusion list.
 
 ### `[simulation]`
 
 | Field         | Type | Required | Default | Notes |
 |---------------|------|----------|---------|-------|
-| `seed`        | u64  | yes      | —       | RNG seed for Maxwell-Boltzmann velocity generation. Required even when the init file supplies velocities. |
-| `temperature` | f64  | yes      | —       | Initial-velocity temperature in K. Finite, `>= 0`. Used only when the init file omits velocities. The thermostat's bath temperature is a separate field. |
+| `seed`                | u64  | yes | —       | RNG seed for Maxwell-Boltzmann velocity generation. Required even when the init file supplies velocities. |
+| `temperature`         | f64  | yes | —       | Initial-velocity temperature in K. Finite, `>= 0`. Used only when the init file omits velocities. The thermostat's bath temperature is a separate field. |
+| `fast_math`           | bool | no  | `true`  | Build every JIT-compiled kernel with `nvcc`'s `--use_fast_math`. ~13% faster pair force; **still bit-reproducible run-to-run on a fixed GPU** (a `true` run follows a different f32 trajectory than a `false` run, but each is independently reproducible). Set `false` for precise-IEEE kernels. |
+| `graph_batch_size`    | u32  | no  | `5`     | Number of step replays between displacement checks / output-cadence re-evaluations when a phase runs under CUDA-graph mode. Must be `>= 1`. |
+| `cuda_graphs_disable` | bool | no  | `false` | When `true`, every MD phase runs the per-step launch loop with full per-kernel timings — a diagnostic escape hatch from CUDA-graph batching. |
+
+Per-step settings (timestep, step count, integrator/thermostat/barostat
+composition, output cadences) live in the `[[phase]]` array, not here.
 
 ### `[[phase]]`
 
@@ -395,7 +420,7 @@ One entry per species. Names must be unique.
 |----------|--------|----------|---------|-------|
 | `name`   | string | yes      | —       | Identifier referenced from the init file and from `pair_interactions.between`. Case-sensitive. Non-empty. |
 | `mass`   | f64    | yes      | —       | Particle mass in kg. Finite, strictly positive. |
-| `charge` | f64    | no       | `0.0`   | Per-particle charge in C. Any sign. Required by the Coulomb / SPME slots. |
+| `charge` | f64    | no       | `0.0`   | Per-particle charge in C. Any sign. Consumed by the SPME slot. |
 
 ### `[[pair_interactions]]` (array)
 
@@ -419,21 +444,17 @@ Fields for `potential = "lennard-jones"`:
 | `sigma`   | f64  | yes      | LJ zero-crossing distance (m). |
 | `epsilon` | f64  | yes      | LJ well depth (J). |
 
-### `[coulomb]` (optional)
-
-Activates the truncated short-range Coulomb pair-force slot. The
-per-particle charges come from `[[particle_types]].charge`; this table
-carries only the cutoff parameters. Mutually exclusive with `[spme]`.
-
-| Field      | Type | Required | Default        | Notes |
-|------------|------|----------|----------------|-------|
-| `cutoff`   | f64  | yes      | —              | Cutoff distance (m). |
-| `r_switch` | f64  | no       | `0.9 · cutoff` | Inner switching radius. |
-
 ### `[spme]` (optional)
 
-Activates smooth particle-mesh Ewald. Mutually exclusive with
-`[coulomb]`.
+Activates smooth particle-mesh Ewald — the engine's electrostatics
+model. Per-particle charges come from `[[particle_types]].charge`.
+Requires the `cell-list` neighbor mode (`[spme]` combined with
+`mode = "all-pairs"` is rejected).
+
+> The top-level `[coulomb]` truncated-Coulomb table used by earlier
+> versions of the config has been **retired**. A config that declares
+> `[coulomb]` is rejected at load time (`CoulombRetired`); use `[spme]`
+> for electrostatics.
 
 | Field          | Type     | Required | Default | Notes |
 |----------------|----------|----------|---------|-------|
@@ -442,29 +463,110 @@ Activates smooth particle-mesh Ewald. Mutually exclusive with
 | `grid`         | [u32; 3] | yes      | —       | FFT grid `[n_a, n_b, n_c]`. Each `n_d >= 2 · spline_order`. |
 | `spline_order` | u32      | no       | `4`     | One of `4, 5, 6, 7, 8`. |
 
-### `[[bond_types]]`, `[[angle_types]]`, `[[constraint_types]]`
+### `[[bond_types]]`, `[[angle_types]]`, `[[dihedral_types]]`, `[[constraint_types]]`
 
-Declare parameter sets referenced by name from the optional `.topology`
-file. All three arrays are optional. The schema details (Morse bonds,
-harmonic angles, SHAKE constraint clusters) live in
-`rqm/io/config-schema.md` and the matching pages under `rqm/forces/`
-and `rqm/integration/`.
+These four optional arrays declare parameter sets referenced **by name**
+from the optional `.topology` file's `[bonds]`, `[angles]`,
+`[dihedrals]`, and `[constraints]` sections respectively. Each is empty
+by default; declared-but-unused entries are permitted. Every entry has a
+`name` (unique within its array) and — for the force potentials — a
+`potential` selector; constraint types use a `kind` selector instead.
+
+#### `[[bond_types]]`
+
+Two-atom bonded potentials. A system may freely mix bond potentials;
+each bond is routed to the matching slot by its type.
+
+`potential = "harmonic"` — `U = ½ k (r − r₀)²` (AMBER/CHARMM stiff
+spring):
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `k`   | f64  | yes      | Force constant in J/m² (in the `½ k (r−r₀)²` convention). Strictly positive. |
+| `r0`  | f64  | yes      | Equilibrium distance in m. Strictly positive. |
+
+`potential = "morse"` — `U = D_e (1 − e^{−a(r−r_e)})²`:
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `de`  | f64  | yes      | Well depth in J. Strictly positive. |
+| `a`   | f64  | yes      | Width parameter in 1/m. Strictly positive. |
+| `re`  | f64  | yes      | Equilibrium distance in m. Strictly positive. |
+
+#### `[[angle_types]]`
+
+Three-atom angle potentials. `potential = "harmonic"` is the only
+supported value — `U = ½ k_θ (θ − θ₀)²`:
+
+| Field     | Type | Required | Notes |
+|-----------|------|----------|-------|
+| `k_theta` | f64  | yes      | Force constant in J/rad². Strictly positive. |
+| `theta_0` | f64  | yes      | Equilibrium angle in radians, in `[0, π]`. |
+
+#### `[[dihedral_types]]`
+
+Four-atom torsion potentials. `potential = "periodic"` is the only
+supported value — `U = k_φ · (1 + cos(n·φ − φ₀))`. A multi-term torsion
+on one `(i, j, k, l)` quadruple is expressed by declaring one dihedral
+type per Fourier term and naming each from its own `[dihedrals]` row on
+the same quadruple.
+
+| Field           | Type | Required | Default        | Notes |
+|-----------------|------|----------|----------------|-------|
+| `k_phi`         | f64  | yes      | —              | Force constant in J. Finite (may be zero or negative). |
+| `n`             | u32  | yes      | —              | Multiplicity, integer in `[1, 6]`. |
+| `phi_0`         | f64  | yes      | —              | Phase offset in radians, in `[−2π, 2π]`. |
+| `scale_lj_14`   | f64  | no       | `0.5`          | LJ scale for the implicit 1-4 exclusion this torsion introduces. In `[0, 1]`. |
+| `scale_coul_14` | f64  | no       | `0.8333` (1/1.2) | Coulomb scale for that same 1-4 exclusion. In `[0, 1]`. |
+
+#### `[[constraint_types]]`
+
+Rigid-constraint groups. Each entry's `kind` selects the algorithm that
+processes any group declared with that type in the topology's
+`[constraints]` section. The presence of any constraint group is
+incompatible with the Langevin BAOAB, MTK NPT, and lossless
+velocity-Verlet integrators (see [Validation](#validation)).
+
+`kind = "settle"` — analytic three-atom rigid water (fast path). A
+`[constraints]` row for this type lists three atoms in canonical order:
+oxygen, then the two hydrogens.
+
+| Field  | Type | Required | Notes |
+|--------|------|----------|-------|
+| `d_OH` | f64  | yes      | Oxygen–hydrogen bond length in m. Strictly positive. |
+| `d_HH` | f64  | yes      | Hydrogen–hydrogen distance in m. Strictly positive and `< 2 · d_OH`. |
+
+`kind = "shake"` — general iterative SHAKE/RATTLE for arbitrary rigid
+clusters. A `[constraints]` row lists this type's `atoms` global atom
+indices.
+
+| Field         | Type                        | Required | Notes |
+|---------------|-----------------------------|----------|-------|
+| `atoms`       | u32                         | yes      | Atoms per group. `1 ≤ atoms ≤ 8`. |
+| `constraints` | list of `{ i, j, d }`       | yes      | One entry per pair-distance constraint; 1–12 entries. `i`, `j` are local indices in `0..atoms` (`i ≠ j`, each unordered pair unique); `d` is the target distance in m (strictly positive). |
+
+The exhaustive validator error catalogue for all four arrays lives in
+`rqm/io/config-schema.md`, with the physics in the matching pages under
+`rqm/forces/` and `rqm/integration/`.
 
 ### `[neighbor_list]` (optional)
 
 Selects the algorithm short-range pair-force slots use to enumerate
 non-bonded pairs. Defaults to the cell-list pipeline.
 
-| Field           | Type   | Required | Default        | Notes |
-|-----------------|--------|----------|----------------|-------|
-| `mode`          | string | no       | `"cell-list"`  | `"cell-list"` or `"all-pairs"`. |
-| `max_neighbors` | u64    | no       | `256`          | Cell-list only. Per-particle neighbor capacity. A rebuild that exceeds this halts the run. |
-| `r_skin`        | f64    | no       | `0.3 · cutoff` | Cell-list only. Skin distance in m. |
+| Field     | Type   | Required | Default        | Notes |
+|-----------|--------|----------|----------------|-------|
+| `mode`    | string | no       | `"cell-list"`  | `"cell-list"` or `"all-pairs"`. |
+| `r_skin`  | f64    | no       | `0.3 · cutoff` | Cell-list only. Skin distance in m. |
 
-For `mode = "all-pairs"`, `max_neighbors` and `r_skin` are rejected as
-unknown fields. The simulation box's minimum perpendicular width must
-satisfy `>= 3 · (cutoff_max + r_skin)`; the runner validates this once
-the box is known.
+There is no `max_neighbors` field: the packed-neighbour pair-force
+architecture sizes its buffers to the actual interaction count plus a
+growth margin, so supplying `max_neighbors` is a load-time error. For
+`mode = "all-pairs"`, `r_skin` is likewise rejected as an unknown field,
+and combining `all-pairs` with `[spme]` is rejected. The simulation
+box's minimum perpendicular width must satisfy
+`>= 3 · (cutoff_max + r_skin)`; the runner validates this once the box
+is known.
 
 ### `[phase.output]` (optional; all fields have defaults)
 
@@ -499,7 +601,8 @@ The loader rejects configs that:
 - declare a `[[pair_interactions]]` entry referencing an undeclared
   type, omit a required pair, or duplicate a pair;
 - resolve two supplied file paths to the same location;
-- combine `[coulomb]` with `[spme]`;
+- declare the retired `[coulomb]` table (`CoulombRetired`), or combine
+  `mode = "all-pairs"` with `[spme]`;
 - combine `[phase.thermostat]`/`[phase.barostat]` with an integrator
   that owns its own;
 - declare zero phases (the union of `[[phase]]` and

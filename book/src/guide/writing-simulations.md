@@ -256,10 +256,30 @@ NPT production phase that writes a frame per picosecond. See
 
 ### Bonded forces, exclusions, rigid constraints
 
-Add a `topology` field at the top level pointing to a `.topology`
-file, and declare matching `[[bond_types]]`, `[[angle_types]]`, or
-`[[constraint_types]]` entries. The `examples/spc-water-256/` bundle
-demonstrates all three with a flexible-SPC water model.
+Add a `topology` field at the top level pointing to a `.topology` file,
+then declare the matching parameter arrays:
+
+- `[[bond_types]]` — harmonic (`potential = "harmonic"`, `k`/`r0`) or
+  Morse (`potential = "morse"`) two-atom bonds; a system may mix both.
+- `[[angle_types]]` — harmonic three-atom angles (`k_theta`/`theta_0`).
+- `[[dihedral_types]]` — periodic torsions (`potential = "periodic"`,
+  `k_phi`/`n`/`phi_0`); repeat a `[dihedrals]` row per Fourier term for
+  a multi-term torsion.
+- `[[constraint_types]]` — rigid groups. Use `kind = "settle"`
+  (`d_OH`/`d_HH`) for rigid three-atom water (the fast analytic path),
+  or `kind = "shake"` (`atoms` + a `constraints` list) for a general
+  rigid cluster. Constraints require the plain `velocity-verlet`
+  integrator (not `lossless`, Langevin BAOAB, or MTK NPT).
+
+See the [Configuration Reference](configuration.md#bond_types-angle_types-dihedral_types-constraint_types)
+for the full field tables. Worked bundles:
+
+- `examples/spc-water-256/` — flexible SPC water (harmonic + Morse
+  bonds, harmonic angles).
+- `examples/ethane-216/` — liquid ethane exercising the periodic
+  dihedral force.
+- `examples/chignolin/` — a solvated all-atom protein combining bonds,
+  angles, dihedrals, and SETTLE-constrained rigid water.
 
 ### Restart from a previous frame
 
