@@ -572,17 +572,23 @@ subsequent stage as **skipped (earlier check failed)**.
    the stage failure (consistent with the short-circuit semantics).
 3. **`init`** — `load_init_state(&config.init, &type_names)`. On
    success the stage description carries the particle count and the
-   box dimensions extracted from `init_state.box`.
+   box dimensions extracted from `init_state.box`. Box dimensions (and
+   every other length in a lint or error message) are displayed in the
+   config's unit system — metres in `si` mode, Bohr (`a_0`) in `atomic`
+   mode — with the matching unit symbol, even though the box is stored
+   internally in atomic units.
 4. **`box/cutoff`** — when `config.neighbor_list` is `CellList`,
    compute `cutoff_max` as in *Runner flow* step 6 and call
    `sim_box.check_min_perpendicular_width(3 * (cutoff_max + r_skin))`.
-   A failure surfaces as `RunnerError::CellListBoxTooSmall { .. }`.
-   When `config.neighbor_list` is `AllPairs`, the stage is recorded
-   as **not applicable (mode = all-pairs)** and is not a failure.
+   The displayed minimum perpendicular width and required width are in
+   the config's unit system (see stage 3). A failure surfaces as
+   `RunnerError::CellListBoxTooSmall { .. }`. When
+   `config.neighbor_list` is `AllPairs`, the stage is recorded as
+   **not applicable (mode = all-pairs)** and is not a failure.
 5. **`topology`** — when `config.topology.is_some()`, call
    `load_topology_file(...)` as in *Runner flow* step 6a and record
-   the bond, angle, and constraint-group counts on success. When
-   `config.topology.is_none()`, the stage is recorded as **not
+   the bond, angle, dihedral, and constraint-group counts on success.
+   When `config.topology.is_none()`, the stage is recorded as **not
    supplied** and is not a failure.
 
 #### `--with-gpu` stages <!-- rq-688fb553 -->
@@ -907,9 +913,11 @@ wrapper that dispatches between the two on the first CLI argument.
     — when `config.neighbor_list` is `CellList`, the box read from the
     init file has a perpendicular width along some lattice direction
     that is shorter than `3 * (cutoff_max + r_skin)`, where `cutoff_max`
-    is the largest cutoff across `config.pair_interactions`,
-    `config.coulomb.cutoff`, and `config.spme.r_cut_real` (whichever
-    are present). `direction` is one of `"a"`, `"b"`, `"c"`. The
+    is the largest cutoff across `config.pair_interactions` and
+    `config.spme.r_cut_real` (whichever are present). `direction` is one
+    of `"a"`, `"b"`, `"c"`. `width` and `required` are in the config's
+    unit system (metres in `si` mode, Bohr in `atomic` mode), converted
+    from the internal atomic-unit values for user-facing display. The
     payload is filled by translating
     `SimulationBoxError::PerpendicularWidthTooSmall` returned by
     `sim_box.check_min_perpendicular_width(required)` (see

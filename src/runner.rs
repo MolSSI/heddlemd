@@ -400,13 +400,16 @@ pub fn lint_simulation_with_registries(
             stages.push(LintStage {
                 label: "init",
                 status: LintStatus::Ok {
-                    detail: format!(
-                        "resolved, {} particles, box {:.1e} × {:.1e} × {:.1e} m",
-                        i.particle_count,
-                        i.sim_box.lx(),
-                        i.sim_box.ly(),
-                        i.sim_box.lz(),
-                    ),
+                    detail: {
+                        let (lf, lu) = length_display(config.units);
+                        format!(
+                            "resolved, {} particles, box {:.1e} × {:.1e} × {:.1e} {lu}",
+                            i.particle_count,
+                            i.sim_box.lx() as f64 * lf,
+                            i.sim_box.ly() as f64 * lf,
+                            i.sim_box.lz() as f64 * lf,
+                        )
+                    },
                 },
             });
             i
@@ -441,13 +444,14 @@ pub fn lint_simulation_with_registries(
             let required = (3.0 * (cutoff_max + r_skin)) as Real;
             match sim_box.check_min_perpendicular_width(required) {
                 Ok(()) => {
+                    let (lf, lu) = length_display(config.units);
                     stages.push(LintStage {
                         label: "box/cutoff",
                         status: LintStatus::Ok {
                             detail: format!(
-                                "min perp width {:.2e} m ≥ required {:.2e} m",
-                                sim_box.min_perpendicular_width(),
-                                required,
+                                "min perp width {:.2e} {lu} ≥ required {:.2e} {lu}",
+                                sim_box.min_perpendicular_width() as f64 * lf,
+                                required as f64 * lf,
                             ),
                         },
                     });
@@ -457,16 +461,19 @@ pub fn lint_simulation_with_registries(
                     width,
                     required,
                 }) => {
+                    let (lf, lu) = length_display(config.units);
+                    let width_u = width as f64 * lf;
+                    let required_u = required as f64 * lf;
                     stages.push(LintStage {
                         label: "box/cutoff",
                         status: LintStatus::Fail {
                             detail: format!(
-                                "min perp width {width:.2e} m along `{direction}` < required {required:.2e} m"
+                                "min perp width {width_u:.2e} {lu} along `{direction}` < required {required_u:.2e} {lu}"
                             ),
                             error: RunnerError::CellListBoxTooSmall {
                                 direction,
-                                width,
-                                required,
+                                width: width_u as Real,
+                                required: required_u as Real,
                             },
                         },
                     });
@@ -635,6 +642,19 @@ fn compute_cutoff_max(config: &crate::io::Config) -> f64 {
         cutoff_max = cutoff_max.max(s.r_cut_real);
     }
     cutoff_max
+}
+
+// rq-65a63eec — box dimensions and perpendicular widths are stored in
+// atomic units (Bohr) internally; user-facing lint and error messages
+// report them in the config's unit system. Returns the atomic→user length
+// scale factor and the matching unit symbol.
+fn length_display(units: crate::units::UnitSystem) -> (f64, &'static str) {
+    let factor = units.to_user(crate::units::Dimension::Length, 1.0);
+    let symbol = match units {
+        crate::units::UnitSystem::Si => "m",
+        crate::units::UnitSystem::Atomic => "a_0",
+    };
+    (factor, symbol)
 }
 
 // Runs the GPU-touching half of the setup phase (init_device, cuFFT
@@ -862,11 +882,15 @@ fn simulation_setup_new_impl(
                     direction,
                     width,
                     required,
-                } => RunnerError::CellListBoxTooSmall {
-                    direction,
-                    width,
-                    required,
-                },
+                } => {
+                    // Report the payload in the config's unit system.
+                    let (lf, _lu) = length_display(config.units);
+                    RunnerError::CellListBoxTooSmall {
+                        direction,
+                        width: (width as f64 * lf) as Real,
+                        required: (required as f64 * lf) as Real,
+                    }
+                }
                 _ => unreachable!(
                     "check_min_perpendicular_width only produces PerpendicularWidthTooSmall"
                 ),

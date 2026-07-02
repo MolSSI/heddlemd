@@ -28,6 +28,7 @@ target/
 *.out.*.xyz
 *.out.*.log
 *.out.*.timings
+*.out.*.minlog
 
 # Analysis output (`dynamics analyze` writes `<root>.out.<name>.csv`).
 *.out.*.csv

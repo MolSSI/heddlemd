@@ -178,8 +178,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t0", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.624999262e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -210,8 +210,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t0", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.624999262e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -298,8 +298,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t1", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 5.534539231e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -330,8 +330,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t1", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 5.534539231e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -410,8 +410,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t2", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.699834754e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -442,8 +442,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t2", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.699834754e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -514,8 +514,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t3", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 5.979988590e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -546,8 +546,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t3", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 5.979988590e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -610,8 +610,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t4", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.699834754e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -642,8 +642,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t4", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.699834754e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -698,8 +698,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t5", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.479960951e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -730,8 +730,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t5", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.479960951e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -778,8 +778,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t6", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.324766394e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -810,8 +810,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t6", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.324766394e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -850,8 +850,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t7", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.299821230e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -882,8 +882,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t7", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.299821230e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -914,8 +914,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t8", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.533236694e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -946,8 +946,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t8", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.533236694e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -970,56 +970,56 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t9", "t9"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 1.000000000e-09
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
 [[pair_interactions]]
 between = ["t9", "t10"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.235676522e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
 [[pair_interactions]]
 between = ["t9", "t11"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.255276294e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
 [[pair_interactions]]
 between = ["t9", "t12"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.575376203e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
 [[pair_interactions]]
 between = ["t9", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 1.000000000e-09
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
 [[pair_interactions]]
 between = ["t9", "t14"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.219640345e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
 [[pair_interactions]]
 between = ["t9", "t15"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 7.238828479e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -1050,8 +1050,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t10", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.235676522e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -1090,8 +1090,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t11", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.255276294e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -1122,8 +1122,8 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t12", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.575376203e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -1146,24 +1146,24 @@ r_switch = 9.000000000e-10
 [[pair_interactions]]
 between = ["t13", "t13"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 1.000000000e-09
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
 [[pair_interactions]]
 between = ["t13", "t14"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 6.219640345e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
 [[pair_interactions]]
 between = ["t13", "t15"]
 potential = "lennard-jones"
-sigma = 1.000000000e-10
-epsilon = 1.000000000e-30
+sigma = 7.238828479e-10
+epsilon = 0.000000000e+00
 cutoff = 9.000000000e-10
 r_switch = 9.000000000e-10
 
@@ -2429,4 +2429,4 @@ spline_order = 5
 
 [neighbor_list]
 mode = "cell-list"
-r_skin = 1.176035767e-10
+r_skin = 1.209141665e-10

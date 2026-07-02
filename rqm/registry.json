@@ -12916,7 +12916,12 @@
     "decl": "#### Always-on stages (CPU only)",
     "file": "simulation-runner",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Always-on stages (CPU only)",
     "type": "section"
   },
