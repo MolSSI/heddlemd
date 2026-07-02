@@ -1748,6 +1748,53 @@ fn neighbor_list_all_pairs_mode() {
     assert_eq!(cfg.neighbor_list, NeighborListConfig::AllPairs);
 }
 
+const SPME_BLOCK: &str =
+    "[spme]\nalpha = 3.5e9\nr_cut_real = 1.0e-9\ngrid = [32, 32, 32]\n";
+
+#[test] // rq-9854f358
+fn all_pairs_with_spme_is_rejected() {
+    let dir = tmp_path("nl_all_pairs_spme");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"all-pairs\"\n{}",
+        minimal_config(),
+        SPME_BLOCK
+    );
+    let path = write_config(&dir, &body);
+    assert!(matches!(
+        load_config(&path).unwrap_err(),
+        ConfigError::AllPairsWithSpme
+    ));
+}
+
+#[test] // rq-281f9a14
+fn cell_list_with_spme_is_accepted() {
+    let dir = tmp_path("nl_cell_list_spme");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"cell-list\"\nr_skin = 1.0e-10\n{}",
+        minimal_config(),
+        SPME_BLOCK
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(matches!(
+        cfg.neighbor_list,
+        NeighborListConfig::CellList { .. }
+    ));
+}
+
+#[test] // rq-1d073be3
+fn spme_with_neighbor_list_omitted_is_accepted() {
+    let dir = tmp_path("nl_omitted_spme");
+    let body = format!("{}\n{}", minimal_config(), SPME_BLOCK);
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    // Defaults to cell-list, so the combination is valid.
+    assert!(matches!(
+        cfg.neighbor_list,
+        NeighborListConfig::CellList { .. }
+    ));
+}
+
 // rq-0a92d90b
 #[test]
 fn neighbor_list_unknown_mode_rejected() {

@@ -80,6 +80,12 @@ pub enum ConfigError {
     // rq-coulomb-retired
     #[error("the pairwise `[coulomb]` slot has been retired; use `[spme]` for electrostatics")]
     CoulombRetired,
+    // rq-adddaf1a
+    #[error(
+        "[neighbor_list] mode = \"all-pairs\" is incompatible with a [spme] table: SPME runs \
+         through the cell-list neighbour pipeline only. Use mode = \"cell-list\"."
+    )]
+    AllPairsWithSpme,
     // rq-lossless_unsupported_in_f64
     #[error(
         "[integrator] lossless = true is not available in the f64 build (the velocity-Verlet \
@@ -1445,6 +1451,14 @@ impl Config {
             validate_spme(s)?;
         }
         validate_neighbor_list(&self.neighbor_list)?;
+        // rq-adddaf1a — SPME is evaluated only through the cell-list
+        // neighbour pipeline; the all-pairs kernel does not drive the
+        // SPME real-space sum, so reject the combination at load time.
+        if self.spme.is_some()
+            && matches!(self.neighbor_list, NeighborListConfig::AllPairs)
+        {
+            return Err(ConfigError::AllPairsWithSpme);
+        }
 
         // Structural cross-validation: pair coverage and path
         // collisions. The integrator/thermostat/barostat compatibility

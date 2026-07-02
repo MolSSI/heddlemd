@@ -4026,6 +4026,18 @@
     "title": "A 5-atom methane group's C-H constraints remain within tolerance after 100 steps",
     "type": "scenario"
   },
+  "rq-1d073be3": {
+    "decl": "Scenario: an [spme] table with [neighbor_list] omitted is accepted (default cell-list)",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "an [spme] table with [neighbor_list] omitted is accepted (default cell-list)",
+    "type": "scenario"
+  },
   "rq-1d25a0db": {
     "decl": "Scenario: Log file header includes csvr_conserved when CSVR is the thermostat",
     "file": "integration/csvr",
@@ -5532,6 +5544,18 @@
       }
     ],
     "title": "Construct an orthorhombic box (all tilts zero)",
+    "type": "scenario"
+  },
+  "rq-281f9a14": {
+    "decl": "Scenario: cell-list mode with an [spme] table is accepted",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "cell-list mode with an [spme] table is accepted",
     "type": "scenario"
   },
   "rq-282850ad": {
@@ -18837,6 +18861,18 @@
     "title": "Loop executes exactly n_steps integration steps",
     "type": "scenario"
   },
+  "rq-9854f358": {
+    "decl": "Scenario: all-pairs mode with an [spme] table is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "all-pairs mode with an [spme] table is rejected",
+    "type": "scenario"
+  },
   "rq-9864078f": {
     "decl": "#### `Lattice` (required)",
     "file": "io/init-state-file",
@@ -21616,7 +21652,12 @@
     "decl": "#### `[neighbor_list]` (optional table)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[neighbor_list]` (optional table)",
     "type": "section"
   },

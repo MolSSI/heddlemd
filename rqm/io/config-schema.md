@@ -902,6 +902,11 @@ every grid cell.
   defaults to `4` when omitted. Accepted values are `4`, `5`, `6`,
   `7`, `8`.
 
+SPME requires the cell-list neighbour pipeline: a present `[spme]` table
+together with `[neighbor_list]` `mode = "all-pairs"` is rejected at load
+time with `ConfigError::AllPairsWithSpme` (see `[neighbor_list]`
+*Cross-validation*).
+
 #### `[neighbor_list]` (optional table) <!-- rq-adddaf1a -->
 
 Selects the algorithm used by the Lennard-Jones slot to enumerate
@@ -932,6 +937,15 @@ an unknown field in this mode.
 Cross-validation:
 
 - `r_skin > 0` and finite.
+- `mode = "all-pairs"` is incompatible with a present `[spme]` table.
+  SPME electrostatics is evaluated only through the cell-list neighbour
+  pipeline; the all-pairs kernel does not drive the SPME real-space sum,
+  so the combination would silently omit real-space electrostatics.
+  `Config::validate` rejects it at load time with
+  `ConfigError::AllPairsWithSpme`. The check depends only on the config
+  (the `[spme]` table's presence and `mode`), so it runs in
+  `load_config` without needing the init file or registries. SPME runs
+  require `mode = "cell-list"` (the default).
 - The simulation box's minimum perpendicular width satisfies
   `min_perpendicular_width >= 3 * (cutoff_max + r_skin)` where
   `cutoff_max` is the largest cutoff among `[[pair_interactions]]`
@@ -1492,6 +1506,9 @@ phase failures.
   - `CoulombRetired` — the config declares a top-level `[coulomb]`
     table. The truncated Coulomb slot has been retired; use `[spme]`
     instead.
+  - `AllPairsWithSpme` — the config declares a `[spme]` table together
+    with `[neighbor_list]` `mode = "all-pairs"`. SPME runs through the
+    cell-list neighbour pipeline only; use `mode = "cell-list"`.
   - `EmptyPhases` — the merged phase sequence
     (`[[phase]]` ∪ `[[minimization]]`) is empty. A simulation
     requires at least one phase of either kind.
@@ -1629,7 +1646,7 @@ phase failures.
     documented for that check (`InvalidValue` for per-field domain
     failures; `DuplicateTypeName`, `UnknownTypeInPair`,
     `MissingPairInteraction`, `DuplicatePairInteraction`,
-    `PathCollision`, `CoulombRetired`,
+    `PathCollision`, `CoulombRetired`, `AllPairsWithSpme`,
     `IncompatibleThermostat`, `IncompatibleBarostat`,
     `DuplicateBondTypeName`, or `DuplicateAngleTypeName` for the
     cross-validation rules).
@@ -2629,6 +2646,28 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Ok(config)
     And config.neighbor_list matches NeighborListConfig::AllPairs
+
+  @rq-9854f358
+  Scenario: all-pairs mode with an [spme] table is rejected
+    Given the Background config plus [neighbor_list] mode="all-pairs"
+      and an [spme] table with alpha=3.5e9 r_cut_real=1.0e-9 grid=[32,32,32]
+    When load_config is called
+    Then it returns Err(ConfigError::AllPairsWithSpme)
+
+  @rq-281f9a14
+  Scenario: cell-list mode with an [spme] table is accepted
+    Given the Background config plus [neighbor_list] mode="cell-list" r_skin=1.0e-10
+      and an [spme] table with alpha=3.5e9 r_cut_real=1.0e-9 grid=[32,32,32]
+    When load_config is called
+    Then it returns Ok(config)
+
+  @rq-1d073be3
+  Scenario: an [spme] table with [neighbor_list] omitted is accepted (default cell-list)
+    Given the Background config plus an [spme] table with alpha=3.5e9 r_cut_real=1.0e-9 grid=[32,32,32]
+      and no [neighbor_list] table
+    When load_config is called
+    Then it returns Ok(config)
+    And config.neighbor_list matches NeighborListConfig::CellList { .. }
 
   @rq-0a92d90b
   Scenario: Unknown neighbor_list mode is rejected
