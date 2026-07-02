@@ -190,16 +190,20 @@ returns it as a `RunnerError`.
    required }` and exits with code `1`.
    `NeighborListConfig::AllPairs` skips this check.
 6a. **Load topology file (if supplied).** When
-    `config.topology.is_some()`, build the slice of bond type names
-    from `config.bond_types` and the slice of angle type names from
-    `config.angle_types`, call
-    `load_topology_file(path, particle_count, &bond_type_names,
-    &angle_type_names, &config.constraint_types)`
+    `config.topology.is_some()`, build the bond-type-name and
+    angle-type-name slices from `config.bond_types` and
+    `config.angle_types`, call `load_topology_file(path,
+    particle_count, &bond_type_names, &angle_type_names,
+    &config.dihedral_types, &config.constraint_types,
+    &registries.constraint_types, config.units)`
     (`forces/topology.md`), and capture the resulting `(BondList,
-    AngleList, ExclusionList, ConstraintList)`. Failure → exit 1.
-    When `config.topology.is_none()`, use an empty `BondList`, an
-    empty `AngleList`, an empty `ExclusionList`, and an empty
-    `ConstraintList`.
+    AngleList, DihedralList, ExclusionList, ConstraintList,
+    Option<ChargeList>)`. Failure → exit 1. When
+    `config.topology.is_none()`, use empty `BondList`, `AngleList`,
+    `DihedralList`, `ExclusionList`, and `ConstraintList`, and `None`
+    for the charge list. The optional `ChargeList`, when present,
+    carries a complete per-atom charge assignment already in atomic
+    units (see `forces/topology.md`); it is consumed in step 9.
 7. **Initialise CUDA.** Call `init_device()` (`build-pipeline.md`).
    Failure → exit 1. When `config.spme.is_some()`, `init_device` runs
    the cuFFT determinism smoke test described in `forces/spme.md`. A
@@ -216,11 +220,27 @@ returns it as a `RunnerError`.
    - `velocities_*` from either the init state or the generated values,
    - `masses` populated from
      `config.particle_types[init_state.type_indices[i]].mass` cast to `f32`,
-   - `charges` populated from
-     `config.particle_types[init_state.type_indices[i]].charge` cast to
-     `f32`,
+   - `charges` populated per particle from the topology `ChargeList`
+     when one is present (`charges[i] = charge_list.charges[i]`, already
+     in atomic units) and otherwise from
+     `config.particle_types[init_state.type_indices[i]].charge` (the
+     per-type fallback), cast to `f32`,
    - `ids = None` (default `0..N`),
    - `forces_*` zero-initialised by the constructor.
+
+   When a `ChargeList` is present, the runner first rejects any config
+   in which some `[[particle_types]]` entry declares a nonzero `charge`,
+   surfacing `RunnerError::TypeChargeWithPerAtomCharges { type_name,
+   charge }` and exiting with code 1 — the topology's `[charges]`
+   section fully supplies per-particle charge, so a stray nonzero
+   per-type charge is ambiguous. After the per-particle `charges` array
+   is assembled (from either source), the runner computes the net charge
+   `q_net = Σ_i charges[i]`; when `|q_net| > 1.0e-4` (elementary charges,
+   the engine's atomic charge unit) it prints a non-blocking warning to
+   stderr naming `q_net`. A nonzero net charge is not fatal — SPME
+   applies a uniform neutralising background (`forces/spme.md`) — but it
+   is a likely modelling error, so the warning fires for both the
+   per-atom and the per-type charge source.
 10. **Allocate `ParticleBuffers`.** Construct `ParticleBuffers` from
     the host state.
 10a. **Project initial velocities onto the constraint manifold.**
@@ -863,6 +883,13 @@ wrapper that dispatches between the two on the first CLI argument.
     `integration/framework.md`).
   - `TopologyFile(TopologyFileError)` — from `load_topology_file`
     (see `forces/topology.md`).
+  - `TypeChargeWithPerAtomCharges { type_name: String, charge: f64 }` —
+    the topology file supplies a `[charges]` section (a `ChargeList`)
+    while a `[[particle_types]]` entry named `type_name` declares a
+    nonzero per-type `charge`. Per-atom and per-type charge sources are
+    mutually exclusive; the config must drop the per-type `charge` when
+    a `[charges]` section is present. Surfaces at setup with exit
+    code 1.
   - `ForceField(ForceFieldError)` — from `ForceField::new` or
     `ForceField::step` (see `forces/framework.md`).
   - `Trajectory(TrajectoryWriterError)` — from trajectory writer

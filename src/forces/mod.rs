@@ -43,7 +43,7 @@ pub use harmonic_bond::{HarmonicBondBuilder, HarmonicBondState};
 pub use lj::{LennardJonesBuilder, LennardJonesState};
 pub use morse::{MorseBondedBuilder, MorseBondedState};
 pub use topology::{
-    Angle, AngleList, Bond, BondList, ConstraintGroup, ConstraintList,
+    Angle, AngleList, Bond, BondList, ChargeList, ConstraintGroup, ConstraintList,
     DeviceExclusionList, Dihedral, DihedralList, Exclusion, ExclusionList, GroupConstraint,
     MoleculeList, TopologyFileError, load_topology_file,
 };

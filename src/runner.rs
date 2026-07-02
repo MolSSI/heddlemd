@@ -8,8 +8,8 @@ use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
 use crate::forces::{
-    AngleList, BondList, ConstraintList, DihedralList, ExclusionList, ForceField, ForceFieldError,
-    TopologyFileError,
+    AngleList, BondList, ChargeList, ConstraintList, DihedralList, ExclusionList, ForceField,
+    ForceFieldError, TopologyFileError,
     load_topology_file,
 };
 use crate::gpu::{ParticleBuffers, compute_total_potential_energy, init_device};
@@ -60,6 +60,13 @@ pub enum RunnerError {
     Constraint(#[source] ConstraintError),
     #[error("{0}")]
     TopologyFile(#[source] TopologyFileError),
+    // rq-8ee27e27 — a topology [charges] section coexists with a nonzero
+    // per-type charge. The two charge sources are mutually exclusive.
+    #[error(
+        "particle type `{type_name}` declares a nonzero charge ({charge}) while the topology \
+         file supplies a [charges] section; drop the per-type charge when using [charges]"
+    )]
+    TypeChargeWithPerAtomCharges { type_name: String, charge: f64 },
     #[error("{0}")]
     ForceField(#[source] ForceFieldError),
     #[error("{0}")]
@@ -484,8 +491,16 @@ pub fn lint_simulation_with_registries(
             &config.dihedral_types,
             &config.constraint_types,
             &registries.constraint_types,
+            config.units,
         ) {
-            Ok((bond_list, angle_list, dihedral_list, exclusion_list, constraint_list)) => {
+            Ok((
+                bond_list,
+                angle_list,
+                dihedral_list,
+                exclusion_list,
+                constraint_list,
+                charge_list,
+            )) => {
                 // Cross-check integrator/constraint compatibility now that the
                 // constraint list is known.
                 if let Err(e) = config
@@ -513,7 +528,14 @@ pub fn lint_simulation_with_registries(
                         ),
                     },
                 });
-                Some((bond_list, angle_list, dihedral_list, exclusion_list, constraint_list))
+                Some((
+                    bond_list,
+                    angle_list,
+                    dihedral_list,
+                    exclusion_list,
+                    constraint_list,
+                    charge_list,
+                ))
             }
             Err(e) => {
                 stages.push(LintStage {
@@ -630,7 +652,14 @@ fn lint_gpu_full_setup(
     config: crate::io::Config,
     init: InitState,
     sim_box: crate::pbc::SimulationBox,
-    topology: Option<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList)>,
+    topology: Option<(
+        BondList,
+        AngleList,
+        DihedralList,
+        ExclusionList,
+        ConstraintList,
+        Option<ChargeList>,
+    )>,
     registries: &crate::Registries,
     gpu: crate::gpu::GpuContext,
 ) -> Result<(), (String, RunnerError)> {
@@ -642,6 +671,7 @@ fn lint_gpu_full_setup(
             DihedralList::empty(n),
             ExclusionList::empty(n),
             ConstraintList::empty(n),
+            None,
         )
     });
     let setup = simulation_setup_finish_gpu(
@@ -850,26 +880,34 @@ fn simulation_setup_new_impl(
         config.bond_types.iter().map(|bt| bt.name()).collect();
     let angle_type_names: Vec<&str> =
         config.angle_types.iter().map(|at| at.name()).collect();
-    let topology: (BondList, AngleList, DihedralList, ExclusionList, ConstraintList) =
-        match config.topology.as_ref() {
-            Some(path) => load_topology_file(
-                path,
-                n,
-                &bond_type_names,
-                &angle_type_names,
-                &config.dihedral_types,
-                &config.constraint_types,
-                &registries.constraint_types,
-            )
-            .map_err(RunnerError::TopologyFile)?,
-            None => (
-                BondList::empty(n),
-                AngleList::empty(n),
-                DihedralList::empty(n),
-                ExclusionList::empty(n),
-                ConstraintList::empty(n),
-            ),
-        };
+    let topology: (
+        BondList,
+        AngleList,
+        DihedralList,
+        ExclusionList,
+        ConstraintList,
+        Option<ChargeList>,
+    ) = match config.topology.as_ref() {
+        Some(path) => load_topology_file(
+            path,
+            n,
+            &bond_type_names,
+            &angle_type_names,
+            &config.dihedral_types,
+            &config.constraint_types,
+            &registries.constraint_types,
+            config.units,
+        )
+        .map_err(RunnerError::TopologyFile)?,
+        None => (
+            BondList::empty(n),
+            AngleList::empty(n),
+            DihedralList::empty(n),
+            ExclusionList::empty(n),
+            ConstraintList::empty(n),
+            None,
+        ),
+    };
 
     simulation_setup_finish_gpu(
         config,
@@ -894,14 +932,22 @@ fn simulation_setup_finish_gpu(
     registries: crate::Registries,
     init: InitState,
     sim_box: crate::pbc::SimulationBox,
-    topology: (BondList, AngleList, DihedralList, ExclusionList, ConstraintList),
+    topology: (
+        BondList,
+        AngleList,
+        DihedralList,
+        ExclusionList,
+        ConstraintList,
+        Option<ChargeList>,
+    ),
     config_load_duration: Duration,
     init_load_duration: Duration,
     gpu: crate::gpu::GpuContext,
     gpu_init_duration: Duration,
 ) -> Result<SimulationSetup, RunnerError> {
     let n = init.particle_count;
-    let (bond_list, angle_list, dihedral_list, exclusion_list, constraint_list) = topology;
+    let (bond_list, angle_list, dihedral_list, exclusion_list, constraint_list, per_atom_charges) =
+        topology;
 
     // rq-637cd1a5 rq-02f4d342 rq-ea4205ec
     if config.spme.is_some() {
@@ -916,15 +962,43 @@ fn simulation_setup_finish_gpu(
         }
     }
 
+    // rq-d734328e — a topology [charges] section is the sole charge source
+    // and is mutually exclusive with any nonzero per-type charge.
+    if per_atom_charges.is_some() {
+        if let Some(pt) = config.particle_types.iter().find(|pt| pt.charge != 0.0) {
+            return Err(RunnerError::TypeChargeWithPerAtomCharges {
+                type_name: pt.name.clone(),
+                charge: pt.charge,
+            });
+        }
+    }
+
     // Build masses and charges arrays from per-particle type_index lookup.
+    // Charge comes from the topology [charges] section (a ChargeList) when
+    // present, otherwise from the per-type `charge` fallback.
     let mut masses_f64: Vec<f64> = Vec::with_capacity(n);
     let mut masses: Vec<Real> = Vec::with_capacity(n);
     let mut charges: Vec<Real> = Vec::with_capacity(n);
-    for &ti in &init.type_indices {
+    for (i, &ti) in init.type_indices.iter().enumerate() {
         let pt = &config.particle_types[ti as usize];
         masses_f64.push(pt.mass);
         masses.push(pt.mass as Real);
-        charges.push(pt.charge as Real);
+        let q = match &per_atom_charges {
+            Some(cl) => cl.charges[i],
+            None => pt.charge as Real,
+        };
+        charges.push(q);
+    }
+
+    // rq-d734328e — non-blocking net-charge warning. SPME tolerates a
+    // nonzero net charge via a uniform neutralising background, so this is
+    // a likely-modelling-error hint, not a fatal condition.
+    let q_net: f64 = charges.iter().map(|&q| q as f64).sum();
+    if q_net.abs() > 1.0e-4 {
+        eprintln!(
+            "warning: system net charge = {q_net:.6e} e (exceeds 1e-4 e); \
+             SPME applies a uniform neutralizing background"
+        );
     }
 
     let n_constraints = constraint_list.total_constraint_count();

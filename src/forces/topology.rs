@@ -8,6 +8,7 @@ use crate::gpu::GpuError;
 use crate::integrator::ConstraintRegistry;
 use crate::io::config::{DihedralTypeConfig, NamedSlotConfig};
 use crate::precision::Real;
+use crate::units::{Dimension, UnitSystem};
 
 // rq-0a8831b1
 #[derive(Debug, Clone, Copy)]
@@ -190,6 +191,16 @@ impl ExclusionList {
             particle_count,
         }
     }
+}
+
+// rq-52450608 rq-4cae9784 — a complete per-atom charge assignment parsed
+// from a `[charges]` section. Produced only when the section is present;
+// `charges[a]` is particle `a`'s charge in atomic units (elementary
+// charges). See `forces/topology.md` *Charge list*.
+#[derive(Debug, Clone)]
+pub struct ChargeList {
+    pub charges: Vec<Real>,
+    pub particle_count: usize,
 }
 
 // rq-3d5f2e98 — constraint slot framework data layout. See
@@ -416,6 +427,19 @@ pub enum TopologyFileError {
     BondIsAlsoConstraint { atom_i: u32, atom_j: u32 },
     #[error("constraint type `{name}`: {reason}")]
     InvalidConstraintTypeParams { name: String, reason: String },
+    // rq-107a61fc — [charges] section row and coverage errors.
+    #[error("line {line_number}: invalid charge row: {reason}")]
+    InvalidChargeRow { line_number: usize, reason: String },
+    #[error("atom {atom} appears in more than one [charges] row")]
+    DuplicateChargeAtom { atom: u32 },
+    #[error(
+        "[charges] section assigns charges to {present} of {particle_count} atoms; \
+         when present it must list every atom exactly once"
+    )]
+    IncompleteCharges {
+        present: usize,
+        particle_count: usize,
+    },
 }
 
 // rq-12b7dcb6
@@ -428,8 +452,18 @@ pub fn load_topology_file(
     dihedral_types: &[DihedralTypeConfig],
     constraint_types: &[NamedSlotConfig],
     constraint_registry: &ConstraintRegistry,
-) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList), TopologyFileError>
-{
+    units: UnitSystem,
+) -> Result<
+    (
+        BondList,
+        AngleList,
+        DihedralList,
+        ExclusionList,
+        ConstraintList,
+        Option<ChargeList>,
+    ),
+    TopologyFileError,
+> {
     let raw = std::fs::read_to_string(path)
         .map_err(|e| TopologyFileError::Io(format!("{}: {}", path.display(), e)))?;
     parse_topology_file(
@@ -440,6 +474,7 @@ pub fn load_topology_file(
         dihedral_types,
         constraint_types,
         constraint_registry,
+        units,
     )
 }
 
@@ -451,6 +486,8 @@ enum Section {
     Angles,
     Dihedrals,
     Constraints,
+    // rq-107a61fc
+    Charges,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -462,8 +499,18 @@ pub(crate) fn parse_topology_file(
     dihedral_types: &[DihedralTypeConfig],
     constraint_types: &[NamedSlotConfig],
     constraint_registry: &ConstraintRegistry,
-) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList), TopologyFileError>
-{
+    units: UnitSystem,
+) -> Result<
+    (
+        BondList,
+        AngleList,
+        DihedralList,
+        ExclusionList,
+        ConstraintList,
+        Option<ChargeList>,
+    ),
+    TopologyFileError,
+> {
     let max_index_for_check: i64 = particle_count as i64 - 1;
 
     let mut current: Section = Section::None;
@@ -472,6 +519,7 @@ pub(crate) fn parse_topology_file(
     let mut angles_seen = false;
     let mut dihedrals_seen = false;
     let mut constraints_seen = false;
+    let mut charges_seen = false;
     let mut raw_bonds: Vec<(usize, u32, u32, u32)> = Vec::new();
     let mut raw_excl: Vec<(usize, u32, u32, Real, Real)> = Vec::new();
     let mut raw_angles: Vec<(usize, u32, u32, u32, u32)> = Vec::new();
@@ -479,6 +527,8 @@ pub(crate) fn parse_topology_file(
     let mut raw_dihedrals: Vec<(usize, u32, u32, u32, u32, u32)> = Vec::new();
     // (line_number, atom_indices_in_declared_order, constraint_type_index)
     let mut raw_constraint_rows: Vec<(usize, Vec<u32>, u32)> = Vec::new();
+    // (line_number, atom_index, charge_in_user_units)
+    let mut raw_charges: Vec<(usize, u32, f64)> = Vec::new();
 
     for (idx, line) in raw.lines().enumerate() {
         let line_number = idx + 1;
@@ -538,6 +588,17 @@ pub(crate) fn parse_topology_file(
                     }
                     constraints_seen = true;
                     current = Section::Constraints;
+                }
+                // rq-107a61fc rq-27616511
+                "charges" => {
+                    if charges_seen {
+                        return Err(TopologyFileError::DuplicateSection {
+                            name: "charges".to_string(),
+                            line_number,
+                        });
+                    }
+                    charges_seen = true;
+                    current = Section::Charges;
                 }
                 other => {
                     return Err(TopologyFileError::UnknownSection {
@@ -851,6 +912,42 @@ pub(crate) fn parse_topology_file(
                     }
                 }
                 raw_constraint_rows.push((line_number, atoms, type_idx));
+            }
+            // rq-107a61fc — [charges] row: `atom_index charge`.
+            Section::Charges => {
+                let cols: Vec<&str> = trimmed.split_ascii_whitespace().collect();
+                if cols.len() != 2 {
+                    return Err(TopologyFileError::InvalidChargeRow {
+                        line_number,
+                        reason: format!("expected 2 columns, got {}", cols.len()),
+                    });
+                }
+                let atom_index = cols[0].parse::<u32>().map_err(|_| {
+                    TopologyFileError::InvalidChargeRow {
+                        line_number,
+                        reason: format!("atom_index {:?} is not a u32", cols[0]),
+                    }
+                })?;
+                if (atom_index as i64) > max_index_for_check {
+                    return Err(TopologyFileError::AtomIndexOutOfRange {
+                        line_number,
+                        index: atom_index,
+                        max: max_index_for_check.max(0) as u32,
+                    });
+                }
+                let charge = cols[1].parse::<f64>().map_err(|_| {
+                    TopologyFileError::InvalidChargeRow {
+                        line_number,
+                        reason: format!("charge {:?} is not a number", cols[1]),
+                    }
+                })?;
+                if !charge.is_finite() {
+                    return Err(TopologyFileError::InvalidChargeRow {
+                        line_number,
+                        reason: format!("charge {:?} is not finite", cols[1]),
+                    });
+                }
+                raw_charges.push((line_number, atom_index, charge));
             }
         }
     }
@@ -1323,7 +1420,47 @@ pub(crate) fn parse_topology_file(
         group_constraints,
         particle_count,
     };
-    Ok((bond_list, angle_list, dihedral_list, exclusion_list, constraint_list))
+
+    // rq-107a61fc rq-4cae9784 — assemble the ChargeList from the [charges]
+    // section when present. All-or-nothing coverage; each value is
+    // converted from the user's unit system to atomic units (elementary
+    // charges) at load.
+    let charge_list = if charges_seen {
+        let mut slots: Vec<Option<Real>> = vec![None; particle_count];
+        let mut present = 0usize;
+        for (_line, atom_index, charge_user) in raw_charges {
+            // atom_index is already bounds-checked to `< particle_count`
+            // (or the row was rejected as AtomIndexOutOfRange above).
+            let slot = &mut slots[atom_index as usize];
+            if slot.is_some() {
+                return Err(TopologyFileError::DuplicateChargeAtom { atom: atom_index });
+            }
+            *slot = Some(units.from_user(Dimension::Charge, charge_user) as Real);
+            present += 1;
+        }
+        if present != particle_count {
+            return Err(TopologyFileError::IncompleteCharges {
+                present,
+                particle_count,
+            });
+        }
+        let charges = slots.into_iter().map(|s| s.expect("full coverage")).collect();
+        Some(ChargeList {
+            charges,
+            particle_count,
+        })
+    } else {
+        None
+    };
+
+    Ok((
+        bond_list,
+        angle_list,
+        dihedral_list,
+        exclusion_list,
+        constraint_list,
+        charge_list,
+    ))
 }
 
 // rq-42195e6f — connectivity-derived molecule partition. See

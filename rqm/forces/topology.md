@@ -8,9 +8,10 @@ future dihedral functional forms), the `Constraint` slot
 (`integration/constraint-framework.md`, `integration/shake.md`), and the
 Lennard-Jones and SPME real-space slots' exclusion logic
 (`lj-pair-force.md`, `spme.md`). The file lists bond instances, angle instances,
-dihedral instances, per-pair non-bonded exclusions, and rigid constraint
-groups; bond, angle, dihedral, and constraint *types* (parameters) live in
-the config alongside particle types.
+dihedral instances, per-pair non-bonded exclusions, rigid constraint
+groups, and optional per-atom charges; bond, angle, dihedral, and
+constraint *types* (parameters) live in the config alongside particle
+types.
 
 The file produces five host-side structures: a `BondList` (bonds, with
 precomputed per-atom indexing tables for deterministic reduction), an
@@ -22,6 +23,16 @@ constraint-coupled, or otherwise excluded atoms), and a `ConstraintList`
 (rigid constraint groups; see `integration/constraint-framework.md` for the
 SoA layout and the kernel contract).
 
+When the file contains a `[charges]` section it additionally produces a
+`ChargeList` — a complete per-atom charge assignment (see *Charge
+entries* and *Charge list*). A present `ChargeList` is the source of
+every particle's charge, and the per-type `charge` field of
+`[[particle_types]]` (`io/config-schema.md`) is then required to be
+absent or zero; when the section is absent, the per-type `charge` field
+is the fallback source. The runner assembles the per-particle charge
+array and validates this precedence at setup (see
+`simulation-runner.md`).
+
 The bond and constraint connectivity additionally induces a
 `MoleculeList`, a partition of the particles into connected molecular
 groups derived from the combined bond + constraint graph (see *Molecule
@@ -31,14 +42,16 @@ centres of mass.
 
 ## File Format <!-- rq-a33c1f4f -->
 
-The `.topology` file is UTF-8 text organised into five named sections,
-`[bonds]`, `[exclusions]`, `[angles]`, `[dihedrals]`, and `[constraints]`.
-Each section may appear at most once; each may be empty; each may be absent
-(an absent `[bonds]` means no bonds, an absent `[exclusions]` means no
-explicit exclusions, an absent `[angles]` means no angles, an absent
-`[dihedrals]` means no dihedrals, an absent `[constraints]` means no rigid
-constraint groups). Section headers are case-sensitive and must appear on
-their own line. Sections may appear in any order.
+The `.topology` file is UTF-8 text organised into six named sections,
+`[bonds]`, `[exclusions]`, `[angles]`, `[dihedrals]`, `[constraints]`, and
+`[charges]`. Each section may appear at most once; each may be empty; each
+may be absent (an absent `[bonds]` means no bonds, an absent `[exclusions]`
+means no explicit exclusions, an absent `[angles]` means no angles, an
+absent `[dihedrals]` means no dihedrals, an absent `[constraints]` means no
+rigid constraint groups, an absent `[charges]` means per-atom charges are
+not supplied and the per-type `charge` fallback is used). Section headers
+are case-sensitive and must appear on their own line. Sections may appear
+in any order.
 
 ```
 # Comments start with '#' and run to end of line. Blank lines are <!-- rq-38285db7 -->
@@ -81,6 +94,15 @@ their own line. Sections may appear in any order.
 # atom is the oxygen and the next two are the hydrogens). <!-- rq-7e2c482a -->
 # atom_count per row is determined by the constraint_type's `kind`. <!-- rq-94cb21a5 -->
 0 1 2 SPCE
+
+[charges]
+# Column format: atom_index  charge <!-- rq-bcc71adf -->
+# One row per particle; charge is in the config's unit system <!-- rq-3376c1b0 -->
+# (coulombs in SI mode, elementary charges in atomic mode). <!-- rq-2926ea10 -->
+# When this section is present it must cover every atom exactly once. <!-- rq-b74e8ce4 -->
+0 -0.8340
+1  0.4170
+2  0.4170
 ```
 
 Inside a section, columns are separated by ASCII whitespace (one or
@@ -231,6 +253,45 @@ A pair of atoms `(min, max)` that appears as a constraint pair (every
 appearing in `[bonds]`. Conflicting rows are rejected as
 `BondIsAlsoConstraint`.
 
+### Charge entries <!-- rq-107a61fc -->
+
+Each non-comment line in `[charges]` has the form `atom_index charge`
+where:
+
+- `atom_index: u32` is a zero-based particle index and must be
+  `< particle_count`. An out-of-range index is rejected as
+  `AtomIndexOutOfRange`.
+- `charge: f64` is the particle's electric charge in the config's unit
+  system (coulombs in `si` mode, elementary charges in `atomic` mode;
+  see `io/unit-system.md`). It must be finite; any sign, and exactly
+  zero, are accepted. A non-finite or unparseable value is rejected as
+  `InvalidChargeRow`. A row whose column count is not exactly two is
+  also rejected as `InvalidChargeRow`.
+
+The `[charges]` section is **all-or-nothing**: when it is present it must
+assign a charge to every particle exactly once. An atom index that
+appears in more than one row is rejected as `DuplicateChargeAtom`. A
+section that resolves to fewer than `particle_count` distinct atoms is
+rejected as `IncompleteCharges`; a section that supplies exactly
+`particle_count` distinct, in-range indices necessarily covers every
+atom. Row order in the section is not significant — each charge is stored
+at its declared `atom_index`.
+
+The charge values are converted from the config's unit system to the
+engine's internal atomic units (elementary charges) at load, so the
+resulting `ChargeList` holds atomic-unit charges, consistent with every
+other unit-bearing quantity past the I/O boundary.
+
+A present `[charges]` section is the sole source of per-particle charge:
+the per-type `charge` field of `[[particle_types]]` is then required to
+be absent or zero, and a config that declares both a `[charges]` section
+and a nonzero per-type `charge` is rejected at runner setup (see
+`simulation-runner.md`). When `[charges]` is absent, each particle's
+charge comes from its type's `charge` field, exactly as for a topology
+file that omits the section. Either way the per-particle charge is stored
+only in `posq.w` on the device; the `[charges]` section changes the
+*source* of that value, not the device layout or any pair-force kernel.
+
 ### Effective exclusions <!-- rq-24f280af -->
 
 After parsing, the consumer-facing `ExclusionList` is the *effective
@@ -301,12 +362,16 @@ from the list; the LJ and SPME real-space kernels treat them as
 ### Empty file <!-- rq-1c794f95 -->
 
 A `.topology` file containing zero bonds, zero exclusions, zero
-angles, zero dihedrals, and zero constraints is valid (all sections
-empty or absent). The runner produces an empty `BondList`, an empty
-`AngleList`, an empty `DihedralList`, an empty `ExclusionList`, and
-an empty `ConstraintList`; the `MorseBonded`, `HarmonicAngle`,
-`PeriodicDihedral` (and any other dihedral slot), and `Constraint`
-slots are not constructed.
+angles, zero dihedrals, zero constraints, and no `[charges]` section is
+valid (all sections empty or absent). The runner produces an empty
+`BondList`, an empty `AngleList`, an empty `DihedralList`, an empty
+`ExclusionList`, an empty `ConstraintList`, and `None` for the charge
+list; the `MorseBonded`, `HarmonicAngle`, `PeriodicDihedral` (and any
+other dihedral slot), and `Constraint` slots are not constructed, and
+every particle's charge comes from its type's `charge` field. An empty
+`[charges]` section (the header with no rows) is valid only when
+`particle_count == 0`; for a nonzero particle count an empty `[charges]`
+section is rejected as `IncompleteCharges`.
 
 ## Molecule grouping <!-- rq-c200c7b8 -->
 
@@ -449,6 +514,25 @@ The helper performs the linear scan over atom `i`'s partner range and
 returns either the matching scale (from the per-potential scale array
 the kernel passes in) or `1.0f` when `j` is not present.
 
+### Charge list <!-- rq-4cae9784 -->
+
+The `ChargeList` is produced only when the `.topology` file contains a
+`[charges]` section (an absent section yields no `ChargeList`). It
+carries:
+
+- `charges: Vec<Real>` — length `particle_count`. `charges[a]` is the
+  charge of particle `a` in atomic units (elementary charges), stored at
+  the atom's declared index. Because the section is all-or-nothing, every
+  entry is populated.
+- `particle_count: usize` — `N`.
+
+The `ChargeList` is a dense per-atom assignment, not a sparse list of
+overrides: its length equals the particle count and each particle's
+charge is present. The runner reads it once at setup to populate the
+per-particle charge array uploaded to `posq.w` (see
+`simulation-runner.md`); it induces no device-side table of its own and
+is immutable for the lifetime of a run.
+
 ### Molecule list <!-- rq-3246a873 -->
 
 For `M` molecules among `N` particles, the host-side `MoleculeList`
@@ -568,11 +652,17 @@ contribution flows through to the caller without a separate code path.
 
   Method `MoleculeList::molecule_count(&self) -> usize`.
 
+- `ChargeList` — host-side. Fields: `charges: Vec<Real>` (length <!-- rq-52450608 -->
+  `particle_count`, in atomic units), `particle_count: usize`. A complete
+  per-atom charge assignment parsed from a `[charges]` section (see
+  *Charge list*). Produced only when the section is present; `charges[a]`
+  is particle `a`'s charge.
+
 - `TopologyFileError` — error type returned by the parser. Variants: <!-- rq-bca0adbc -->
   - `Io(String)` — failed to read the file.
   - `UnknownSection { name: String, line_number: usize }` — a section
     header is not one of the accepted names (`bonds`, `exclusions`,
-    `angles`, `dihedrals`, `constraints`).
+    `angles`, `dihedrals`, `constraints`, `charges`).
   - `DuplicateSection { name: String, line_number: usize }` — the
     same section header appears twice.
   - `ContentOutsideSection { line_number: usize }` — non-blank,
@@ -614,18 +704,31 @@ contribution flows through to the caller without a separate code path.
   - `BondIsAlsoConstraint { atom_i: u32, atom_j: u32 }` — a pair
     appears in both `[bonds]` and (after expansion) in
     `[constraints]`.
+  - `InvalidChargeRow { line_number: usize, reason: String }` — a
+    `[charges]` row does not have exactly two columns, its
+    `atom_index` does not parse as `u32`, or its `charge` does not
+    parse as a finite `f64`.
+  - `DuplicateChargeAtom { atom: u32 }` — an atom index appears in more
+    than one `[charges]` row.
+  - `IncompleteCharges { present: usize, particle_count: usize }` — the
+    `[charges]` section is present but assigns charges to only `present`
+    of the `particle_count` atoms (the section is all-or-nothing).
 
 ### Functions <!-- rq-e66012e0 -->
 
-- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], dihedral_types: &[DihedralTypeConfig], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList), TopologyFileError>` <!-- rq-12b7dcb6 -->
-  - Reads the file at `path` and parses all five sections.
+- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], dihedral_types: &[DihedralTypeConfig], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry, units: UnitSystem) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList, Option<ChargeList>), TopologyFileError>` <!-- rq-12b7dcb6 -->
+  - Reads the file at `path` and parses all six sections.
   - Validates every constraint described in *File Format*.
   - Returns the canonicalised, sorted `BondList`, `AngleList`,
     `DihedralList`, the *effective* `ExclusionList` (explicit
     entries plus implicit bond-derived, angle-derived,
-    constraint-derived, and dihedral-derived-1-4 defaults), and the
+    constraint-derived, and dihedral-derived-1-4 defaults), the
     `ConstraintList` (groups sorted by minimum particle index per
-    `integration/constraint-framework.md`).
+    `integration/constraint-framework.md`), and an
+    `Option<ChargeList>` — `Some(charge_list)` when the file contains a
+    `[charges]` section (a complete per-atom charge assignment; see
+    *Charge entries* and *Charge list*), or `None` when the section is
+    absent.
   - The caller passes `particle_count` (used to bound atom indices),
     `bond_type_names` (used to resolve `bond_type_name` strings to
     indices in the config's `[[bond_types]]` array),
@@ -638,10 +741,20 @@ contribution flows through to the caller without a separate code path.
     1-4 exclusions),
     `constraint_types` (the full parsed `[[constraint_types]]`
     array of `NamedSlotConfig` entries, used to resolve
-    `constraint_type_name` strings to indices), and
+    `constraint_type_name` strings to indices),
     `constraint_registry` (used to look up each constraint type's
     builder for the `expected_atom_count(&params)` query that
-    size-checks `[constraints]` rows).
+    size-checks `[constraints]` rows), and
+    `units` (the config's `UnitSystem`, used to convert each
+    `[charges]` value from the user's unit system to atomic units so
+    the returned `ChargeList` holds atomic-unit charges).
+  - When a `[charges]` section is present it must assign a charge to
+    every particle exactly once; a missing atom is rejected as
+    `IncompleteCharges`, a repeated atom as `DuplicateChargeAtom`. The
+    function does not consult the per-type `charge` fields and does not
+    enforce the "`[charges]` present ⇒ per-type charge must be zero"
+    rule — that cross-check, and the net-charge warning, are applied by
+    the runner (see `simulation-runner.md`).
 
 - `MoleculeList::from_topology(particle_count: usize, bonds: &BondList, constraints: &ConstraintList) -> MoleculeList` <!-- rq-b0bdc311 -->
   - Builds the connected-component partition described in *Molecule
@@ -691,6 +804,18 @@ contribution flows through to the caller without a separate code path.
 - An exclusion "scale = NaN" sentinel to mean "remove implicit
   exclusion". An explicit entry with `scale = 1.0` already achieves
   that effect.
+- Partial per-atom charge coverage. A `[charges]` section that lists
+  only some atoms and leaves the rest to fall back to their type
+  `charge` is rejected (`IncompleteCharges`); the section is
+  all-or-nothing. A system that needs distinct charges on only a few
+  atoms lists every atom's charge, using the type charge value for the
+  unchanged ones.
+- Per-atom masses or per-atom Lennard-Jones parameters. Charge is the
+  only per-atom force-field quantity carried by the `.topology` file;
+  mass and LJ `sigma`/`epsilon` remain per-type (`io/config-schema.md`).
+  Collapsing charge to per-atom lets a force field define one particle
+  type per distinct `(mass, sigma, epsilon)` tuple rather than one per
+  distinct `(mass, sigma, epsilon, charge)` tuple.
 
 ---
 
@@ -705,7 +830,11 @@ Feature: Topology file with bonds, angles, and exclusions
     And an angle_type_names slice of ["HOH"]
     And a dihedral_types slice (empty by default; scenarios that exercise
       [dihedrals] supply their own typed entries with explicit scales)
+    And a units selector of "atomic" unless a scenario states otherwise
     And particle_count = 4
+    # load_topology_file returns a trailing Option<ChargeList>; scenarios
+    # that do not exercise [charges] receive None and omit it from the
+    # returned tuple for brevity.
 
   # --- Happy paths ---
 
@@ -1338,4 +1467,99 @@ Feature: Topology file with bonds, angles, and exclusions
     Given a BondList with bonds (2,0) and (0,1), particle_count = 3
     When MoleculeList::from_topology(3, &bonds, &constraints) is called
     Then molecule 0's atoms are [0, 1, 2]
+
+  # --- Charge rows ---
+
+  @rq-41691785
+  Scenario: Load a topology file with a [charges] section
+    Given tmp/sim.topology containing
+      """
+      [charges]
+      0 -0.834
+      1  0.417
+      2  0.417
+      3  0.000
+      """
+    And a units selector of "atomic"
+    When load_topology_file is called with particle_count = 4
+    Then the returned Option<ChargeList> is Some(charge_list)
+    And charge_list.charges equals [-0.834, 0.417, 0.417, 0.0] (in atomic units)
+    And charge_list.particle_count equals 4
+
+  @rq-08ab6b03
+  Scenario: A topology file with no [charges] section yields None
+    Given tmp/sim.topology with a [bonds] section and no [charges] section
+    When load_topology_file is called
+    Then the returned Option<ChargeList> is None
+
+  @rq-815534fc
+  Scenario: Charge rows may appear in any atom order
+    Given a [charges] section with rows "3 0.0", "1 0.417", "0 -0.834", "2 0.417"
+    When load_topology_file is called with particle_count = 4
+    Then charge_list.charges equals [-0.834, 0.417, 0.417, 0.0]
+      (each charge stored at its declared atom_index, not row order)
+
+  @rq-f85569fa
+  Scenario: Negative and zero charges are accepted
+    Given a [charges] section assigning atom 0 charge -1.0 and atom 1 charge 0.0
+      (and atoms 2, 3 any finite charge)
+    When load_topology_file is called with particle_count = 4
+    Then it returns Ok with charge_list.charges[0] == -1.0 and charge_list.charges[1] == 0.0
+
+  @rq-f6b8d252
+  Scenario: SI charge values are converted to atomic units at load
+    Given a [charges] section assigning atom 0 the value 1.602176634e-19
+      (and atoms 1, 2, 3 the value 0.0)
+    And a units selector of "si"
+    When load_topology_file is called with particle_count = 4
+    Then charge_list.charges[0] equals 1.0 within f32 round-off
+      (one elementary charge, the atomic-unit charge)
+
+  @rq-ce19b7ab
+  Scenario: A [charges] section missing an atom is rejected
+    Given a [charges] section with rows for atoms 0, 1, 2 only (atom 3 absent)
+    When load_topology_file is called with particle_count = 4
+    Then it returns Err(TopologyFileError::IncompleteCharges { present: 3, particle_count: 4 })
+
+  @rq-194105d0
+  Scenario: An empty [charges] section with a nonzero particle count is rejected
+    Given a [charges] section header with no rows
+    When load_topology_file is called with particle_count = 4
+    Then it returns Err(TopologyFileError::IncompleteCharges { present: 0, particle_count: 4 })
+
+  @rq-bc05f0f0
+  Scenario: A duplicate atom in [charges] is rejected
+    Given a [charges] section with rows for atoms 0, 1, 2, 3 and a second row for atom 1
+    When load_topology_file is called with particle_count = 4
+    Then it returns Err(TopologyFileError::DuplicateChargeAtom { atom: 1 })
+
+  @rq-8f03bfba
+  Scenario: A charge row with an out-of-range atom index is rejected
+    Given a [charges] row "9 0.0" and particle_count = 4
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::AtomIndexOutOfRange { index: 9, max: 3, .. })
+
+  @rq-c49984a5
+  Scenario: A charge row with the wrong column count is rejected
+    Given a [charges] row "0 0.5 extra"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::InvalidChargeRow { line_number: _, reason: _ })
+
+  @rq-4f430b32
+  Scenario: A charge row with a non-finite charge is rejected
+    Given a [charges] row "0 nan"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::InvalidChargeRow { line_number: _, reason: _ })
+
+  @rq-6f8f35a2
+  Scenario: A charge row with a non-integer atom index is rejected
+    Given a [charges] row "abc 0.5"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::InvalidChargeRow { line_number: _, reason: _ })
+
+  @rq-27616511
+  Scenario: A duplicate [charges] section header is rejected
+    Given tmp/sim.topology with two [charges] headers
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::DuplicateSection { name: "charges", line_number: _ })
 ```

@@ -1167,6 +1167,18 @@
     "title": "Reading Existing Requirements",
     "type": "section"
   },
+  "rq-08ab6b03": {
+    "decl": "Scenario: A topology file with no [charges] section yields None",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A topology file with no [charges] section yields None",
+    "type": "scenario"
+  },
   "rq-08aba7ee": {
     "decl": "# Feature: Steepest-Descent Energy Minimizer",
     "file": "minimization/steepest-descent",
@@ -2260,6 +2272,23 @@
     "title": "`Barostat` trait surface",
     "type": "section"
   },
+  "rq-107a61fc": {
+    "decl": "### Charge entries",
+    "file": "forces/topology",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Charge entries",
+    "type": "section"
+  },
   "rq-107a7187": {
     "decl": "Scenario: KE of a single particle at rest is zero",
     "file": "io/log-output",
@@ -2660,7 +2689,7 @@
     "type": "scenario"
   },
   "rq-12b7dcb6": {
-    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], dihedral_types: &[DihedralTypeConfig], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList), TopologyFileError>`",
+    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], dihedral_types: &[DihedralTypeConfig], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry, units: UnitSystem) -> Result<(BondList, AngleList, DihedralList, ExclusionList, ConstraintList, Option<ChargeList>), TopologyFileError>`",
     "file": "forces/topology",
     "refs": [
       {
@@ -3466,6 +3495,18 @@
     ],
     "title": "PhaseKind",
     "type": "api-item"
+  },
+  "rq-194105d0": {
+    "decl": "Scenario: An empty [charges] section with a nonzero particle count is rejected",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An empty [charges] section with a nonzero particle count is rejected",
+    "type": "scenario"
   },
   "rq-19496703": {
     "decl": "### Shared `nhc_chain_sub_step` host-side helper",
@@ -5522,6 +5563,22 @@
     "title": "JIT fragment behaviour",
     "type": "section"
   },
+  "rq-27616511": {
+    "decl": "Scenario: A duplicate [charges] section header is rejected",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A duplicate [charges] section header is rejected",
+    "type": "scenario"
+  },
   "rq-277dbeb2": {
     "decl": "- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>`",
     "file": "integration/framework",
@@ -5728,6 +5785,13 @@
     ],
     "title": "Reject a name containing non-ASCII characters",
     "type": "scenario"
+  },
+  "rq-2926ea10": {
+    "decl": "# (coulombs in SI mode, elementary charges in atomic mode).",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "(coulombs in SI mode, elementary charges in atomic mode).",
+    "type": "file"
   },
   "rq-2932ea42": {
     "decl": "## Launch Configuration",
@@ -6962,6 +7026,13 @@
     "refs": [],
     "title": "SimulationSetup::new returns a populated struct on a valid config",
     "type": "scenario"
+  },
+  "rq-3376c1b0": {
+    "decl": "# One row per particle; charge is in the config's unit system",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "One row per particle; charge is in the config's unit system",
+    "type": "file"
   },
   "rq-33861244": {
     "decl": "Scenario: LjSpmeRealFusedBuilder is not part of PotentialRegistry::with_builtins",
@@ -8696,6 +8767,18 @@
     "title": "Degenerate geometry (|n_vec|² ~ 0) produces zero force, not NaN",
     "type": "scenario"
   },
+  "rq-41691785": {
+    "decl": "Scenario: Load a topology file with a [charges] section",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Load a topology file with a [charges] section",
+    "type": "scenario"
+  },
   "rq-4169d3af": {
     "decl": "Scenario: Reject schema_version = 0",
     "file": "io/config-schema",
@@ -9848,6 +9931,23 @@
     "title": "Wrap Algorithm",
     "type": "section"
   },
+  "rq-4cae9784": {
+    "decl": "### Charge list",
+    "file": "forces/topology",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Charge list",
+    "type": "section"
+  },
   "rq-4cb82e94": {
     "decl": "- `ElemTy` — element type of a pointer parameter or scalar parameter,",
     "file": "forces/jit-composed-pair-force",
@@ -10031,6 +10131,18 @@
     ],
     "title": "BerendsenBarostatBuilder",
     "type": "api-item"
+  },
+  "rq-4f430b32": {
+    "decl": "Scenario: A charge row with a non-finite charge is rejected",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A charge row with a non-finite charge is rejected",
+    "type": "scenario"
   },
   "rq-4f5643f1": {
     "decl": "### Types",
@@ -10355,6 +10467,18 @@
     "file": "integration/settle",
     "refs": [],
     "title": "SettleParams",
+    "type": "api-item"
+  },
+  "rq-52450608": {
+    "decl": "- `ChargeList` — host-side. Fields: `charges: Vec<Real>` (length",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ChargeList",
     "type": "api-item"
   },
   "rq-5269221c": {
@@ -14092,6 +14216,18 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-6f8f35a2": {
+    "decl": "Scenario: A charge row with a non-integer atom index is rejected",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A charge row with a non-integer atom index is rejected",
+    "type": "scenario"
+  },
   "rq-6f99094a": {
     "decl": "- `f64` build: `{:.17e}` — 17-fractional-digit exponent representation,",
     "file": "precision",
@@ -16346,6 +16482,18 @@
     "title": "An overflow bit makes pre_step halt with PackedNeighborOverflow",
     "type": "scenario"
   },
+  "rq-815534fc": {
+    "decl": "Scenario: Charge rows may appear in any atom order",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Charge rows may appear in any atom order",
+    "type": "scenario"
+  },
   "rq-81659783": {
     "decl": "## Feature API",
     "file": "forces/topology",
@@ -17838,6 +17986,18 @@
     ],
     "title": "log_column_names",
     "type": "api-item"
+  },
+  "rq-8f03bfba": {
+    "decl": "Scenario: A charge row with an out-of-range atom index is rejected",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A charge row with an out-of-range atom index is rejected",
+    "type": "scenario"
   },
   "rq-8f121de5": {
     "decl": "## Launch Configuration",
@@ -22943,6 +23103,13 @@
     "title": "Config does not exist",
     "type": "scenario"
   },
+  "rq-b74e8ce4": {
+    "decl": "# When this section is present it must cover every atom exactly once.",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "When this section is present it must cover every atom exactly once.",
+    "type": "file"
+  },
   "rq-b7573bd5": {
     "decl": "Scenario: Accept a lower-triangular triclinic lattice",
     "file": "io/init-state-file",
@@ -23473,6 +23640,18 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-bc05f0f0": {
+    "decl": "Scenario: A duplicate atom in [charges] is rejected",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A duplicate atom in [charges] is rejected",
+    "type": "scenario"
+  },
   "rq-bc1b494f": {
     "decl": "Scenario: Empty dihedral_type name rejected",
     "file": "io/config-schema",
@@ -23552,6 +23731,13 @@
     ],
     "title": "Reject an unknown field under [minimization.algorithm]",
     "type": "scenario"
+  },
+  "rq-bcc71adf": {
+    "decl": "# Column format: atom_index  charge",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Column format: atom_index  charge",
+    "type": "file"
   },
   "rq-bce26a14": {
     "decl": "# Feature: Packed-Neighbour Pair-Force Architecture",
@@ -24464,6 +24650,18 @@
     "refs": [],
     "title": "Empty State",
     "type": "section"
+  },
+  "rq-c49984a5": {
+    "decl": "Scenario: A charge row with the wrong column count is rejected",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A charge row with the wrong column count is rejected",
+    "type": "scenario"
   },
   "rq-c49b2fe6": {
     "decl": "- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<bool, NeighborListError>`",
@@ -25703,6 +25901,18 @@
     "title": "Round-trip through load_init_state preserves a triclinic lattice",
     "type": "scenario"
   },
+  "rq-ce19b7ab": {
+    "decl": "Scenario: A [charges] section missing an atom is rejected",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A [charges] section missing an atom is rejected",
+    "type": "scenario"
+  },
   "rq-ce37404c": {
     "decl": "## Parameters",
     "file": "integration/mtk-npt",
@@ -26833,7 +27043,12 @@
     "decl": "### Once-only setup",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Once-only setup",
     "type": "section"
   },
@@ -30910,6 +31125,18 @@
     "title": "Iteration Semantics <!-- -->",
     "type": "section"
   },
+  "rq-f6b8d252": {
+    "decl": "Scenario: SI charge values are converted to atomic units at load",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SI charge values are converted to atomic units at load",
+    "type": "scenario"
+  },
   "rq-f6d45062": {
     "decl": "## Real-space slot",
     "file": "forces/spme",
@@ -31155,6 +31382,18 @@
       }
     ],
     "title": "Timings path equal to trajectory path is rejected",
+    "type": "scenario"
+  },
+  "rq-f85569fa": {
+    "decl": "Scenario: Negative and zero charges are accepted",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Negative and zero charges are accepted",
     "type": "scenario"
   },
   "rq-f856f666": {

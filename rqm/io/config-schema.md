@@ -653,6 +653,20 @@ One entry per particle species. At least one entry required.
   uploads the per-type charges into a per-particle `charges` buffer at
   init time (see `particle-state.md`).
 
+  A per-type `charge` is the fallback charge source. When the `.topology`
+  file supplies a `[charges]` section (a per-atom charge assignment; see
+  `forces/topology.md`), that section is the sole source of every
+  particle's charge and every `[[particle_types]]` entry must leave
+  `charge` at its `0.0` default. A config that declares both a
+  `[charges]` section and a nonzero per-type `charge` is rejected at
+  setup with `RunnerError::TypeChargeWithPerAtomCharges`
+  (`simulation-runner.md`). Declaring one particle type per distinct
+  `(mass, sigma, epsilon)` tuple and carrying the differing charges in
+  the `[charges]` section — rather than one type per distinct
+  `(mass, sigma, epsilon, charge)` tuple — is how a many-charge
+  force-field system keeps its `[[particle_types]]` and
+  `[[pair_interactions]]` arrays small.
+
 Names must be unique within the array.
 
 #### `[[pair_interactions]]` (array of tables) <!-- rq-9244aae4 -->
