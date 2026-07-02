@@ -268,7 +268,7 @@
     "type": "section"
   },
   "rq-017b6769": {
-    "decl": "Scenario: Reject non-positive epsilon",
+    "decl": "Scenario: Reject negative epsilon",
     "file": "io/config-schema",
     "refs": [
       {
@@ -276,7 +276,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reject non-positive epsilon",
+    "title": "Reject negative epsilon",
     "type": "scenario"
   },
   "rq-01813ffa": {
@@ -4414,6 +4414,18 @@
     "title": "Config bond_type with an unknown potential is rejected",
     "type": "scenario"
   },
+  "rq-1fc720f6": {
+    "decl": "Scenario: An epsilon = 0 pair contributes exactly zero force and energy",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An epsilon = 0 pair contributes exactly zero force and energy",
+    "type": "scenario"
+  },
   "rq-1fcaf334": {
     "decl": "- `TrajectoryWriterError` — error type. Variants:",
     "file": "io/trajectory-output",
@@ -8072,6 +8084,18 @@
     "title": "graph_batch_size = 1 is valid and runs every step under graph mode",
     "type": "scenario"
   },
+  "rq-3c673e27": {
+    "decl": "Scenario: Reject non-finite epsilon",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject non-finite epsilon",
+    "type": "scenario"
+  },
   "rq-3c6753bc": {
     "decl": "Scenario: ConstraintList::subset preserves the supplied index order",
     "file": "integration/constraint-framework",
@@ -8915,6 +8939,18 @@
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
     "title": "kernels/angle.cu does not declare a harmonic_angle_force entry point",
+    "type": "scenario"
+  },
+  "rq-4469c43d": {
+    "decl": "Scenario: Accept a Lennard-Jones-inert pair with epsilon = 0",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Accept a Lennard-Jones-inert pair with epsilon = 0",
     "type": "scenario"
   },
   "rq-44ccc1cb": {
@@ -17018,6 +17054,18 @@
     "title": "neighbor_displacement_check_flag",
     "type": "api-item"
   },
+  "rq-88518736": {
+    "decl": "Scenario: A sigma = 0 pair contributes exactly zero force and energy",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A sigma = 0 pair contributes exactly zero force and energy",
+    "type": "scenario"
+  },
   "rq-888ed181": {
     "decl": "Scenario: Every potential builder is consulted for activation",
     "file": "registry-framework",
@@ -18169,7 +18217,12 @@
     "decl": "#### `[[pair_interactions]]` (array of tables)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[[pair_interactions]]` (array of tables)",
     "type": "section"
   },
@@ -21221,7 +21274,7 @@
     "type": "scenario"
   },
   "rq-aa19f894": {
-    "decl": "Scenario: Reject non-positive sigma",
+    "decl": "Scenario: Reject negative sigma",
     "file": "io/config-schema",
     "refs": [
       {
@@ -21229,7 +21282,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reject non-positive sigma",
+    "title": "Reject negative sigma",
     "type": "scenario"
   },
   "rq-aa33e39f": {
@@ -25357,6 +25410,18 @@
     "file": "forces/topology",
     "refs": [],
     "title": "Implicit 1-4 uses the dihedral_type's scale_lj_14 / scale_coul_14",
+    "type": "scenario"
+  },
+  "rq-cbcc4e3b": {
+    "decl": "Scenario: Accept sigma = 0",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Accept sigma = 0",
     "type": "scenario"
   },
   "rq-cbe60abb": {

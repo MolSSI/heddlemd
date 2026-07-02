@@ -1871,8 +1871,12 @@ fn validate_pair_interactions(
         }
         match &p.potential {
             PairPotentialParams::LennardJones { sigma, epsilon } => {
-                require_finite_positive(&format!("pair_interactions[{i}].sigma"), *sigma)?;
-                require_finite_positive(&format!("pair_interactions[{i}].epsilon"), *epsilon)?;
+                // rq-9244aae4 — sigma/epsilon are finite and >= 0. A pair
+                // with epsilon = 0 or sigma = 0 is Lennard-Jones-inert
+                // (zero LJ force/energy/virial); negatives/NaN/inf are
+                // rejected.
+                require_finite_non_negative(&format!("pair_interactions[{i}].sigma"), *sigma)?;
+                require_finite_non_negative(&format!("pair_interactions[{i}].epsilon"), *epsilon)?;
             }
         }
     }

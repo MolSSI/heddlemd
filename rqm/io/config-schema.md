@@ -688,9 +688,16 @@ Common fields:
 Fields accepted for `potential = "lennard-jones"` (see
 `forces/lj-pair-force.md`):
 
-- `sigma: f64` — LJ zero-crossing distance in metres. Finite, strictly
-  positive.
-- `epsilon: f64` — LJ well depth in joules. Finite, strictly positive.
+- `sigma: f64` — LJ zero-crossing distance in metres. Finite and `>= 0`.
+  Negative, NaN, and infinite values are rejected.
+- `epsilon: f64` — LJ well depth in joules. Finite and `>= 0`. Negative,
+  NaN, and infinite values are rejected.
+
+A pair with `epsilon = 0` or `sigma = 0` is Lennard-Jones-inert: it
+contributes zero LJ force, energy, and virial at every separation. This
+lets a force field express genuinely non-interacting type pairs — for
+example a hydrogen that carries a partial charge but no Lennard-Jones
+site — directly, rather than through a negligible placeholder.
 
 Same-type pairs are required even when only one type is declared:
 `between = ["Ar", "Ar"]` must appear. Unknown fields for the chosen
@@ -2088,16 +2095,36 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::InvalidValue { field: "particle_types[0].mass", reason: _ })
 
   @rq-aa19f894
-  Scenario: Reject non-positive sigma
-    Given the Background config with pair_interactions[0].sigma=0.0
+  Scenario: Reject negative sigma
+    Given the Background config with pair_interactions[0].sigma=-1.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].sigma", reason: _ })
 
   @rq-017b6769
-  Scenario: Reject non-positive epsilon
+  Scenario: Reject negative epsilon
     Given the Background config with pair_interactions[0].epsilon=-1.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].epsilon", reason: _ })
+
+  @rq-3c673e27
+  Scenario: Reject non-finite epsilon
+    Given the Background config with pair_interactions[0].epsilon=nan
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].epsilon", reason: _ })
+
+  @rq-4469c43d
+  Scenario: Accept a Lennard-Jones-inert pair with epsilon = 0
+    Given the Background config with pair_interactions[0].epsilon=0.0
+    When load_config is called
+    Then it returns Ok(config)
+    And config.pair_interactions[0] carries epsilon = 0.0
+
+  @rq-cbcc4e3b
+  Scenario: Accept sigma = 0
+    Given the Background config with pair_interactions[0].sigma=0.0
+    When load_config is called
+    Then it returns Ok(config)
+    And config.pair_interactions[0] carries sigma = 0.0
 
   @rq-ae65c293
   Scenario: Reject non-positive cutoff

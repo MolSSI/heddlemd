@@ -641,6 +641,83 @@ fn lj_mixed_types_use_cross_term_parameters() {
     assert!((downloaded.forces_x[0] + downloaded.forces_x[1]).abs() < 1e-4 * expected_fx0.abs());
 }
 
+// A single-type ForceField whose only LJ pair uses the given sigma/epsilon.
+fn inert_lj_force_field(gpu: &GpuContext, n: usize, sigma: f64, epsilon: f64) -> ForceField {
+    ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        gpu,
+        n,
+        &box_10(gpu),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &[lj_pair("Ar", "Ar", sigma, epsilon)],
+        &[],
+        &[],
+        &[],
+        None,
+        &[],
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &DihedralList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap()
+}
+
+// Two same-type atoms on the x-axis at separation 1.5 (inside cutoff 5.0).
+fn two_atom_same_type_state() -> ParticleState {
+    ParticleState::new(
+        vec![0.0 as Real, 1.5],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![0.0 as Real, 0.0],
+        vec![1.0 as Real, 1.0],
+        vec![0.0 as Real, 0.0],
+        vec![0u32, 0u32],
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+fn assert_inert_pair_is_zero(gpu: &GpuContext, sigma: f64, epsilon: f64) {
+    let state = two_atom_same_type_state();
+    let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
+    let mut ff = inert_lj_force_field(gpu, 2, sigma, epsilon);
+    step_and_finalize(&mut ff, &mut buffers, &box_10(gpu), gpu, AggregateLevel::ForcesAndScalars);
+    let mut downloaded = state.clone();
+    downloaded.download_from(&buffers).unwrap();
+    for v in downloaded
+        .forces_x
+        .iter()
+        .chain(downloaded.forces_y.iter())
+        .chain(downloaded.forces_z.iter())
+    {
+        assert_eq!(*v, 0.0 as Real, "inert LJ pair must produce zero force, got {v}");
+    }
+    let energies = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let virials = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    for v in energies.iter().chain(virials.iter()) {
+        assert_eq!(*v, 0.0 as Real, "inert LJ pair must produce zero energy/virial, got {v}");
+    }
+}
+
+#[test] // rq-1fc720f6
+fn lj_pair_with_zero_epsilon_is_inert() {
+    let gpu = init_device().unwrap();
+    // epsilon = 0 with a normal sigma: the pair contributes nothing.
+    assert_inert_pair_is_zero(&gpu, 1.0, 0.0);
+}
+
+#[test] // rq-88518736
+fn lj_pair_with_zero_sigma_is_inert() {
+    let gpu = init_device().unwrap();
+    // sigma = 0 with a normal epsilon: the pair contributes nothing.
+    assert_inert_pair_is_zero(&gpu, 0.0, 1.0);
+}
+
 // rq-73cd4ad9
 #[test]
 fn amortized_type_indices_are_bit_exact_run_to_run() {

@@ -614,9 +614,9 @@ fn reject_nonpositive_mass() {
 
 // rq-aa19f894
 #[test]
-fn reject_nonpositive_sigma() {
-    let dir = tmp_path("zero_sigma");
-    let body = minimal_config().replace("sigma = 3.40e-10", "sigma = 0.0");
+fn reject_negative_sigma() {
+    let dir = tmp_path("neg_sigma");
+    let body = minimal_config().replace("sigma = 3.40e-10", "sigma = -1.0");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::InvalidValue { field, .. } => assert_eq!(field, "pair_interactions[0].sigma"),
@@ -626,7 +626,7 @@ fn reject_nonpositive_sigma() {
 
 // rq-017b6769
 #[test]
-fn reject_nonpositive_epsilon() {
+fn reject_negative_epsilon() {
     let dir = tmp_path("neg_epsilon");
     let body = minimal_config().replace("epsilon = 1.65e-21", "epsilon = -1.0");
     let path = write_config(&dir, &body);
@@ -635,6 +635,45 @@ fn reject_nonpositive_epsilon() {
             assert_eq!(field, "pair_interactions[0].epsilon");
         }
         other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test] // rq-3c673e27
+fn reject_nonfinite_epsilon() {
+    let dir = tmp_path("nan_epsilon");
+    let body = minimal_config().replace("epsilon = 1.65e-21", "epsilon = nan");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "pair_interactions[0].epsilon");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test] // rq-4469c43d
+fn accept_inert_pair_with_zero_epsilon() {
+    let dir = tmp_path("inert_epsilon");
+    let body = minimal_config().replace("epsilon = 1.65e-21", "epsilon = 0.0");
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match &cfg.pair_interactions[0].potential {
+        heddle_md::io::PairPotentialParams::LennardJones { epsilon, .. } => {
+            assert_eq!(*epsilon, 0.0);
+        }
+    }
+}
+
+#[test] // rq-cbcc4e3b
+fn accept_pair_with_zero_sigma() {
+    let dir = tmp_path("zero_sigma");
+    let body = minimal_config().replace("sigma = 3.40e-10", "sigma = 0.0");
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match &cfg.pair_interactions[0].potential {
+        heddle_md::io::PairPotentialParams::LennardJones { sigma, .. } => {
+            assert_eq!(*sigma, 0.0);
+        }
     }
 }
 

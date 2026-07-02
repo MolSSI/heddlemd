@@ -105,6 +105,13 @@ the packed list yields, where `j` is a neighbour atom distinct from `i`:
    vector is `factor * (dx, dy, dz)`; `energy` is the closed-form pair
    potential `U_lj(r)`.
 
+   A pair whose `epsilon` is `0` (or whose `sigma` is `0`) is
+   **Lennard-Jones-inert**: the `epsilon` (respectively `sigma`) multiply
+   drives both `factor` and `energy` to exactly `0`, so the pair
+   contributes no force, energy, or virial. The functor stays branchless —
+   no special case is compiled for inert pairs — and evaluates to exactly
+   zero at every physically realizable separation.
+
 5. Apply the CHARMM-style C¹ switching function `S(r²)` defined over
    `[r_switch, r_cut]`. Let `r_s2 = switch * switch`,
    `r_c2 = cutoff * cutoff`, and `delta = r_c2 - r_s2`. The polynomial
@@ -260,7 +267,12 @@ neighbour list yields. The functor specialises the per-pair recipe of
    `r² > HEDDLE_JIT_MAX_CUTOFF_SQUARED`. The fragment is safe to
    call at any positive `r²` because `inv_r` and `r` are
    well-defined for all positive `r²` and the LJ functional form
-   `(σ·inv_r)¹² − (σ·inv_r)⁶` is finite for all positive `r²`.
+   `(σ·inv_r)¹² − (σ·inv_r)⁶` is finite for all positive `r²`. An inert
+   pair (`epsilon = 0` or `sigma = 0`) evaluates to exactly `0`; the
+   branchless form can produce a non-finite intermediate only at
+   sub-picometre separations far below any physical bond length — a state
+   a non-diverged trajectory never reaches — so no in-kernel guard is
+   compiled for that case.
 
 ### Parameter-table symmetry <!-- rq-7d92b551 -->
 
@@ -487,6 +499,24 @@ Feature: Lennard-Jones O(N²) pair force kernel
     Given a ParticleState of N=4 with arbitrary positions
     When the Lennard-Jones functor is evaluated in the composed pair-force kernel
     Then for every i in 0..4, slot_force_x[i], slot_force_y[i], slot_force_z[i] are all 0.0_f32
+
+  # --- Inert pairs ---
+
+  @rq-1fc720f6
+  Scenario: An epsilon = 0 pair contributes exactly zero force and energy
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
+    And a LennardJonesParameterTable entry with epsilon=0.0 and sigma=1.0
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
+    And the slot's energy and virial contributions are 0.0_f32
+
+  @rq-88518736
+  Scenario: A sigma = 0 pair contributes exactly zero force and energy
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
+    And a LennardJonesParameterTable entry with sigma=0.0 and epsilon=1.0
+    When the Lennard-Jones functor is evaluated in the composed pair-force kernel
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
+    And the slot's energy and virial contributions are 0.0_f32
 
   # --- Cutoff handling ---
 
