@@ -7661,6 +7661,18 @@
     "title": "Load a two-particle file with no velocities",
     "type": "scenario"
   },
+  "rq-38fe4b81": {
+    "decl": "Scenario: COM scaling uses the minimum-image molecule for a boundary-straddling molecule",
+    "file": "integration/mc-barostat",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "COM scaling uses the minimum-image molecule for a boundary-straddling molecule",
+    "type": "scenario"
+  },
   "rq-391a7d23": {
     "decl": "## Feature API",
     "file": "cuda-graphs",
@@ -24935,7 +24947,12 @@
     "decl": "## CUDA Kernels and launch helpers",
     "file": "integration/mc-barostat",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CUDA Kernels and launch helpers",
     "type": "section"
   },

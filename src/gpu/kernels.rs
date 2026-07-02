@@ -1456,6 +1456,7 @@ pub fn compute_total_potential_energy(
 // See `rqm/integration/mc-barostat.md`.
 pub fn mc_barostat_scale_molecule_com(
     buffers: &mut ParticleBuffers,
+    sim_box: &SimulationBox,
     mol_atom_offsets: &CudaSlice<u32>,
     mol_atom_indices: &CudaSlice<u32>,
     scale: Real,
@@ -1464,6 +1465,9 @@ pub fn mc_barostat_scale_molecule_com(
     if n_mol == 0 {
         return Ok(());
     }
+    // rq-c83742c0 — the kernel reconstructs each molecule under the
+    // minimum-image convention, so it needs the current lattice.
+    let lattice = sim_box.lattice_device();
     let func = buffers
         .kernels
         .mc_barostat
@@ -1478,6 +1482,7 @@ pub fn mc_barostat_scale_molecule_com(
                 mol_atom_offsets,
                 mol_atom_indices,
                 &buffers.masses,
+                lattice,
                 scale,
                 n_mol as u32,
             ),

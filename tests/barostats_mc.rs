@@ -291,6 +291,9 @@ fn rigid_molecule_geometry_invariant_under_scale() {
     let pz = vec![0.5 as Real, 0.5, 0.5];
     let masses = vec![16.0 as Real, 1.0, 1.0];
     let mut buffers = make_buffers(&gpu, px.clone(), py.clone(), pz.clone(), masses.clone());
+    // A box far larger than the molecule, so min-image reconstruction is a
+    // no-op and the COM equals the naive average.
+    let sb = cube(&gpu, 1000.0);
     let offsets = gpu.device.htod_sync_copy(&[0u32, 3]).unwrap();
     let indices = gpu.device.htod_sync_copy(&[0u32, 1, 2]).unwrap();
     let scale: Real = 1.25;
@@ -299,7 +302,7 @@ fn rigid_molecule_geometry_invariant_under_scale() {
     let com = |p: &[Real]| p.iter().zip(&masses).map(|(&x, &mm)| x as f64 * mm as f64).sum::<f64>() / m;
     let (cx0, cy0, cz0) = (com(&px), com(&py), com(&pz));
 
-    mc_barostat_scale_molecule_com(&mut buffers, &offsets, &indices, scale).unwrap();
+    mc_barostat_scale_molecule_com(&mut buffers, &sb, &offsets, &indices, scale).unwrap();
     let (qx, qy, qz) = buffers.download_positions().unwrap();
 
     // Internal displacements preserved.
@@ -322,15 +325,78 @@ fn singleton_molecules_scale_each_atom_about_origin() {
     let pz = vec![0.0 as Real, 0.0, 0.0, 0.0];
     let n = 4;
     let mut buffers = make_buffers(&gpu, px.clone(), py.clone(), pz.clone(), vec![1.0; n]);
+    let sb = cube(&gpu, 1000.0);
     let offsets = gpu.device.htod_sync_copy(&[0u32, 1, 2, 3, 4]).unwrap();
     let indices = gpu.device.htod_sync_copy(&[0u32, 1, 2, 3]).unwrap();
     let scale: Real = 0.8;
-    mc_barostat_scale_molecule_com(&mut buffers, &offsets, &indices, scale).unwrap();
+    mc_barostat_scale_molecule_com(&mut buffers, &sb, &offsets, &indices, scale).unwrap();
     let (qx, qy, _) = buffers.download_positions().unwrap();
     for i in 0..n {
         assert!(((qx[i] - scale * px[i]) as f64).abs() < 1e-5);
         assert!(((qy[i] - scale * py[i]) as f64).abs() < 1e-5);
     }
+}
+
+#[test] // rq-38fe4b81
+fn com_uses_min_image_for_boundary_straddling_molecule() {
+    let gpu = init_device().unwrap();
+    let l: Real = 10.0;
+    let sb = cube(&gpu, l);
+    // A 3-atom molecule straddling the +x face. True (unwrapped) positions
+    // are O at 4.9, H at 5.1, H at 5.05; wrapped into [-5, 5) they become
+    // O at 4.9, H at -4.9, H at -4.95 — split across opposite faces.
+    let px = vec![4.9 as Real, -4.9, -4.95];
+    let py = vec![0.0 as Real, 0.0, 0.0];
+    let pz = vec![0.0 as Real, 0.0, 0.0];
+    let masses = vec![16.0 as Real, 1.0, 1.0];
+    let mut buffers = make_buffers(&gpu, px.clone(), py.clone(), pz.clone(), masses.clone());
+    let offsets = gpu.device.htod_sync_copy(&[0u32, 3]).unwrap();
+    let indices = gpu.device.htod_sync_copy(&[0u32, 1, 2]).unwrap();
+    let scale: Real = 1.25;
+
+    // Orthorhombic minimum image about the reference (atom 0), matching the
+    // kernel's reconstruction.
+    let ll = l as f64;
+    let minimg = |d: f64| d - ll * (d / ll + 0.5).floor();
+    let mtot: f64 = masses.iter().map(|&m| m as f64).sum();
+    let ref_x = px[0] as f64;
+    let com_true = ref_x
+        + masses
+            .iter()
+            .zip(&px)
+            .map(|(&m, &x)| m as f64 * minimg(x as f64 - ref_x))
+            .sum::<f64>()
+            / mtot;
+    let com_naive =
+        masses.iter().zip(&px).map(|(&m, &x)| m as f64 * x as f64).sum::<f64>() / mtot;
+    let shift_true = (scale as f64 - 1.0) * com_true;
+    let shift_naive = (scale as f64 - 1.0) * com_naive;
+    // The two must differ, or the test would not distinguish the fix.
+    assert!(
+        (shift_true - shift_naive).abs() > 0.1,
+        "min-image and naive shifts must differ: {shift_true} vs {shift_naive}"
+    );
+
+    mc_barostat_scale_molecule_com(&mut buffers, &sb, &offsets, &indices, scale).unwrap();
+    let (qx, _, _) = buffers.download_positions().unwrap();
+
+    for a in 0..3 {
+        let applied = qx[a] as f64 - px[a] as f64;
+        // Every atom is translated by exactly (scale - 1) * COM_true.
+        assert!(
+            (applied - shift_true).abs() < 1e-4 * shift_true.abs().max(1.0),
+            "atom {a}: applied shift {applied} != min-image shift {shift_true}"
+        );
+        // And NOT by the naive (wrapped-average) shift.
+        assert!(
+            (applied - shift_naive).abs() > 1e-3,
+            "atom {a}: shift {applied} must not equal the naive value {shift_naive}"
+        );
+    }
+    // Intramolecular min-image geometry preserved (rigid translation).
+    let before = minimg(px[1] as f64 - px[0] as f64);
+    let after = minimg(qx[1] as f64 - qx[0] as f64);
+    assert!((before - after).abs() < 1e-4, "intramolecular geometry changed");
 }
 
 // ---------- end-to-end ----------

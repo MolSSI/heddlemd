@@ -164,12 +164,30 @@ For each invocation:
 6. **Apply the trial.** Multiply all six lattice parameters by `scale`
    (`sim_box.multiply_lattice_isotropic(scale)`; bumps the generation),
    and scale every molecule's centre of mass by `scale` with the
-   `mc_barostat_scale_molecule_com` kernel: each molecule's atoms are
-   translated rigidly by `(scale − 1) · COM_molecule` so the molecular
-   centre of mass scales about the origin while every intramolecular
-   displacement is unchanged. Fractional coordinates of each molecule's
-   centre of mass are invariant under the scale, so no PBC wrap is
-   required and image flags carry over unchanged.
+   `mc_barostat_scale_molecule_com` kernel.
+
+   The kernel computes each molecule's mass-weighted centre of mass by
+   reconstructing the molecule as a contiguous rigid body about a
+   reference atom — the lowest-indexed atom of the molecule. Each atom's
+   displacement from the reference is taken under the minimum-image
+   convention before the mass-weighted average. Because positions are held
+   in the primary image (the integrator re-wraps every atom each step), a
+   molecule that spans a periodic boundary has its atoms split across
+   opposite faces; the minimum-image reconstruction recovers the
+   molecule's true centre of mass rather than one pulled toward the box
+   centre. The reconstruction is exact for any molecule whose largest
+   intramolecular separation is below half the shortest box width — a
+   condition the minimum-image convention already requires of every
+   simulation.
+
+   Each molecule's atoms are then translated rigidly by
+   `(scale − 1) · COM_molecule`, so the molecular centre of mass scales
+   about the origin while every intramolecular displacement is unchanged.
+   The fractional coordinates of each molecule's centre of mass are
+   invariant under the joint box-and-position scale, so no PBC wrap is
+   applied and image flags carry over unchanged; a subsequent integration
+   step re-wraps any atom the translation carried outside the primary
+   image.
 
 7. **Trial energy.** Evaluate the force field at the trial configuration
    with `force_field.step(buffers, sim_box, timings,
@@ -311,24 +329,27 @@ kernel:
 
 ```c
 extern "C" __global__ void mc_barostat_scale_molecule_com(
-    float *positions_x,
-    float *positions_y,
-    float *positions_z,
+    Real4 *posq,                            // positions (xyz) + charge (w)
     const unsigned int *mol_atom_offsets,   // length n_mol + 1
     const unsigned int *mol_atom_indices,   // length N, atom ids grouped by molecule
-    const float *masses,                    // length N
-    float scale,
+    const Real *masses,                     // length N
+    const Real *lattice,                    // six lattice params, for min-image
+    Real scale,
     unsigned int n_mol);
 ```
 
-One warp (or thread) per molecule. For molecule `m` over its atom slice
+One thread per molecule. For molecule `m` over its atom slice
 `mol_atom_indices[mol_atom_offsets[m] .. mol_atom_offsets[m+1]]`, the
-kernel computes `COM = (Σ m_i · x_i) / (Σ m_i)` componentwise, then writes
-`x_i ← x_i + (scale − 1) · COM` for every atom `i` in the molecule. The
-per-molecule reduction sums atoms in their stored (ascending-index) order,
-so the result is bit-identical across runs on the same GPU. A singleton
-molecule's COM is its single atom's position, so the atom is simply scaled
-about the origin.
+kernel takes the lowest-indexed atom as the reference `r₀`, forms each
+atom's minimum-image displacement `d_i = min_image(x_i − r₀)` from the six
+`lattice` parameters, and computes the reconstructed mass-weighted centre
+of mass `COM = r₀ + (Σ m_i · d_i) / (Σ m_i)` componentwise. It then writes
+`x_i ← x_i + (scale − 1) · COM` for every atom `i` in the molecule,
+translating the stored primary-image positions while leaving the
+molecule's rigid geometry unchanged. The per-molecule reduction sums atoms
+in their stored (ascending-index) order, so the result is bit-identical
+across runs on the same GPU. A singleton molecule's `d` is zero, so its
+COM is its own position and the atom is simply scaled about the origin.
 
 The Rust launcher `mc_barostat_scale_molecule_com` is exposed under
 `crate::gpu`. The barostat reuses `compute_total_potential_energy`
@@ -683,6 +704,18 @@ Feature: Monte-Carlo barostat
     And n_molecules equals 8
     When a move with scale s is applied (forced accept)
     Then every atom position equals s times its pre-move position within f32 round-off
+
+  @rq-38fe4b81
+  Scenario: COM scaling uses the minimum-image molecule for a boundary-straddling molecule
+    Given a single 3-atom molecule whose atoms are wrapped across a periodic
+      boundary (some atoms near +L/2, others near -L/2) with a small
+      minimum-image intramolecular extent
+    And its true (minimum-image-reconstructed) mass-weighted centre of mass COM_true
+    When mc_barostat_scale_molecule_com is applied with scale s
+    Then every atom is translated by exactly (s - 1) * COM_true
+    And every intramolecular minimum-image displacement is unchanged
+    And the applied translation differs from (s - 1) * COM_naive, where COM_naive
+      is the mass-weighted average of the wrapped coordinates
 
   @rq-24c7ed51
   Scenario: N_mol is the molecule count, not the atom count

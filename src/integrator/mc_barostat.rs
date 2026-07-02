@@ -304,6 +304,7 @@ impl Barostat for McBarostat {
             timings.kernel_start(KernelStage::MC_BAROSTAT_SCALE_COM)?;
             mc_barostat_scale_molecule_com(
                 buffers,
+                sim_box,
                 &self.mol_atom_offsets,
                 &self.mol_atom_indices,
                 scale as Real,
