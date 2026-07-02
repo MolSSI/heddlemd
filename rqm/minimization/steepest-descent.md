@@ -307,11 +307,15 @@ rejects unknown fields.
     above).
 
 Fields accepted for `kind = "steepest-descent"` (all optional with
-defaults):
+defaults). Every omitted field takes its default number interpreted in
+the config's declared unit system and rescaled to atomic, exactly like a
+user-written value (see `io/unit-system.md`'s *Builder-Owned
+Slot-Parameter Conversion*); the default numbers below are chosen to be
+physically sensible under the default `units = "si"`:
 
 - `initial_step: f64` — initial scalar step `step_0` in Bohr (`a_0`).
-  Default `1.0e-12` metres ≈ `1.89e-2` Bohr (the loader converts
-  user-supplied SI defaults). Finite and strictly positive.
+  Default `1.0e-12`; under SI that is `1.0e-12` m ≈ `1.89e-2` Bohr.
+  Finite and strictly positive.
 - `max_step: f64` — upper bound on `step` in Bohr (`a_0`). Default
   `1.0e-10` metres = 1 Å ≈ 1.89 Bohr. Finite, strictly positive, and
   `≥ initial_step`.
@@ -327,8 +331,10 @@ defaults):
   `max_iterations` end the loop).
 - `energy_tolerance: f64` — relative convergence threshold on
   `|ΔE| / max(|E_prev|, |E_curr|, 1.0e-30)` between consecutive
-  accepted iterations. Default `1.0e-7`. Finite and `≥ 0.0`. A value
-  of `0.0` disables this criterion.
+  accepted iterations. Dimensionless (a ratio), so it carries no
+  dimensioned newtype and the unit-system conversion never rescales it.
+  Default `1.0e-7`. Finite and `≥ 0.0`. A value of `0.0` disables this
+  criterion.
 - `max_iterations: u64` — iteration cap. Default `1000`. Strictly
   positive. Non-convergence after `max_iterations` is a hard error
   (see *Algorithm*'s step 6).
@@ -833,8 +839,9 @@ Feature: Steepest-descent energy minimizer
 
   @rq-57a0f297
   Scenario: Parse a [[minimization]] section with defaults
-    Given a config file containing exactly one [[minimization]] table with name="min"
-      and [minimization.algorithm] kind="steepest-descent" and no other fields
+    Given a config file with units="atomic" containing exactly one [[minimization]]
+      table with name="min" and [minimization.algorithm] kind="steepest-descent"
+      and no other fields
     When load_config(path) is called
     Then it returns Ok(config)
     And config.phases has length 1
@@ -844,6 +851,11 @@ Feature: Steepest-descent energy minimizer
     And the builder-resolved params carry initial_step = 1.0e-12, max_step = 1.0e-10,
       step_increase = 1.2, step_decrease = 0.2, force_tolerance = 1.0e-10,
       energy_tolerance = 1.0e-7, max_iterations = 1000
+    # units="atomic" makes the resolved (atomic) params equal the builder
+    # defaults verbatim. Under the default units="si" the dimensioned
+    # defaults (initial_step, max_step, force_tolerance) are instead their
+    # atomic conversions; energy_tolerance is dimensionless and unchanged
+    # in either system.
 
   @rq-bcc16e10
   Scenario: Reject an unknown field under [minimization.algorithm]
@@ -910,6 +922,18 @@ Feature: Steepest-descent energy minimizer
     When one minimizer.step is invoked
     Then the reported energy decreases by more than 1.0e-25 J
     And the reported accepted flag is true
+
+  @rq-0839e6f6
+  Scenario: Minimisation with fully defaulted step and tolerances makes progress on an un-minimised system
+    Given a config file with units="si" and a [[minimization]] phase with
+      kind="steepest-descent" and no initial_step, max_step, force_tolerance,
+      or energy_tolerance fields (all left to their defaults)
+    And a 2-particle system placed on the Lennard-Jones repulsive wall so
+      F_max at step 0 is large (well above the default force_tolerance)
+    When the minimization phase runs
+    Then at least one iteration is accepted (the default initial_step is a
+      physically meaningful ~0.01 Å, not a sub-picometre no-op)
+    And F_max at the final accepted state is strictly smaller than F_max at step 0
 
   @rq-48e36163
   Scenario: SD step formula moves the largest-force atom by exactly `step`

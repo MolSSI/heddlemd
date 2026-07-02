@@ -218,11 +218,26 @@ centralised table. Every named-selection builder converts its own
 params through `KindedBuilder::convert_params` (see
 `registry-framework.md`): the builder deserialises the `params` table
 into its typed parameter struct — which derives `Convert` and so
-declares each field's dimension on the field — applies `from_user`, and
-serialises the converted values back into the `toml::Value`. Nested
-arrays of tables (for example a constraint type's `constraints[k].d`)
-convert through the derive's recursion into `Vec`, with no
-special-casing.
+declares each field's dimension on the field, and which fills every
+field the user omitted with that field's builder-declared serde default
+— applies `from_user`, and serialises the **full** converted struct
+back into the `toml::Value`. Every field of the struct is written back,
+whether the user supplied it or it came from a default; the converted
+`toml::Value` therefore carries an entry for each param, already in
+atomic units, and the builder's later typed read never re-applies a
+default. Nested arrays of tables (for example a constraint type's
+`constraints[k].d`) convert through the derive's recursion into `Vec`,
+with no special-casing.
+
+Because defaults are filled before `from_user` runs, an omitted
+dimensioned param is rescaled exactly like a user-written value: its
+builder-declared default number is interpreted in the config's declared
+unit system and divided by that dimension's factor. Under the default
+`units = "si"` the default number is an SI quantity (so a
+`Length(1.0e-12)` default is `1.0e-12` m ≈ `1.89e-2` Bohr); under
+`units = "atomic"` the same number is read as already-atomic and passes
+through unchanged. Dimensionless defaults (counts, ratios, seeds)
+rescale as a no-op and so are unaffected either way.
 
 The config-validation pass resolves each slot's builder from the
 registries and invokes `convert_params` before any `validate_params`
@@ -563,12 +578,34 @@ Feature: Unit-system selector and atomic-units internals
     Given a TOML file with `units = "si"` and a
       `[minimization.algorithm]` block with `kind = "steepest-descent"`
       and `initial_step`, `max_step` in metres, `force_tolerance` in
-      newtons, and `energy_tolerance` in joules
+      newtons, and a dimensionless `energy_tolerance`
     When load_config is called on that file
     Then `initial_step` and `max_step` are divided by the bohr ->
       meter factor
     And `force_tolerance` is divided by the (E_h/a_0) -> newton factor
-    And `energy_tolerance` is divided by the hartree -> joule factor
+    And `energy_tolerance` is unchanged — it is a dimensionless relative
+      threshold (`|ΔE| / max(|E_prev|, |E_curr|, ε)`), not an energy, so
+      it carries no dimensioned newtype and no factor is applied
+
+  @rq-daa6678e
+  Scenario: An omitted dimensioned slot-param default is filled and converted (SI)
+    Given a TOML file with `units = "si"` and a
+      `[minimization.algorithm]` block with `kind = "steepest-descent"`
+      and no `initial_step` field
+    When load_config is called and the minimizer builder converts its params
+    Then the converted params carry an `initial_step` entry (the omitted
+      field was filled from its builder default before conversion)
+    And it equals the builder default `1.0e-12` divided by the bohr ->
+      meter factor (≈ `1.89e-2` Bohr), not the raw `1.0e-12`
+
+  @rq-7e7f820e
+  Scenario: An omitted dimensioned slot-param default passes through under atomic units
+    Given a TOML file with `units = "atomic"` and a
+      `[minimization.algorithm]` block with `kind = "steepest-descent"`
+      and no `initial_step` field
+    When load_config is called and the minimizer builder converts its params
+    Then the converted params carry an `initial_step` entry equal to the
+      builder default `1.0e-12` unchanged (the atomic-unit factor is 1.0)
 
   @rq-aeee8e44
   Scenario: Slot kind with no registered builder passes through unchanged

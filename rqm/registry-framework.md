@@ -135,11 +135,14 @@ the per-subsystem framework files and are not part of this framework.
       /// unit system to atomic units, in place. The implementation
       /// deserialises `params` into the builder's typed parameter
       /// struct (which derives `Convert`; see `io/unit-system.md`),
-      /// applies `Convert::from_user`, and serialises the converted
-      /// values back into `params`. A non-numeric value at a
-      /// unit-bearing field surfaces the typed deserialisation error.
-      /// Default: a no-op, appropriate only for a kind with no
-      /// unit-bearing params.
+      /// filling any omitted field with its serde default, applies
+      /// `Convert::from_user`, and serialises the full converted struct
+      /// back into `params` — every field, defaulted or user-supplied,
+      /// so an omitted dimensioned default is rescaled like a
+      /// user-written value (see `io/unit-system.md`). A non-numeric
+      /// value at a unit-bearing field surfaces the typed
+      /// deserialisation error. Default: a no-op, appropriate only for a
+      /// kind with no unit-bearing params.
       fn convert_params(
           &self,
           _units: UnitSystem,

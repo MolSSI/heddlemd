@@ -31,8 +31,11 @@ pub struct SteepestDescentParams {
     pub step_decrease: f64,
     #[serde(default = "default_force_tolerance")]
     pub force_tolerance: crate::units::Force,
+    // rq-0a2ca9ac — dimensionless relative threshold (|ΔE| / max(...)),
+    // not an energy: it must not be unit-converted, so it is a bare f64
+    // rather than a dimensioned newtype.
     #[serde(default = "default_energy_tolerance")]
-    pub energy_tolerance: crate::units::Energy,
+    pub energy_tolerance: f64,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u64,
 }
@@ -52,8 +55,8 @@ fn default_step_decrease() -> f64 {
 fn default_force_tolerance() -> crate::units::Force {
     crate::units::Force(1.0e-10)
 }
-fn default_energy_tolerance() -> crate::units::Energy {
-    crate::units::Energy(1.0e-7)
+fn default_energy_tolerance() -> f64 {
+    1.0e-7
 }
 fn default_max_iterations() -> u64 {
     1000
@@ -105,7 +108,7 @@ impl SteepestDescentMinimizer {
             step_increase: params.step_increase as Real,
             step_decrease: params.step_decrease as Real,
             force_tolerance: params.force_tolerance.0,
-            energy_tolerance: params.energy_tolerance.0,
+            energy_tolerance: params.energy_tolerance,
             max_iterations: params.max_iterations,
             current_step: params.initial_step.0 as Real,
             last_accepted_energy: 0.0,
@@ -376,12 +379,12 @@ impl MinimizerBuilder for SteepestDescentBuilder {
                 ),
             });
         }
-        if !p.energy_tolerance.0.is_finite() || p.energy_tolerance.0 < 0.0 {
+        if !p.energy_tolerance.is_finite() || p.energy_tolerance < 0.0 {
             return Err(ConfigError::InvalidValue {
                 field: "minimization.algorithm.energy_tolerance".to_string(),
                 reason: format!(
                     "energy_tolerance must be finite and >= 0.0, got {}",
-                    p.energy_tolerance.0
+                    p.energy_tolerance
                 ),
             });
         }

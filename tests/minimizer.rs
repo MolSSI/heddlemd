@@ -130,6 +130,76 @@ fn steepest_descent_reduces_lj_energy() {
     );
 }
 
+// rq-0839e6f6 — a minimization with fully defaulted step and tolerances
+// makes real progress on an un-minimised system. Under the pre-fix bug the
+// default initial_step was consumed as ~1e-12 Bohr (a sub-picometre no-op):
+// every trial was rejected, the step decayed to zero, and the phase failed
+// to converge. With the fix the default is a physically meaningful ~0.01 Å.
+#[test]
+fn sd_with_default_step_and_tolerances_makes_progress() {
+    let dir = tmp_dir("sd_default_step_progress");
+    // Two argon atoms 3.0e-10 m apart — well up the LJ repulsive wall.
+    fs::write(dir.join("argon.in.xyz"), two_argon_offset_init()).unwrap();
+    // [minimization.algorithm] carries ONLY the kind: initial_step,
+    // max_step, force_tolerance, and energy_tolerance are all defaulted.
+    let cfg = r#"schema_version = 1
+units = "si"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 0.0
+
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+
+[minimization.output]
+minlog_every = 1
+trajectory_every = 0
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+charge = 0.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.5e-9
+r_switch = 1.5e-9
+
+[neighbor_list]
+mode = "all-pairs"
+"#;
+    let cfg_path = dir.join("argon.in.toml");
+    fs::write(&cfg_path, cfg).unwrap();
+
+    let summary = run_simulation(&cfg_path)
+        .expect("minimization with default step should converge, not stall");
+    let ps = &summary.phases[0];
+    assert_eq!(ps.kind, "minimization");
+    assert!(
+        ps.n_steps > 0,
+        "minimizer should take at least one iteration, got {}",
+        ps.n_steps
+    );
+
+    // Energy strictly decreases from the step-0 row to the final row.
+    let content = fs::read_to_string(dir.join("argon.out.min.minlog")).unwrap();
+    let rows: Vec<&str> = content.lines().skip(1).collect();
+    assert!(rows.len() >= 2, "expected step-0 row + at least one more");
+    let energy = |row: &str| row.split(',').nth(1).unwrap().parse::<f64>().unwrap();
+    assert!(
+        energy(rows.last().unwrap()) < energy(rows.first().unwrap()),
+        "energy should decrease under default-step minimization"
+    );
+}
+
 // rq-57a0f297
 #[test]
 fn config_loader_parses_minimization_block() {

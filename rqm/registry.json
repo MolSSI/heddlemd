@@ -1108,6 +1108,18 @@
     "title": "Reciprocal-space virial is distributed equally per particle",
     "type": "scenario"
   },
+  "rq-0839e6f6": {
+    "decl": "Scenario: Minimisation with fully defaulted step and tolerances makes progress on an un-minimised system",
+    "file": "minimization/steepest-descent",
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Minimisation with fully defaulted step and tolerances makes progress on an un-minimised system",
+    "type": "scenario"
+  },
   "rq-084ba25b": {
     "decl": "Scenario: Builder validate_params accepts a well-formed params object",
     "file": "integration/framework",
@@ -15974,6 +15986,18 @@
     "title": "total_runtime is at least as large as the maximum single-stage total",
     "type": "scenario"
   },
+  "rq-7e7f820e": {
+    "decl": "Scenario: An omitted dimensioned slot-param default passes through under atomic units",
+    "file": "io/unit-system",
+    "refs": [
+      {
+        "file": "tests/unit_conversion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An omitted dimensioned slot-param default passes through under atomic units",
+    "type": "scenario"
+  },
   "rq-7e9cb164": {
     "decl": "#### `[[constraint_types]]` (optional array of tables)",
     "file": "io/config-schema",
@@ -27092,6 +27116,18 @@
     "title": "Philox uniform-`Real` conversion",
     "type": "section"
   },
+  "rq-daa6678e": {
+    "decl": "Scenario: An omitted dimensioned slot-param default is filled and converted (SI)",
+    "file": "io/unit-system",
+    "refs": [
+      {
+        "file": "tests/unit_conversion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An omitted dimensioned slot-param default is filled and converted (SI)",
+    "type": "scenario"
+  },
   "rq-daadfc1a": {
     "decl": "## Per-Step Interface",
     "file": "integration/framework",
@@ -27213,7 +27249,12 @@
     "decl": "### Builder-Owned Slot-Parameter Conversion",
     "file": "io/unit-system",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/registry.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Builder-Owned Slot-Parameter Conversion",
     "type": "section"
   },

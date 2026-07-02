@@ -2114,12 +2114,12 @@ tau = 1.0e-13"#,
     assert_eq!(t.kind, "nose-hoover-chain");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "tau"), 1.0e-13);
-    // Defaults for the optional fields are applied by the builder's
-    // validate_params / build at consume time; not present in the
-    // parsed params (they were not in the TOML).
-    assert!(t.params.get("chain_length").is_none());
-    assert!(t.params.get("yoshida_order").is_none());
-    assert!(t.params.get("n_resp").is_none());
+    // The builder's slot-param conversion fills every omitted field with
+    // its serde default and writes the full struct back, so the converted
+    // params carry the optional fields at their default values.
+    assert_eq!(t.params.get("chain_length").and_then(|v| v.as_integer()), Some(3));
+    assert_eq!(t.params.get("yoshida_order").and_then(|v| v.as_integer()), Some(3));
+    assert_eq!(t.params.get("n_resp").and_then(|v| v.as_integer()), Some(1));
 }
 
 #[test]
@@ -2752,11 +2752,12 @@ fn mtk_npt_with_defaults_accepted() {
     assert_eq!(param_f64(i, "tau_t"), 1.0e-13);
     assert_eq!(param_f64(i, "tau_p"), 1.0e-12);
     // chain_length, yoshida_order, n_resp are not in the TOML; the
-    // builder applies its serde defaults during build, but the raw
-    // params on the SlotConfig only carry the user-provided fields.
-    assert!(i.params.get("chain_length").is_none());
-    assert!(i.params.get("yoshida_order").is_none());
-    assert!(i.params.get("n_resp").is_none());
+    // builder's slot-param conversion fills them with their serde
+    // defaults and writes the full struct back, so the converted params
+    // carry them at their default values.
+    assert_eq!(i.params.get("chain_length").and_then(|v| v.as_integer()), Some(3));
+    assert_eq!(i.params.get("yoshida_order").and_then(|v| v.as_integer()), Some(3));
+    assert_eq!(i.params.get("n_resp").and_then(|v| v.as_integer()), Some(1));
 }
 
 // rq-d572a90a rq-08e113ca
@@ -4235,7 +4236,10 @@ mode = "all-pairs"
     assert!(approx_eq(init, init_si / len_f), "initial_step {} vs expected {}", init, init_si / len_f);
     assert!(approx_eq(max, max_si / len_f), "max_step {} vs expected {}", max, max_si / len_f);
     assert!(approx_eq(ftol, ftol_si / force_f), "force_tolerance {} vs expected {}", ftol, ftol_si / force_f);
-    assert!(approx_eq(etol, etol_si / energy_f), "energy_tolerance {} vs expected {}", etol, etol_si / energy_f);
+    // energy_tolerance is a dimensionless relative threshold, so it is NOT
+    // rescaled by the unit system — it passes through unchanged.
+    let _ = energy_f;
+    assert!(approx_eq(etol, etol_si), "energy_tolerance {} vs expected {} (unconverted)", etol, etol_si);
 }
 
 // --- Multi-phase config and cross-phase rules ---------------------------

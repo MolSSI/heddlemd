@@ -118,6 +118,51 @@ fn every_registered_kind_converts_representative_params() {
     assert!((init - 1.0e-12 / UnitSystem::Si.factor(Dimension::Length)).abs() < 1e-6);
 }
 
+// rq-daa6678e — an omitted dimensioned slot-param default is filled from
+// its builder default and converted like a user-written value (SI).
+#[test]
+fn omitted_slot_param_default_is_filled_and_converted_si() {
+    let r = Registries::with_builtins();
+    let b = r.minimizers.lookup("steepest-descent").unwrap();
+    // Omit initial_step; supply only an unrelated (dimensionless) field.
+    let mut p = params("max_iterations = 100\n");
+    b.convert_params(UnitSystem::Si, &mut p).unwrap();
+    let init = p
+        .get("initial_step")
+        .expect("omitted default is filled into the converted params")
+        .as_float()
+        .unwrap();
+    let expected = 1.0e-12 / UnitSystem::Si.factor(Dimension::Length); // ≈ 1.89e-2 Bohr
+    assert!(
+        (init - expected).abs() < 1e-6 * expected.abs(),
+        "omitted initial_step default should be converted: got {init}, expected {expected}"
+    );
+    // And specifically NOT the raw SI number 1.0e-12.
+    assert!(
+        (init - 1.0e-12).abs() > 1e-3 * expected.abs(),
+        "converted default must not be the raw 1.0e-12, got {init}"
+    );
+}
+
+// rq-7e7f820e — under atomic units an omitted dimensioned default passes
+// through unchanged (the atomic-unit factor is 1.0).
+#[test]
+fn omitted_slot_param_default_passes_through_atomic() {
+    let r = Registries::with_builtins();
+    let b = r.minimizers.lookup("steepest-descent").unwrap();
+    let mut p = params("max_iterations = 100\n");
+    b.convert_params(UnitSystem::Atomic, &mut p).unwrap();
+    let init = p
+        .get("initial_step")
+        .expect("omitted default is filled into the converted params")
+        .as_float()
+        .unwrap();
+    assert!(
+        (init - 1.0e-12).abs() < 1e-18,
+        "atomic passthrough: omitted default should stay 1.0e-12, got {init}"
+    );
+}
+
 // rq-a0d557f5 — a slot's params round-trip equivalently between an SI
 // description and the atomic description of the same physical values.
 #[test]

@@ -49,22 +49,22 @@ where
         Err(_) => return Ok(()),
     };
     typed.from_user(units);
-    let converted = toml::Value::try_from(&typed).map_err(|e| {
+    // Serialise the full converted struct back into `params` — every
+    // field, whether the user supplied it or it was filled by a serde
+    // default. Because defaults are filled before `from_user` runs, an
+    // omitted dimensioned default is rescaled exactly like a user-written
+    // value (interpreted in the config's declared unit system, then
+    // divided by that dimension's factor), and the builder's later typed
+    // read never re-applies a default in atomic-unit space. See
+    // rqm/io/unit-system.md (rq-db1a6094). The deserialise above already
+    // returned early on an unknown/ill-typed field, leaving `params`
+    // untouched so that error surfaces at `validate_params`.
+    *params = toml::Value::try_from(&typed).map_err(|e| {
         crate::io::config::ConfigError::Parse {
             path: "constraint/slot params".to_string(),
             message: e.to_string(),
         }
     })?;
-    // Overwrite only the keys the user actually wrote: a field omitted
-    // from the input (filled by a serde default) must stay absent so the
-    // builder's own default applies, matching the field-table behaviour.
-    if let (Some(dst), Some(src)) = (params.as_table_mut(), converted.as_table()) {
-        for (k, v) in src {
-            if dst.contains_key(k) {
-                dst.insert(k.clone(), v.clone());
-            }
-        }
-    }
     Ok(())
 }
 
