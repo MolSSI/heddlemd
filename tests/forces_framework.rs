@@ -32,6 +32,8 @@ fn ar_type() -> ParticleTypeConfig {
     ParticleTypeConfig {
         name: "Ar".to_string(),
         mass: 1.0,
+        sigma: None,
+        epsilon: None,
         charge: 0.0,
     }
 }
@@ -536,8 +538,8 @@ fn step_lennardjones_only_writes_nonzero_forces() {
 // (cross) parameter slot.
 fn oh_types() -> Vec<ParticleTypeConfig> {
     vec![
-        ParticleTypeConfig { name: "O".to_string(), mass: 1.0, charge: 0.0 },
-        ParticleTypeConfig { name: "H".to_string(), mass: 1.0, charge: 0.0 },
+        ParticleTypeConfig { name: "O".to_string(), mass: 1.0, sigma: None, epsilon: None, charge: 0.0 },
+        ParticleTypeConfig { name: "H".to_string(), mass: 1.0, sigma: None, epsilon: None, charge: 0.0 },
     ]
 }
 
@@ -648,7 +650,7 @@ fn inert_lj_force_field(gpu: &GpuContext, n: usize, sigma: f64, epsilon: f64) ->
         gpu,
         n,
         &box_10(gpu),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, sigma: None, epsilon: None, charge: 0.0 }],
         &[lj_pair("Ar", "Ar", sigma, epsilon)],
         &[],
         &[],
@@ -1917,6 +1919,8 @@ fn ar_type_with_charge(charge: Real) -> ParticleTypeConfig {
     ParticleTypeConfig {
         name: "Ar".to_string(),
         mass: 1.0,
+        sigma: None,
+        epsilon: None,
         charge: charge as f64,
     }
 }

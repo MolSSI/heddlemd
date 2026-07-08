@@ -17,7 +17,7 @@ use crate::gpu::{
 };
 use crate::registry::{Builtins, Registry};
 use crate::io::config::{
-    AngleTypeConfig, BondTypeConfig, DihedralTypeConfig, NeighborListConfig,
+    AngleTypeConfig, BondTypeConfig, DihedralTypeConfig, LennardJonesConfig, NeighborListConfig,
     PairInteractionConfig, ParticleTypeConfig, SpmeConfig,
 };
 use crate::pbc::SimulationBox;
@@ -240,6 +240,7 @@ pub struct PotentialBuildContext<'a> {
     pub sim_box: &'a SimulationBox,
     pub particle_types: &'a [ParticleTypeConfig],
     pub pair_interactions: &'a [PairInteractionConfig],
+    pub lennard_jones: Option<&'a LennardJonesConfig>,
     pub bond_types: &'a [BondTypeConfig],
     pub angle_types: &'a [AngleTypeConfig],
     pub dihedral_types: &'a [DihedralTypeConfig],
@@ -351,6 +352,10 @@ pub struct ForceField {
 
 impl ForceField {
     // rq-79938dbf
+    /// Build a force field with no Lennard-Jones combining rule: every LJ
+    /// pair comes from an explicit `[[pair_interactions]]` override.
+    /// Equivalent to [`ForceField::new_with_combining`] with
+    /// `lennard_jones = None`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         registry: &PotentialRegistry,
@@ -359,6 +364,50 @@ impl ForceField {
         sim_box: &SimulationBox,
         particle_types: &[ParticleTypeConfig],
         pair_interactions: &[PairInteractionConfig],
+        bond_types: &[BondTypeConfig],
+        angle_types: &[AngleTypeConfig],
+        dihedral_types: &[DihedralTypeConfig],
+        spme_config: Option<&SpmeConfig>,
+        charges: &[Real],
+        bond_list: &BondList,
+        angle_list: &AngleList,
+        dihedral_list: &DihedralList,
+        exclusion_list: &ExclusionList,
+        neighbor_list_config: &NeighborListConfig,
+    ) -> Result<Self, ForceFieldError> {
+        Self::new_with_combining(
+            registry,
+            gpu,
+            particle_count,
+            sim_box,
+            particle_types,
+            pair_interactions,
+            None,
+            bond_types,
+            angle_types,
+            dihedral_types,
+            spme_config,
+            charges,
+            bond_list,
+            angle_list,
+            dihedral_list,
+            exclusion_list,
+            neighbor_list_config,
+        )
+    }
+
+    // rq-be18633a — combining-aware constructor: LJ pairs without an
+    // explicit override are combined from per-type sigma/epsilon under the
+    // `[lennard_jones]` table's rule.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_combining(
+        registry: &PotentialRegistry,
+        gpu: &GpuContext,
+        particle_count: usize,
+        sim_box: &SimulationBox,
+        particle_types: &[ParticleTypeConfig],
+        pair_interactions: &[PairInteractionConfig],
+        lennard_jones: Option<&LennardJonesConfig>,
         bond_types: &[BondTypeConfig],
         angle_types: &[AngleTypeConfig],
         dihedral_types: &[DihedralTypeConfig],
@@ -379,6 +428,7 @@ impl ForceField {
             sim_box,
             particle_types,
             pair_interactions,
+            lennard_jones,
             bond_types,
             angle_types,
             dihedral_types,

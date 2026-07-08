@@ -2,9 +2,14 @@
 
 Lennard-Jones is the non-bonded pairwise potential slot in the pluggable
 potential framework (`framework.md`). The slot is present when the config
-declares at least one `[[pair_interactions]]` entry. Its parameters come
-from the per-pair-type table built from the full `[[pair_interactions]]`
-array (see `io/config-schema.md`).
+declares any Lennard-Jones configuration — a `[lennard_jones]` combining
+table, a non-empty `[[pair_interactions]]` override array, or both. Its
+device-resident per-pair-type parameter table is built once at
+construction: each unordered type pair takes its `(σ, ε, cutoff,
+r_switch)` from an explicit `[[pair_interactions]]` override when one is
+present, and otherwise from combining the two types' per-type
+`sigma`/`epsilon` under the `[lennard_jones]` table's `combining_rule`
+(see *Combining rules* and `io/config-schema.md`).
 
 The slot contributes its per-pair functional form to the JIT-composed
 pair-force pipeline as a `PairForceFragment` (see
@@ -342,26 +347,63 @@ than opposites.
 
 - `LennardJonesParameterTable::from_config(device: &Arc<CudaDevice>, <!-- inline --> <!-- rq-1adf5954 -->
   particle_types: &[ParticleTypeConfig], pair_interactions:
-  &[PairInteractionConfig]) -> Result<LennardJonesParameterTable, GpuError>`
+  &[PairInteractionConfig], lennard_jones: Option<&LennardJonesConfig>) ->
+  Result<LennardJonesParameterTable, GpuError>`
   - `n_types = particle_types.len()`.
-  - Allocates four host-side `Vec<f32>` of length `n_types * n_types`,
-    initially zero. For each entry in `pair_interactions`, resolves the
-    two type names to indices `ti`, `tj` via `particle_types` (matched
-    by `name`), reads σ and ε from the entry's
-    `PairPotentialParams::LennardJones` variant and `cutoff` /
-    `r_switch` from the entry's common fields, and writes σ, ε,
-    `cutoff`, and `r_switch` at both `[ti * n_types + tj]` and
-    `[tj * n_types + ti]`. The caller is responsible for having
-    validated that every unordered pair is covered and that
-    `r_switch <= cutoff` for every entry (the config loader enforces
-    both; see `io/config-schema.md`). `r_switch` is taken directly from
-    `PairInteractionConfig::r_switch`, which the config loader
-    populates with the user-supplied value when present and with
-    `0.9 * cutoff` when omitted.
+  - Allocates four host-side `Vec<f32>` of length `n_types * n_types`.
+    For every unordered type-index pair `(ti, tj)` with `ti <= tj`, it
+    resolves the pair's `(σ, ε, cutoff, r_switch)` and writes them at
+    both `[ti * n_types + tj]` and `[tj * n_types + ti]`, so the table
+    is symmetric by construction:
+    - **Override.** When a `pair_interactions` entry names the pair
+      (its `between` matches the two types' names), σ and ε come from
+      that entry's `PairPotentialParams::LennardJones` variant and
+      `cutoff` / `r_switch` from its common fields.
+    - **Combine.** Otherwise σ and ε are mixed from the two types'
+      per-type `sigma`/`epsilon` (see `ParticleTypeConfig`) by
+      `lennard_jones.combining_rule` (see *Combining rules* below), and
+      `cutoff` / `r_switch` are the `lennard_jones` table's global
+      values.
+    The caller (config loader) has validated that every pair resolves —
+    every pair either has an override or is combinable (both types carry
+    `sigma`/`epsilon` and a `[lennard_jones]` table is present) — and
+    that `r_switch <= cutoff` for every override and for the table (see
+    `io/config-schema.md`), so this function assumes a well-formed
+    input: `lennard_jones` is `Some` whenever any pair lacks an
+    override, and both types carry `sigma`/`epsilon` for every combined
+    pair.
   - Uploads each host array to a fresh `CudaSlice<f32>` and returns the
     populated `LennardJonesParameterTable`.
   - When `n_types == 0` (no particle types declared), all four slices
     have length zero.
+
+### Combining rules <!-- rq-f5b943c1 -->
+
+For a type pair `(ti, tj)` that has no explicit `[[pair_interactions]]`
+override, `from_config` derives the pair's `(σ, ε)` from the two types'
+per-type `sigma`/`epsilon` using the rule selected by the `[lennard_jones]`
+table's `combining_rule` field:
+
+- **Lorentz-Berthelot** (`combining_rule = "lorentz-berthelot"`):
+
+  ```
+  σ_ij = (σ_i + σ_j) / 2        (arithmetic mean)
+  ε_ij = sqrt(ε_i · ε_j)        (geometric mean)
+  ```
+
+The self pair `(ti, ti)` combines to `(σ_i, ε_i)` exactly under
+Lorentz-Berthelot, so a type's self-interaction equals its own per-type
+parameters unless overridden. A type with `ε_i = 0` (or `σ_i = 0`) makes
+every combined pair it participates in Lennard-Jones-inert, since
+`ε_ij = sqrt(ε_i · ε_j) = 0`. `cutoff` and `r_switch` are not combined —
+a combined pair takes the `[lennard_jones]` table's global `cutoff` and
+`r_switch`.
+
+Combining is performed once, host-side, at force-field construction; the
+device kernel reads only the resulting per-pair parameter table and is
+unaware of the rule. The set of rules is a tagged enum
+(`CombiningRule`); `"lorentz-berthelot"` is the only value, with
+geometric and Waldman-Hagler reserved for future rules.
 
 ### Force evaluation <!-- rq-4ddab3c7 -->
 
@@ -429,12 +471,19 @@ carrying the `LennardJonesParameterTable` and the `DeviceExclusionList`.
 It does not own a neighbor list; the framework's shared
 `NeighborListState` is reached through `ForceFieldContext`.
 
+The builder constructs the slot whenever the config carries any
+Lennard-Jones configuration — a non-empty `[[pair_interactions]]` array
+or a `[lennard_jones]` table (or both). A config with neither has no LJ
+interaction and the slot is absent.
+
 The slot's `Potential` methods:
 
 - `max_cutoff` returns `Some(max_cutoff)` where `max_cutoff` is the
-  largest cutoff across the slot's pair-interaction configuration,
-  captured at construction time as a plain `f32` field. The trait call
-  requires no device download.
+  largest cutoff over every resolved type pair — the maximum of the
+  `[[pair_interactions]]` override cutoffs and the `[lennard_jones]`
+  table's `cutoff` (whichever are present) — captured at construction
+  time as a plain `f32` field. The trait call requires no device
+  download.
 - `jit_participant` returns `Some(JitParticipant::PairForce(self))`, so
   the slot contributes the Lennard-Jones functor (see *JIT fragment
   behaviour* above) to the composed packed pair-force kernel rather than
@@ -445,9 +494,12 @@ The slot's `Potential` methods:
 ## Out of Scope <!-- rq-9d7966f4 -->
 
 - Other interaction potentials (Buckingham, Morse, Coulomb, bonded terms).
-- Combining rules (Lorentz–Berthelot, geometric, …) inside the kernel;
-  the config supplies per-pair `(σ, ε, cutoff)` directly and any combining
-  rule is the user's responsibility at config-authoring time.
+- Combining rules **inside the kernel**. Lorentz-Berthelot combining is
+  performed host-side at force-field construction (see *Combining
+  rules*), populating the same per-pair parameter table the kernel reads;
+  the kernel itself always reads pre-combined per-pair `(σ, ε, cutoff,
+  r_switch)` and never mixes. Combining rules other than Lorentz-Berthelot
+  (geometric, Waldman-Hagler, …) are reserved and not yet implemented.
 - Energy and virial tensor computation; this feature computes forces only.
 - Long-range tail corrections.
 - Truncated-and-shifted (energy-shift-only) potential variants. The
@@ -979,4 +1031,49 @@ Feature: Lennard-Jones O(N²) pair force kernel
     When ForceField::step(...) is called
     Then the per-particle forces equal those computed with explicit type_indices[i] / type_indices[j] lookups within f32 round-off
     And two runs on the same GPU produce byte-identical per-particle forces
+
+  # --- Combining rules (from_config) ---
+
+  @rq-9c22145d
+  Scenario: from_config combines an un-overridden pair via Lorentz-Berthelot
+    Given particle_types "A" (sigma=3.0e-10, epsilon=1.0e-21) and
+      "B" (sigma=4.0e-10, epsilon=4.0e-21)
+    And no pair_interactions entry for the (A, B) pair
+    And a LennardJonesConfig with combining_rule LorentzBerthelot, cutoff=9.0e-10
+    When LennardJonesParameterTable::from_config is called
+    Then sigma[A*n+B] equals 3.5e-10 (arithmetic mean) within f32 round-off
+    And epsilon[A*n+B] equals 2.0e-21 (geometric mean sqrt(1e-21 * 4e-21)) within f32 round-off
+    And cutoff[A*n+B] equals 9.0e-10
+    And sigma[B*n+A] equals sigma[A*n+B] and epsilon[B*n+A] equals epsilon[A*n+B] (symmetric table)
+
+  @rq-2c0a228b
+  Scenario: from_config prefers an explicit override over the combined value
+    Given particle_types "A" and "B" both carrying sigma/epsilon
+    And a LennardJonesConfig with combining_rule LorentzBerthelot
+    And a pair_interactions override for (A, B) with sigma=2.5e-10, epsilon=5.0e-22, cutoff=7.0e-10
+    When LennardJonesParameterTable::from_config is called
+    Then sigma[A*n+B] equals 2.5e-10 and epsilon[A*n+B] equals 5.0e-22 (the override, not the mix)
+    And cutoff[A*n+B] equals 7.0e-10
+
+  @rq-270597f3
+  Scenario: from_config self-pair combines to the type's own parameters
+    Given particle_type "A" (sigma=3.4e-10, epsilon=1.65e-21)
+    And no override for the (A, A) self pair
+    And a LennardJonesConfig with combining_rule LorentzBerthelot
+    When LennardJonesParameterTable::from_config is called
+    Then sigma[A*n+A] equals 3.4e-10 and epsilon[A*n+A] equals 1.65e-21 within f32 round-off
+
+  @rq-44481602
+  Scenario: from_config yields an inert combined pair when one type has epsilon = 0
+    Given particle_types "A" (epsilon=1.0e-21) and "H" (sigma=1.0e-10, epsilon=0)
+    And no override for the (A, H) pair
+    And a LennardJonesConfig with combining_rule LorentzBerthelot
+    When LennardJonesParameterTable::from_config is called
+    Then epsilon[A*n+H] equals 0 (sqrt(1e-21 * 0)), so the pair contributes zero LJ force
+
+  @rq-b6723765
+  Scenario: Two combined runs produce byte-identical parameter tables
+    Given identical particle_types with sigma/epsilon and an identical LennardJonesConfig
+    When LennardJonesParameterTable::from_config is called twice
+    Then the two downloaded sigma/epsilon/cutoff/switch tables agree byte-for-byte
 ```

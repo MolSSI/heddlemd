@@ -1098,6 +1098,8 @@ fn build_sd_argon_pair(
         &[ParticleTypeConfig {
             name: "Ar".to_string(),
             mass: mass_au,
+            sigma: None,
+            epsilon: None,
             charge: 0.0,
         }],
         &[PairInteractionConfig {

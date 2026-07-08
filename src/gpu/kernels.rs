@@ -7,7 +7,10 @@ use cudarc::driver::{
 #[cfg(not(feature = "f64"))]
 use crate::gpu::LosslessBuffers;
 use crate::gpu::{GpuError, Kernels, ParticleBuffers};
-use crate::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
+use crate::io::config::{
+    CombiningRule, LennardJonesConfig, PairInteractionConfig, PairPotentialParams,
+    ParticleTypeConfig,
+};
 use crate::pbc::SimulationBox;
 use crate::precision::{Real, Real4};
 
@@ -112,6 +115,7 @@ impl LennardJonesParameterTable {
         device: &Arc<CudaDevice>,
         particle_types: &[ParticleTypeConfig],
         pair_interactions: &[PairInteractionConfig],
+        lennard_jones: Option<&LennardJonesConfig>,
     ) -> Result<Self, GpuError> {
         let n_types = particle_types.len();
         let len = n_types * n_types;
@@ -120,28 +124,54 @@ impl LennardJonesParameterTable {
         let mut cutoff_host: Vec<Real> = vec![0.0; len];
         let mut switch_host: Vec<Real> = vec![0.0; len];
 
-        for pi in pair_interactions {
-            let ti = particle_types
-                .iter()
-                .position(|pt| pt.name == pi.between.0)
-                .expect("pair_interactions type name absent from particle_types (config-layer invariant)");
-            let tj = particle_types
-                .iter()
-                .position(|pt| pt.name == pi.between.1)
-                .expect("pair_interactions type name absent from particle_types (config-layer invariant)");
-            let PairPotentialParams::LennardJones { sigma, epsilon } = pi.potential;
-            let s = sigma as Real;
-            let e = epsilon as Real;
-            let c = pi.cutoff as Real;
-            let rs = pi.r_switch as Real;
-            sigma_host[ti * n_types + tj] = s;
-            sigma_host[tj * n_types + ti] = s;
-            epsilon_host[ti * n_types + tj] = e;
-            epsilon_host[tj * n_types + ti] = e;
-            cutoff_host[ti * n_types + tj] = c;
-            cutoff_host[tj * n_types + ti] = c;
-            switch_host[ti * n_types + tj] = rs;
-            switch_host[tj * n_types + ti] = rs;
+        // rq-1adf5954 rq-f5b943c1 — resolve every unordered pair by an
+        // explicit override when present, otherwise by combining the two
+        // types' per-type sigma/epsilon under the configured rule. The
+        // config layer has validated resolvability, so the `expect`s below
+        // never fire on a validated config. The table is written
+        // symmetrically at (ti,tj) and (tj,ti).
+        for ti in 0..n_types {
+            for tj in ti..n_types {
+                let name_i = &particle_types[ti].name;
+                let name_j = &particle_types[tj].name;
+                let over = pair_interactions.iter().find(|pi| {
+                    (pi.between.0 == *name_i && pi.between.1 == *name_j)
+                        || (pi.between.0 == *name_j && pi.between.1 == *name_i)
+                });
+                let (s, e, c, rs) = if let Some(pi) = over {
+                    let PairPotentialParams::LennardJones { sigma, epsilon } = pi.potential;
+                    (sigma as Real, epsilon as Real, pi.cutoff as Real, pi.r_switch as Real)
+                } else {
+                    let lj = lennard_jones
+                        .expect("combined pair requires a [lennard_jones] table (config invariant)");
+                    let si = particle_types[ti]
+                        .sigma
+                        .expect("combined pair type sigma (config invariant)");
+                    let sj = particle_types[tj]
+                        .sigma
+                        .expect("combined pair type sigma (config invariant)");
+                    let ei = particle_types[ti]
+                        .epsilon
+                        .expect("combined pair type epsilon (config invariant)");
+                    let ej = particle_types[tj]
+                        .epsilon
+                        .expect("combined pair type epsilon (config invariant)");
+                    let (sigma, epsilon) = match lj.combining_rule {
+                        CombiningRule::LorentzBerthelot => {
+                            (0.5 * (si + sj), (ei * ej).sqrt())
+                        }
+                    };
+                    (sigma as Real, epsilon as Real, lj.cutoff as Real, lj.r_switch as Real)
+                };
+                sigma_host[ti * n_types + tj] = s;
+                sigma_host[tj * n_types + ti] = s;
+                epsilon_host[ti * n_types + tj] = e;
+                epsilon_host[tj * n_types + ti] = e;
+                cutoff_host[ti * n_types + tj] = c;
+                cutoff_host[tj * n_types + ti] = c;
+                switch_host[ti * n_types + tj] = rs;
+                switch_host[tj * n_types + ti] = rs;
+            }
         }
 
         let sigma = htod_or_empty(device, &sigma_host)?;

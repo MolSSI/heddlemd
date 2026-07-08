@@ -52,8 +52,9 @@ Sections:
 | `[simulation]` | yes | RNG seed and target temperature for initial-velocity sampling |
 | `[[phase]]` | conditional | per-phase integrator / thermostat / barostat / outputs (at least one of `[[phase]]` or `[[minimization]]` must be present) |
 | `[[minimization]]` | conditional | per-phase minimization algorithm / parameters / outputs |
-| `[[particle_types]]` | yes (>= 1) | per-type properties |
-| `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
+| `[[particle_types]]` | yes (>= 1) | per-type properties (mass, optional LJ `sigma`/`epsilon`) |
+| `[lennard_jones]` | no | LJ combining rule and cutoff for pairs without an explicit override |
+| `[[pair_interactions]]` | no (per-pair overrides) | explicit per-type-pair LJ parameters |
 | `[[bond_types]]` | no | per-bond-type parameters |
 | `[[angle_types]]` | no | per-angle-type parameters |
 | `[[dihedral_types]]` | no | per-dihedral-type parameters |
@@ -647,6 +648,20 @@ One entry per particle species. At least one entry required.
   `pair_interactions.between`. Case-sensitive. Empty strings are rejected.
 - `mass: f64` — particle mass in kilograms. Must be finite and strictly
   positive.
+- `sigma: f64` — optional. Per-type Lennard-Jones zero-crossing distance
+  in metres, used by the combining rule (see `[lennard_jones]` below) to
+  build the parameters of every type pair that has no explicit
+  `[[pair_interactions]]` override. Finite and `>= 0`.
+- `epsilon: f64` — optional. Per-type Lennard-Jones well depth in joules,
+  used by the combining rule. Finite and `>= 0`.
+
+  `sigma` and `epsilon` are declared together: a type that supplies one
+  must supply the other, and a type that supplies neither cannot be
+  combined (every pair it participates in must then have an explicit
+  override). A type used in any pair resolved by combining must carry
+  both. A type with `epsilon = 0` (or `sigma = 0`) is Lennard-Jones-inert
+  in every combined pair, since `epsilon_ij = sqrt(epsilon_i · epsilon_j)`
+  is then zero.
 - `charge: f64` — optional. Particle charge in coulombs. Must be finite
   when supplied; any sign is accepted. Defaults to `0.0` when omitted.
   The charge applies to every particle of this type uniformly. The runner
@@ -669,11 +684,55 @@ One entry per particle species. At least one entry required.
 
 Names must be unique within the array.
 
+#### `[lennard_jones]` (optional table) <!-- rq-be18633a -->
+
+Declares the Lennard-Jones combining rule and the cutoff applied to every
+type pair that has no explicit `[[pair_interactions]]` override. The table
+is optional; it is required whenever at least one pair is resolved by
+combining (i.e. whenever `[[pair_interactions]]` does not cover every
+unordered pair).
+
+```toml
+[lennard_jones]
+combining_rule = "lorentz-berthelot"
+cutoff = 9.0e-10        # metres
+# r_switch = 8.1e-10    # optional; default 0.9 * cutoff
+```
+
+Fields:
+
+- `combining_rule: String` — required. Selects how a pair's `(sigma,
+  epsilon)` is mixed from the two types' per-type `sigma`/`epsilon`. The
+  only supported value is `"lorentz-berthelot"`
+  (`sigma_ij = (sigma_i + sigma_j) / 2`,
+  `epsilon_ij = sqrt(epsilon_i · epsilon_j)`; see
+  `forces/lj-pair-force.md`). Other values (`"geometric"`,
+  `"waldman-hagler"`, ...) are reserved and rejected. Case-sensitive.
+- `cutoff: f64` — required. Pair distance in metres beyond which the LJ
+  force is treated as zero, applied to every combined pair. Finite and
+  strictly positive.
+- `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
+  switching function for combined pairs. Finite, strictly positive, and
+  `<= cutoff`. Defaults to `0.9 * cutoff` when omitted. Setting
+  `r_switch = cutoff` selects the hard-cutoff degenerate case.
+
+Combining mixes only `sigma` and `epsilon`; `cutoff` and `r_switch` for a
+combined pair are the table's global values, not a per-type quantity. An
+explicit `[[pair_interactions]]` override supplies its own `cutoff` /
+`r_switch` for the pair it names.
+
 #### `[[pair_interactions]]` (array of tables) <!-- rq-9244aae4 -->
 
-One entry per unordered pair of declared types. The collection contains
-exactly one entry for every unordered pair, including same-type self pairs.
-For `N` declared types the array contains exactly `N * (N + 1) / 2` entries.
+Optional per-type-pair overrides. Each entry fully specifies the
+Lennard-Jones parameters of one unordered pair of declared types, taking
+precedence over the value the combining rule would produce for that pair.
+The array may be empty or absent; a pair without an override is resolved
+by combining the two types' per-type `sigma`/`epsilon` (see
+`[lennard_jones]` above). Every unordered pair — including same-type self
+pairs — must resolve exactly one way: by an override, or by combining. A
+pair that has no override and involves a type lacking `sigma`/`epsilon`
+(or a config with no `[lennard_jones]` table) is rejected (see
+*Validation*).
 
 Each entry is a tagged variant: a required `potential` field selects the
 pair potential, and every other field is either a common field shared by
@@ -713,8 +772,10 @@ lets a force field express genuinely non-interacting type pairs — for
 example a hydrogen that carries a partial charge but no Lennard-Jones
 site — directly, rather than through a negligible placeholder.
 
-Same-type pairs are required even when only one type is declared:
-`between = ["Ar", "Ar"]` must appear. Unknown fields for the chosen
+An override may name a same-type self pair (`between = ["Ar", "Ar"]`) to
+override that type's self-interaction; a self pair without an override is
+combined from the type's own `sigma`/`epsilon` (which for Lorentz-Berthelot
+reproduces `(sigma, epsilon)` exactly). Unknown fields for the chosen
 `potential` are rejected.
 
 #### `[[bond_types]]` (optional array of tables) <!-- rq-e4420955 -->
@@ -889,7 +950,8 @@ failures as
 
 Cross-validation alongside the other pair potentials feeds into the
 neighbor list's box-compatibility check: the shared neighbor list's
-search radius is `max(pair_interactions.cutoff_max, spme.r_cut_real) +
+search radius is
+`max(pair_interactions.cutoff_max, lennard_jones.cutoff, spme.r_cut_real) +
 r_skin`, and the simulation box's minimum perpendicular width must be
 at least `3 *` that value.
 
@@ -969,8 +1031,9 @@ Cross-validation:
   require `mode = "cell-list"` (the default).
 - The simulation box's minimum perpendicular width satisfies
   `min_perpendicular_width >= 3 * (cutoff_max + r_skin)` where
-  `cutoff_max` is the largest cutoff among `[[pair_interactions]]`
-  and the `[spme]` table's `r_cut_real` (when present). The box is
+  `cutoff_max` is the largest cutoff among the `[[pair_interactions]]`
+  overrides, the `[lennard_jones]` table's `cutoff`, and the `[spme]`
+  table's `r_cut_real` (whichever are present). The box is
   read from the init file, so this check is performed by the runner,
   not by `load_config`. See `simulation-runner.md` for the
   runner-side validation and the corresponding `RunnerError` variant.
@@ -1130,12 +1193,25 @@ path:
    `[[particle_types]]`. Unknown names produce `UnknownTypeInPair { name,
    pair_index }` where `pair_index` is the zero-based index in the
    `pair_interactions` array.
-2. Every unordered pair of declared types appears in
-   `[[pair_interactions]]` exactly once. A missing pair produces
-   `MissingPairInteraction { types: (String, String) }`. A duplicate
-   produces `DuplicatePairInteraction { types: (String, String) }`. The
-   reported tuple is normalised so the lexicographically smaller name
-   comes first.
+2. Every unordered pair of declared types **resolves** to exactly one set
+   of Lennard-Jones parameters, by one of two routes: an explicit
+   `[[pair_interactions]]` override for that pair, or combining the two
+   types' per-type `sigma`/`epsilon` via the `[lennard_jones]` table's
+   `combining_rule`. A pair that has no override and cannot be combined
+   (the `[lennard_jones]` table is absent, or one of the two types omits
+   `sigma`/`epsilon`) produces
+   `UnresolvedPairInteraction { types: (String, String) }`. Two overrides
+   for the same pair produce
+   `DuplicatePairInteraction { types: (String, String) }`. All reported
+   tuples are normalised so the lexicographically smaller name comes
+   first.
+2a. When the `[lennard_jones]` table is present, `combining_rule` is a
+    known value (`UnknownCombiningRule { got: String }` otherwise), its
+    `cutoff` is finite and strictly positive, and its `r_switch` (when
+    supplied) is finite, strictly positive, and `<= cutoff`
+    (`InvalidValue` otherwise). Each `[[particle_types]]` entry supplies
+    `sigma`/`epsilon` together or omits both, and each supplied value is
+    finite and `>= 0` (`InvalidValue` otherwise).
 3. The merged phase sequence (`[[phase]]` ∪ `[[minimization]]`) is
    non-empty (`EmptyPhases` otherwise).
 4. Every phase (MD or minimization) has a non-empty ASCII-only `name`
@@ -1255,7 +1331,11 @@ phase failures.
     `[[minimization]]` entries. The `MinimizationConfig` type is
     documented in `rqm/minimization/steepest-descent.md`.
   - `particle_types: Vec<ParticleTypeConfig>`
-  - `pair_interactions: Vec<PairInteractionConfig>`
+  - `pair_interactions: Vec<PairInteractionConfig>` — explicit per-pair
+    LJ overrides; empty when the `[[pair_interactions]]` array is absent.
+  - `lennard_jones: Option<LennardJonesConfig>` — `Some` when the
+    `[lennard_jones]` table is present, `None` otherwise. Carries the
+    combining rule and the cutoff for pairs without an override.
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
     array is absent.
   - `angle_types: Vec<AngleTypeConfig>` — empty when the
@@ -1269,8 +1349,9 @@ phase failures.
   - `neighbor_list: NeighborListConfig` — defaults to
     `NeighborListConfig::CellList { r_skin: 0.3 * max_cutoff }` when the
     `[neighbor_list]` table is omitted from the
-    config, where `max_cutoff` is the largest cutoff across
-    `[[pair_interactions]]` and the `[spme]` table's `r_cut_real`
+    config, where `max_cutoff` is the largest cutoff across the
+    `[[pair_interactions]]` overrides, the `[lennard_jones]` table's
+    `cutoff`, and the `[spme]` table's `r_cut_real`
     (whichever are present).
   - `config_path: PathBuf` — the absolute path of the source config file,
     retained for error messages and default output-path derivation.
@@ -1353,6 +1434,10 @@ phase failures.
 - `ParticleTypeConfig` <!-- rq-a5ccc1de -->
   - `name: String`
   - `mass: f64`
+  - `sigma: Option<f64>` — per-type LJ σ (metres); `Some` when the TOML
+    field is supplied, `None` otherwise. `Some` iff `epsilon` is `Some`.
+  - `epsilon: Option<f64>` — per-type LJ ε (joules); `Some` iff `sigma`
+    is `Some`.
   - `charge: f64` — defaults to `0.0` when the TOML field is omitted.
 
 - `PairInteractionConfig` <!-- rq-f001eaf8 -->
@@ -1371,6 +1456,22 @@ phase failures.
   - `LennardJones { sigma: f64, epsilon: f64 }` — selected by
     `potential = "lennard-jones"`. `sigma` is the LJ zero-crossing
     distance in metres; `epsilon` is the LJ well depth in joules.
+
+- `LennardJonesConfig` — parsed `[lennard_jones]` table. <!-- rq-b248aadf -->
+  - `combining_rule: CombiningRule` — how a combined pair's `(sigma,
+    epsilon)` is mixed from the two types' per-type values.
+  - `cutoff: f64` — cutoff distance in metres for every combined pair.
+  - `r_switch: f64` — inner switching radius for combined pairs.
+    Populated from the user value when present, otherwise from the
+    default `0.9 * cutoff`. Always satisfies `0 < r_switch <= cutoff`.
+
+- `CombiningRule` — enum selecting the Lennard-Jones mixing rule. <!-- rq-35a75871 -->
+  Variants:
+  - `LorentzBerthelot` — selected by
+    `combining_rule = "lorentz-berthelot"`:
+    `sigma_ij = (sigma_i + sigma_j) / 2`,
+    `epsilon_ij = sqrt(epsilon_i · epsilon_j)`. See
+    `forces/lj-pair-force.md`.
 
 - `BondTypeConfig` — tagged enum carrying the chosen bonded-potential <!-- rq-2f230ccb -->
   parameters. Variants:
@@ -1511,13 +1612,17 @@ phase failures.
   - `UnknownTypeInPair { name: String, pair_index: usize }` — a
     `[[pair_interactions]]` entry's `between` field names a type not
     declared in `[[particle_types]]`.
-  - `MissingPairInteraction { types: (String, String) }` — the
-    declared types omit an unordered pair from `[[pair_interactions]]`.
-    Tuple is normalised so the lexicographically smaller name comes
-    first.
+  - `UnresolvedPairInteraction { types: (String, String) }` — an
+    unordered pair of declared types has no `[[pair_interactions]]`
+    override and cannot be combined (the `[lennard_jones]` table is
+    absent, or one of the two types omits `sigma`/`epsilon`). Tuple is
+    normalised so the lexicographically smaller name comes first.
   - `DuplicatePairInteraction { types: (String, String) }` — two
     `[[pair_interactions]]` entries cover the same unordered pair.
     Tuple normalised as above.
+  - `UnknownCombiningRule { got: String }` — the `[lennard_jones]`
+    table's `combining_rule` is not a recognised value. The only
+    supported value is `"lorentz-berthelot"`.
   - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`
     — two supplied file paths resolve to the same location. `PathRole`
     carries variants `Init`, `Topology`, and
@@ -1666,9 +1771,9 @@ phase failures.
   - On the first failure, returns the structured error variant
     documented for that check (`InvalidValue` for per-field domain
     failures; `DuplicateTypeName`, `UnknownTypeInPair`,
-    `MissingPairInteraction`, `DuplicatePairInteraction`,
-    `PathCollision`, `CoulombRetired`, `AllPairsWithSpme`,
-    `IncompatibleThermostat`, `IncompatibleBarostat`,
+    `UnresolvedPairInteraction`, `DuplicatePairInteraction`,
+    `UnknownCombiningRule`, `PathCollision`, `CoulombRetired`,
+    `AllPairsWithSpme`, `IncompatibleThermostat`, `IncompatibleBarostat`,
     `DuplicateBondTypeName`, or `DuplicateAngleTypeName` for the
     cross-validation rules).
   - Order of checks: per-field domain checks in the section order
@@ -2064,10 +2169,11 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::MissingField { field: "particle_types" })
 
   @rq-a94d2c13
-  Scenario: Missing [[pair_interactions]] is rejected
-    Given the Background config with no [[pair_interactions]] entries
+  Scenario: A pair with no override and no combining source is rejected
+    Given the Background config with no [[pair_interactions]] entries,
+      no [lennard_jones] table, and the "Ar" type carrying no sigma/epsilon
     When load_config is called
-    Then it returns Err(ConfigError::MissingPairInteraction { types: ("Ar", "Ar") })
+    Then it returns Err(ConfigError::UnresolvedPairInteraction { types: ("Ar", "Ar") })
 
   # --- Per-field validation ---
 
@@ -2233,17 +2339,73 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::UnknownTypeInPair { name: "Xe", pair_index: 1 })
 
   @rq-ae6d5db8
-  Scenario: Reject missing pair interaction
-    Given a config with two declared types "Ar" and "Kr"
+  Scenario: Reject an unresolvable cross pair when combining is unavailable
+    Given a config with two declared types "Ar" and "Kr" carrying no sigma/epsilon,
+      no [lennard_jones] table,
       and pair_interactions containing only between=["Ar","Ar"] and between=["Kr","Kr"]
     When load_config is called
-    Then it returns Err(ConfigError::MissingPairInteraction { types: ("Ar", "Kr") })
+    Then it returns Err(ConfigError::UnresolvedPairInteraction { types: ("Ar", "Kr") })
 
   @rq-f11e9d4c
   Scenario: Reject duplicate pair interaction
     Given a config with two pair_interactions both between=["Ar","Ar"]
     When load_config is called
     Then it returns Err(ConfigError::DuplicatePairInteraction { types: ("Ar", "Ar") })
+
+  # --- Lennard-Jones combining rules ---
+
+  @rq-301f463e
+  Scenario: All pairs resolve by combining with no explicit overrides
+    Given a config with types "Ar" (sigma=3.4e-10, epsilon=1.65e-21) and
+      "Kr" (sigma=3.6e-10, epsilon=2.25e-21), no [[pair_interactions]] entries,
+      and a [lennard_jones] table with combining_rule="lorentz-berthelot"
+      and cutoff=8.5e-10
+    When load_config is called
+    Then it returns Ok(config)
+    And every unordered pair (Ar,Ar), (Ar,Kr), (Kr,Kr) resolves
+
+  @rq-7b421a7d
+  Scenario: An explicit override takes precedence over the combined value
+    Given a config whose types carry sigma/epsilon and a [lennard_jones] table,
+      plus an explicit [[pair_interactions]] between=["Ar","Kr"] with
+      sigma=3.0e-10, epsilon=1.0e-21
+    When load_config is called
+    Then it returns Ok(config)
+    And the (Ar,Kr) pair uses the override's sigma=3.0e-10, epsilon=1.0e-21
+      rather than the Lorentz-Berthelot combination
+
+  @rq-8fbf23bb
+  Scenario: A type used only in overridden pairs may omit sigma/epsilon
+    Given a config with types "Ar" (sigma/epsilon present) and "X" (no sigma/epsilon),
+      a [lennard_jones] table, and explicit overrides for every pair involving "X"
+      ((Ar,X) and (X,X))
+    When load_config is called
+    Then it returns Ok(config)
+
+  @rq-d4720f04
+  Scenario: A combined pair whose type lacks sigma/epsilon is rejected
+    Given a config with types "Ar" (sigma/epsilon present) and "X" (no sigma/epsilon),
+      a [lennard_jones] table, and no override for the (Ar,X) pair
+    When load_config is called
+    Then it returns Err(ConfigError::UnresolvedPairInteraction { types: ("Ar", "X") })
+
+  @rq-da8df5fb
+  Scenario: An unknown combining_rule is rejected
+    Given a [lennard_jones] table with combining_rule="geometric"
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownCombiningRule { got: "geometric" })
+
+  @rq-6550d758
+  Scenario: A type declaring sigma without epsilon is rejected
+    Given a [[particle_types]] entry with sigma=3.4e-10 and no epsilon
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "particle_types[..].epsilon", .. })
+
+  @rq-393a8b22
+  Scenario: A [lennard_jones] table with r_switch greater than cutoff is rejected
+    Given a [lennard_jones] table with cutoff=8.5e-10 and r_switch=9.0e-10
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "lennard_jones.r_switch", .. })
 
   @rq-9e4d8944
   Scenario: Reject duplicate pair under different orderings
@@ -2754,11 +2916,12 @@ Feature: TOML simulation config schema
     And config.pair_interactions has length 3
 
   @rq-66dfc50f
-  Scenario: Reject a two-type config that omits a pair
-    Given a config with two declared types "Ar" and "Kr"
+  Scenario: Reject a two-type config that omits a pair with no combining source
+    Given a config with two declared types "Ar" and "Kr" carrying no sigma/epsilon,
+      no [lennard_jones] table,
       and pair_interactions for ("Ar","Ar") and ("Kr","Kr") only
     When load_config is called
-    Then it returns Err(ConfigError::MissingPairInteraction { types: ("Ar", "Kr") })
+    Then it returns Err(ConfigError::UnresolvedPairInteraction { types: ("Ar", "Kr") })
 
   # --- Output cadence semantics ---
 

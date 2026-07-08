@@ -3694,6 +3694,10 @@
       {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
+      },
+      {
+        "file": "tests/lj_combining.rs",
+        "kind": "code"
       }
     ],
     "title": "LennardJonesParameterTable",
@@ -5531,6 +5535,18 @@
     "title": "Doubling epsilon doubles the force at the same separation",
     "type": "scenario"
   },
+  "rq-270597f3": {
+    "decl": "Scenario: from_config self-pair combines to the type's own parameters",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "tests/lj_combining.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "from_config self-pair combines to the type's own parameters",
+    "type": "scenario"
+  },
   "rq-270637dd": {
     "decl": "Scenario: Pre-flight refuses to overwrite an existing output file",
     "file": "analysis/framework",
@@ -6217,6 +6233,18 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-2c0a228b": {
+    "decl": "Scenario: from_config prefers an explicit override over the combined value",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "tests/lj_combining.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "from_config prefers an explicit override over the combined value",
+    "type": "scenario"
+  },
   "rq-2c1b569c": {
     "decl": "- `CudaGraph` — RAII wrapper around `cudarc::driver::sys::CUgraph`.",
     "file": "cuda-graphs",
@@ -6724,6 +6752,18 @@
     ],
     "title": "Thermostat",
     "type": "api-item"
+  },
+  "rq-301f463e": {
+    "decl": "Scenario: All pairs resolve by combining with no explicit overrides",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "All pairs resolve by combining with no explicit overrides",
+    "type": "scenario"
   },
   "rq-303211d9": {
     "decl": "- `LosslessBuffers` — host-side wrapper around the six device residual",
@@ -7342,6 +7382,13 @@
     "title": "First displacement_check call always rebuilds (needs_rebuild starts true)",
     "type": "scenario"
   },
+  "rq-35a75871": {
+    "decl": "- `CombiningRule` — enum selecting the Lennard-Jones mixing rule.",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CombiningRule",
+    "type": "api-item"
+  },
   "rq-35af4d98": {
     "decl": "Scenario: apply_influence produces V_hat[k] = G[k] * rho_hat[k] for k != 0",
     "file": "forces/spme",
@@ -7818,6 +7865,18 @@
       }
     ],
     "title": "rescale_velocities with factor=1.0 is the identity",
+    "type": "scenario"
+  },
+  "rq-393a8b22": {
+    "decl": "Scenario: A [lennard_jones] table with r_switch greater than cutoff is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A [lennard_jones] table with r_switch greater than cutoff is rejected",
     "type": "scenario"
   },
   "rq-394a4bb1": {
@@ -9016,6 +9075,18 @@
     "refs": [],
     "title": "atom_j is the centre (vertex) atom; atom_i and atom_k are the wings.",
     "type": "file"
+  },
+  "rq-44481602": {
+    "decl": "Scenario: from_config yields an inert combined pair when one type has epsilon = 0",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "tests/lj_combining.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "from_config yields an inert combined pair when one type has epsilon = 0",
+    "type": "scenario"
   },
   "rq-444903e2": {
     "decl": "Scenario: Construct velocity-Verlet (lossy) via the integrator registry",
@@ -12864,6 +12935,18 @@
     "title": "Tilts may exceed the corresponding diagonals",
     "type": "scenario"
   },
+  "rq-6550d758": {
+    "decl": "Scenario: A type declaring sigma without epsilon is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A type declaring sigma without epsilon is rejected",
+    "type": "scenario"
+  },
   "rq-656ce38f": {
     "decl": "Scenario: Log header includes the MC barostat columns when configured",
     "file": "integration/mc-barostat",
@@ -13050,7 +13133,7 @@
     "type": "scenario"
   },
   "rq-66dfc50f": {
-    "decl": "Scenario: Reject a two-type config that omits a pair",
+    "decl": "Scenario: Reject a two-type config that omits a pair with no combining source",
     "file": "io/config-schema",
     "refs": [
       {
@@ -13058,7 +13141,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reject a two-type config that omits a pair",
+    "title": "Reject a two-type config that omits a pair with no combining source",
     "type": "scenario"
   },
   "rq-66ec7ee4": {
@@ -15769,6 +15852,18 @@
     "title": "Kernel Variants",
     "type": "section"
   },
+  "rq-7b421a7d": {
+    "decl": "Scenario: An explicit override takes precedence over the combined value",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An explicit override takes precedence over the combined value",
+    "type": "scenario"
+  },
   "rq-7b5eef8c": {
     "decl": "## Lossless Velocity-Verlet Loop",
     "file": "pipeline-reversibility",
@@ -18060,6 +18155,18 @@
     "title": "lookup returns the builder for a registered kind",
     "type": "scenario"
   },
+  "rq-8fbf23bb": {
+    "decl": "Scenario: A type used only in overridden pairs may omit sigma/epsilon",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A type used only in overridden pairs may omit sigma/epsilon",
+    "type": "scenario"
+  },
   "rq-8fd4e3bf": {
     "decl": "Scenario: plan walk on empty state is a no-op",
     "file": "integration/framework",
@@ -19596,6 +19703,18 @@
       }
     ],
     "title": "Exclusion scales default to 0.0 when both columns omitted",
+    "type": "scenario"
+  },
+  "rq-9c22145d": {
+    "decl": "Scenario: from_config combines an un-overridden pair via Lorentz-Berthelot",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "tests/lj_combining.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "from_config combines an un-overridden pair via Lorentz-Berthelot",
     "type": "scenario"
   },
   "rq-9c3ecf3f": {
@@ -21309,7 +21428,7 @@
     "type": "section"
   },
   "rq-a94d2c13": {
-    "decl": "Scenario: Missing [[pair_interactions]] is rejected",
+    "decl": "Scenario: A pair with no override and no combining source is rejected",
     "file": "io/config-schema",
     "refs": [
       {
@@ -21317,7 +21436,7 @@
         "kind": "code"
       }
     ],
-    "title": "Missing [[pair_interactions]] is rejected",
+    "title": "A pair with no override and no combining source is rejected",
     "type": "scenario"
   },
   "rq-a953fc1d": {
@@ -21959,7 +22078,7 @@
     "type": "scenario"
   },
   "rq-ae6d5db8": {
-    "decl": "Scenario: Reject missing pair interaction",
+    "decl": "Scenario: Reject an unresolvable cross pair when combining is unavailable",
     "file": "io/config-schema",
     "refs": [
       {
@@ -21967,7 +22086,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reject missing pair interaction",
+    "title": "Reject an unresolvable cross pair when combining is unavailable",
     "type": "scenario"
   },
   "rq-ae74d89b": {
@@ -22503,6 +22622,13 @@
     "title": "Bit-exact equality after a single full velocity-Verlet step",
     "type": "scenario"
   },
+  "rq-b248aadf": {
+    "decl": "- `LennardJonesConfig` — parsed `[lennard_jones]` table.",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "LennardJonesConfig",
+    "type": "api-item"
+  },
   "rq-b2559e09": {
     "decl": "### Reduction Kernel",
     "file": "forces/morse-bonded",
@@ -22967,6 +23093,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-b6723765": {
+    "decl": "Scenario: Two combined runs produce byte-identical parameter tables",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "tests/lj_combining.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two combined runs produce byte-identical parameter tables",
+    "type": "scenario"
   },
   "rq-b6728f3c": {
     "decl": "- `log_column_names() -> &'static [\"pressure\", \"box_volume\"]`.",
@@ -23853,6 +23991,35 @@
     ],
     "title": "Per-phase [phase.output] overrides default paths",
     "type": "scenario"
+  },
+  "rq-be18633a": {
+    "decl": "#### `[lennard_jones]` (optional table)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "`[lennard_jones]` (optional table)",
+    "type": "section"
   },
   "rq-be1eb548": {
     "decl": "- `ForceField::step_class(&mut self, class: ForceClass, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings, level: AggregateLevel) -> Result<(), ForceFieldError>`",
@@ -26672,6 +26839,18 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-d4720f04": {
+    "decl": "Scenario: A combined pair whose type lacks sigma/epsilon is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A combined pair whose type lacks sigma/epsilon is rejected",
+    "type": "scenario"
+  },
   "rq-d4759a9a": {
     "decl": "- `pub const REAL_NAME: &str;`",
     "file": "precision",
@@ -27417,6 +27596,18 @@
     "refs": [],
     "title": "Philox uniform-`Real` conversion",
     "type": "section"
+  },
+  "rq-da8df5fb": {
+    "decl": "Scenario: An unknown combining_rule is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An unknown combining_rule is rejected",
+    "type": "scenario"
   },
   "rq-daa6678e": {
     "decl": "Scenario: An omitted dimensioned slot-param default is filled and converted (SI)",
@@ -30961,6 +31152,27 @@
     ],
     "title": "A run with one [[minimization]] phase executes the SD loop and proceeds to the next phase",
     "type": "scenario"
+  },
+  "rq-f5b943c1": {
+    "decl": "### Combining rules",
+    "file": "forces/lj-pair-force",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/lj_combining.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Combining rules",
+    "type": "section"
   },
   "rq-f5b9695a": {
     "decl": "### Velocity-Verlet `lossless` mode interaction",

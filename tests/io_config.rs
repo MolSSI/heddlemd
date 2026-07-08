@@ -535,7 +535,7 @@ mass = 1.0
 "#;
     let path = write_config(&dir, body);
     match load_config(&path).unwrap_err() {
-        ConfigError::MissingPairInteraction { types } => {
+        ConfigError::UnresolvedPairInteraction { types } => {
             assert_eq!(types, ("Ar".to_string(), "Ar".to_string()));
         }
         other => panic!("unexpected: {other:?}"),
@@ -938,7 +938,7 @@ cutoff = 1.0
 "#;
     let path = write_config(&dir, body);
     match load_config(&path).unwrap_err() {
-        ConfigError::MissingPairInteraction { types } => {
+        ConfigError::UnresolvedPairInteraction { types } => {
             assert_eq!(types, ("Ar".to_string(), "Kr".to_string()));
         }
         other => panic!("unexpected: {other:?}"),
@@ -1183,7 +1183,7 @@ cutoff = 1.0
 "#;
     let path = write_config(&dir, body);
     match load_config(&path).unwrap_err() {
-        ConfigError::MissingPairInteraction { types } => {
+        ConfigError::UnresolvedPairInteraction { types } => {
             assert_eq!(types, ("Ar".to_string(), "Kr".to_string()));
         }
         other => panic!("unexpected: {other:?}"),
@@ -4673,4 +4673,247 @@ fn harmonic_bond_type_rejects_extra_fields() {
     );
     let path = write_config(&dir, &cfg_str);
     assert_parse(&load_config(&path).unwrap_err(), "bond_types[0]");
+}
+
+// =====================================================================
+// Lennard-Jones combining rules (rq-be18633a)
+// =====================================================================
+
+/// Base config prefix (schema, simulation, one MD phase) shared by the
+/// combining-rule tests. Callers append `[[particle_types]]`,
+/// optional `[[pair_interactions]]`, and an optional `[lennard_jones]`.
+fn combining_prefix() -> String {
+    r#"schema_version = 1
+units = "atomic"
+init = "x.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 300.0
+
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+"#
+    .to_string()
+}
+
+// rq-301f463e
+#[test]
+fn combining_all_pairs_resolve_without_overrides() {
+    let dir = tmp_path("comb_all");
+    let body = combining_prefix()
+        + r#"
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+sigma = 3.4e-10
+epsilon = 1.65e-21
+
+[[particle_types]]
+name = "Kr"
+mass = 1.0
+sigma = 3.6e-10
+epsilon = 2.25e-21
+
+[lennard_jones]
+combining_rule = "lorentz-berthelot"
+cutoff = 8.5e-10
+"#;
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.pair_interactions.is_empty());
+    assert!(cfg.lennard_jones.is_some());
+}
+
+// rq-7b421a7d
+#[test]
+fn combining_override_takes_precedence() {
+    let dir = tmp_path("comb_override");
+    let body = combining_prefix()
+        + r#"
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+sigma = 3.4e-10
+epsilon = 1.65e-21
+
+[[particle_types]]
+name = "Kr"
+mass = 1.0
+sigma = 3.6e-10
+epsilon = 2.25e-21
+
+[lennard_jones]
+combining_rule = "lorentz-berthelot"
+cutoff = 8.5e-10
+
+[[pair_interactions]]
+between = ["Ar", "Kr"]
+potential = "lennard-jones"
+sigma = 3.0e-10
+epsilon = 1.0e-21
+cutoff = 8.5e-10
+"#;
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    // The override is retained as-is for the (Ar, Kr) pair.
+    let over = cfg
+        .pair_interactions
+        .iter()
+        .find(|p| p.between == ("Ar".to_string(), "Kr".to_string()))
+        .expect("override present");
+    match over.potential {
+        heddle_md::io::config::PairPotentialParams::LennardJones { sigma, epsilon } => {
+            assert!((sigma - 3.0e-10).abs() < 1e-22);
+            assert!((epsilon - 1.0e-21).abs() < 1e-33);
+        }
+    }
+}
+
+// rq-8fbf23bb
+#[test]
+fn combining_type_used_only_in_overrides_may_omit_sigma_epsilon() {
+    let dir = tmp_path("comb_omit_ok");
+    let body = combining_prefix()
+        + r#"
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+sigma = 3.4e-10
+epsilon = 1.65e-21
+
+[[particle_types]]
+name = "X"
+mass = 1.0
+
+[lennard_jones]
+combining_rule = "lorentz-berthelot"
+cutoff = 8.5e-10
+
+[[pair_interactions]]
+between = ["Ar", "X"]
+potential = "lennard-jones"
+sigma = 3.0e-10
+epsilon = 1.0e-21
+cutoff = 8.5e-10
+
+[[pair_interactions]]
+between = ["X", "X"]
+potential = "lennard-jones"
+sigma = 3.0e-10
+epsilon = 1.0e-21
+cutoff = 8.5e-10
+"#;
+    let path = write_config(&dir, &body);
+    // (Ar,Ar) combines; (Ar,X) and (X,X) are overridden, so X needs no
+    // sigma/epsilon.
+    load_config(&path).unwrap();
+}
+
+// rq-d4720f04
+#[test]
+fn combining_pair_with_type_lacking_params_is_rejected() {
+    let dir = tmp_path("comb_unresolved");
+    let body = combining_prefix()
+        + r#"
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+sigma = 3.4e-10
+epsilon = 1.65e-21
+
+[[particle_types]]
+name = "X"
+mass = 1.0
+
+[lennard_jones]
+combining_rule = "lorentz-berthelot"
+cutoff = 8.5e-10
+"#;
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnresolvedPairInteraction { types } => {
+            assert_eq!(types, ("Ar".to_string(), "X".to_string()));
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-da8df5fb
+#[test]
+fn combining_unknown_rule_is_rejected() {
+    let dir = tmp_path("comb_unknown_rule");
+    let body = combining_prefix()
+        + r#"
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+sigma = 3.4e-10
+epsilon = 1.65e-21
+
+[lennard_jones]
+combining_rule = "geometric"
+cutoff = 8.5e-10
+"#;
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownCombiningRule { got } => assert_eq!(got, "geometric"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-6550d758
+#[test]
+fn combining_sigma_without_epsilon_is_rejected() {
+    let dir = tmp_path("comb_sigma_only");
+    let body = combining_prefix()
+        + r#"
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+sigma = 3.4e-10
+
+[lennard_jones]
+combining_rule = "lorentz-berthelot"
+cutoff = 8.5e-10
+"#;
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert!(field.contains("epsilon"), "field was {field}");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-393a8b22
+#[test]
+fn combining_r_switch_greater_than_cutoff_is_rejected() {
+    let dir = tmp_path("comb_rswitch");
+    let body = combining_prefix()
+        + r#"
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+sigma = 3.4e-10
+epsilon = 1.65e-21
+
+[lennard_jones]
+combining_rule = "lorentz-berthelot"
+cutoff = 8.5e-10
+r_switch = 9.0e-10
+"#;
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "lennard_jones.r_switch");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
 }

@@ -783,6 +783,7 @@ fn builder_returns_none_for_empty_dihedral_list() {
         sim_box: &box_10(&gpu),
         particle_types: &[],
         pair_interactions: &[],
+        lennard_jones: None,
         bond_types: &[],
         angle_types: &[],
         dihedral_types: &[periodic_type("D", 1.0, 1, 0.0)],

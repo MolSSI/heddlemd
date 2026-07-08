@@ -164,33 +164,44 @@ impl PotentialBuilder for LennardJonesBuilder {
         &self,
         cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        if cx.pair_interactions.is_empty() {
+        // rq-be18633a — the slot is present when the config carries any LJ
+        // configuration: explicit overrides, a [lennard_jones] combining
+        // table, or both. A config with neither has no LJ interaction.
+        if cx.pair_interactions.is_empty() && cx.lennard_jones.is_none() {
             return Ok(None);
         }
         let params = LennardJonesParameterTable::from_config(
             &cx.gpu.device,
             cx.particle_types,
             cx.pair_interactions,
+            cx.lennard_jones,
         )?;
-        let max_cutoff = cx
+        // rq-be18633a — cutoff structure spans both the per-pair override
+        // cutoffs and the [lennard_jones] combined cutoff. `cutoffs`
+        // collects every cutoff/r_switch that appears in the resolved
+        // table; `max_cutoff` is their maximum, `uniform_cutoff` is
+        // `Some(c)` only when they all share one value, and
+        // `switch_degenerate` holds only when every one has
+        // `r_switch == cutoff`.
+        let cutoffs: Vec<(f64, f64)> = cx
             .pair_interactions
             .iter()
-            .map(|p| p.cutoff as Real)
+            .map(|p| (p.cutoff, p.r_switch))
+            .chain(cx.lennard_jones.map(|lj| (lj.cutoff, lj.r_switch)))
+            .collect();
+        let max_cutoff = cutoffs
+            .iter()
+            .map(|(c, _)| *c as Real)
             .fold(0.0, Real::max);
-        // Inspect the configured pair interactions to decide the
-        // fragment's cutoff structure and whether the LJ switching
-        // function is degenerate (every entry has r_switch == cutoff).
-        let first = &cx.pair_interactions[0];
-        let cutoff_uniform = cx
-            .pair_interactions
+        let first_cutoff = cutoffs[0].0;
+        let cutoff_uniform = cutoffs
             .iter()
-            .all(|p| (p.cutoff - first.cutoff).abs() < f64::EPSILON);
-        let switch_degenerate = cx
-            .pair_interactions
+            .all(|(c, _)| (c - first_cutoff).abs() < f64::EPSILON);
+        let switch_degenerate = cutoffs
             .iter()
-            .all(|p| (p.r_switch - p.cutoff).abs() < f64::EPSILON);
+            .all(|(c, rs)| (rs - c).abs() < f64::EPSILON);
         let uniform_cutoff = if cutoff_uniform {
-            Some(first.cutoff as Real)
+            Some(first_cutoff as Real)
         } else {
             None
         };

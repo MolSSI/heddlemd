@@ -67,10 +67,18 @@ pub enum ConfigError {
     DuplicateTypeName { name: String },
     #[error("pair_interactions[{pair_index}] references unknown particle type `{name}`")]
     UnknownTypeInPair { name: String, pair_index: usize },
-    #[error("missing pair interaction for type pair (`{}`, `{}`)", types.0, types.1)]
-    MissingPairInteraction { types: (String, String) },
+    // rq-9244aae4 — a pair with no override that cannot be combined.
+    #[error(
+        "type pair (`{}`, `{}`) has no [[pair_interactions]] override and cannot be combined: \
+         supply an override, or add a [lennard_jones] table and give both types sigma/epsilon",
+        types.0, types.1
+    )]
+    UnresolvedPairInteraction { types: (String, String) },
     #[error("duplicate pair interaction for type pair (`{}`, `{}`)", types.0, types.1)]
     DuplicatePairInteraction { types: (String, String) },
+    // rq-be18633a
+    #[error("unknown `[lennard_jones]` combining_rule `{got}`: expected `lorentz-berthelot`")]
+    UnknownCombiningRule { got: String },
     #[error("output paths collide: `{kind_a}` and `{kind_b}` both resolve to `{}`", path.display())]
     PathCollision {
         kind_a: PathRole,
@@ -415,8 +423,32 @@ impl<'de> Deserialize<'de> for NamedSlotConfig {
 pub struct ParticleTypeConfig {
     pub name: String,
     pub mass: f64,
+    /// Per-type LJ zero-crossing distance (metres); `Some` iff `epsilon`
+    /// is `Some`. Used by the combining rule for pairs without an override.
+    #[serde(default)]
+    pub sigma: Option<f64>,
+    /// Per-type LJ well depth (joules); `Some` iff `sigma` is `Some`.
+    #[serde(default)]
+    pub epsilon: Option<f64>,
     #[serde(default)]
     pub charge: f64,
+}
+
+// rq-be18633a — enum selecting the Lennard-Jones combining rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombiningRule {
+    // rq-f5b943c1 — sigma_ij = (sigma_i + sigma_j) / 2,
+    // epsilon_ij = sqrt(epsilon_i * epsilon_j).
+    LorentzBerthelot,
+}
+
+// rq-be18633a — parsed `[lennard_jones]` table: the combining rule and
+// the cutoff / switching radius applied to every combined pair.
+#[derive(Debug, Clone)]
+pub struct LennardJonesConfig {
+    pub combining_rule: CombiningRule,
+    pub cutoff: f64,
+    pub r_switch: f64,
 }
 
 // rq-f001eaf8
@@ -575,7 +607,12 @@ pub struct Config {
     /// `[[minimization]]` table.
     pub phases: Vec<PhaseKind>,
     pub particle_types: Vec<ParticleTypeConfig>,
+    /// Explicit per-type-pair LJ overrides. May be empty when every pair
+    /// is resolved by combining (see `lennard_jones`).
     pub pair_interactions: Vec<PairInteractionConfig>,
+    /// LJ combining rule and cutoff for pairs without an explicit
+    /// override. `Some` when the `[lennard_jones]` table is present.
+    pub lennard_jones: Option<LennardJonesConfig>,
     pub bond_types: Vec<BondTypeConfig>,
     pub angle_types: Vec<AngleTypeConfig>,
     pub dihedral_types: Vec<DihedralTypeConfig>,
@@ -633,7 +670,23 @@ struct RawParticleTypeConfig {
     name: String,
     mass: crate::units::Mass,
     #[serde(default)]
+    sigma: Option<crate::units::Length>,
+    #[serde(default)]
+    epsilon: Option<crate::units::Energy>,
+    #[serde(default)]
     charge: crate::units::Charge,
+}
+
+// rq-be18633a — raw `[lennard_jones]` table. `combining_rule` is a raw
+// string parsed to `CombiningRule` in `load_config_raw`; the Length
+// fields are converted to atomic units by the `from_user` pass.
+#[derive(Debug, Deserialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+struct RawLennardJonesConfig {
+    combining_rule: String,
+    cutoff: crate::units::Length,
+    #[serde(default)]
+    r_switch: Option<crate::units::Length>,
 }
 
 #[derive(Debug, Deserialize, crate::units::Convert)]
@@ -664,6 +717,8 @@ struct RawConfig {
     particle_types: Vec<RawParticleTypeConfig>,
     #[serde(default)]
     pair_interactions: Vec<RawPairInteraction>,
+    #[serde(default)]
+    lennard_jones: Option<RawLennardJonesConfig>,
     #[serde(default)]
     bond_types: Vec<RawBondType>,
     #[serde(default)]
@@ -940,7 +995,31 @@ pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
         use crate::units::Convert;
         raw_config.from_user(units);
     }
-    let mut config = build_config(raw_config, path, base_dir, units);
+    // rq-be18633a — parse the `[lennard_jones]` table (its Length fields
+    // are now atomic). The `combining_rule` string is the one fallible
+    // string→enum parse, mirroring `units`; an unknown value is rejected
+    // here so `build_config` can stay infallible.
+    let lennard_jones = match raw_config.lennard_jones.take() {
+        None => None,
+        Some(raw_lj) => {
+            let combining_rule = match raw_lj.combining_rule.as_str() {
+                "lorentz-berthelot" => CombiningRule::LorentzBerthelot,
+                other => {
+                    return Err(ConfigError::UnknownCombiningRule {
+                        got: other.to_string(),
+                    });
+                }
+            };
+            let cutoff = raw_lj.cutoff.0;
+            let r_switch = raw_lj.r_switch.map(|x| x.0).unwrap_or(0.9 * cutoff);
+            Some(LennardJonesConfig {
+                combining_rule,
+                cutoff,
+                r_switch,
+            })
+        }
+    };
+    let mut config = build_config(raw_config, path, base_dir, units, lennard_jones);
     // Open-shaped slot params are converted to atomic units by the owning
     // builder's `convert_params`. The built-in registries supply those
     // builders; an unknown kind is left untouched and rejected later by
@@ -1150,6 +1229,7 @@ fn build_config(
     config_path: &Path,
     base_dir: &Path,
     units: UnitSystem,
+    lennard_jones: Option<LennardJonesConfig>,
 ) -> Config {
     // Unit conversion already happened in the single `raw.from_user(units)`
     // pass before this function; every Raw unit-bearing field is in atomic
@@ -1209,14 +1289,21 @@ fn build_config(
         spline_order: s.spline_order,
     });
 
-    // Compute the maximum cutoff across pair_interactions and
-    // spme.r_cut_real; used to derive r_skin's default when
-    // [neighbor_list] is absent or its r_skin field is omitted.
+    // Compute the maximum cutoff across pair_interaction overrides, the
+    // [lennard_jones] combined cutoff, and spme.r_cut_real; used to derive
+    // r_skin's default when [neighbor_list] is absent or its r_skin field
+    // is omitted.
     let max_cutoff = {
         let mut m: f64 = 0.0;
         for p in &pair_interactions {
             if p.cutoff > m {
                 m = p.cutoff;
+            }
+        }
+        // rq-be18633a — combined pairs use the [lennard_jones] cutoff.
+        if let Some(lj) = lennard_jones.as_ref() {
+            if lj.cutoff > m {
+                m = lj.cutoff;
             }
         }
         if let Some(s) = spme.as_ref() {
@@ -1403,7 +1490,13 @@ fn build_config(
     let particle_types: Vec<ParticleTypeConfig> = raw
         .particle_types
         .into_iter()
-        .map(|p| ParticleTypeConfig { name: p.name, mass: p.mass.0, charge: p.charge.0 })
+        .map(|p| ParticleTypeConfig {
+            name: p.name,
+            mass: p.mass.0,
+            sigma: p.sigma.map(|x| x.0),
+            epsilon: p.epsilon.map(|x| x.0),
+            charge: p.charge.0,
+        })
         .collect();
 
     Config {
@@ -1415,6 +1508,7 @@ fn build_config(
         phases,
         particle_types,
         pair_interactions,
+        lennard_jones,
         bond_types,
         angle_types,
         dihedral_types,
@@ -1443,6 +1537,18 @@ impl Config {
         validate_phases(&self.phases)?;
         validate_particle_types(&self.particle_types)?;
         validate_pair_interactions(&self.pair_interactions, &self.particle_types)?;
+        if let Some(lj) = &self.lennard_jones {
+            validate_lennard_jones(lj)?;
+        }
+        // Resolvability is a pair-interaction concern; check it here, before
+        // neighbor-list validation, so a config with no LJ configuration at
+        // all surfaces the informative `UnresolvedPairInteraction` rather
+        // than the downstream `r_skin = 0.3 * max_cutoff = 0` error.
+        check_pair_coverage(
+            &self.particle_types,
+            &self.pair_interactions,
+            self.lennard_jones.as_ref(),
+        )?;
         validate_bond_types(&self.bond_types)?;
         validate_angle_types(&self.angle_types)?;
         validate_dihedral_types(&self.dihedral_types)?;
@@ -1464,7 +1570,6 @@ impl Config {
         // collisions. The integrator/thermostat/barostat compatibility
         // rules require builder predicates, so they live in
         // `validate_against`.
-        check_pair_coverage(&self.particle_types, &self.pair_interactions)?;
         check_path_collisions(self)?;
         Ok(())
     }
@@ -1826,6 +1931,27 @@ fn validate_particle_types(pts: &[ParticleTypeConfig]) -> Result<(), ConfigError
         }
         require_finite_positive(&format!("particle_types[{i}].mass"), pt.mass)?;
         require_finite(&format!("particle_types[{i}].charge"), pt.charge)?;
+        // rq-be18633a — per-type LJ sigma/epsilon are declared together
+        // and each is finite and >= 0.
+        match (pt.sigma, pt.epsilon) {
+            (Some(sigma), Some(epsilon)) => {
+                require_finite_non_negative(&format!("particle_types[{i}].sigma"), sigma)?;
+                require_finite_non_negative(&format!("particle_types[{i}].epsilon"), epsilon)?;
+            }
+            (Some(_), None) => {
+                return Err(invalid(
+                    format!("particle_types[{i}].epsilon"),
+                    "sigma is set but epsilon is missing; declare both or neither",
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(invalid(
+                    format!("particle_types[{i}].sigma"),
+                    "epsilon is set but sigma is missing; declare both or neither",
+                ));
+            }
+            (None, None) => {}
+        }
         if seen.iter().any(|n| *n == pt.name) {
             return Err(ConfigError::DuplicateTypeName {
                 name: pt.name.clone(),
@@ -1840,14 +1966,8 @@ fn validate_pair_interactions(
     pis: &[PairInteractionConfig],
     pts: &[ParticleTypeConfig],
 ) -> Result<(), ConfigError> {
-    if pis.is_empty() {
-        // No pair interactions at all — surfaces as a missing pair for the
-        // first declared type pair. (Pair-coverage check below covers the
-        // case where the array is non-empty but incomplete.)
-        return Err(ConfigError::MissingPairInteraction {
-            types: (pts[0].name.clone(), pts[0].name.clone()),
-        });
-    }
+    // An empty `[[pair_interactions]]` array is valid: every pair is then
+    // resolved by combining (see `check_pair_coverage`).
     for (i, p) in pis.iter().enumerate() {
         require_finite_positive(&format!("pair_interactions[{i}].cutoff"), p.cutoff)?;
         require_finite_positive(&format!("pair_interactions[{i}].r_switch"), p.r_switch)?;
@@ -1889,6 +2009,24 @@ fn validate_pair_interactions(
                 });
             }
         }
+    }
+    Ok(())
+}
+
+// rq-be18633a — the `[lennard_jones]` table's cutoff is finite and
+// strictly positive, and its r_switch is finite, strictly positive, and
+// `<= cutoff`. (The combining_rule string was validated at parse time.)
+fn validate_lennard_jones(lj: &LennardJonesConfig) -> Result<(), ConfigError> {
+    require_finite_positive("lennard_jones.cutoff", lj.cutoff)?;
+    require_finite_positive("lennard_jones.r_switch", lj.r_switch)?;
+    if lj.r_switch > lj.cutoff {
+        return Err(invalid(
+            "lennard_jones.r_switch",
+            format!(
+                "r_switch ({}) exceeds cutoff ({})",
+                lj.r_switch, lj.cutoff
+            ),
+        ));
     }
     Ok(())
 }
@@ -2057,15 +2195,28 @@ fn validate_neighbor_list(n: &NeighborListConfig) -> Result<(), ConfigError> {
     }
 }
 
+// rq-9244aae4 rq-be18633a — every unordered type pair must resolve
+// exactly one way: by an explicit `[[pair_interactions]]` override, or by
+// combining the two types' per-type sigma/epsilon via the `[lennard_jones]`
+// table. A pair that is neither overridden nor combinable is rejected.
 fn check_pair_coverage(
     pts: &[ParticleTypeConfig],
     pis: &[PairInteractionConfig],
+    lennard_jones: Option<&LennardJonesConfig>,
 ) -> Result<(), ConfigError> {
+    let can_combine = lennard_jones.is_some();
     for i in 0..pts.len() {
         for j in i..pts.len() {
             let key = normalise_pair(&pts[i].name, &pts[j].name);
-            if !pis.iter().any(|p| p.between == key) {
-                return Err(ConfigError::MissingPairInteraction { types: key });
+            if pis.iter().any(|p| p.between == key) {
+                continue; // resolved by an explicit override
+            }
+            // No override: resolvable only by combining, which requires a
+            // [lennard_jones] table and sigma/epsilon on both types.
+            let combinable =
+                can_combine && pts[i].sigma.is_some() && pts[j].sigma.is_some();
+            if !combinable {
+                return Err(ConfigError::UnresolvedPairInteraction { types: key });
             }
         }
     }

@@ -148,11 +148,15 @@ fn eth_particle_types() -> Vec<ParticleTypeConfig> {
         ParticleTypeConfig {
             name: "C".to_string(),
             mass: (1.9944e-26 / 9.1093837015e-31) as f64,
+            sigma: None,
+            epsilon: None,
             charge: 0.0,
         },
         ParticleTypeConfig {
             name: "H".to_string(),
             mass: (1.6735e-27 / 9.1093837015e-31) as f64,
+            sigma: None,
+            epsilon: None,
             charge: 0.0,
         },
     ]

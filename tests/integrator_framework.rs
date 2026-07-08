@@ -304,7 +304,7 @@ fn integrator_owns_force_evaluation_inside_step() {
     let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, sigma: None, epsilon: None, charge: 0.0 }],
         &[PairInteractionConfig {
             between: ("Ar".to_string(), "Ar".to_string()),
             cutoff: 1.0,
@@ -1244,6 +1244,8 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
         &[heddle_md::io::config::ParticleTypeConfig {
             name: "Ar".to_string(),
             mass: 1.0,
+            sigma: None,
+            epsilon: None,
             charge: 0.0,
         }],
         &[heddle_md::io::config::PairInteractionConfig {
@@ -1303,6 +1305,8 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
         &[heddle_md::io::config::ParticleTypeConfig {
             name: "Ar".to_string(),
             mass: 1.0,
+            sigma: None,
+            epsilon: None,
             charge: 0.0,
         }],
         &[heddle_md::io::config::PairInteractionConfig {
@@ -1362,6 +1366,8 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
         &[heddle_md::io::config::ParticleTypeConfig {
             name: "Ar".to_string(),
             mass: 1.0,
+            sigma: None,
+            epsilon: None,
             charge: 0.0,
         }],
         &[heddle_md::io::config::PairInteractionConfig {

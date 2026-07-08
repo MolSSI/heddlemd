@@ -731,7 +731,7 @@ fn end_to_end_w_per_particle_virial_equals_half_over_n_times_sum_of_partials() {
     let n = state.particle_count();
     // Compose a real ForceField (with builtins) so the recip slot's
     // compute() runs the reduce_partials kernel after apply_influence.
-    let particle_types = vec![ParticleTypeConfig { name: "X".into(), mass: 1.0, charge: 0.0 }];
+    let particle_types = vec![ParticleTypeConfig { name: "X".into(), mass: 1.0, sigma: None, epsilon: None, charge: 0.0 }];
     let pairs = vec![PairInteractionConfig {
         between: ("X".into(), "X".into()),
         cutoff: 0.3e-9,

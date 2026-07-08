@@ -638,6 +638,10 @@ fn compute_cutoff_max(config: &crate::io::Config) -> f64 {
         .iter()
         .map(|p| p.cutoff)
         .fold(0.0, f64::max);
+    // rq-be18633a — combined pairs use the [lennard_jones] cutoff.
+    if let Some(lj) = config.lennard_jones.as_ref() {
+        cutoff_max = cutoff_max.max(lj.cutoff);
+    }
     if let Some(s) = config.spme.as_ref() {
         cutoff_max = cutoff_max.max(s.r_cut_real);
     }
@@ -867,14 +871,7 @@ fn simulation_setup_new_impl(
     // Cutoff aggregation stays here because it walks the config; the
     // per-direction width check is delegated to `SimulationBox`.
     if let NeighborListConfig::CellList { r_skin, .. } = &config.neighbor_list {
-        let mut cutoff_max: f64 = config
-            .pair_interactions
-            .iter()
-            .map(|p| p.cutoff)
-            .fold(0.0, f64::max);
-        if let Some(s) = config.spme.as_ref() {
-            cutoff_max = cutoff_max.max(s.r_cut_real);
-        }
+        let cutoff_max = compute_cutoff_max(&config);
         let required = (3.0 * (cutoff_max + r_skin)) as Real;
         if let Err(e) = sim_box.check_min_perpendicular_width(required) {
             return Err(match e {
@@ -1128,13 +1125,14 @@ fn simulation_setup_finish_gpu(
     crate::forces::set_jit_fast_math(config.simulation.fast_math);
 
     // ForceField persists across phases.
-    let force_field = ForceField::new(
+    let force_field = ForceField::new_with_combining(
         &registries.potentials,
         &gpu,
         n,
         &sim_box,
         &config.particle_types,
         &config.pair_interactions,
+        config.lennard_jones.as_ref(),
         &config.bond_types,
         &config.angle_types,
         &config.dihedral_types,
