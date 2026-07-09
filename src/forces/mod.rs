@@ -257,6 +257,11 @@ pub struct PotentialBuildContext<'a> {
     pub angle_list: &'a AngleList,
     pub dihedral_list: &'a DihedralList,
     pub exclusion_list: &'a ExclusionList,
+    /// The `ForceField`'s single device-resident exclusion list.
+    /// Exclusion-consuming slots clone the `Arc` and bind their kernel
+    /// arguments from the shared buffers; no slot constructs its own
+    /// `DeviceExclusionList`. rq-d116af5f
+    pub device_exclusions: &'a Arc<DeviceExclusionList>,
     pub neighbor_list_config: &'a NeighborListConfig,
 }
 
@@ -401,6 +406,9 @@ pub struct ForceField {
     pub device: Arc<CudaDevice>,
     pub kernels: Arc<Kernels>,
     pub slots: Vec<Box<dyn Potential>>,
+    /// The single device-resident exclusion list, shared with every
+    /// exclusion-consuming slot via `Arc` clones. rq-d116af5f
+    pub device_exclusions: Arc<DeviceExclusionList>,
     pub fast_total_forces_x: CudaSlice<Real>,
     pub fast_total_forces_y: CudaSlice<Real>,
     pub fast_total_forces_z: CudaSlice<Real>,
@@ -525,6 +533,11 @@ impl ForceField {
         let device = gpu.device.clone();
         let kernels = gpu.kernels.clone();
 
+        // rq-79938dbf — the single DeviceExclusionList for this
+        // ForceField, built unconditionally before the builder loop.
+        let device_exclusions =
+            Arc::new(DeviceExclusionList::from_host(&device, exclusion_list)?);
+
         let cx = PotentialBuildContext {
             gpu,
             particle_count,
@@ -541,6 +554,7 @@ impl ForceField {
             angle_list,
             dihedral_list,
             exclusion_list,
+            device_exclusions: &device_exclusions,
             neighbor_list_config,
         };
 
@@ -743,6 +757,7 @@ impl ForceField {
             device,
             kernels,
             slots,
+            device_exclusions,
             fast_total_forces_x,
             fast_total_forces_y,
             fast_total_forces_z,

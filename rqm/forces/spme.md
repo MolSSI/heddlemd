@@ -47,8 +47,11 @@ SPME contributes two `Potential` slots to the `ForceField`:
   the reciprocal-space pipeline always runs separately.
 
 Both slots draw their per-particle charges from `posq.w` on
-`ParticleBuffers` (see `particle-state.md`) and share the
-`DeviceExclusionList` (see `topology.md`). The two slots are
+`ParticleBuffers` (see `particle-state.md`). The real-space slot holds
+a clone of the `ForceField`'s shared `Arc<DeviceExclusionList>`,
+received through `PotentialBuildContext::device_exclusions` (see
+`framework.md` and `lj-pair-force.md`); it constructs no exclusion
+buffers of its own. The two slots are
 constructed together when `[spme]` is present in the config; they
 share the parsed `alpha` but are otherwise independent.
 

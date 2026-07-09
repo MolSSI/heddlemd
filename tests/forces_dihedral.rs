@@ -770,6 +770,10 @@ fn builder_returns_none_for_empty_dihedral_list() {
     use heddle_md::forces::{Potential, PotentialBuilder, PotentialBuildContext};
     let gpu = init_device().unwrap();
     let dl = DihedralList::empty(4);
+    let excl = ExclusionList::empty(4);
+    let device_exclusions = std::sync::Arc::new(
+        heddle_md::forces::DeviceExclusionList::from_host(&gpu.device, &excl).unwrap(),
+    );
     let cx = PotentialBuildContext {
         gpu: &gpu,
         particle_count: 4,
@@ -785,7 +789,8 @@ fn builder_returns_none_for_empty_dihedral_list() {
         bond_list: &BondList::empty(4),
         angle_list: &AngleList::empty(4),
         dihedral_list: &dl,
-        exclusion_list: &ExclusionList::empty(4),
+        exclusion_list: &excl,
+        device_exclusions: &device_exclusions,
         neighbor_list_config: &NeighborListConfig::AllPairs,
     };
     let built: Option<Box<dyn Potential>> = PeriodicDihedralBuilder.build(&cx).unwrap();

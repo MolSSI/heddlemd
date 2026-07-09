@@ -322,30 +322,14 @@ impl DeviceExclusionList {
         device: &Arc<CudaDevice>,
         list: &ExclusionList,
     ) -> Result<Self, GpuError> {
-        let atom_excl_offsets = device
-            .htod_sync_copy(&list.atom_excl_offsets)
-            .map_err(GpuError::from)?;
-        let atom_excl_partners = if list.atom_excl_partners.is_empty() {
-            device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
-        } else {
-            device
-                .htod_sync_copy(&list.atom_excl_partners)
-                .map_err(GpuError::from)?
-        };
-        let atom_excl_lj_scales = if list.atom_excl_lj_scales.is_empty() {
-            device.alloc_zeros::<Real>(0).map_err(GpuError::from)?
-        } else {
-            device
-                .htod_sync_copy(&list.atom_excl_lj_scales)
-                .map_err(GpuError::from)?
-        };
-        let atom_excl_coul_scales = if list.atom_excl_coul_scales.is_empty() {
-            device.alloc_zeros::<Real>(0).map_err(GpuError::from)?
-        } else {
-            device
-                .htod_sync_copy(&list.atom_excl_coul_scales)
-                .map_err(GpuError::from)?
-        };
+        let atom_excl_offsets =
+            crate::gpu::htod_or_empty(device, &list.atom_excl_offsets)?;
+        let atom_excl_partners =
+            crate::gpu::htod_or_empty(device, &list.atom_excl_partners)?;
+        let atom_excl_lj_scales =
+            crate::gpu::htod_or_empty(device, &list.atom_excl_lj_scales)?;
+        let atom_excl_coul_scales =
+            crate::gpu::htod_or_empty(device, &list.atom_excl_coul_scales)?;
         Ok(DeviceExclusionList {
             atom_excl_offsets,
             atom_excl_partners,

@@ -494,18 +494,24 @@ buffers; the kernel handles this case without a separate code path.
 
 The `DeviceExclusionList` is a host-side handle holding the four device
 buffers `atom_excl_offsets`, `atom_excl_partners`, `atom_excl_lj_scales`,
-and `atom_excl_coul_scales`. It is constructed from the host-side
-`ExclusionList` (see `topology.md`) once at force-field construction time
-and shared between the LJ and Coulomb functors; each consumes the scale
-array appropriate to itself. An empty exclusion list is represented by a
-`DeviceExclusionList` whose offsets buffer has length `N + 1` filled with
-zeros and whose partner / scale buffers have length zero.
+and `atom_excl_coul_scales`. `ForceField::new` constructs it from the
+host-side `ExclusionList` (see `topology.md`) exactly once, wraps it in
+an `Arc`, and hands it to builders through
+`PotentialBuildContext::device_exclusions` (see `framework.md`). The LJ
+slot and the SPME real-space slot each hold a clone of that `Arc` and
+bind their kernel arguments from its buffers — the LJ functor consumes
+`atom_excl_lj_scales`, the Coulomb functor `atom_excl_coul_scales` —
+so the four device buffers exist once per `ForceField`. An empty
+exclusion list is represented by a `DeviceExclusionList` whose offsets
+buffer has length `N + 1` filled with zeros and whose partner / scale
+buffers have length zero.
 
 ## Slot Integration <!-- rq-a5a919df -->
 
 `LennardJonesState` implements the `Potential` trait declared in
 `framework.md` with `label() == "lennard_jones"`. It is a single struct
-carrying the `LennardJonesParameterTable` and the `DeviceExclusionList`.
+carrying the `LennardJonesParameterTable` and a clone of the shared
+`Arc<DeviceExclusionList>`.
 It does not own a neighbor list; the framework's shared
 `NeighborListState` is reached through `ForceFieldContext`.
 

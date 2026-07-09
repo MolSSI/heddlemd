@@ -23,7 +23,7 @@ use crate::io::config::SpmeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
-use super::topology::{DeviceExclusionList, ExclusionList};
+use super::topology::DeviceExclusionList;
 use super::neighbor_list::{alloc_scan_block_totals, NeighborListError};
 use super::{
     AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
@@ -593,9 +593,9 @@ fn cardinal_bspline(p: usize, x: f64) -> f64 {
 // rq-22171569
 #[derive(Debug)]
 pub struct SpmeRealSpaceState {
-    #[allow(dead_code)]
-    device: Arc<CudaDevice>,
-    exclusions: DeviceExclusionList,
+    /// Clone of the `ForceField`'s shared device exclusion list; the
+    /// Coulomb functor consumes `atom_excl_coul_scales`. rq-f6d45062
+    exclusions: Arc<DeviceExclusionList>,
     alpha: Real,
     r_cut_real: Real,
     particle_count: usize,
@@ -603,21 +603,17 @@ pub struct SpmeRealSpaceState {
 
 impl SpmeRealSpaceState {
     pub fn new(
-        gpu: &GpuContext,
         particle_count: usize,
         alpha: Real,
         r_cut_real: Real,
-        exclusion_list: &ExclusionList,
-    ) -> Result<Self, NeighborListError> {
-        let device = gpu.device.clone();
-        let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
-        Ok(SpmeRealSpaceState {
-            device,
+        exclusions: Arc<DeviceExclusionList>,
+    ) -> Self {
+        SpmeRealSpaceState {
             exclusions,
             alpha,
             r_cut_real,
             particle_count,
-        })
+        }
     }
 }
 
@@ -952,12 +948,11 @@ impl PotentialBuilder for SpmeRealBuilder {
         };
         let params = SpmeParameters::from(spme_cfg);
         let state = SpmeRealSpaceState::new(
-            cx.gpu,
             cx.particle_count,
             params.alpha,
             params.r_cut_real,
-            cx.exclusion_list,
-        )?;
+            cx.device_exclusions.clone(),
+        );
         Ok(Some(Box::new(state)))
     }
 }

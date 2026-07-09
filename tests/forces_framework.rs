@@ -19,6 +19,8 @@ use heddle_md::precision::Real;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::{KernelStage, Timings, TimingsReport};
 
+mod common;
+
 // =================================================================
 // Helpers
 // =================================================================
@@ -1933,6 +1935,59 @@ fn build_with_spme(
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
+}
+
+// rq-e9385445 — the ForceField holds one Arc<DeviceExclusionList>; the
+// LJ slot and the SPME real-space slot each hold a clone, so the strong
+// count is exactly 3 and no slot constructed its own list.
+#[test] // rq-e9385445
+fn exclusion_consuming_slots_share_one_device_exclusion_list() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let excl = common::host_exclusions_from_entries(n, &[(0, 1, 0.5, 0.5)]);
+    let ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type_with_charge(1.0)],
+        &[lj_pair_config()],
+        &[],
+        &[],
+        &[],
+        Some(&spme_config_default()),
+        &charges,
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &DihedralList::empty(0),
+        &excl,
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert!(labels.contains(&"lennard_jones"));
+    assert!(labels.contains(&"spme_real"));
+    assert_eq!(Arc::strong_count(&ff.device_exclusions), 3);
+}
+
+// rq-8c9ec66e — the shared DeviceExclusionList exists even when no slot
+// consumes it: a bonded-only ForceField carries a zero-filled offsets
+// buffer of length particle_count + 1 and zero-length partner / scale
+// buffers, and no slot holds a clone.
+#[test] // rq-8c9ec66e
+fn shared_device_exclusion_list_is_built_for_bonded_only_force_field() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let ff = morse_only_force_field(&gpu, n);
+    let excl = &ff.device_exclusions;
+    assert_eq!(excl.atom_excl_offsets.len(), n + 1);
+    assert_eq!(excl.atom_excl_partners.len(), 0);
+    assert_eq!(excl.atom_excl_lj_scales.len(), 0);
+    assert_eq!(excl.atom_excl_coul_scales.len(), 0);
+    let offsets: Vec<u32> = gpu.device.dtoh_sync_copy(&excl.atom_excl_offsets).unwrap();
+    assert!(offsets.iter().all(|&o| o == 0));
+    assert_eq!(Arc::strong_count(&ff.device_exclusions), 1);
 }
 
 #[test]

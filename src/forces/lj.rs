@@ -1,14 +1,11 @@
 // rq-a5a919df
 use std::sync::Arc;
 
-use cudarc::driver::CudaDevice;
-
-use crate::gpu::{GpuContext, LennardJonesParameterTable, ParticleBuffers};
+use crate::gpu::{LennardJonesParameterTable, ParticleBuffers};
 use crate::pbc::SimulationBox;
 use crate::timings::Timings;
 
-use super::topology::{DeviceExclusionList, ExclusionList};
-use super::neighbor_list::NeighborListError;
+use super::topology::DeviceExclusionList;
 use super::{
     AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
     JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
@@ -80,10 +77,10 @@ pub fn resolve_lj_pair(p: &PairInteractionConfig) -> Option<ResolvedLjPair> {
 // rq-af2d1628
 #[derive(Debug)]
 pub struct LennardJonesState {
-    #[allow(dead_code)]
-    pub(crate) device: Arc<CudaDevice>,
     pub(crate) params: LennardJonesParameterTable,
-    pub(crate) exclusions: DeviceExclusionList,
+    /// Clone of the `ForceField`'s shared device exclusion list; the
+    /// LJ functor consumes `atom_excl_lj_scales`. rq-a5a919df
+    pub(crate) exclusions: Arc<DeviceExclusionList>,
     pub(crate) particle_count: usize,
     pub(crate) max_cutoff: Real,
     /// `true` when every configured pair-interaction has
@@ -97,27 +94,22 @@ pub struct LennardJonesState {
 }
 
 impl LennardJonesState {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        gpu: &GpuContext,
         particle_count: usize,
         params: LennardJonesParameterTable,
         max_cutoff: Real,
-        exclusion_list: &ExclusionList,
+        exclusions: Arc<DeviceExclusionList>,
         switch_degenerate: bool,
         uniform_cutoff: Option<Real>,
-    ) -> Result<Self, NeighborListError> {
-        let device = gpu.device.clone();
-        let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
-        Ok(LennardJonesState {
-            device,
+    ) -> Self {
+        LennardJonesState {
             params,
             exclusions,
             particle_count,
             max_cutoff,
             switch_degenerate,
             uniform_cutoff,
-        })
+        }
     }
 
     pub fn particle_count(&self) -> usize {
@@ -271,14 +263,13 @@ impl PotentialBuilder for LennardJonesBuilder {
             None
         };
         let state = LennardJonesState::new(
-            cx.gpu,
             cx.particle_count,
             params,
             max_cutoff,
-            cx.exclusion_list,
+            cx.device_exclusions.clone(),
             switch_degenerate,
             uniform_cutoff,
-        )?;
+        );
         Ok(Some(Box::new(state)))
     }
 

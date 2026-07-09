@@ -746,8 +746,9 @@ the additive identity. The rest of the pipeline runs normally.
   for the duration of the `compute` call.
 
 - `LennardJonesState` — implements `Potential` with `label() == "lennard_jones"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-af2d1628 -->
-  Owns the slot's `LennardJonesParameters` and the
-  `DeviceExclusionList` (see `topology.md`). The slot consumes the
+  Owns the slot's `LennardJonesParameters` and holds a clone of the
+  `ForceField`'s shared `Arc<DeviceExclusionList>` (see
+  `lj-pair-force.md`). The slot consumes the
   shared `NeighborListState` (see `neighbor-list.md`); its on-host
   state carries only the parameter tables. The packed-neighbour
   data structures (`interacting_tiles`, `interacting_atoms`,
@@ -879,9 +880,19 @@ the additive identity. The rest of the pipeline runs normally.
       pub angle_list: &'a AngleList,
       pub dihedral_list: &'a DihedralList,
       pub exclusion_list: &'a ExclusionList,
+      pub device_exclusions: &'a Arc<DeviceExclusionList>,
       pub neighbor_list_config: &'a NeighborListConfig,
   }
   ```
+
+  `device_exclusions` is the single device-resident exclusion list for
+  the `ForceField`. `ForceField::new` constructs it once (via
+  `DeviceExclusionList::from_host`) before iterating builders; every
+  exclusion-consuming slot clones the `Arc` and binds its kernel
+  arguments from the shared buffers, so the four exclusion device
+  buffers exist exactly once per `ForceField` regardless of how many
+  slots consume them. No slot constructs its own
+  `DeviceExclusionList`.
 
   Each builder reads only the fields it needs. The four potential-table
   slices (`pair_interactions`, `bond_types`, `angle_types`,
@@ -1049,8 +1060,15 @@ the additive identity. The rest of the pipeline runs normally.
 ### Functions and methods <!-- rq-17abcb76 -->
 
 - `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], lennard_jones: Option<&LennardJonesConfig>, bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], dihedral_types: &[DihedralTypeConfig], spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, dihedral_list: &DihedralList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
+  - Constructs the shared `DeviceExclusionList` from `exclusion_list`
+    (one `DeviceExclusionList::from_host` call, wrapped in an `Arc`)
+    unconditionally — whether or not any exclusion-consuming slot ends
+    up active. With no exclusions the handle holds an
+    `atom_excl_offsets` buffer of length `particle_count + 1` filled
+    with zeros and zero-length partner / scale buffers.
   - Builds a `PotentialBuildContext` populated from every parameter
-    listed above (apart from `registry`).
+    listed above (apart from `registry`) plus the shared
+    `device_exclusions` handle.
   - Iterates `registry.builders` in registration order. For each builder,
     calls `builder.build(&cx)`. When the call returns `Ok(Some(slot))`,
     records the slot together with the builder's `displaces()` list
@@ -1386,6 +1404,23 @@ Feature: Pluggable potential slot framework
     When ForceField::new(...) is called
     Then it returns Ok(force_field)
     And every per-class accumulator buffer has length 0
+
+  @rq-e9385445
+  Scenario: Exclusion-consuming slots share one DeviceExclusionList
+    Given a config activating both the Lennard-Jones slot and the SPME slots
+    And an exclusion list with one entry
+    And a PotentialBuildContext whose device_exclusions Arc has strong count 1
+    When every registered builder has been consulted
+    Then the device_exclusions Arc strong count has increased by one per exclusion-consuming slot built
+    And no additional DeviceExclusionList is constructed
+
+  @rq-8c9ec66e
+  Scenario: The shared DeviceExclusionList is built even when no slot consumes it
+    Given a config with bonded potentials only and no exclusions
+    When ForceField::new(...) is called
+    Then it returns Ok(force_field)
+    And the shared DeviceExclusionList holds an offsets buffer of length particle_count + 1 filled with zeros
+    And its partner and scale buffers have length 0
 
   @rq-f92cfcdf
   Scenario: htod_or_empty uploads a non-empty host slice

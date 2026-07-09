@@ -18038,6 +18038,18 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-8c9ec66e": {
+    "decl": "Scenario: The shared DeviceExclusionList is built even when no slot consumes it",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The shared DeviceExclusionList is built even when no slot consumes it",
+    "type": "scenario"
+  },
   "rq-8cda2c89": {
     "decl": "- `plan(dt)` — returns the fourteen-element `StepPlan` defined in",
     "file": "integration/mtk-npt",
@@ -29814,6 +29826,18 @@
       }
     ],
     "title": "Two SD runs on the same GPU with identical inputs are byte-identical",
+    "type": "scenario"
+  },
+  "rq-e9385445": {
+    "decl": "Scenario: Exclusion-consuming slots share one DeviceExclusionList",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Exclusion-consuming slots share one DeviceExclusionList",
     "type": "scenario"
   },
   "rq-e93e7ad1": {
