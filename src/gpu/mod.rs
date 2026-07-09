@@ -12,7 +12,7 @@ pub mod lossless_buffers;
 pub use barostat_kernels::BarostatKernels;
 pub use mc_barostat_kernels::McBarostatKernels;
 pub use kernel_macros::{SubsystemKernels, concat_kernel_stages};
-pub use buffers::ParticleBuffers;
+pub use buffers::{ParticleBuffers, htod_or_empty};
 pub use device::{GpuContext, GpuError, Kernels, init_device};
 pub use fill::FillKernels;
 pub use graph::{

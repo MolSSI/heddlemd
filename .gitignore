@@ -12,13 +12,9 @@ target/
 # cargo-mutants output
 **/mutants.out*/
 
-
-
-<<<<<<< before updating
 # Generated at runtime by run.sh
 .vscode/settings.json
 .interface.sh
-
 
 # Added by cargo
 
@@ -35,5 +31,3 @@ target/
 
 # mdBook build output
 book/book/
-=======
->>>>>>> after updating

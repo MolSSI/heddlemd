@@ -1165,6 +1165,22 @@ the additive identity. The rest of the pipeline runs normally.
     other class's last-evaluated state.
   - Returns `Ok(())` when `particle_count == 0`, launching no kernels.
 
+- `htod_or_empty<T: DeviceRepr + ValidAsZeroBits + Unpin>(device: &Arc<CudaDevice>, data: &[T]) -> Result<CudaSlice<T>, GpuError>` <!-- rq-52edede9 -->
+  - Lives in `src/gpu/buffers.rs` and is re-exported from `crate::gpu`.
+  - The single host-to-device upload helper for slot construction and
+    parameter-table construction. Slot constructors (bonded, angle,
+    dihedral) and the Lennard-Jones parameter-table builder upload
+    every host-built index and parameter vector through this function;
+    no slot defines a file-local equivalent.
+  - When `data` is non-empty, performs `device.htod_sync_copy(data)`
+    and returns the resulting device buffer.
+  - When `data` is empty, returns a zero-length device allocation
+    (`device.alloc_zeros::<T>(0)`) instead of attempting a copy, so a
+    slot whose input list is empty (see *Empty State*) constructs
+    valid zero-length device buffers without error.
+  - Errors from the underlying cudarc calls are returned as
+    `GpuError`.
+
 ### Class-Combine Kernel <!-- rq-c0f98145 -->
 
 `kernels/forces.cu` declares one `extern "C"` kernel:
@@ -1370,6 +1386,22 @@ Feature: Pluggable potential slot framework
     When ForceField::new(...) is called
     Then it returns Ok(force_field)
     And every per-class accumulator buffer has length 0
+
+  @rq-f92cfcdf
+  Scenario: htod_or_empty uploads a non-empty host slice
+    Given a host vector [1.0, 2.0, 3.0] of Real
+    When htod_or_empty(&device, &data) is called
+    Then it returns Ok(slice)
+    And slice has length 3
+    And downloading slice yields [1.0, 2.0, 3.0]
+
+  @rq-737f68cd
+  Scenario: htod_or_empty returns a zero-length device buffer for an empty host slice
+    Given an empty host vector of u32
+    When htod_or_empty(&device, &data) is called
+    Then it returns Ok(slice)
+    And slice has length 0
+    And no host-to-device copy is attempted
 
   @rq-b850b5be
   Scenario: Per-class accumulator buffers are zero-initialised at construction

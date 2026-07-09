@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 
-use crate::gpu::{GpuContext, GpuError, Kernels, ParticleBuffers, reduce_bond_forces};
+use crate::gpu::{GpuContext, GpuError, Kernels, ParticleBuffers, htod_or_empty, reduce_bond_forces};
 use crate::io::config::BondTypeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -105,9 +105,9 @@ impl HarmonicBondState {
             }
         }
 
-        let bonds = htod_or_empty_u32(&device, &bonds_flat)?;
-        let atom_bond_offsets = htod_or_empty_u32(&device, &harmonic_list.atom_bond_offsets)?;
-        let atom_bond_indices = htod_or_empty_u32(&device, &harmonic_list.atom_bond_indices)?;
+        let bonds = htod_or_empty(&device, &bonds_flat)?;
+        let atom_bond_offsets = htod_or_empty(&device, &harmonic_list.atom_bond_offsets)?;
+        let atom_bond_indices = htod_or_empty(&device, &harmonic_list.atom_bond_indices)?;
         let bond_k = htod_or_empty(&device, &k_vec)?;
         let bond_r0 = htod_or_empty(&device, &r0_vec)?;
 
@@ -251,28 +251,6 @@ fn is_harmonic(bond_types: &[BondTypeConfig], ti: u32) -> bool {
     bond_types
         .get(ti as usize)
         .is_some_and(|bt| bt.kind == HARMONIC_BOND_KIND)
-}
-
-fn htod_or_empty_u32(
-    device: &Arc<CudaDevice>,
-    data: &[u32],
-) -> Result<CudaSlice<u32>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<u32>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
-    }
-}
-
-fn htod_or_empty(
-    device: &Arc<CudaDevice>,
-    data: &[Real],
-) -> Result<CudaSlice<Real>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<Real>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
-    }
 }
 
 // rq-c3da9ee1

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::{
-    GpuContext, GpuError, Kernels, ParticleBuffers, reduce_dihedral_forces,
+    GpuContext, GpuError, Kernels, ParticleBuffers, htod_or_empty, reduce_dihedral_forces,
 };
 use crate::io::config::DihedralTypeConfig;
 use crate::pbc::SimulationBox;
@@ -179,14 +179,14 @@ impl PeriodicDihedralState {
             cursor[pl] += 1;
         }
 
-        let dihedrals_buf = htod_or_empty_u32(&device, &dihedrals_flat)?;
+        let dihedrals_buf = htod_or_empty(&device, &dihedrals_flat)?;
         let atom_dihedral_offsets_buf =
-            htod_or_empty_u32(&device, &atom_dihedral_offsets)?;
+            htod_or_empty(&device, &atom_dihedral_offsets)?;
         let atom_dihedral_indices_buf =
-            htod_or_empty_u32(&device, &atom_dihedral_indices)?;
+            htod_or_empty(&device, &atom_dihedral_indices)?;
         let dihedral_k_phi = htod_or_empty(&device, &k_vec)?;
         let dihedral_phi_0 = htod_or_empty(&device, &phi0_vec)?;
-        let dihedral_n = htod_or_empty_u32(&device, &n_vec)?;
+        let dihedral_n = htod_or_empty(&device, &n_vec)?;
 
         let quad_len = 4 * dihedral_count;
         let dihedral_quadruple_x =
@@ -328,28 +328,6 @@ fn periodic_dihedral_arg_schema() -> KernelArgSchema {
             KernelArg::new("periodic_dihedral_n", ConstPtrU32, "dihedral_n"),
         ],
     )
-}
-
-fn htod_or_empty_u32(
-    device: &Arc<CudaDevice>,
-    data: &[u32],
-) -> Result<CudaSlice<u32>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<u32>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
-    }
-}
-
-fn htod_or_empty(
-    device: &Arc<CudaDevice>,
-    data: &[Real],
-) -> Result<CudaSlice<Real>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<Real>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
-    }
 }
 
 #[derive(Debug, Clone)]

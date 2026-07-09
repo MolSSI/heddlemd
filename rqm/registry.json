@@ -10771,6 +10771,18 @@
     "title": "StepError",
     "type": "api-item"
   },
+  "rq-52edede9": {
+    "decl": "- `htod_or_empty<T: DeviceRepr + ValidAsZeroBits + Unpin>(device: &Arc<CudaDevice>, data: &[T]) -> Result<CudaSlice<T>, GpuError>`",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "src/gpu/buffers.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "htod_or_empty",
+    "type": "api-item"
+  },
   "rq-52f547fd": {
     "decl": "Scenario: NeighborListState with particle_count = 1 produces an empty neighbor list",
     "file": "forces/neighbor-list",
@@ -14818,6 +14830,18 @@
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
     "title": "Per-block SPC predicate is true when every axis margin exceeds MAX_CUTOFF",
+    "type": "scenario"
+  },
+  "rq-737f68cd": {
+    "decl": "Scenario: htod_or_empty returns a zero-length device buffer for an empty host slice",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/gpu_buffers.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "htod_or_empty returns a zero-length device buffer for an empty host slice",
     "type": "scenario"
   },
   "rq-73801d98": {
@@ -31962,6 +31986,18 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "Standalone post-force per-particle kernels are not declared",
+    "type": "scenario"
+  },
+  "rq-f92cfcdf": {
+    "decl": "Scenario: htod_or_empty uploads a non-empty host slice",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/gpu_buffers.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "htod_or_empty uploads a non-empty host slice",
     "type": "scenario"
   },
   "rq-f93d278e": {

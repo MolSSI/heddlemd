@@ -6,7 +6,7 @@ use cudarc::driver::{
 
 #[cfg(not(feature = "f64"))]
 use crate::gpu::LosslessBuffers;
-use crate::gpu::{GpuError, Kernels, ParticleBuffers};
+use crate::gpu::{GpuError, Kernels, ParticleBuffers, htod_or_empty};
 use crate::forces::lj::ResolvedLjPair;
 use crate::io::config::{CombiningRule, LennardJonesConfig, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
@@ -191,17 +191,6 @@ impl LennardJonesParameterTable {
             cutoff,
             switch,
         })
-    }
-}
-
-fn htod_or_empty(
-    device: &Arc<CudaDevice>,
-    data: &[Real],
-) -> Result<CudaSlice<Real>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<Real>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
     }
 }
 

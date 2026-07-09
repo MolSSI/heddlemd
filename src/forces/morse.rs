@@ -3,7 +3,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::{
-    GpuContext, GpuError, Kernels, ParticleBuffers, reduce_bond_forces,
+    GpuContext, GpuError, Kernels, ParticleBuffers, htod_or_empty, reduce_bond_forces,
 };
 use crate::io::config::BondTypeConfig;
 use crate::pbc::SimulationBox;
@@ -103,9 +103,9 @@ impl MorseBondedState {
             }
         }
 
-        let bonds = htod_or_empty_u32(&device, &bonds_flat)?;
-        let atom_bond_offsets = htod_or_empty_u32(&device, &morse_list.atom_bond_offsets)?;
-        let atom_bond_indices = htod_or_empty_u32(&device, &morse_list.atom_bond_indices)?;
+        let bonds = htod_or_empty(&device, &bonds_flat)?;
+        let atom_bond_offsets = htod_or_empty(&device, &morse_list.atom_bond_offsets)?;
+        let atom_bond_indices = htod_or_empty(&device, &morse_list.atom_bond_indices)?;
         let bond_de = htod_or_empty(&device, &de_vec)?;
         let bond_a = htod_or_empty(&device, &a_vec)?;
         let bond_re = htod_or_empty(&device, &re_vec)?;
@@ -247,28 +247,6 @@ fn morse_arg_schema() -> KernelArgSchema {
             KernelArg::new("morse_bond_re", ConstPtrReal, "bond_re"),
         ],
     )
-}
-
-fn htod_or_empty_u32(
-    device: &Arc<CudaDevice>,
-    data: &[u32],
-) -> Result<CudaSlice<u32>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<u32>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
-    }
-}
-
-fn htod_or_empty(
-    device: &Arc<CudaDevice>,
-    data: &[Real],
-) -> Result<CudaSlice<Real>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<Real>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
-    }
 }
 
 // rq-e8550f96

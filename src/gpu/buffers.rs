@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
+use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, DeviceSlice, ValidAsZeroBits};
 
 use crate::gpu::{GpuContext, GpuError, Kernels};
 use crate::precision::{Real, Real4};
@@ -78,6 +78,21 @@ pub fn split_posq_into(
         positions_y[i] = p.y;
         positions_z[i] = p.z;
         charges[i] = p.w;
+    }
+}
+
+/// Upload a host slice to the device, returning a zero-length device
+/// allocation when the slice is empty (a zero-length `htod_sync_copy`
+/// is not a valid CUDA copy).
+// rq-52edede9
+pub fn htod_or_empty<T: DeviceRepr + ValidAsZeroBits + Unpin>(
+    device: &Arc<CudaDevice>,
+    data: &[T],
+) -> Result<CudaSlice<T>, GpuError> {
+    if data.is_empty() {
+        device.alloc_zeros::<T>(0).map_err(GpuError::from)
+    } else {
+        device.htod_sync_copy(data).map_err(GpuError::from)
     }
 }
 

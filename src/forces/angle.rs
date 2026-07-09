@@ -3,7 +3,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::{
-    GpuContext, GpuError, Kernels, ParticleBuffers, reduce_angle_forces,
+    GpuContext, GpuError, Kernels, ParticleBuffers, htod_or_empty, reduce_angle_forces,
 };
 use crate::io::config::AngleTypeConfig;
 use crate::pbc::SimulationBox;
@@ -139,9 +139,9 @@ impl HarmonicAngleState {
             }
         }
 
-        let angles = htod_or_empty_u32(&device, &angles_flat)?;
-        let atom_angle_offsets = htod_or_empty_u32(&device, &offsets_host)?;
-        let atom_angle_indices = htod_or_empty_u32(&device, &indices_host)?;
+        let angles = htod_or_empty(&device, &angles_flat)?;
+        let atom_angle_offsets = htod_or_empty(&device, &offsets_host)?;
+        let atom_angle_indices = htod_or_empty(&device, &indices_host)?;
         let angle_k_theta = htod_or_empty(&device, &k_vec)?;
         let angle_theta_0 = htod_or_empty(&device, &theta0_vec)?;
 
@@ -281,28 +281,6 @@ fn harmonic_angle_arg_schema() -> KernelArgSchema {
             KernelArg::new("harmonic_angle_theta_0", ConstPtrReal, "angle_theta_0"),
         ],
     )
-}
-
-fn htod_or_empty_u32(
-    device: &Arc<CudaDevice>,
-    data: &[u32],
-) -> Result<CudaSlice<u32>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<u32>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
-    }
-}
-
-fn htod_or_empty(
-    device: &Arc<CudaDevice>,
-    data: &[Real],
-) -> Result<CudaSlice<Real>, GpuError> {
-    if data.is_empty() {
-        device.alloc_zeros::<Real>(0).map_err(GpuError::from)
-    } else {
-        device.htod_sync_copy(data).map_err(GpuError::from)
-    }
 }
 
 // rq-e8550f96
