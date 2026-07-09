@@ -27,14 +27,7 @@ fn periodic_type(
     n: u32,
     phi_0: f64,
 ) -> DihedralTypeConfig {
-    DihedralTypeConfig::Periodic {
-        name: name.to_string(),
-        k_phi,
-        n,
-        phi_0,
-        scale_lj_14: 0.5,
-        scale_coul_14: 1.0 / 1.2,
-    }
+    DihedralTypeConfig::periodic(name, k_phi, n, phi_0)
 }
 
 fn four_particle_state(positions: [[Real; 3]; 4]) -> ParticleState {
@@ -487,14 +480,14 @@ mass = 1.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[dihedral_types]]
 name = "D"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.0
 n = {n}
 phi_0 = 0.0

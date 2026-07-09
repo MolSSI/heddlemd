@@ -14,9 +14,24 @@ use super::{
     AggregateLevel, BondedForceFragment, BondedPotential, BondedScratchView, ForceFieldError,
     ForceLaunchBuilder, ForceLaunchContext, JitParticipant, KernelArg, KernelArgBinder,
     KernelArgSchema, KernelArgType, Potential, PotentialBuildContext, PotentialBuilder,
-    SlotOutputView,
+    PotentialConfigEntry, PotentialParamsCategory, PotentialParamsClaim, SlotOutputView,
 };
+use crate::io::config::{ConfigError, translate_params_error_local};
 use crate::precision::Real;
+
+/// The `kind` string the Morse builder claims in `[[bond_types]]`.
+pub const MORSE_KIND: &str = "morse";
+
+// rq-12872970
+/// Typed per-entry parameter struct the Morse builder deserialises
+/// from a claimed `kind = "morse"` `[[bond_types]]` entry's `params`.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+pub struct MorseBondParams {
+    pub de: crate::units::Energy,
+    pub a: crate::units::InverseLength,
+    pub re: crate::units::Length,
+}
 
 // rq-2361f2b8 rq-ec18d174
 #[derive(Debug)]
@@ -68,17 +83,23 @@ impl MorseBondedState {
         let mut a_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
         let mut re_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
         for bt in bond_types {
-            match bt {
-                BondTypeConfig::Morse { de, a, re, .. } => {
-                    de_vec.push(*de as Real);
-                    a_vec.push(*a as Real);
-                    re_vec.push(*re as Real);
-                }
-                BondTypeConfig::Harmonic { .. } => {
-                    de_vec.push(0.0);
-                    a_vec.push(0.0);
-                    re_vec.push(0.0);
-                }
+            if bt.kind == MORSE_KIND {
+                // rq-12872970 — validation has already guaranteed the
+                // params shape; a failure here is an internal error.
+                let p: MorseBondParams = bt
+                    .params
+                    .clone()
+                    .try_into()
+                    .expect("validated morse bond-type params (config invariant)");
+                de_vec.push(p.de.0 as Real);
+                a_vec.push(p.a.0 as Real);
+                re_vec.push(p.re.0 as Real);
+            } else {
+                // Rows for bond types of other kinds hold placeholders
+                // this slot never reads.
+                de_vec.push(0.0);
+                a_vec.push(0.0);
+                re_vec.push(0.0);
             }
         }
 
@@ -271,14 +292,61 @@ impl PotentialBuilder for MorseBondedBuilder {
         let state = MorseBondedState::new(cx.gpu, cx.bond_list, cx.bond_types)?;
         Ok(Some(Box::new(state)))
     }
+
+    // rq-529b9e4b rq-35a89768
+    fn params_claim(&self) -> Option<PotentialParamsClaim> {
+        Some(PotentialParamsClaim {
+            category: PotentialParamsCategory::BondType,
+            kind: MORSE_KIND,
+        })
+    }
+
+    // rq-12872970 rq-95a50109 — de/a/re required, finite, strictly
+    // positive. Errors carry entry-relative paths; the loader prefixes
+    // the document location.
+    fn validate_params(
+        &self,
+        entry: PotentialConfigEntry<'_>,
+    ) -> Result<(), ConfigError> {
+        let PotentialConfigEntry::BondType(bt) = entry else {
+            unreachable!("dispatch guarantees the claimed category");
+        };
+        let p: MorseBondParams = bt
+            .params
+            .clone()
+            .try_into()
+            .map_err(translate_params_error_local)?;
+        require_finite_positive("de", p.de.0)?;
+        require_finite_positive("a", p.a.0)?;
+        require_finite_positive("re", p.re.0)?;
+        Ok(())
+    }
+
+    // rq-529b9e4b
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        crate::registry::convert_params_in_place::<MorseBondParams>(units, params)
+    }
 }
 
-/// Whether the bond type at global index `ti` selects `potential = "morse"`.
+pub(crate) fn require_finite_positive(field: &str, v: f64) -> Result<(), ConfigError> {
+    if !v.is_finite() || v <= 0.0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: "must be finite and strictly positive".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Whether the bond type at global index `ti` selects `kind = "morse"`.
 fn is_morse(bond_types: &[BondTypeConfig], ti: u32) -> bool {
-    matches!(
-        bond_types.get(ti as usize),
-        Some(BondTypeConfig::Morse { .. })
-    )
+    bond_types
+        .get(ti as usize)
+        .is_some_and(|bt| bt.kind == MORSE_KIND)
 }
 
 /// Morse per-bond force fragment for the JIT-composed bonded module.

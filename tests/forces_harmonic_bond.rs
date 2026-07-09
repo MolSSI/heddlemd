@@ -23,20 +23,11 @@ fn box_10(gpu: &GpuContext) -> SimulationBox {
 }
 
 fn harmonic_type(k: f64, r0: f64) -> BondTypeConfig {
-    BondTypeConfig::Harmonic {
-        name: "CT-CT".to_string(),
-        k,
-        r0,
-    }
+    BondTypeConfig::harmonic("CT-CT", k, r0)
 }
 
 fn morse_type(de: f64, a: f64, re: f64) -> BondTypeConfig {
-    BondTypeConfig::Morse {
-        name: "MM".to_string(),
-        de,
-        a,
-        re,
-    }
+    BondTypeConfig::morse("MM", de, a, re)
 }
 
 fn state_from(positions: &[[Real; 3]]) -> ParticleState {

@@ -12,8 +12,7 @@ use cudarc::driver::DeviceSlice;
 use heddle_md::forces::{AggregateLevel, AngleList, Bond, BondList, CutoffHandling, DihedralList, ExclusionList, ForceClass, ForceField, ForceFieldContext, ForceFieldError, ForceLaunchBuilder, JitParticipant, PairForceBindContext, PairForceFragment, PairForcePotential, Potential, PotentialBuildContext, PotentialBuilder, PotentialRegistry, SlotOutputView};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{
-    BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
-    ParticleTypeConfig, SpmeConfig,
+    BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig, SpmeConfig,
 };
 use heddle_md::pbc::SimulationBox;
 use heddle_md::precision::Real;
@@ -39,24 +38,11 @@ fn ar_type() -> ParticleTypeConfig {
 }
 
 fn lj_pair_config() -> PairInteractionConfig {
-    PairInteractionConfig {
-        between: ("Ar".to_string(), "Ar".to_string()),
-        cutoff: 5.0,
-        r_switch: 5.0,
-        potential: PairPotentialParams::LennardJones {
-            sigma: 1.0,
-            epsilon: 1.0,
-        },
-    }
+    PairInteractionConfig::lennard_jones(("Ar".to_string(), "Ar".to_string()), 1.0, 1.0, 5.0, Some(5.0))
 }
 
 fn morse_bond_type() -> BondTypeConfig {
-    BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de: 1.0,
-        a: 2.0,
-        re: 1.0,
-    }
+    BondTypeConfig::morse("CC".to_string(), 1.0, 2.0, 1.0)
 }
 
 fn state_n(n: usize) -> ParticleState {
@@ -544,12 +530,7 @@ fn oh_types() -> Vec<ParticleTypeConfig> {
 }
 
 fn lj_pair(a: &str, b: &str, sigma: f64, epsilon: f64) -> PairInteractionConfig {
-    PairInteractionConfig {
-        between: (a.to_string(), b.to_string()),
-        cutoff: 5.0,
-        r_switch: 5.0,
-        potential: PairPotentialParams::LennardJones { sigma, epsilon },
-    }
+    PairInteractionConfig::lennard_jones((a, b), sigma, epsilon, 5.0, Some(5.0))
 }
 
 // Distinct O-O, O-H, H-H parameters; the O-H (cross) term is what a

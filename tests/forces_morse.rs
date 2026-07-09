@@ -19,12 +19,7 @@ fn box_10(gpu: &GpuContext) -> SimulationBox {
 }
 
 fn morse_type(de: f64, a: f64, re: f64) -> BondTypeConfig {
-    BondTypeConfig::Morse {
-        name: "CC".to_string(),
-        de,
-        a,
-        re,
-    }
+    BondTypeConfig::morse("CC", de, a, re)
 }
 
 fn two_particle_state(p0: [Real; 3], p1: [Real; 3]) -> ParticleState {

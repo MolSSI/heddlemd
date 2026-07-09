@@ -8,7 +8,7 @@ form `U(φ) = k_phi · (1 + cos(n · φ − phi_0))` with per-dihedral-type
 parameters. The slot plugs into the pluggable potential framework
 (`framework.md`); selection is implicit — the slot is present whenever
 the config's `topology` field references a non-empty `.topology` file
-and at least one `[[dihedral_types]]` entry has `potential = "periodic"`.
+and at least one `[[dihedral_types]]` entry has `kind = "periodic"`.
 
 The system's full set of `[[dihedral_types]]` entries may freely mix
 the periodic form with future dihedral potentials (Ryckaert-Bellemans,
@@ -180,9 +180,21 @@ atomics and no race conditions.
 
 ## Parameters <!-- rq-4eec8cf7 -->
 
-Each `[[dihedral_types]]` entry in the config that uses
-`potential = "periodic"` contributes one row to a per-dihedral-type
-parameter table uploaded to the device:
+The builder carries the params claim `(DihedralType, "periodic")` (see
+`framework.md`'s *Potential Params Claims*): it owns the typed
+`PeriodicDihedralParams` schema of every `kind = "periodic"`
+`[[dihedral_types]]` entry's `params`, validating and unit-converting
+them at config load.
+
+```rust
+#[derive(Deserialize, Serialize, Convert)]
+#[serde(deny_unknown_fields)]
+pub struct PeriodicDihedralParams {
+    pub k_phi: Energy,
+    pub n: u32,
+    pub phi_0: f64,
+}
+```
 
 - `k_phi: f64` — force constant in E_h. Required. Finite. May be
   zero or negative (negative `k_phi` is equivalent to a `phi_0`
@@ -192,27 +204,31 @@ parameter table uploaded to the device:
 - `phi_0: f64` — phase offset in radians. Required. Finite, in
   `[−2π, 2π]`. The cosine is periodic, so any value of `phi_0`
   outside this range can be wrapped without loss; the range bound is
-  defensive against typos.
-- `scale_lj_14: f64` — optional. Default `0.5`. Finite, in `[0.0,
-  1.0]`. The Lennard-Jones scale factor applied to the implicit 1-4
-  exclusion derived from any `[dihedrals]` row that names this type
-  and is the first to introduce its `(atom_i, atom_l)` pair (see
-  `topology.md`'s *Effective exclusions*).
-- `scale_coul_14: f64` — optional. Default `1.0 / 1.2 ≈ 0.83333`.
-  Finite, in `[0.0, 1.0]`. The Coulomb scale factor applied to the
-  same implicit 1-4 exclusion.
+  defensive against typos. Dimensionless for unit conversion:
+  radians in both unit systems.
 
-The on-device parameter tables are four `CudaSlice<f32>` /
-`CudaSlice<u32>` arrays (`dihedral_k_phi`, `dihedral_phi_0`,
-`dihedral_n`, all length `n_dihedral_types`), cast from `f64` or
-`u32` at upload time. The 1-4 scales are not consulted by the
-dihedral kernel; they are read by the topology loader and folded
-into the `ExclusionList`. Each dihedral carries a `dihedral_type_index`
-(see `topology.md`) into this table.
+The per-type 1-4 exclusion scale factors (`scale_lj_14`,
+`scale_coul_14`) are **common fields** of every `[[dihedral_types]]`
+entry, not part of this builder's claimed `params`: the implicit 1-4
+exclusion derivation is performed centrally by the topology loader
+independent of the functional form (see `io/config-schema.md` and
+`topology.md`'s *Effective exclusions*).
 
-The only `potential` value handled by the periodic slot is
-`"periodic"`. Other values land in different slots (e.g. a future
-Ryckaert-Bellemans slot would consume `potential = "ryckaert-bellemans"`).
+At build time the builder deserialises `PeriodicDihedralParams` from
+each claimed entry's `params`; each `kind = "periodic"` entry
+contributes one row to a per-dihedral-type parameter table uploaded
+to the device. The on-device parameter tables are four
+`CudaSlice<f32>` / `CudaSlice<u32>` arrays (`dihedral_k_phi`,
+`dihedral_phi_0`, `dihedral_n`, all length `n_dihedral_types`), cast
+from `f64` or `u32` at upload time. The 1-4 scales are not consulted
+by the dihedral kernel; they are read by the topology loader and
+folded into the `ExclusionList`. Each dihedral carries a
+`dihedral_type_index` (see `topology.md`) into this table.
+
+The only `kind` claimed by the periodic slot is `"periodic"`. Other
+kinds land in different slots (e.g. a future Ryckaert-Bellemans slot
+would register a builder claiming
+`(DihedralType, "ryckaert-bellemans")`).
 
 ## Empty State <!-- rq-66bad604 -->
 
@@ -264,8 +280,7 @@ therefore not constructed.
   Constructor:
 
   - `PeriodicDihedralState::new(device: Arc<CudaDevice>, dihedral_list: &DihedralList, dihedral_types: &[DihedralTypeConfig]) -> Result<PeriodicDihedralState, GpuError>`
-    - Filters `dihedral_types` to entries with `potential ==
-      "periodic"` and uploads their `(k_phi, n, phi_0)` parameters.
+    - Filters `dihedral_types` to entries with `kind == "periodic"` and uploads their `(k_phi, n, phi_0)` parameters.
     - Filters `dihedral_list.dihedrals` to entries whose
       `dihedral_type_index` resolves to a periodic type and uploads
       the filtered list, rebuilding `atom_dihedral_offsets` /
@@ -432,7 +447,7 @@ The reduction is launched through the framework's
 
 - Other dihedral potentials (Ryckaert-Bellemans polynomial,
   restricted-cosine, harmonic-in-φ, OPLS-style multi-term fused
-  forms). Each lands as a new `potential` value in
+  forms). Each lands as a builder claiming a new `kind` in
   `[[dihedral_types]]` with its own functor and its own slot, both
   feeding the same shared `DihedralList` and the same shared
   `reduce_dihedral_forces` reduction kernel. The Ryckaert-Bellemans
@@ -494,7 +509,7 @@ Feature: Periodic dihedral bonded potential
   @rq-d2f43e61
   Scenario: Construct PeriodicDihedralState
     Given a DihedralList with 1 dihedral among 4 atoms and one periodic dihedral type
-    And [[dihedral_types]] with one entry "CT-CT-CT-CT_n3" potential="periodic"
+    And [[dihedral_types]] with one entry "CT-CT-CT-CT_n3" kind="periodic"
       k_phi=2.18e-4 n=3 phi_0=0.0
     When PeriodicDihedralState::new(device, &dihedral_list, &dihedral_types) is called
     Then it returns Ok(state)
@@ -585,13 +600,13 @@ Feature: Periodic dihedral bonded potential
 
   @rq-7bf70ee9
   Scenario: n = 0 is rejected at config-load time
-    Given a [[dihedral_types]] entry with potential="periodic" n=0
+    Given a [[dihedral_types]] entry with kind="periodic" n=0
     When the config is loaded
     Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].n", .. })
 
   @rq-ce48ab4a
   Scenario: n > 6 is rejected at config-load time
-    Given a [[dihedral_types]] entry with potential="periodic" n=7
+    Given a [[dihedral_types]] entry with kind="periodic" n=7
     When the config is loaded
     Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].n", .. })
 

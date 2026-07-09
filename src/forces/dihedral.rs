@@ -14,15 +14,42 @@ use super::{
     AggregateLevel, DihedralForceFragment, DihedralPotential, DihedralScratchView,
     ForceFieldError, ForceLaunchBuilder, ForceLaunchContext, JitParticipant, KernelArg,
     KernelArgBinder, KernelArgSchema, KernelArgType, Potential, PotentialBuildContext,
-    PotentialBuilder, SlotOutputView,
+    PotentialBuilder, PotentialConfigEntry, PotentialParamsCategory, PotentialParamsClaim,
+    SlotOutputView,
 };
+use crate::io::config::{ConfigError, translate_params_error_local};
 use crate::precision::Real;
+
+/// The `kind` string the periodic-dihedral builder claims in
+/// `[[dihedral_types]]`.
+pub const PERIODIC_DIHEDRAL_KIND: &str = "periodic";
+
+// rq-4eec8cf7
+/// Typed per-entry parameter struct the periodic-dihedral builder
+/// deserialises from a claimed `kind = "periodic"`
+/// `[[dihedral_types]]` entry's `params`. The 1-4 scale factors are
+/// common fields of the entry, not part of this struct (the topology
+/// loader consumes them centrally). `phi_0` is dimensionless for unit
+/// conversion (radians in both unit systems).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+pub struct PeriodicDihedralParams {
+    pub k_phi: crate::units::Energy,
+    pub n: u32,
+    pub phi_0: f64,
+}
+
+fn is_periodic(dihedral_types: &[DihedralTypeConfig], ti: u32) -> bool {
+    dihedral_types
+        .get(ti as usize)
+        .is_some_and(|dt| dt.kind == PERIODIC_DIHEDRAL_KIND)
+}
 
 // rq-4b84f452 rq-ccea967a
 /// Periodic-dihedral potential slot. Evaluates
 /// `U(φ) = k_phi · (1 + cos(n · φ − phi_0))` per dihedral. Only the
 /// subset of `DihedralList` entries whose `dihedral_type_index`
-/// references a `DihedralTypeConfig::Periodic` entry is uploaded to
+/// references a `kind = "periodic"` entry is uploaded to
 /// this slot; entries of other functional forms live in their own
 /// slot driven by the same `DihedralList`.
 #[derive(Debug)]
@@ -67,15 +94,18 @@ impl PeriodicDihedralState {
         let mut phi0_vec: Vec<Real> = Vec::new();
         let mut n_vec: Vec<u32> = Vec::new();
         for (global_idx, dt) in dihedral_types.iter().enumerate() {
-            match dt {
-                DihedralTypeConfig::Periodic {
-                    k_phi, n, phi_0, ..
-                } => {
-                    periodic_remap[global_idx] = Some(k_vec.len() as u32);
-                    k_vec.push(*k_phi as Real);
-                    phi0_vec.push(*phi_0 as Real);
-                    n_vec.push(*n);
-                }
+            if dt.kind == PERIODIC_DIHEDRAL_KIND {
+                // rq-4eec8cf7 — validation has already guaranteed the
+                // params shape; a failure here is an internal error.
+                let p: PeriodicDihedralParams = dt
+                    .params
+                    .clone()
+                    .try_into()
+                    .expect("validated periodic dihedral-type params (config invariant)");
+                periodic_remap[global_idx] = Some(k_vec.len() as u32);
+                k_vec.push(p.k_phi.0 as Real);
+                phi0_vec.push(p.phi_0 as Real);
+                n_vec.push(p.n);
             }
         }
 
@@ -336,17 +366,71 @@ impl PotentialBuilder for PeriodicDihedralBuilder {
         // The slot only activates when at least one entry of the
         // dihedral list resolves to a periodic type — there is no
         // point compiling a JIT module that processes zero dihedrals.
-        let any_periodic = cx.dihedral_list.dihedrals.iter().any(|d| {
-            matches!(
-                cx.dihedral_types.get(d.dihedral_type_index as usize),
-                Some(DihedralTypeConfig::Periodic { .. })
-            )
-        });
+        let any_periodic = cx
+            .dihedral_list
+            .dihedrals
+            .iter()
+            .any(|d| is_periodic(cx.dihedral_types, d.dihedral_type_index));
         if !any_periodic {
             return Ok(None);
         }
         let state = PeriodicDihedralState::new(cx.gpu, cx.dihedral_list, cx.dihedral_types)?;
         Ok(Some(Box::new(state)))
+    }
+
+    // rq-529b9e4b rq-35a89768
+    fn params_claim(&self) -> Option<PotentialParamsClaim> {
+        Some(PotentialParamsClaim {
+            category: PotentialParamsCategory::DihedralType,
+            kind: PERIODIC_DIHEDRAL_KIND,
+        })
+    }
+
+    // rq-4eec8cf7 rq-95a50109 — k_phi required and finite (zero or
+    // negative permitted); n required, integer in [1, 6]; phi_0
+    // required, finite, in [−2π, 2π]. Errors carry entry-relative
+    // paths; the loader prefixes the document location.
+    fn validate_params(
+        &self,
+        entry: PotentialConfigEntry<'_>,
+    ) -> Result<(), ConfigError> {
+        let PotentialConfigEntry::DihedralType(dt) = entry else {
+            unreachable!("dispatch guarantees the claimed category");
+        };
+        let p: PeriodicDihedralParams = dt
+            .params
+            .clone()
+            .try_into()
+            .map_err(translate_params_error_local)?;
+        if !p.k_phi.0.is_finite() {
+            return Err(ConfigError::InvalidValue {
+                field: "k_phi".to_string(),
+                reason: "k_phi must be finite".to_string(),
+            });
+        }
+        if !(1..=6).contains(&p.n) {
+            return Err(ConfigError::InvalidValue {
+                field: "n".to_string(),
+                reason: "n must be an integer in [1, 6]".to_string(),
+            });
+        }
+        let two_pi = 2.0 * std::f64::consts::PI;
+        if !p.phi_0.is_finite() || !(-two_pi..=two_pi).contains(&p.phi_0) {
+            return Err(ConfigError::InvalidValue {
+                field: "phi_0".to_string(),
+                reason: "phi_0 must be finite and in [-2π, 2π]".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    // rq-529b9e4b
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        crate::registry::convert_params_in_place::<PeriodicDihedralParams>(units, params)
     }
 }
 

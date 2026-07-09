@@ -13,9 +13,69 @@ use super::{
     AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
     JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
     PairForceBindContext, PairForceFragment, PairForcePotential, Potential,
-    PotentialBuildContext, PotentialBuilder, SlotOutputView,
+    PotentialBuildContext, PotentialBuilder, PotentialConfigEntry, PotentialParamsCategory,
+    PotentialParamsClaim, SlotOutputView,
 };
+use crate::io::config::{ConfigError, PairInteractionConfig, translate_params_error_local};
 use crate::precision::Real;
+
+/// The `kind` string the Lennard-Jones builder claims in
+/// `[[pair_interactions]]`.
+pub const LJ_KIND: &str = "lennard-jones";
+
+// rq-9244aae4
+/// Typed per-entry parameter struct the Lennard-Jones builder
+/// deserialises from a claimed `kind = "lennard-jones"` entry's
+/// `params`. `deny_unknown_fields` is what rejects an unrecognised
+/// field under the entry. An omitted `r_switch` stays `None` through
+/// conversion and is resolved to `0.9 * cutoff` at build time (after
+/// conversion, so the dimensionless ratio multiplies the
+/// already-converted cutoff).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+pub struct LjPairParams {
+    pub sigma: crate::units::Length,
+    pub epsilon: crate::units::Energy,
+    #[serde(default)]
+    pub r_switch: Option<crate::units::Length>,
+}
+
+/// A `kind = "lennard-jones"` pair entry with its typed params
+/// deserialised and the `r_switch` default resolved against the
+/// entry's common `cutoff`.
+#[derive(Debug, Clone)]
+pub struct ResolvedLjPair {
+    pub between: (String, String),
+    pub sigma: f64,
+    pub epsilon: f64,
+    pub cutoff: f64,
+    pub r_switch: f64,
+}
+
+/// Resolve one `[[pair_interactions]]` entry into LJ parameters.
+/// Returns `None` for entries of other kinds (they belong to other
+/// claiming builders). Panics on a params table that does not
+/// deserialise into `LjPairParams` — validation has already
+/// guaranteed the shape, so a failure here is an internal error.
+// rq-1adf5954
+pub fn resolve_lj_pair(p: &PairInteractionConfig) -> Option<ResolvedLjPair> {
+    if p.kind != LJ_KIND {
+        return None;
+    }
+    let params: LjPairParams = p
+        .params
+        .clone()
+        .try_into()
+        .expect("validated lennard-jones entry params (config invariant)");
+    let r_switch = params.r_switch.map(|x| x.0).unwrap_or(0.9 * p.cutoff);
+    Some(ResolvedLjPair {
+        between: p.between.clone(),
+        sigma: params.sigma.0,
+        epsilon: params.epsilon.0,
+        cutoff: p.cutoff,
+        r_switch,
+    })
+}
 
 // rq-af2d1628
 #[derive(Debug)]
@@ -165,26 +225,31 @@ impl PotentialBuilder for LennardJonesBuilder {
         cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         // rq-be18633a — the slot is present when the config carries any LJ
-        // configuration: explicit overrides, a [lennard_jones] combining
-        // table, or both. A config with neither has no LJ interaction.
-        if cx.pair_interactions.is_empty() && cx.lennard_jones.is_none() {
+        // configuration: at least one `kind = "lennard-jones"` entry, a
+        // [lennard_jones] combining table, or both. A config with neither
+        // has no LJ interaction.
+        let lj_pairs: Vec<ResolvedLjPair> = cx
+            .pair_interactions
+            .iter()
+            .filter_map(resolve_lj_pair)
+            .collect();
+        if lj_pairs.is_empty() && cx.lennard_jones.is_none() {
             return Ok(None);
         }
         let params = LennardJonesParameterTable::from_config(
             &cx.gpu.device,
             cx.particle_types,
-            cx.pair_interactions,
+            &lj_pairs,
             cx.lennard_jones,
         )?;
-        // rq-be18633a — cutoff structure spans both the per-pair override
+        // rq-be18633a — cutoff structure spans both the per-pair entry
         // cutoffs and the [lennard_jones] combined cutoff. `cutoffs`
         // collects every cutoff/r_switch that appears in the resolved
         // table; `max_cutoff` is their maximum, `uniform_cutoff` is
         // `Some(c)` only when they all share one value, and
         // `switch_degenerate` holds only when every one has
         // `r_switch == cutoff`.
-        let cutoffs: Vec<(f64, f64)> = cx
-            .pair_interactions
+        let cutoffs: Vec<(f64, f64)> = lj_pairs
             .iter()
             .map(|p| (p.cutoff, p.r_switch))
             .chain(cx.lennard_jones.map(|lj| (lj.cutoff, lj.r_switch)))
@@ -216,6 +281,70 @@ impl PotentialBuilder for LennardJonesBuilder {
         )?;
         Ok(Some(Box::new(state)))
     }
+
+    // rq-529b9e4b rq-35a89768
+    fn params_claim(&self) -> Option<PotentialParamsClaim> {
+        Some(PotentialParamsClaim {
+            category: PotentialParamsCategory::PairInteraction,
+            kind: LJ_KIND,
+        })
+    }
+
+    // rq-9244aae4 rq-95a50109 — sigma/epsilon finite and >= 0 (a zero
+    // is Lennard-Jones-inert, negatives/NaN/inf are rejected);
+    // r_switch, when supplied, finite, strictly positive, and <= the
+    // entry's common cutoff. Errors carry entry-relative paths; the
+    // loader prefixes the document location.
+    fn validate_params(
+        &self,
+        entry: PotentialConfigEntry<'_>,
+    ) -> Result<(), ConfigError> {
+        let PotentialConfigEntry::PairInteraction(p) = entry else {
+            unreachable!("dispatch guarantees the claimed category");
+        };
+        let params: LjPairParams = p
+            .params
+            .clone()
+            .try_into()
+            .map_err(translate_params_error_local)?;
+        require_finite_non_negative("sigma", params.sigma.0)?;
+        require_finite_non_negative("epsilon", params.epsilon.0)?;
+        if let Some(rs) = params.r_switch {
+            let rs = rs.0;
+            if !rs.is_finite() || rs <= 0.0 {
+                return Err(ConfigError::InvalidValue {
+                    field: "r_switch".to_string(),
+                    reason: "must be finite and strictly positive".to_string(),
+                });
+            }
+            if rs > p.cutoff {
+                return Err(ConfigError::InvalidValue {
+                    field: "r_switch".to_string(),
+                    reason: format!("r_switch ({rs}) exceeds cutoff ({})", p.cutoff),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    // rq-529b9e4b
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        crate::registry::convert_params_in_place::<LjPairParams>(units, params)
+    }
+}
+
+fn require_finite_non_negative(field: &str, v: f64) -> Result<(), ConfigError> {
+    if !v.is_finite() || v < 0.0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: "must be finite and >= 0".to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// LJ-12-6 (optionally with CHARMM C¹ switching) fragment for the

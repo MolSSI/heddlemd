@@ -7,14 +7,7 @@ use heddle_md::io::config::{DihedralTypeConfig, NamedSlotConfig};
 use heddle_md::units::UnitSystem;
 
 fn dihedral_type(name: &str, scale_lj: f64, scale_coul: f64) -> DihedralTypeConfig {
-    DihedralTypeConfig::Periodic {
-        name: name.to_string(),
-        k_phi: 1.0,
-        n: 1,
-        phi_0: 0.0,
-        scale_lj_14: scale_lj,
-        scale_coul_14: scale_coul,
-    }
+    DihedralTypeConfig::periodic_with_scales(name.to_string(), 1.0, 1, 0.0, scale_lj, scale_coul)
 }
 
 fn registry() -> ConstraintRegistry {

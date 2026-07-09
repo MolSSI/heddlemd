@@ -781,7 +781,7 @@ pub(crate) fn parse_topology_file(
                 }
                 let type_idx = dihedral_types
                     .iter()
-                    .position(|t| t.name() == cols[4])
+                    .position(|t| t.name == cols[4])
                     .ok_or_else(|| TopologyFileError::UnknownDihedralType {
                         line_number,
                         name: cols[4].to_string(),
@@ -1037,8 +1037,8 @@ pub(crate) fn parse_topology_file(
             && w[0].dihedral_type_index == w[1].dihedral_type_index
         {
             let type_name = dihedral_types[w[0].dihedral_type_index as usize]
-                .name()
-                .to_string();
+                .name
+                .clone();
             return Err(TopologyFileError::DuplicateDihedral {
                 atom_i: w[0].atom_i,
                 atom_j: w[0].atom_j,
@@ -1266,8 +1266,8 @@ pub(crate) fn parse_topology_file(
             effective.push(Exclusion {
                 atom_i: lo,
                 atom_j: hi,
-                scale_lj: dtype.scale_lj_14() as Real,
-                scale_coul: dtype.scale_coul_14() as Real,
+                scale_lj: dtype.scale_lj_14 as Real,
+                scale_coul: dtype.scale_coul_14 as Real,
             });
             effective.sort_by_key(|e| (e.atom_i, e.atom_j));
         }

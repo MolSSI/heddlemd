@@ -142,349 +142,349 @@ r_switch = 9.000000000e-10
 
 [[bond_types]]
 name = "b0"
-potential = "harmonic"
+kind = "harmonic"
 k = 6.030599657e+02
 r0 = 1.010000000e-10
 
 [[bond_types]]
 name = "b1"
-potential = "harmonic"
+kind = "harmonic"
 k = 4.724432911e+02
 r0 = 1.090000000e-10
 
 [[bond_types]]
 name = "b2"
-potential = "harmonic"
+kind = "harmonic"
 k = 5.099608465e+02
 r0 = 1.080000000e-10
 
 [[bond_types]]
 name = "b3"
-potential = "harmonic"
+kind = "harmonic"
 k = 7.684151176e+02
 r0 = 9.600000000e-11
 
 [[bond_types]]
 name = "b4"
-potential = "harmonic"
+kind = "harmonic"
 k = 4.404838920e+02
 r0 = 1.522000000e-10
 
 [[bond_types]]
 name = "b5"
-potential = "harmonic"
+kind = "harmonic"
 k = 7.920372821e+02
 r0 = 1.229000000e-10
 
 [[bond_types]]
 name = "b6"
-potential = "harmonic"
+kind = "harmonic"
 k = 4.307571183e+02
 r0 = 1.526000000e-10
 
 [[bond_types]]
 name = "b7"
-potential = "harmonic"
+kind = "harmonic"
 k = 5.099608465e+02
 r0 = 1.471000000e-10
 
 [[bond_types]]
 name = "b8"
-potential = "harmonic"
+kind = "harmonic"
 k = 4.404838920e+02
 r0 = 1.510000000e-10
 
 [[bond_types]]
 name = "b9"
-potential = "harmonic"
+kind = "harmonic"
 k = 6.516938339e+02
 r0 = 1.400000000e-10
 
 [[bond_types]]
 name = "b10"
-potential = "harmonic"
+kind = "harmonic"
 k = 6.516938339e+02
 r0 = 1.409000000e-10
 
 [[bond_types]]
 name = "b11"
-potential = "harmonic"
+kind = "harmonic"
 k = 6.252925911e+02
 r0 = 1.364000000e-10
 
 [[bond_types]]
 name = "b12"
-potential = "harmonic"
+kind = "harmonic"
 k = 6.808741548e+02
 r0 = 1.335000000e-10
 
 [[bond_types]]
 name = "b13"
-potential = "harmonic"
+kind = "harmonic"
 k = 4.682746738e+02
 r0 = 1.449000000e-10
 
 [[bond_types]]
 name = "b14"
-potential = "harmonic"
+kind = "harmonic"
 k = 9.115376440e+02
 r0 = 1.250000000e-10
 
 [[bond_types]]
 name = "b15"
-potential = "harmonic"
+kind = "harmonic"
 k = 4.446525093e+02
 r0 = 1.410000000e-10
 
 [[bond_types]]
 name = "b16"
-potential = "harmonic"
+kind = "harmonic"
 k = 4.404838920e+02
 r0 = 1.495000000e-10
 
 [[bond_types]]
 name = "b17"
-potential = "harmonic"
+kind = "harmonic"
 k = 7.586883439e+02
 r0 = 1.352000000e-10
 
 [[bond_types]]
 name = "b18"
-potential = "harmonic"
+kind = "harmonic"
 k = 5.933331920e+02
 r0 = 1.381000000e-10
 
 [[bond_types]]
 name = "b19"
-potential = "harmonic"
+kind = "harmonic"
 k = 6.211239739e+02
 r0 = 1.419000000e-10
 
 [[bond_types]]
 name = "b20"
-potential = "harmonic"
+kind = "harmonic"
 k = 6.516938339e+02
 r0 = 1.404000000e-10
 
 [[bond_types]]
 name = "b21"
-potential = "harmonic"
+kind = "harmonic"
 k = 5.391411675e+02
 r0 = 1.459000000e-10
 
 [[bond_types]]
 name = "b22"
-potential = "harmonic"
+kind = "harmonic"
 k = 5.947227311e+02
 r0 = 1.380000000e-10
 
 [[angle_types]]
 name = "a0"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 6.947695457e-19
 theta_0 = 1.911135531e+00
 
 [[angle_types]]
 name = "a1"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 1.111631273e-18
 theta_0 = 1.940806128e+00
 
 [[angle_types]]
 name = "a2"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 4.863386820e-19
 theta_0 = 1.911135531e+00
 
 [[angle_types]]
 name = "a3"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 1.111631273e-18
 theta_0 = 2.101376419e+00
 
 [[angle_types]]
 name = "a4"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 2.035053908e+00
 
 [[angle_types]]
 name = "a5"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 1.989675347e+00
 
 [[angle_types]]
 name = "a6"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 1.939060799e+00
 
 [[angle_types]]
 name = "a7"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 6.947695457e-19
 theta_0 = 2.094395102e+00
 
 [[angle_types]]
 name = "a8"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 6.947695457e-19
 theta_0 = 2.127556358e+00
 
 [[angle_types]]
 name = "a9"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 1.111631273e-18
 theta_0 = 2.145009651e+00
 
 [[angle_types]]
 name = "a10"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 2.094395102e+00
 
 [[angle_types]]
 name = "a11"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 2.094395102e+00
 
 [[angle_types]]
 name = "a12"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 6.947695457e-19
 theta_0 = 1.972222055e+00
 
 [[angle_types]]
 name = "a13"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 1.921607506e+00
 
 [[angle_types]]
 name = "a14"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 1.111631273e-18
 theta_0 = 1.914626189e+00
 
 [[angle_types]]
 name = "a15"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 6.947695457e-19
 theta_0 = 2.060186649e+00
 
 [[angle_types]]
 name = "a16"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 2.042035225e+00
 
 [[angle_types]]
 name = "a17"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 1.111631273e-18
 theta_0 = 2.199114858e+00
 
 [[angle_types]]
 name = "a18"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 6.947695457e-19
 theta_0 = 2.059488517e+00
 
 [[angle_types]]
 name = "a19"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 5.558156366e-19
 theta_0 = 1.911135531e+00
 
 [[angle_types]]
 name = "a20"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 7.642465003e-19
 theta_0 = 1.893682238e+00
 
 [[angle_types]]
 name = "a21"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 2.017600615e+00
 
 [[angle_types]]
 name = "a22"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 2.181661565e+00
 
 [[angle_types]]
 name = "a23"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 2.244493418e+00
 
 [[angle_types]]
 name = "a24"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 1.897172897e+00
 
 [[angle_types]]
 name = "a25"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 1.898918226e+00
 
 [[angle_types]]
 name = "a26"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 2.354449161e+00
 
 [[angle_types]]
 name = "a27"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 1.857030324e+00
 
 [[angle_types]]
 name = "a28"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 1.947787445e+00
 
 [[angle_types]]
 name = "a29"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 1.822123739e+00
 
 [[angle_types]]
 name = "a30"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 2.141518992e+00
 
 [[angle_types]]
 name = "a31"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 9.726773640e-19
 theta_0 = 2.317797247e+00
 
 [[angle_types]]
 name = "a32"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 6.947695457e-19
 theta_0 = 2.148500309e+00
 
 [[angle_types]]
 name = "a33"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 8.754096276e-19
 theta_0 = 2.028072591e+00
 
 [[dihedral_types]]
 name = "d0"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.080752627e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -493,7 +493,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d1"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.863386820e-23
 n = 4
 phi_0 = 3.141592654e+00
@@ -502,7 +502,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d2"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.333957528e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -511,7 +511,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d3"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.014831683e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -520,7 +520,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d4"
-potential = "periodic"
+kind = "periodic"
 k_phi = 8.337234548e-23
 n = 1
 phi_0 = 3.141592654e+00
@@ -529,7 +529,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d5"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.736923864e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -538,7 +538,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d6"
-potential = "periodic"
+kind = "periodic"
 k_phi = 3.334893819e-22
 n = 4
 phi_0 = 3.141592654e+00
@@ -547,7 +547,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d7"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.793909865e-22
 n = 2
 phi_0 = 3.141592654e+00
@@ -556,7 +556,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d8"
-potential = "periodic"
+kind = "periodic"
 k_phi = 8.337234548e-23
 n = 4
 phi_0 = 3.141592654e+00
@@ -565,7 +565,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d9"
-potential = "periodic"
+kind = "periodic"
 k_phi = 3.258469169e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -574,7 +574,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d10"
-potential = "periodic"
+kind = "periodic"
 k_phi = 3.821232501e-22
 n = 1
 phi_0 = 0.000000000e+00
@@ -583,7 +583,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d11"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.918032092e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -592,7 +592,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d12"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.875877773e-21
 n = 2
 phi_0 = 0.000000000e+00
@@ -601,7 +601,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d13"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.558156366e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -610,7 +610,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d14"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.250585182e-20
 n = 2
 phi_0 = 0.000000000e+00
@@ -619,7 +619,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d15"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.389539091e-20
 n = 1
 phi_0 = 0.000000000e+00
@@ -628,7 +628,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d16"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.779078183e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -637,7 +637,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d17"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.389539091e-21
 n = 2
 phi_0 = 0.000000000e+00
@@ -646,7 +646,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d18"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.389539091e-21
 n = 1
 phi_0 = 0.000000000e+00
@@ -655,7 +655,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d19"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.518539603e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -664,7 +664,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d20"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.516002047e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -673,7 +673,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d21"
-potential = "periodic"
+kind = "periodic"
 k_phi = 6.134815089e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -682,7 +682,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d22"
-potential = "periodic"
+kind = "periodic"
 k_phi = 3.821232501e-21
 n = 3
 phi_0 = 3.141592654e+00
@@ -691,7 +691,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d23"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.097735882e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -700,7 +700,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d24"
-potential = "periodic"
+kind = "periodic"
 k_phi = 3.126462956e-21
 n = 1
 phi_0 = 3.141592654e+00
@@ -709,7 +709,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d25"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.558156366e-21
 n = 1
 phi_0 = 0.000000000e+00
@@ -718,7 +718,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d26"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.558156366e-22
 n = 3
 phi_0 = 3.141592654e+00
@@ -727,7 +727,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d27"
-potential = "periodic"
+kind = "periodic"
 k_phi = 6.183448957e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -736,7 +736,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d28"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.029663365e-22
 n = 3
 phi_0 = 0.000000000e+00
@@ -745,7 +745,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d29"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.495158961e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -754,7 +754,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d30"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.496533601e-20
 n = 1
 phi_0 = 3.141592654e+00
@@ -763,7 +763,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d31"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.153785592e-22
 n = 4
 phi_0 = 3.141592654e+00
@@ -772,7 +772,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d32"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.342777806e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -781,7 +781,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d33"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.069945100e-21
 n = 4
 phi_0 = 0.000000000e+00
@@ -790,7 +790,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d34"
-potential = "periodic"
+kind = "periodic"
 k_phi = 3.188992215e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -799,7 +799,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d35"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.945822874e-21
 n = 1
 phi_0 = 0.000000000e+00
@@ -808,7 +808,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d36"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.389539091e-20
 n = 2
 phi_0 = 0.000000000e+00
@@ -817,7 +817,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d37"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.111631273e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -826,7 +826,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d38"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.250585182e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -835,7 +835,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d39"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.736923864e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -844,7 +844,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d40"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.389539091e-21
 n = 1
 phi_0 = 3.141592654e+00
@@ -853,7 +853,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d41"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.042154319e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -862,7 +862,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d42"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.419202457e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -871,7 +871,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d43"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.000468146e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -880,7 +880,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d44"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.278375964e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -889,7 +889,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d45"
-potential = "periodic"
+kind = "periodic"
 k_phi = 6.947695457e-22
 n = 1
 phi_0 = 3.141592654e+00
@@ -898,7 +898,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d46"
-potential = "periodic"
+kind = "periodic"
 k_phi = 3.890709456e-22
 n = 4
 phi_0 = 3.141592654e+00
@@ -907,7 +907,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d47"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.224198838e-21
 n = 3
 phi_0 = 3.141592654e+00
@@ -916,7 +916,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d48"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.542388391e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -925,7 +925,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d49"
-potential = "periodic"
+kind = "periodic"
 k_phi = 9.497499690e-21
 n = 1
 phi_0 = 3.141592654e+00
@@ -934,7 +934,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d50"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.007415841e-21
 n = 4
 phi_0 = 0.000000000e+00
@@ -943,7 +943,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d51"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.730444315e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -952,7 +952,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d52"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.924979787e-21
 n = 1
 phi_0 = 3.141592654e+00
@@ -961,7 +961,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d53"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.446525093e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -970,7 +970,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d54"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.709601228e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -979,7 +979,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d55"
-potential = "periodic"
+kind = "periodic"
 k_phi = 6.600310684e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -988,7 +988,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d56"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.188524069e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -997,7 +997,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d57"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.168617274e-23
 n = 2
 phi_0 = 0.000000000e+00
@@ -1006,7 +1006,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d58"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.682746738e-21
 n = 1
 phi_0 = 0.000000000e+00
@@ -1015,7 +1015,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d59"
-potential = "periodic"
+kind = "periodic"
 k_phi = 6.947695457e-24
 n = 4
 phi_0 = 3.141592654e+00
@@ -1024,7 +1024,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d60"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.028258928e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -1033,7 +1033,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d61"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.500702219e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -1042,7 +1042,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d62"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.341373369e-21
 n = 1
 phi_0 = 0.000000000e+00
@@ -1051,7 +1051,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d63"
-potential = "periodic"
+kind = "periodic"
 k_phi = 9.032004094e-23
 n = 4
 phi_0 = 0.000000000e+00
@@ -1060,7 +1060,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d64"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.639656128e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -1069,7 +1069,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d65"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.743871560e-21
 n = 2
 phi_0 = 0.000000000e+00
@@ -1078,7 +1078,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d66"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.168617274e-23
 n = 1
 phi_0 = 3.141592654e+00
@@ -1087,7 +1087,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d67"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.736923864e-21
 n = 1
 phi_0 = 0.000000000e+00
@@ -1096,7 +1096,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d68"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.083840491e-21
 n = 4
 phi_0 = 0.000000000e+00
@@ -1105,7 +1105,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d69"
-potential = "periodic"
+kind = "periodic"
 k_phi = 8.267757594e-22
 n = 2
 phi_0 = 3.141592654e+00
@@ -1114,7 +1114,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d70"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.842543734e-21
 n = 1
 phi_0 = 3.141592654e+00
@@ -1123,7 +1123,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d71"
-potential = "periodic"
+kind = "periodic"
 k_phi = 7.781418912e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -1132,7 +1132,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d72"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.007883987e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -1141,7 +1141,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d73"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.820764356e-21
 n = 1
 phi_0 = 3.141592654e+00
@@ -1150,7 +1150,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d74"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.157949243e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -1159,7 +1159,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d75"
-potential = "periodic"
+kind = "periodic"
 k_phi = 3.334893819e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -1168,7 +1168,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d76"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.488679411e-22
 n = 2
 phi_0 = 3.141592654e+00
@@ -1177,7 +1177,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d77"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.467368179e-21
 n = 1
 phi_0 = 0.000000000e+00
@@ -1186,7 +1186,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d78"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.153785592e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -1195,7 +1195,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d79"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.625760737e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -1204,7 +1204,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d80"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.174628678e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -1213,7 +1213,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d81"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.488679411e-22
 n = 1
 phi_0 = 0.000000000e+00
@@ -1222,7 +1222,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d82"
-potential = "periodic"
+kind = "periodic"
 k_phi = 6.600310684e-22
 n = 4
 phi_0 = 3.141592654e+00
@@ -1231,7 +1231,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d83"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.690162579e-21
 n = 3
 phi_0 = 0.000000000e+00
@@ -1240,7 +1240,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d84"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.834659746e-21
 n = 2
 phi_0 = 0.000000000e+00
@@ -1249,7 +1249,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d85"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.535908842e-21
 n = 1
 phi_0 = 0.000000000e+00
@@ -1258,7 +1258,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d86"
-potential = "periodic"
+kind = "periodic"
 k_phi = 5.141294638e-22
 n = 4
 phi_0 = 0.000000000e+00
@@ -1267,7 +1267,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d87"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.452536496e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -1276,7 +1276,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d88"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.181108228e-22
 n = 1
 phi_0 = 3.141592654e+00
@@ -1285,7 +1285,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d89"
-potential = "periodic"
+kind = "periodic"
 k_phi = 4.533371286e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -1294,7 +1294,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d90"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.163738989e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -1303,7 +1303,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d91"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.042154319e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -1312,7 +1312,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d92"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.084308637e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -1321,7 +1321,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d93"
-potential = "periodic"
+kind = "periodic"
 k_phi = 2.431693410e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -1330,7 +1330,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d94"
-potential = "periodic"
+kind = "periodic"
 k_phi = 1.059523557e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -1339,7 +1339,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d95"
-potential = "periodic"
+kind = "periodic"
 k_phi = 7.295080230e-20
 n = 2
 phi_0 = 3.141592654e+00
@@ -1348,7 +1348,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d96"
-potential = "periodic"
+kind = "periodic"
 k_phi = 7.642465003e-21
 n = 2
 phi_0 = 3.141592654e+00
@@ -1357,7 +1357,7 @@ scale_coul_14 = 1.0
 
 [[dihedral_types]]
 name = "d97"
-potential = "periodic"
+kind = "periodic"
 k_phi = 6.947695457e-21
 n = 2
 phi_0 = 3.141592654e+00

@@ -10,13 +10,37 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::topology::AngleList;
+use super::morse::require_finite_positive;
 use super::{
     AggregateLevel, AngleForceFragment, AnglePotential, AngleScratchView, ForceFieldError,
     ForceLaunchBuilder, ForceLaunchContext, JitParticipant, KernelArg, KernelArgBinder,
     KernelArgSchema, KernelArgType, Potential, PotentialBuildContext, PotentialBuilder,
-    SlotOutputView,
+    PotentialConfigEntry, PotentialParamsCategory, PotentialParamsClaim, SlotOutputView,
 };
+use crate::io::config::{ConfigError, translate_params_error_local};
 use crate::precision::Real;
+
+/// The `kind` string the harmonic-angle builder claims in
+/// `[[angle_types]]`.
+pub const HARMONIC_ANGLE_KIND: &str = "harmonic";
+
+// rq-b33243ff
+/// Typed per-entry parameter struct the harmonic-angle builder
+/// deserialises from a claimed `kind = "harmonic"` `[[angle_types]]`
+/// entry's `params`. `theta_0` is dimensionless for unit conversion
+/// (radians in both unit systems).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+pub struct HarmonicAngleParams {
+    pub k_theta: crate::units::Energy,
+    pub theta_0: f64,
+}
+
+fn is_harmonic(angle_types: &[AngleTypeConfig], ti: u32) -> bool {
+    angle_types
+        .get(ti as usize)
+        .is_some_and(|at| at.kind == HARMONIC_ANGLE_KIND)
+}
 
 // rq-21a8063c rq-454ad2cf
 #[derive(Debug)]
@@ -45,12 +69,23 @@ impl HarmonicAngleState {
     ) -> Result<Self, GpuError> {
         let device = gpu.device.clone();
         let kernels = gpu.kernels.clone();
-        let angle_count = angle_list.angles.len();
         let particle_count = angle_list.particle_count;
+
+        // Select only the angles whose type this slot claims
+        // (`kind = "harmonic"`), preserving the AngleList's sort order.
+        // The parameter table stays addressed by the global
+        // `angle_type_index`; rows for other kinds hold placeholders
+        // this slot never reads.
+        let selected: Vec<&super::topology::Angle> = angle_list
+            .angles
+            .iter()
+            .filter(|a| is_harmonic(angle_types, a.angle_type_index))
+            .collect();
+        let angle_count = selected.len();
 
         // Flatten angles to [atom_i, atom_j, atom_k, type_idx] quadruples.
         let mut angles_flat: Vec<u32> = Vec::with_capacity(4 * angle_count);
-        for a in &angle_list.angles {
+        for a in &selected {
             angles_flat.push(a.atom_i);
             angles_flat.push(a.atom_j);
             angles_flat.push(a.atom_k);
@@ -60,17 +95,53 @@ impl HarmonicAngleState {
         let mut k_vec: Vec<Real> = Vec::with_capacity(angle_types.len());
         let mut theta0_vec: Vec<Real> = Vec::with_capacity(angle_types.len());
         for at in angle_types {
-            match at {
-                AngleTypeConfig::Harmonic { k_theta, theta_0, .. } => {
-                    k_vec.push(*k_theta as Real);
-                    theta0_vec.push(*theta_0 as Real);
-                }
+            if at.kind == HARMONIC_ANGLE_KIND {
+                // rq-b33243ff — validation has already guaranteed the
+                // params shape; a failure here is an internal error.
+                let p: HarmonicAngleParams = at
+                    .params
+                    .clone()
+                    .try_into()
+                    .expect("validated harmonic angle-type params (config invariant)");
+                k_vec.push(p.k_theta.0 as Real);
+                theta0_vec.push(p.theta_0 as Real);
+            } else {
+                k_vec.push(0.0);
+                theta0_vec.push(0.0);
+            }
+        }
+
+        // Rebuild atom_angle_offsets / atom_angle_indices over the
+        // selected subset so the reduction kernel's per-atom indexing
+        // matches the slot's own scratch layout (three slots per
+        // selected angle: 3·k, 3·k+1, 3·k+2). Mirrors the shared
+        // AngleList map construction in `topology.rs`, restricted to
+        // the subset.
+        let mut offsets_host = vec![0u32; particle_count + 1];
+        for a in &selected {
+            offsets_host[a.atom_i as usize + 1] += 1;
+            offsets_host[a.atom_j as usize + 1] += 1;
+            offsets_host[a.atom_k as usize + 1] += 1;
+        }
+        for i in 1..=particle_count {
+            offsets_host[i] += offsets_host[i - 1];
+        }
+        let mut indices_host = vec![0u32; angle_count * 3];
+        let mut cursor: Vec<u32> = offsets_host[..particle_count].to_vec();
+        for (k, a) in selected.iter().enumerate() {
+            let slots = [(3 * k) as u32, (3 * k + 1) as u32, (3 * k + 2) as u32];
+            for (slot, atom) in slots
+                .iter()
+                .zip([a.atom_i as usize, a.atom_j as usize, a.atom_k as usize])
+            {
+                indices_host[cursor[atom] as usize] = *slot;
+                cursor[atom] += 1;
             }
         }
 
         let angles = htod_or_empty_u32(&device, &angles_flat)?;
-        let atom_angle_offsets = htod_or_empty_u32(&device, &angle_list.atom_angle_offsets)?;
-        let atom_angle_indices = htod_or_empty_u32(&device, &angle_list.atom_angle_indices)?;
+        let atom_angle_offsets = htod_or_empty_u32(&device, &offsets_host)?;
+        let atom_angle_indices = htod_or_empty_u32(&device, &indices_host)?;
         let angle_k_theta = htod_or_empty(&device, &k_vec)?;
         let angle_theta_0 = htod_or_empty(&device, &theta0_vec)?;
 
@@ -243,11 +314,59 @@ impl PotentialBuilder for HarmonicAngleBuilder {
         &self,
         cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
-        if cx.angle_list.is_empty() {
+        // Active only when at least one angle uses a harmonic angle type.
+        let has_harmonic = cx
+            .angle_list
+            .angles
+            .iter()
+            .any(|a| is_harmonic(cx.angle_types, a.angle_type_index));
+        if !has_harmonic {
             return Ok(None);
         }
         let state = HarmonicAngleState::new(cx.gpu, cx.angle_list, cx.angle_types)?;
         Ok(Some(Box::new(state)))
+    }
+
+    // rq-529b9e4b rq-35a89768
+    fn params_claim(&self) -> Option<PotentialParamsClaim> {
+        Some(PotentialParamsClaim {
+            category: PotentialParamsCategory::AngleType,
+            kind: HARMONIC_ANGLE_KIND,
+        })
+    }
+
+    // rq-b33243ff rq-95a50109 — k_theta required, finite, strictly
+    // positive; theta_0 required, finite, in [0, π]. Errors carry
+    // entry-relative paths; the loader prefixes the document location.
+    fn validate_params(
+        &self,
+        entry: PotentialConfigEntry<'_>,
+    ) -> Result<(), ConfigError> {
+        let PotentialConfigEntry::AngleType(at) = entry else {
+            unreachable!("dispatch guarantees the claimed category");
+        };
+        let p: HarmonicAngleParams = at
+            .params
+            .clone()
+            .try_into()
+            .map_err(translate_params_error_local)?;
+        require_finite_positive("k_theta", p.k_theta.0)?;
+        if !p.theta_0.is_finite() || !(0.0..=std::f64::consts::PI).contains(&p.theta_0) {
+            return Err(ConfigError::InvalidValue {
+                field: "theta_0".to_string(),
+                reason: "theta_0 must be finite and in [0, π]".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    // rq-529b9e4b
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        crate::registry::convert_params_in_place::<HarmonicAngleParams>(units, params)
     }
 }
 

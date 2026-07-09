@@ -19,9 +19,26 @@ use super::{
     AggregateLevel, BondedForceFragment, BondedPotential, BondedScratchView, ForceFieldError,
     ForceLaunchBuilder, ForceLaunchContext, JitParticipant, KernelArg, KernelArgBinder,
     KernelArgSchema, KernelArgType, Potential, PotentialBuildContext, PotentialBuilder,
-    SlotOutputView,
+    PotentialConfigEntry, PotentialParamsCategory, PotentialParamsClaim, SlotOutputView,
 };
+use super::morse::require_finite_positive;
+use crate::io::config::{ConfigError, translate_params_error_local};
 use crate::precision::Real;
+
+/// The `kind` string the harmonic-bond builder claims in
+/// `[[bond_types]]`.
+pub const HARMONIC_BOND_KIND: &str = "harmonic";
+
+// rq-4943810f
+/// Typed per-entry parameter struct the harmonic-bond builder
+/// deserialises from a claimed `kind = "harmonic"` `[[bond_types]]`
+/// entry's `params`. `k` uses the `U = ½ k (r − r_0)²` convention.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, crate::units::Convert)]
+#[serde(deny_unknown_fields)]
+pub struct HarmonicBondParams {
+    pub k: crate::units::Stiffness,
+    pub r0: crate::units::Length,
+}
 
 // rq-c3da9ee1
 #[derive(Debug)]
@@ -74,15 +91,17 @@ impl HarmonicBondState {
         let mut k_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
         let mut r0_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
         for bt in bond_types {
-            match bt {
-                BondTypeConfig::Harmonic { k, r0, .. } => {
-                    k_vec.push(*k as Real);
-                    r0_vec.push(*r0 as Real);
-                }
-                BondTypeConfig::Morse { .. } => {
-                    k_vec.push(0.0);
-                    r0_vec.push(0.0);
-                }
+            if bt.kind == HARMONIC_BOND_KIND {
+                let p: HarmonicBondParams = bt
+                    .params
+                    .clone()
+                    .try_into()
+                    .expect("validated harmonic bond-type params (config invariant)");
+                k_vec.push(p.k.0 as Real);
+                r0_vec.push(p.r0.0 as Real);
+            } else {
+                k_vec.push(0.0);
+                r0_vec.push(0.0);
             }
         }
 
@@ -229,10 +248,9 @@ fn harmonic_arg_schema() -> KernelArgSchema {
 }
 
 fn is_harmonic(bond_types: &[BondTypeConfig], ti: u32) -> bool {
-    matches!(
-        bond_types.get(ti as usize),
-        Some(BondTypeConfig::Harmonic { .. })
-    )
+    bond_types
+        .get(ti as usize)
+        .is_some_and(|bt| bt.kind == HARMONIC_BOND_KIND)
 }
 
 fn htod_or_empty_u32(
@@ -277,6 +295,43 @@ impl PotentialBuilder for HarmonicBondBuilder {
         }
         let state = HarmonicBondState::new(cx.gpu, cx.bond_list, cx.bond_types)?;
         Ok(Some(Box::new(state)))
+    }
+
+    // rq-529b9e4b rq-35a89768
+    fn params_claim(&self) -> Option<PotentialParamsClaim> {
+        Some(PotentialParamsClaim {
+            category: PotentialParamsCategory::BondType,
+            kind: HARMONIC_BOND_KIND,
+        })
+    }
+
+    // rq-4943810f rq-95a50109 — k/r0 required, finite, strictly
+    // positive. Errors carry entry-relative paths; the loader prefixes
+    // the document location.
+    fn validate_params(
+        &self,
+        entry: PotentialConfigEntry<'_>,
+    ) -> Result<(), ConfigError> {
+        let PotentialConfigEntry::BondType(bt) = entry else {
+            unreachable!("dispatch guarantees the claimed category");
+        };
+        let p: HarmonicBondParams = bt
+            .params
+            .clone()
+            .try_into()
+            .map_err(translate_params_error_local)?;
+        require_finite_positive("k", p.k.0)?;
+        require_finite_positive("r0", p.r0.0)?;
+        Ok(())
+    }
+
+    // rq-529b9e4b
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        crate::registry::convert_params_in_place::<HarmonicBondParams>(units, params)
     }
 }
 

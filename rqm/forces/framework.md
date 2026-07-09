@@ -43,15 +43,15 @@ condition is met. The registry's registration order is the slot evaluation
 order; the registry is the single canonical source of slot ordering, and
 `ForceField::new` reads from it without making its own decisions.
 
-| Builder | `label()` of the slot it builds | Activation condition (`build(cx)` returns `Some(_)` iff …) | `frequency_class()` | `displaces()` | Implementation file |
-| --- | --- | --- | --- | --- | --- |
-| `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `Fast` | `&[]` | `lj-pair-force.md` |
-| `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `Fast` | `&[]` | `spme.md` |
-| `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `Slow` | `&[]` | `spme.md` |
-| `MorseBondedBuilder` | `"morse_bonded"` | `cx.bond_list` contains ≥1 bond whose type uses `potential = "morse"` | `Fast` | `&[]` | `morse-bonded.md` |
-| `HarmonicBondBuilder` | `"harmonic_bond"` | `cx.bond_list` contains ≥1 bond whose type uses `potential = "harmonic"` | `Fast` | `&[]` | `harmonic-bond.md` |
-| `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `Fast` | `&[]` | `harmonic-angle.md` |
-| `PeriodicDihedralBuilder` | `"periodic_dihedral"` | `!cx.dihedral_list.is_empty()` | `Fast` | `&[]` | `periodic-dihedral.md` |
+| Builder | `label()` of the slot it builds | Params claim (`params_claim()`) | Activation condition (`build(cx)` returns `Some(_)` iff …) | `frequency_class()` | `displaces()` | Implementation file |
+| --- | --- | --- | --- | --- | --- | --- |
+| `LennardJonesBuilder` | `"lennard_jones"` | `(PairInteraction, "lennard-jones")` | `cx.pair_interactions` contains ≥1 `kind = "lennard-jones"` entry, or `cx.lennard_jones` is `Some` | `Fast` | `&[]` | `lj-pair-force.md` |
+| `SpmeRealBuilder` | `"spme_real"` | `None` | `cx.spme_config.is_some()` | `Fast` | `&[]` | `spme.md` |
+| `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `None` | `cx.spme_config.is_some()` | `Slow` | `&[]` | `spme.md` |
+| `MorseBondedBuilder` | `"morse_bonded"` | `(BondType, "morse")` | `cx.bond_list` contains ≥1 bond whose type uses `kind = "morse"` | `Fast` | `&[]` | `morse-bonded.md` |
+| `HarmonicBondBuilder` | `"harmonic_bond"` | `(BondType, "harmonic")` | `cx.bond_list` contains ≥1 bond whose type uses `kind = "harmonic"` | `Fast` | `&[]` | `harmonic-bond.md` |
+| `HarmonicAngleBuilder` | `"harmonic_angle"` | `(AngleType, "harmonic")` | `cx.angle_list` contains ≥1 angle whose type uses `kind = "harmonic"` | `Fast` | `&[]` | `harmonic-angle.md` |
+| `PeriodicDihedralBuilder` | `"periodic_dihedral"` | `(DihedralType, "periodic")` | `cx.dihedral_list` contains ≥1 dihedral whose type uses `kind = "periodic"` | `Fast` | `&[]` | `periodic-dihedral.md` |
 
 The two SPME builders share the same activation condition; they always
 appear together because the Ewald split is exact only when both halves
@@ -120,6 +120,67 @@ each constituent and return `Ok(None)` whenever any constituent's
 own activation condition is not met; the constituents' standalone
 fragments then participate in the composed kernel unchanged, as if
 no composite were registered.
+
+## Potential Params Claims <!-- rq-73801d98 -->
+
+The four potential type tables in the configuration
+(`[[pair_interactions]]`, `[[bond_types]]`, `[[angle_types]]`,
+`[[dihedral_types]]`; see `io/config-schema.md`) are open-shaped: each
+entry carries a small set of centrally-parsed common fields (`between`
+or `name`, `kind`, plus `cutoff` for pair entries and
+`scale_lj_14` / `scale_coul_14` for dihedral entries) and an opaque
+`params: toml::Value` holding every other field. The engine core never
+inspects `params`; ownership of its schema rests with the potential
+builder that **claims** the entry.
+
+A claim is a `(category, kind)` pair returned by
+`PotentialBuilder::params_claim()`:
+
+- `category` is one of the four table categories (`PairInteraction`,
+  `BondType`, `AngleType`, `DihedralType`).
+- `kind` is the TOML `kind` string the builder owns within that
+  category.
+
+Kind strings are scoped per category: `"harmonic"` in the bond-type
+category and `"harmonic"` in the angle-type category are distinct
+claims owned by distinct builders. A builder claims at most one
+`(category, kind)` pair; the default `params_claim()` returns `None`,
+appropriate for a potential configured outside the type tables (the
+two SPME builders, driven by the typed `[spme]` table).
+
+Claim dispatch selects the **first** registered builder (in
+registration order) whose claim matches an entry's `(category, kind)`,
+mirroring the named-selection registries' `lookup` semantics. An entry
+whose `kind` no registered builder claims is a configuration error
+(`ConfigError::UnknownKind`; see `io/config-schema.md`'s *Validation*).
+
+For each claimed entry, the loader drives two builder-owned steps, in
+order:
+
+1. **Unit conversion.** `convert_params(units, &mut params)` rescales
+   the entry's unit-bearing params from the user's unit system to
+   atomic units in place, exactly like
+   `KindedBuilder::convert_params` (see `registry-framework.md` and
+   `io/unit-system.md`'s *Builder-Owned Slot-Parameter Conversion*):
+   the builder deserialises `params` into its typed parameter struct
+   (which derives `Convert`), fills serde defaults, applies
+   `from_user`, and serialises the full converted struct back.
+2. **Validation.** `validate_params(entry)` receives the whole parsed
+   entry — common fields and converted `params` — and checks the
+   params' shape and domains. Cross-field checks against a common
+   field (for example Lennard-Jones' `r_switch <= cutoff`) read the
+   common field from the entry. Builder-produced errors carry
+   document-relative dotted paths (see `io/config-schema.md`).
+
+At build time, the claiming builder deserialises its typed parameter
+struct from each claimed entry's `params` inside `build(cx)`;
+validation has already guaranteed the deserialisation succeeds, so a
+failure there is a genuine internal error, not a user error.
+
+The claim mechanism routes parameter handling only. It does not select
+the builder (activation remains compositional; see
+`registry-framework.md`), does not affect slot ordering, and does not
+give `PotentialRegistry` a keyed `lookup`.
 
 ## Force Classes <!-- rq-df6d79a1 -->
 
@@ -710,7 +771,7 @@ the additive identity. The rest of the pipeline runs normally.
 - `MorseBondedState` — implements `Potential` with `label() == "morse_bonded"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-2361f2b8 -->
   Owns the slot's `BondPairBuffer`, the bond index/offset tables, and
   the per-bond-type parameter table. Construction requires at least one
-  bond whose type selects `potential = "morse"`; see `morse-bonded.md`.
+  bond whose type selects `kind = "morse"`; see `morse-bonded.md`.
   Its `compute` runs the bonded contribution kernel followed by the
   bonded reduction kernel and writes its per-particle output into the
   `SlotOutputView` it receives.
@@ -719,7 +780,7 @@ the additive identity. The rest of the pipeline runs normally.
   Owns the slot's `BondPairBuffer`, the bond index/offset tables filtered
   to its selected bonds, and the per-bond-type parameter table.
   Construction requires at least one bond whose type selects
-  `potential = "harmonic"`; see `harmonic-bond.md`. Its `compute` runs
+  `kind = "harmonic"`; see `harmonic-bond.md`. Its `compute` runs
   the bonded contribution kernel followed by the shared bonded reduction
   kernel and writes its per-particle output into the `SlotOutputView` it
   receives.
@@ -738,7 +799,7 @@ the additive identity. The rest of the pipeline runs normally.
   `DihedralQuadrupleBuffer`, the dihedral index/offset tables, and
   the per-dihedral-type parameter table. Construction requires a
   non-empty filtered dihedral list (at least one dihedral whose type
-  selects `potential = "periodic"`); see `periodic-dihedral.md`.
+  selects `kind = "periodic"`); see `periodic-dihedral.md`.
   Its `compute` runs the dihedral contribution kernel followed by the
   dihedral reduction kernel and writes its per-particle output into
   the `SlotOutputView` it receives. The slot implements
@@ -808,6 +869,7 @@ the additive identity. The rest of the pipeline runs normally.
       pub sim_box: &'a SimulationBox,
       pub particle_types: &'a [ParticleTypeConfig],
       pub pair_interactions: &'a [PairInteractionConfig],
+      pub lennard_jones: Option<&'a LennardJonesConfig>,
       pub bond_types: &'a [BondTypeConfig],
       pub angle_types: &'a [AngleTypeConfig],
       pub dihedral_types: &'a [DihedralTypeConfig],
@@ -821,9 +883,15 @@ the additive identity. The rest of the pipeline runs normally.
   }
   ```
 
-  Each builder reads only the fields it needs. The context is distinct
-  from `ForceFieldContext`, which is the per-step context handed to
-  `Potential::compute`.
+  Each builder reads only the fields it needs. The four potential-table
+  slices (`pair_interactions`, `bond_types`, `angle_types`,
+  `dihedral_types`) carry the open-shaped parsed entries documented in
+  `io/config-schema.md` — common fields plus an opaque, already
+  unit-converted and validated `params: toml::Value` per entry. A
+  builder with a params claim deserialises its typed parameter struct
+  from the `params` of the entries whose `kind` it claims. The context
+  is distinct from `ForceFieldContext`, which is the per-step context
+  handed to `Potential::compute`.
 
 - `PotentialBuilder` — object-safe trait implemented by every potential's <!-- rq-e8550f96 -->
   factory. Each builder is responsible for at most one slot.
@@ -840,6 +908,25 @@ the additive identity. The rest of the pipeline runs normally.
       fn displaces(&self) -> &'static [&'static str] {
           &[]
       }
+
+      fn params_claim(&self) -> Option<PotentialParamsClaim> {
+          None
+      }
+
+      fn validate_params(
+          &self,
+          _entry: PotentialConfigEntry<'_>,
+      ) -> Result<(), ConfigError> {
+          Ok(())
+      }
+
+      fn convert_params(
+          &self,
+          _units: UnitSystem,
+          _params: &mut toml::Value,
+      ) -> Result<(), ConfigError> {
+          Ok(())
+      }
   }
   ```
 
@@ -849,7 +936,9 @@ the additive identity. The rest of the pipeline runs normally.
   above). The builder has no fragment methods. `PotentialBuilder` does
   **not** carry the `KindedBuilder` bound — potentials are activated
   compositionally by configuration presence, not selected by a `kind`
-  key — so `PotentialRegistry` has no `lookup`. The generated
+  key — so `PotentialRegistry` has no `lookup`; per-entry parameter
+  ownership is routed by the category-scoped params claim instead (see
+  *Potential Params Claims*). The generated
   `PotentialBuilderClone` supertrait provides boxed-trait-object cloning;
   a builder needs only `#[derive(Clone)]`. See `registry-framework.md`.
 
@@ -857,6 +946,21 @@ the additive identity. The rest of the pipeline runs normally.
     activation condition (see *Slots*) is satisfied, or `Ok(None)` if
     not. `Err` is reserved for genuine construction failures (GPU
     allocation, malformed inputs that survived config validation, etc.).
+  - `params_claim` names the `(category, kind)` potential-table entries
+    whose `params` this builder owns. The default `None` claims
+    nothing (appropriate for potentials configured outside the type
+    tables, such as SPME). A builder claims at most one pair.
+  - `validate_params` checks a claimed entry's `params` shape and
+    domains after conversion; the entry view also exposes the common
+    fields for cross-field checks. The defaults are never reached for
+    a builder without a claim; a builder with a claim overrides both
+    `validate_params` and (when its params carry units)
+    `convert_params`.
+  - `convert_params` rescales a claimed entry's `params` from the
+    user's unit system to atomic units in place, conventionally via
+    `convert_params_in_place` applied to the builder's typed parameter
+    struct — the same contract as `KindedBuilder::convert_params`
+    (see `registry-framework.md` and `io/unit-system.md`).
   - Two distinct builders may not produce slots with the same
     `Potential::label()`. The framework enforces this in
     `ForceField::new`; builders themselves do not need to check.
@@ -877,6 +981,51 @@ the additive identity. The rest of the pipeline runs normally.
     conditions are not met, so the lone constituent's standalone
     slot continues to run; the framework does not silently fall back
     on the composite's behalf.
+
+- `PotentialParamsCategory` — the four open potential-table categories. <!-- rq-529b9e4b -->
+
+  ```rust
+  pub enum PotentialParamsCategory {
+      PairInteraction,
+      BondType,
+      AngleType,
+      DihedralType,
+  }
+  ```
+
+- `PotentialParamsClaim` — a builder's declaration of the potential-table <!-- rq-35a89768 -->
+  entries whose `params` it owns.
+
+  ```rust
+  pub struct PotentialParamsClaim {
+      pub category: PotentialParamsCategory,
+      pub kind: &'static str,
+  }
+  ```
+
+  `kind` is matched (case-sensitively) against the `kind` common field
+  of entries in the claimed category's table, and only there — a claim
+  in one category never matches entries of another.
+
+- `PotentialConfigEntry<'a>` — borrowed view of one parsed <!-- rq-95a50109 -->
+  potential-table entry, handed to the claiming builder's
+  `validate_params`. One variant per category, each carrying the
+  category's parsed config type (see `io/config-schema.md`):
+
+  ```rust
+  pub enum PotentialConfigEntry<'a> {
+      PairInteraction(&'a PairInteractionConfig),
+      BondType(&'a BondTypeConfig),
+      AngleType(&'a AngleTypeConfig),
+      DihedralType(&'a DihedralTypeConfig),
+  }
+  ```
+
+  Dispatch guarantees the variant matches the builder's claimed
+  category, so a claiming builder matches its own variant and treats
+  the others as unreachable. The view exposes both the common fields
+  (for cross-field checks such as `r_switch <= cutoff`) and the
+  entry's `params`.
 
 - `PotentialRegistry` — `Registry<dyn PotentialBuilder>` (the generic <!-- rq-50f0a96a -->
   container; see `registry-framework.md`). A compositional-activation
@@ -899,7 +1048,7 @@ the additive identity. The rest of the pipeline runs normally.
 
 ### Functions and methods <!-- rq-17abcb76 -->
 
-- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], dihedral_types: &[DihedralTypeConfig], spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, dihedral_list: &DihedralList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
+- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], lennard_jones: Option<&LennardJonesConfig>, bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], dihedral_types: &[DihedralTypeConfig], spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, dihedral_list: &DihedralList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
   - Builds a `PotentialBuildContext` populated from every parameter
     listed above (apart from `registry`).
   - Iterates `registry.builders` in registration order. For each builder,
@@ -1171,7 +1320,7 @@ Feature: Pluggable potential slot framework
   Scenario: Construct a ForceField with LennardJones and MorseBonded
     Given a particle_count of 4
     And one [[pair_interactions]] entry for ("Ar","Ar")
-    And one [[bond_types]] entry "CC" with potential="morse" and valid Morse parameters
+    And one [[bond_types]] entry "CC" with kind="morse" and valid Morse parameters
     And a BondList with at least one bond of type "CC"
     And an ExclusionList consistent with the bonds
     When ForceField::new(...) is called
@@ -1384,13 +1533,63 @@ Feature: Pluggable potential slot framework
   @rq-b75ce71a
   Scenario: PotentialBuildContext exposes every parsed-config input by reference
     Given a custom builder whose build(cx) records pointer identity for
-      cx.particle_types, cx.pair_interactions, cx.bond_types, cx.angle_types,
-      cx.dihedral_types, cx.spme_config, cx.charges, cx.bond_list,
+      cx.particle_types, cx.pair_interactions, cx.lennard_jones, cx.bond_types,
+      cx.angle_types, cx.dihedral_types, cx.spme_config, cx.charges, cx.bond_list,
       cx.angle_list, cx.dihedral_list, cx.exclusion_list, cx.neighbor_list_config
-    When ForceField::new(&registry, gpu, n, sim_box, pts, pairs, bts, ats, dts,
+    When ForceField::new(&registry, gpu, n, sim_box, pts, pairs, lj, bts, ats, dts,
       spme, charges, bonds, angles, dihs, excl, nl_config) is called
     Then the recorded pointers match the addresses of the function arguments
       passed in by the caller
+
+  # --- Potential params claims ---
+
+  @rq-165037d6
+  Scenario: Built-in builders declare category-scoped params claims
+    Given PotentialRegistry::with_builtins()
+    Then the LennardJonesBuilder's params_claim() is Some((PairInteraction, "lennard-jones"))
+    And the MorseBondedBuilder's params_claim() is Some((BondType, "morse"))
+    And the HarmonicBondBuilder's params_claim() is Some((BondType, "harmonic"))
+    And the HarmonicAngleBuilder's params_claim() is Some((AngleType, "harmonic"))
+    And the PeriodicDihedralBuilder's params_claim() is Some((DihedralType, "periodic"))
+    And the SpmeRealBuilder's and SpmeReciprocalBuilder's params_claim() are None
+
+  @rq-d6888c00
+  Scenario: params_claim defaults to None
+    Given a custom PotentialBuilder implementation that does not override params_claim()
+    Then builder.params_claim() returns None
+    And its validate_params and convert_params defaults return Ok(()) without touching their inputs
+
+  @rq-38fd4430
+  Scenario: Claim dispatch selects the first matching builder in registration order
+    Given a PotentialRegistry holding two builders A then B, both claiming (BondType, "k")
+    When the loader dispatches a [[bond_types]] entry with kind="k"
+    Then A's validate_params and convert_params are invoked and B's are not
+
+  @rq-8670941b
+  Scenario: A claiming builder converts its own unit-bearing entry params
+    Given the registered MorseBondedBuilder
+    And an SI params table { de = 1.65e-21, a = 1.9e10, re = 3.4e-10 }
+    When builder.convert_params(UnitSystem::Si, &mut params) is called
+    Then de, a, and re are rescaled to atomic units
+    And the call returns Ok(())
+
+  @rq-c3b69180
+  Scenario: A claiming builder reads a common field during validation
+    Given the registered LennardJonesBuilder
+    And a pair-interaction entry with cutoff=1.0e-9 whose params carry r_switch=1.1e-9
+    When builder.validate_params(PotentialConfigEntry::PairInteraction(&entry)) is called
+    Then it returns Err(ConfigError::InvalidValue { field: _, reason: _ })
+    # r_switch <= cutoff is a cross-field check against the entry's
+    # common cutoff field, exposed through the entry view.
+
+  @rq-943724af
+  Scenario: build deserialises typed params from claimed entries
+    Given a config with one [[bond_types]] entry kind="morse" whose params
+      carry valid, already-converted de/a/re
+    And a bond list with one bond of that type
+    When ForceField::new(...) is called
+    Then the MorseBondedBuilder's build(cx) deserialises its typed params
+      from cx.bond_types[0].params and returns Ok(Some(slot))
 
   # --- Composite slot displacement ---
 

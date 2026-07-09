@@ -59,7 +59,7 @@ lossless = false
     for i in 0..types.len() {
         for j in i..types.len() {
             s.push_str(&format!(
-                "[[pair_interactions]]\nbetween = [\"{}\", \"{}\"]\npotential = \"lennard-jones\"\nsigma = 1.0e-10\nepsilon = 1.0e-25\ncutoff = 1.0e-10\nr_switch = 1.0e-10\n\n",
+                "[[pair_interactions]]\nbetween = [\"{}\", \"{}\"]\nkind = \"lennard-jones\"\nsigma = 1.0e-10\nepsilon = 1.0e-25\ncutoff = 1.0e-10\nr_switch = 1.0e-10\n\n",
                 types[i], types[j],
             ));
         }

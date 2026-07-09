@@ -113,7 +113,7 @@ charge = 6.7925e-20         # C (SPC/E: +0.4238 e)
 # contributing meaningfully to the forces.
 [[pair_interactions]]
 between = ["O", "O"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.166e-10           # m (SPC/E)
 epsilon = 1.080e-21         # J ≈ 78.2 K · k_B (SPC/E)
 cutoff = 1.0e-9             # m (10 Å, standard for SPME real-space cutoff)
@@ -121,7 +121,7 @@ r_switch = 1.0e-9           # m (== cutoff: hard cutoff degenerate case)
 
 [[pair_interactions]]
 between = ["H", "H"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0e-10
 epsilon = 1.0e-30
 cutoff = 1.0e-9
@@ -129,7 +129,7 @@ r_switch = 1.0e-9
 
 [[pair_interactions]]
 between = ["H", "O"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0e-10
 epsilon = 1.0e-30
 cutoff = 1.0e-9

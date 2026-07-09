@@ -20,16 +20,22 @@ exactly one of them:
   registries (one selection per phase), and the constraint-type and analysis
   registries (several instances, each still naming its kind). A named-selection
   registry's builder trait carries a kind key.
-- **Compositional activation.** The configuration carries no kind for the
-  slot; each builder inspects the build context and returns `Some(slot)` when
-  the data it consumes is present and `None` otherwise. The result is the set
-  of all builders that activate, summed together. Used by the potential
-  registry alone: a force field is an additive composition of many
-  simultaneously-active potentials, each switched on by a distinct
-  configuration section (Lennard-Jones by `[[pair_interactions]]`, SPME by
-  `[spme]`, Morse by the bond list, harmonic angles by the angle list,
-  periodic dihedrals by the dihedral list). The potential builder trait
-  carries no kind key.
+- **Compositional activation.** The configuration selects no single
+  builder for the slot; each builder inspects the build context and returns
+  `Some(slot)` when the data it consumes is present and `None` otherwise.
+  The result is the set of all builders that activate, summed together.
+  Used by the potential registry alone: a force field is an additive
+  composition of many simultaneously-active potentials, each switched on
+  by the configuration data it consumes (Lennard-Jones by
+  `kind = "lennard-jones"` `[[pair_interactions]]` entries or the
+  `[lennard_jones]` table, SPME by `[spme]`, Morse by bonds whose type
+  uses `kind = "morse"`, and so on). The potential builder trait carries
+  no registry-level kind key; instead a potential builder may carry a
+  **category-scoped params claim** — a `(category, kind)` pair naming the
+  open-shaped potential-table entries whose `params` it validates and
+  unit-converts (see `forces/framework.md`'s *Potential params claims*).
+  The claim routes per-entry parameter handling; it does not select the
+  builder, and activation remains presence-based.
 
 The generic container provides storage, registration, built-in population,
 cloning, and — for named-selection registries only — lookup by kind. The
@@ -157,12 +163,19 @@ the per-subsystem framework files and are not part of this framework.
   `ThermostatBuilder`, `BarostatBuilder`, `ConstraintBuilder`,
   `MinimizerBuilder`, `AnalysisBuilder`) carry `KindedBuilder` as a
   supertrait. `PotentialBuilder` does not, which is what withholds `lookup`
-  from `PotentialRegistry`; pair/bonded potential params are typed
-  `Config` fields converted by the loader's single `Convert` pass rather
-  than per-builder. Because `convert_params` is co-located with the
-  builder that owns the kind's schema and is generated from the typed
-  params struct's dimensioned fields, a built-in kind cannot be
-  registered without its params conversion being defined.
+  from `PotentialRegistry`: a potential kind string is meaningful only
+  within one potential-table category (`"harmonic"` names one functional
+  form in `[[bond_types]]` and a different one in `[[angle_types]]`), so
+  a flat registry-level kind key would collide. Potential builders
+  instead own their per-entry params through the category-scoped claim
+  mechanism (`params_claim` / `validate_params` / `convert_params` on
+  `PotentialBuilder`; see `forces/framework.md`'s *Potential params
+  claims*), which mirrors `KindedBuilder::convert_params`'s
+  builder-owned conversion contract. In both models, `convert_params` is
+  co-located with the builder that owns the kind's schema and is
+  generated from the typed params struct's dimensioned fields, so a
+  built-in kind cannot be registered without its params conversion being
+  defined.
 
 - `Builtins` — the per-trait built-in roster. <!-- rq-c00689e6 -->
 
@@ -230,9 +243,11 @@ the per-subsystem framework files and are not part of this framework.
   offers `register_*` convenience methods; it is documented in
   `simulation-runner.md`.
 - Any change to the configuration's selection model. Potentials remain
-  keyless (compositional activation); the named-selection registries remain
-  keyed by `kind`. Giving potentials a `kind` key, or letting a registered
-  builder override a built-in of the same kind, are deliberate non-goals.
+  compositionally activated (a params claim routes per-entry parameter
+  handling but never selects the builder); the named-selection registries
+  remain keyed by `kind`. Giving `PotentialRegistry` a registry-level
+  keyed `lookup`, or letting a registered builder override a built-in of
+  the same kind, are deliberate non-goals.
 
 ## Gherkin Scenarios <!-- rq-6107e6c9 -->
 

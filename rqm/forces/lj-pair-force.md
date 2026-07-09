@@ -3,13 +3,18 @@
 Lennard-Jones is the non-bonded pairwise potential slot in the pluggable
 potential framework (`framework.md`). The slot is present when the config
 declares any Lennard-Jones configuration — a `[lennard_jones]` combining
-table, a non-empty `[[pair_interactions]]` override array, or both. Its
-device-resident per-pair-type parameter table is built once at
-construction: each unordered type pair takes its `(σ, ε, cutoff,
-r_switch)` from an explicit `[[pair_interactions]]` override when one is
-present, and otherwise from combining the two types' per-type
-`sigma`/`epsilon` under the `[lennard_jones]` table's `combining_rule`
-(see *Combining rules* and `io/config-schema.md`).
+table, at least one `kind = "lennard-jones"` `[[pair_interactions]]`
+entry, or both. The builder carries the params claim
+`(PairInteraction, "lennard-jones")` (see `framework.md`'s *Potential
+Params Claims*): it owns the typed `LjPairParams` schema of every
+`kind = "lennard-jones"` entry's `params`, validating and
+unit-converting them at config load. The slot's device-resident
+per-pair-type parameter table is built once at construction: each
+unordered type pair takes its `(σ, ε, cutoff, r_switch)` from an
+explicit `kind = "lennard-jones"` entry when one names the pair, and
+otherwise from combining the two types' per-type `sigma`/`epsilon`
+under the `[lennard_jones]` table's `combining_rule` (see *Combining
+rules* and `io/config-schema.md`).
 
 The slot contributes its per-pair functional form to the JIT-composed
 pair-force pipeline as a `PairForceFragment` (see
@@ -345,6 +350,36 @@ than opposites.
   non-finite, zero, or negative entries propagate to the kernel and
   yield non-finite or numerically meaningless forces.
 
+- `LjPairParams` — the typed per-entry parameter struct the <!-- rq-35ba2154 -->
+  Lennard-Jones builder deserialises from a claimed
+  `kind = "lennard-jones"` `[[pair_interactions]]` entry's `params`.
+
+  ```rust
+  #[derive(Deserialize, Serialize, Convert)]
+  #[serde(deny_unknown_fields)]
+  pub struct LjPairParams {
+      pub sigma: Length,
+      pub epsilon: Energy,
+      pub r_switch: Option<Length>,
+  }
+  ```
+
+  - `sigma` — LJ zero-crossing distance. Finite and `>= 0`.
+  - `epsilon` — LJ well depth. Finite and `>= 0`.
+  - `r_switch` — optional inner switching radius. When supplied:
+    finite, strictly positive, and `<=` the entry's common `cutoff`
+    (a cross-field check `validate_params` performs through the entry
+    view). When `None`, the builder resolves the effective radius to
+    `0.9 * cutoff` at build time — after unit conversion, so the
+    dimensionless ratio multiplies the already-converted cutoff and
+    no serde-default conversion is involved.
+
+  The struct derives `Convert`, so the builder's `convert_params`
+  rescales `sigma` / `epsilon` / `r_switch` via
+  `convert_params_in_place::<LjPairParams>` (see
+  `registry-framework.md`). `deny_unknown_fields` is what rejects an
+  unrecognised field under a `kind = "lennard-jones"` entry.
+
 - `LennardJonesParameterTable::from_config(device: &Arc<CudaDevice>, <!-- inline --> <!-- rq-1adf5954 -->
   particle_types: &[ParticleTypeConfig], pair_interactions:
   &[PairInteractionConfig], lennard_jones: Option<&LennardJonesConfig>) ->
@@ -355,10 +390,13 @@ than opposites.
     resolves the pair's `(σ, ε, cutoff, r_switch)` and writes them at
     both `[ti * n_types + tj]` and `[tj * n_types + ti]`, so the table
     is symmetric by construction:
-    - **Override.** When a `pair_interactions` entry names the pair
-      (its `between` matches the two types' names), σ and ε come from
-      that entry's `PairPotentialParams::LennardJones` variant and
-      `cutoff` / `r_switch` from its common fields.
+    - **Override.** When a `kind = "lennard-jones"` `pair_interactions`
+      entry names the pair (its `between` matches the two types'
+      names), σ, ε, and `r_switch` come from the entry's typed
+      `LjPairParams` deserialised from its `params` (with an omitted
+      `r_switch` resolved to `0.9 * cutoff`), and `cutoff` from the
+      entry's common field. Entries of other kinds are ignored by this
+      table.
     - **Combine.** Otherwise σ and ε are mixed from the two types'
       per-type `sigma`/`epsilon` (see `ParticleTypeConfig`) by
       `lennard_jones.combining_rule` (see *Combining rules* below), and
@@ -472,18 +510,18 @@ It does not own a neighbor list; the framework's shared
 `NeighborListState` is reached through `ForceFieldContext`.
 
 The builder constructs the slot whenever the config carries any
-Lennard-Jones configuration — a non-empty `[[pair_interactions]]` array
-or a `[lennard_jones]` table (or both). A config with neither has no LJ
-interaction and the slot is absent.
+Lennard-Jones configuration — at least one `kind = "lennard-jones"`
+`[[pair_interactions]]` entry or a `[lennard_jones]` table (or both).
+A config with neither has no LJ interaction and the slot is absent.
 
 The slot's `Potential` methods:
 
 - `max_cutoff` returns `Some(max_cutoff)` where `max_cutoff` is the
   largest cutoff over every resolved type pair — the maximum of the
-  `[[pair_interactions]]` override cutoffs and the `[lennard_jones]`
-  table's `cutoff` (whichever are present) — captured at construction
-  time as a plain `f32` field. The trait call requires no device
-  download.
+  `kind = "lennard-jones"` entries' common `cutoff` fields and the
+  `[lennard_jones]` table's `cutoff` (whichever are present) — captured
+  at construction time as a plain `f32` field. The trait call requires
+  no device download.
 - `jit_participant` returns `Some(JitParticipant::PairForce(self))`, so
   the slot contributes the Lennard-Jones functor (see *JIT fragment
   behaviour* above) to the composed packed pair-force kernel rather than

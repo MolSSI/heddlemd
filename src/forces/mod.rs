@@ -39,9 +39,16 @@ pub use spme::{
     SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,
     SpmeRealBuilder, SpmeReciprocalBuilder,
 };
-pub use harmonic_bond::{HarmonicBondBuilder, HarmonicBondState};
-pub use lj::{LennardJonesBuilder, LennardJonesState};
-pub use morse::{MorseBondedBuilder, MorseBondedState};
+pub use angle::{HARMONIC_ANGLE_KIND, HarmonicAngleParams};
+pub use dihedral::{PERIODIC_DIHEDRAL_KIND, PeriodicDihedralParams};
+pub use harmonic_bond::{
+    HARMONIC_BOND_KIND, HarmonicBondBuilder, HarmonicBondParams, HarmonicBondState,
+};
+pub use lj::{
+    LJ_KIND, LennardJonesBuilder, LennardJonesState, LjPairParams, ResolvedLjPair,
+    resolve_lj_pair,
+};
+pub use morse::{MORSE_KIND, MorseBondParams, MorseBondedBuilder, MorseBondedState};
 pub use topology::{
     Angle, AngleList, Bond, BondList, ChargeList, ConstraintGroup, ConstraintList,
     DeviceExclusionList, Dihedral, DihedralList, Exclusion, ExclusionList, GroupConstraint,
@@ -253,12 +260,52 @@ pub struct PotentialBuildContext<'a> {
     pub neighbor_list_config: &'a NeighborListConfig,
 }
 
+/// The four open potential-table categories a params claim can name.
+/// Kind strings are scoped per category: `"harmonic"` in the bond-type
+/// category and `"harmonic"` in the angle-type category are distinct
+/// claims. See `rqm/forces/framework.md` (*Potential Params Claims*).
+// rq-529b9e4b rq-73801d98
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PotentialParamsCategory {
+    PairInteraction,
+    BondType,
+    AngleType,
+    DihedralType,
+}
+
+/// A builder's declaration of the potential-table entries whose
+/// `params` it owns. Matched case-sensitively against the `kind`
+/// common field of entries in the claimed category's table, and only
+/// there.
+// rq-35a89768 rq-73801d98
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PotentialParamsClaim {
+    pub category: PotentialParamsCategory,
+    pub kind: &'static str,
+}
+
+/// Borrowed view of one parsed potential-table entry, handed to the
+/// claiming builder's `validate_params`. Dispatch guarantees the
+/// variant matches the builder's claimed category. The view exposes
+/// both the common fields (for cross-field checks such as
+/// `r_switch <= cutoff`) and the entry's `params`.
+// rq-95a50109
+#[derive(Debug, Clone, Copy)]
+pub enum PotentialConfigEntry<'a> {
+    PairInteraction(&'a PairInteractionConfig),
+    BondType(&'a BondTypeConfig),
+    AngleType(&'a AngleTypeConfig),
+    DihedralType(&'a DihedralTypeConfig),
+}
+
 // rq-e8550f96
 //
 // `PotentialBuilder` carries no `KindedBuilder` bound: potentials are
 // activated compositionally by configuration presence, not selected by
-// a `kind` key, so `PotentialRegistry` has no `lookup`. See
-// `rqm/registry-framework.md`.
+// a `kind` key, so `PotentialRegistry` has no `lookup`. Per-entry
+// parameter ownership is routed by the category-scoped params claim
+// instead. See `rqm/registry-framework.md` and
+// `rqm/forces/framework.md` (*Potential Params Claims*).
 pub trait PotentialBuilder:
     PotentialBuilderClone + std::fmt::Debug + Send + Sync
 {
@@ -270,10 +317,66 @@ pub trait PotentialBuilder:
     fn displaces(&self) -> &'static [&'static str] {
         &[]
     }
+
+    /// The `(category, kind)` potential-table entries whose `params`
+    /// this builder owns. `None` (the default) claims nothing —
+    /// appropriate for potentials configured outside the type tables
+    /// (e.g. SPME, driven by the typed `[spme]` table).
+    // rq-529b9e4b rq-73801d98
+    fn params_claim(&self) -> Option<PotentialParamsClaim> {
+        None
+    }
+
+    /// Validate a claimed entry's `params` shape and domains after
+    /// conversion. Errors carry paths relative to the entry (e.g.
+    /// `"sigma"`); the loader prefixes the table-and-index path. Never
+    /// invoked for a builder without a claim.
+    // rq-95a50109
+    fn validate_params(
+        &self,
+        _entry: PotentialConfigEntry<'_>,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        Ok(())
+    }
+
+    /// Rescale a claimed entry's `params` from the user's unit system
+    /// to atomic units in place, conventionally via
+    /// `crate::registry::convert_params_in_place` applied to the
+    /// builder's typed parameter struct — the same contract as
+    /// `KindedBuilder::convert_params`.
+    // rq-529b9e4b rq-73801d98
+    fn convert_params(
+        &self,
+        _units: crate::units::UnitSystem,
+        _params: &mut toml::Value,
+    ) -> Result<(), crate::io::config::ConfigError> {
+        Ok(())
+    }
 }
 
 // rq-50f0a96a
 pub type PotentialRegistry = Registry<dyn PotentialBuilder>;
+
+impl Registry<dyn PotentialBuilder> {
+    /// The first registered builder (in registration order) whose
+    /// params claim matches `(category, kind)`, mirroring the
+    /// named-selection registries' `lookup` semantics. `None` when no
+    /// builder claims the pair.
+    // rq-35a89768 rq-73801d98
+    pub fn lookup_claim(
+        &self,
+        category: PotentialParamsCategory,
+        kind: &str,
+    ) -> Option<&dyn PotentialBuilder> {
+        self.builders()
+            .iter()
+            .map(|b| b.as_ref())
+            .find(|b| {
+                b.params_claim()
+                    .is_some_and(|c| c.category == category && c.kind == kind)
+            })
+    }
+}
 
 impl Builtins for dyn PotentialBuilder {
     fn builtins() -> Vec<Box<dyn PotentialBuilder>> {

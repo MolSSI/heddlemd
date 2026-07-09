@@ -67,7 +67,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -276,7 +276,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -707,7 +707,7 @@ mass = 1.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -756,7 +756,7 @@ mass = 1.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -805,7 +805,7 @@ mass = 1.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -1006,7 +1006,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -1130,14 +1130,14 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
 
 [[bond_types]]
 name = "ArAr"
-potential = "morse"
+kind = "morse"
 de = 1.65e-21
 a = 1.9e10
 re = 3.4e-10

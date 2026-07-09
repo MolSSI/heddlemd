@@ -7,10 +7,8 @@ use cudarc::driver::{
 #[cfg(not(feature = "f64"))]
 use crate::gpu::LosslessBuffers;
 use crate::gpu::{GpuError, Kernels, ParticleBuffers};
-use crate::io::config::{
-    CombiningRule, LennardJonesConfig, PairInteractionConfig, PairPotentialParams,
-    ParticleTypeConfig,
-};
+use crate::forces::lj::ResolvedLjPair;
+use crate::io::config::{CombiningRule, LennardJonesConfig, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
 use crate::precision::{Real, Real4};
 
@@ -110,11 +108,14 @@ pub struct LennardJonesParameterTable {
 }
 
 impl LennardJonesParameterTable {
-    // rq-1adf5954
+    // rq-1adf5954 — `pair_interactions` carries only the resolved
+    // `kind = "lennard-jones"` entries (typed params deserialised and
+    // r_switch defaults filled by `forces::lj::resolve_lj_pair`);
+    // entries of other kinds never reach this table.
     pub fn from_config(
         device: &Arc<CudaDevice>,
         particle_types: &[ParticleTypeConfig],
-        pair_interactions: &[PairInteractionConfig],
+        pair_interactions: &[ResolvedLjPair],
         lennard_jones: Option<&LennardJonesConfig>,
     ) -> Result<Self, GpuError> {
         let n_types = particle_types.len();
@@ -139,8 +140,12 @@ impl LennardJonesParameterTable {
                         || (pi.between.0 == *name_j && pi.between.1 == *name_i)
                 });
                 let (s, e, c, rs) = if let Some(pi) = over {
-                    let PairPotentialParams::LennardJones { sigma, epsilon } = pi.potential;
-                    (sigma as Real, epsilon as Real, pi.cutoff as Real, pi.r_switch as Real)
+                    (
+                        pi.sigma as Real,
+                        pi.epsilon as Real,
+                        pi.cutoff as Real,
+                        pi.r_switch as Real,
+                    )
                 } else {
                     let lj = lennard_jones
                         .expect("combined pair requires a [lennard_jones] table (config invariant)");

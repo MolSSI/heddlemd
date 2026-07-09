@@ -423,10 +423,10 @@ For `B` bonds among `N` particles, the host-side `BondList` carries:
   runs.
 
 The `BondList` is potential-agnostic: it holds every bond regardless of
-its type's `potential`, and `bond_type_index` is a global index into the
+its type's `kind`, and `bond_type_index` is a global index into the
 config's `[[bond_types]]` array. When more than one bond potential is
 active (e.g. Morse and harmonic bonds in the same system), each bonded
-slot selects the bonds whose type uses its own `potential`, preserving
+slot selects the bonds whose type uses its own claimed `kind`, preserving
 the `(atom_i, atom_j)` sort order, and derives its own device bond array
 plus its own `atom_bond_offsets` / `atom_bond_indices` reduction map over
 that subset — built exactly as above but restricted to the selected
@@ -1201,7 +1201,7 @@ Feature: Topology file with bonds, angles, and exclusions
       [dihedrals]
       0 1 2 3 CT-CT-CT-CT_n3
       """
-    And dihedral_types contains an entry "CT-CT-CT-CT_n3" potential="periodic"
+    And dihedral_types contains an entry "CT-CT-CT-CT_n3" kind="periodic"
     When load_topology_file(tmp/sim.topology, 4, &bond_types, &angle_types,
       &dihedral_types, &constraint_types, &constraint_registry) is called
     Then it returns Ok((bond_list, angle_list, dihedral_list, exclusion_list,
@@ -1295,7 +1295,7 @@ Feature: Topology file with bonds, angles, and exclusions
   Scenario: Implicit 1-4 exclusion is added for a dihedral whose (i, l) pair is otherwise uncovered
     Given a single dihedral "0 1 2 3 D"
     And no bonds, no angles, no constraints, no explicit exclusions
-    And dihedral_types contains "D" potential="periodic" with default
+    And dihedral_types contains "D" kind="periodic" with default
       scale_lj_14=0.5, scale_coul_14=0.8333
     When load_topology_file is called
     Then exclusion_list.entries contains (0, 3, scale_lj=0.5, scale_coul=0.8333)

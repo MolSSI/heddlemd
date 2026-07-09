@@ -2,13 +2,13 @@
 
 The `HarmonicBond` potential slot evaluates a harmonic (Hooke's-law) bond
 force for each bond in the system whose bond type selects
-`potential = "harmonic"` (see `topology.md`). Bonds are pairs of atoms
+`kind = "harmonic"` (see `topology.md`). Bonds are pairs of atoms
 whose distance interaction is described by the harmonic functional form
 with per-bond-type parameters. The slot plugs into the pluggable potential
 framework (`framework.md`); selection is implicit — the slot is present
 whenever the config's `topology` field references a `.topology` file whose
 `[bonds]` section names at least one bond whose `[[bond_types]]` entry has
-`potential = "harmonic"`.
+`kind = "harmonic"`.
 
 The harmonic bond is the stiff-spring form used by the AMBER and CHARMM
 protein force fields; it coexists with the Morse bond (`morse-bonded.md`)
@@ -91,7 +91,7 @@ Morse and harmonic bonds freely.
 
 `HarmonicBondState::new` selects, from the shared `BondList`, exactly the
 bonds whose `bond_type_index` names a `[[bond_types]]` entry with
-`potential == "harmonic"`, preserving their `(atom_i, atom_j)` sort order.
+`kind == "harmonic"`, preserving their `(atom_i, atom_j)` sort order.
 From that selected subset it builds:
 
 - its own device bond array (the selected `[atom_i, atom_j,
@@ -101,7 +101,7 @@ From that selected subset it builds:
   `BondList` builds its map (see `topology.md`'s *Bond list*) but over the
   subset, so the universal `reduce_bond_forces` kernel operates unchanged.
 
-The Morse slot performs the mirror-image selection for `potential ==
+The Morse slot performs the mirror-image selection for `kind ==
 "morse"`. Every bond is therefore owned by exactly one bonded slot, and no
 bond is evaluated twice. When every bond in the system is harmonic, the
 selected subset is the whole list and the derived reduction map equals the
@@ -145,9 +145,20 @@ conditions.
 
 ## Parameters <!-- rq-4943810f -->
 
-Each `[[bond_types]]` entry in the config that uses `potential =
-"harmonic"` contributes one row to a per-bond-type parameter table
-uploaded to the device:
+The builder carries the params claim `(BondType, "harmonic")` (see
+`framework.md`'s *Potential Params Claims*): it owns the typed
+`HarmonicBondParams` schema of every `kind = "harmonic"`
+`[[bond_types]]` entry's `params`, validating and unit-converting them
+at config load.
+
+```rust
+#[derive(Deserialize, Serialize, Convert)]
+#[serde(deny_unknown_fields)]
+pub struct HarmonicBondParams {
+    pub k: Stiffness,
+    pub r0: Length,
+}
+```
 
 - `k: f64` — force constant, Hartrees per Bohr² (`E_h / a_0²`) internally,
   in the `U = ½ k (r − r_0)²` convention. Required. Finite and strictly
@@ -155,7 +166,10 @@ uploaded to the device:
 - `r0: f64` — equilibrium distance, Bohr (`a_0`). Required. Finite and
   strictly positive.
 
-The parameter table on the device is two `CudaSlice<f32>` arrays
+At build time the builder deserialises `HarmonicBondParams` from each
+claimed entry's `params`; each `kind = "harmonic"` entry contributes
+one row to a per-bond-type parameter table uploaded to the device. The
+parameter table on the device is two `CudaSlice<f32>` arrays
 (`bond_k`, `bond_r0`), each of length `n_bond_types`, cast from `f64` to
 `f32` at upload time and addressed by the bond's global `bond_type_index`.
 Rows corresponding to non-harmonic bond types hold placeholder values that
@@ -206,8 +220,8 @@ constructed.
 
   - `HarmonicBondState::new(device: Arc<CudaDevice>, bond_list: &BondList, bond_types: &[BondTypeConfig]) -> Result<HarmonicBondState, GpuError>`
     - Selects the bonds of `bond_list` whose `bond_type_index` names a
-      `BondTypeConfig::Harmonic` entry (see *Per-Potential Bond
-      Selection*), preserving sort order.
+      `kind = "harmonic"` `BondTypeConfig` entry (see *Per-Potential
+      Bond Selection*), preserving sort order.
     - Builds the slot's own `atom_bond_offsets` / `atom_bond_indices`
       reduction map over the selected subset.
     - Uploads the selected bond triples and reduction map to device
@@ -319,7 +333,7 @@ views. It returns `Ok(())` without launching when `particle_count == 0`.
 ## Out of Scope <!-- rq-1185d826 -->
 
 - Other bonded potentials (Morse — see `morse-bonded.md`; FENE;
-  Buckingham; class-2 quartic bonds). Each lands as a new `potential`
+  Buckingham; class-2 quartic bonds). Each lands as a builder claiming a new `kind`
   value in `[[bond_types]]` with its own kernel.
 - Angle, dihedral, and improper potentials.
 - Per-bond parameter overrides (every bond gets its parameters via its
@@ -345,8 +359,8 @@ Feature: Harmonic bonded potential
   @rq-e2b77f30
   Scenario: Construct HarmonicBondState from an all-harmonic bond list
     Given a BondList with 3 bonds among 4 atoms
-    And [[bond_types]] with entry "CC" potential="harmonic" k=2.0 r0=1.0
-    And entry "CN" potential="harmonic" k=4.0 r0=1.5
+    And [[bond_types]] with entry "CC" kind="harmonic" k=2.0 r0=1.0
+    And entry "CN" kind="harmonic" k=4.0 r0=1.5
     When HarmonicBondState::new(device, &bond_list, &bond_types) is called
     Then it returns Ok(state)
     And state.bond_count equals 3
@@ -355,7 +369,7 @@ Feature: Harmonic bonded potential
 
   @rq-990d287d
   Scenario: Harmonic slot selects only harmonic bonds from a mixed list
-    Given [[bond_types]] "CC" potential="harmonic" and "MM" potential="morse"
+    Given [[bond_types]] "CC" kind="harmonic" and "MM" kind="morse"
     And a BondList with two bonds: bond A of type "CC" and bond B of type "MM"
     When HarmonicBondState::new(device, &bond_list, &bond_types) is called
     Then state.bond_count equals 1

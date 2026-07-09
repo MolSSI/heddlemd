@@ -718,7 +718,7 @@ fn end_to_end_w_per_particle_virial_equals_half_over_n_times_sum_of_partials() {
     // host-side reference.
     use heddle_md::forces::{AggregateLevel, ForceField, PotentialRegistry};
     use heddle_md::forces::{AngleList, BondList, DihedralList, ExclusionList};
-    use heddle_md::io::config::{NeighborListConfig, PairInteractionConfig, ParticleTypeConfig, PairPotentialParams, SpmeConfig};
+    use heddle_md::io::config::{NeighborListConfig, PairInteractionConfig, ParticleTypeConfig, SpmeConfig};
 
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
@@ -732,12 +732,7 @@ fn end_to_end_w_per_particle_virial_equals_half_over_n_times_sum_of_partials() {
     // Compose a real ForceField (with builtins) so the recip slot's
     // compute() runs the reduce_partials kernel after apply_influence.
     let particle_types = vec![ParticleTypeConfig { name: "X".into(), mass: 1.0, sigma: None, epsilon: None, charge: 0.0 }];
-    let pairs = vec![PairInteractionConfig {
-        between: ("X".into(), "X".into()),
-        cutoff: 0.3e-9,
-        r_switch: 0.3e-9,
-        potential: PairPotentialParams::LennardJones { sigma: 1.0e-10, epsilon: 1.0e-30 },
-    }];
+    let pairs = vec![PairInteractionConfig::lennard_jones(("X", "X"), 1.0e-10, 1.0e-30, 0.3e-9, Some(0.3e-9))];
     let spme_cfg = SpmeConfig {
         alpha: 4.0e9,
         r_cut_real: 0.3e-9,

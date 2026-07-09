@@ -7,7 +7,7 @@ harmonic functional form `U(θ) = ½ k (θ − θ₀)²` with per-angle-type
 parameters. The slot plugs into the pluggable potential framework
 (`framework.md`); selection is implicit — the slot is present whenever the
 config's `topology` field references a non-empty `.topology` file and at
-least one `[[angle_types]]` entry has `potential = "harmonic"`.
+least one `[[angle_types]]` entry has `kind = "harmonic"`.
 
 ## Algorithm <!-- rq-d12b8b49 -->
 
@@ -129,23 +129,40 @@ race conditions.
 
 ## Parameters <!-- rq-b33243ff -->
 
-Each `[[angle_types]]` entry in the config that uses
-`potential = "harmonic"` contributes one row to a per-angle-type
-parameter table uploaded to the device:
+The builder carries the params claim `(AngleType, "harmonic")` (see
+`framework.md`'s *Potential Params Claims*): it owns the typed
+`HarmonicAngleParams` schema of every `kind = "harmonic"`
+`[[angle_types]]` entry's `params`, validating and unit-converting
+them at config load.
+
+```rust
+#[derive(Deserialize, Serialize, Convert)]
+#[serde(deny_unknown_fields)]
+pub struct HarmonicAngleParams {
+    pub k_theta: Energy,
+    pub theta_0: f64,
+}
+```
 
 - `k_theta: f64` — force constant in E_h/rad². Required. Finite and
-  strictly positive.
+  strictly positive. (The radian is dimensionless, so `k_theta`
+  converts as an energy.)
 - `theta_0: f64` — equilibrium angle in radians. Required. Finite and
-  in `[0, π]`.
+  in `[0, π]`. Dimensionless for unit conversion: radians in both
+  unit systems.
 
+At build time the builder deserialises `HarmonicAngleParams` from each
+claimed entry's `params`; each `kind = "harmonic"` entry contributes
+one row to a per-angle-type parameter table uploaded to the device.
 The parameter table on the device is two `CudaSlice<f32>` arrays
 (`angle_k_theta`, `angle_theta_0`), one per angle type, cast from `f64`
 to `f32` at upload time. Each angle carries an `angle_type_index` (see
 `topology.md`) into this table.
 
-The only supported `potential` value for angle types is `"harmonic"`;
-other values are rejected at config-load time. Future angle potentials
-(cosine-harmonic, Urey-Bradley, etc.) add new `potential` values and
+The only built-in claimed `kind` for angle types is `"harmonic"`; an
+entry whose `kind` no registered builder claims is rejected at
+config-load time. Future angle potentials (cosine-harmonic,
+Urey-Bradley, etc.) register builders claiming new `kind` values and
 reuse the existing `AngleList` / `AnglePairBuffer` / reduction
 infrastructure.
 
@@ -192,7 +209,7 @@ not constructed.
   Constructor:
 
   - `HarmonicAngleState::new(device: Arc<CudaDevice>, angle_list: &AngleList, angle_types: &[AngleTypeConfig]) -> Result<HarmonicAngleState, GpuError>`
-    - Filters `angle_types` to entries with `potential == "harmonic"`
+    - Filters `angle_types` to entries with `kind == "harmonic"`
       and uploads their parameters.
     - Uploads `angle_list.angles`, `angle_list.atom_angle_offsets`,
       and `angle_list.atom_angle_indices` to device memory.
@@ -347,8 +364,8 @@ The reduction is launched through the framework's
 
 - Other angle potentials (cosine-harmonic, Urey-Bradley with an
   embedded 1-3 bond term, restricted bending potentials, etc.). Each
-  lands as a new `potential` value in `[[angle_types]]` with its own
-  kernel.
+  lands as a builder claiming a new `kind` in `[[angle_types]]` with
+  its own kernel.
 - Dihedral, improper, and CMAP potentials.
 - Per-angle parameter overrides (every angle gets its parameters via
   its angle type).
@@ -380,7 +397,7 @@ Feature: Harmonic angle bonded potential
   @rq-dbee9f45
   Scenario: Construct HarmonicAngleState
     Given an AngleList with 2 angles among 5 atoms and one angle type
-    And [[angle_types]] with one entry "HOH" potential="harmonic"
+    And [[angle_types]] with one entry "HOH" kind="harmonic"
       k_theta=5.27e-19 theta_0=1.911 (E_h/rad², radians; flexible-SPC
       Toukan-Rahman bend stiffness)
     When HarmonicAngleState::new(device, &angle_list, &angle_types) is called
@@ -570,11 +587,11 @@ Feature: Harmonic angle bonded potential
   # --- Rejection of non-harmonic angle types ---
 
   @rq-225633c4
-  Scenario: Config angle_type with potential != "harmonic" is rejected
-    Given an [[angle_types]] entry with potential="cosine-harmonic"
+  Scenario: Config angle_type with an unclaimed kind is rejected
+    Given an [[angle_types]] entry with kind="cosine-harmonic"
     When the config is loaded
-    Then it returns Err(ConfigError::InvalidValue { field:
-      "angle_types[0].potential", reason: _ })
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "angle_types", kind: "cosine-harmonic" })
 
   # --- Flexible SPC water smoke test ---
 
@@ -589,10 +606,10 @@ Feature: Harmonic angle bonded potential
       and H (mass 1.6735e-27 kg, charge +0.41e)
     And [[pair_interactions]] for ("O","O") (σ = 3.166e-10 m,
       ε = 6.502e-22 J), ("O","H") (ε = 0), ("H","H") (ε = 0)
-    And [[bond_types]] with one entry "OH" potential="morse" tuned so
+    And [[bond_types]] with one entry "OH" kind="morse" tuned so
       that 2·D_e·a² equals the SPC harmonic stiffness 4.515e5 J/m²
       at r_e = 1.0e-10 m
-    And [[angle_types]] with one entry "HOH" potential="harmonic"
+    And [[angle_types]] with one entry "HOH" kind="harmonic"
       k_theta = 5.27e-19 E_h/rad² theta_0 = 1.911 rad
     And a .topology file declaring two OH bonds and one HOH angle (so
       1-2 and 1-3 exclusions auto-derive to (0,0))

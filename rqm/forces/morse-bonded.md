@@ -7,7 +7,7 @@ per-bond-type parameters. The slot plugs into the pluggable potential
 framework (`framework.md`); selection is implicit — the slot is present
 whenever the config's `topology` field references a `.topology` file whose
 `[bonds]` section names at least one bond whose `[[bond_types]]` entry has
-`potential = "morse"`. A system may mix Morse and harmonic
+`kind = "morse"`. A system may mix Morse and harmonic
 (`harmonic-bond.md`) bonds; each bond is routed to the matching potential
 slot by its type (see *Per-Potential Bond Selection*).
 
@@ -92,9 +92,20 @@ conditions.
 
 ## Parameters <!-- rq-12872970 -->
 
-Each `[[bond_types]]` entry in the config that uses `potential = "morse"`
-contributes one row to a per-bond-type parameter table uploaded to the
-device:
+The builder carries the params claim `(BondType, "morse")` (see
+`framework.md`'s *Potential Params Claims*): it owns the typed
+`MorseBondParams` schema of every `kind = "morse"` `[[bond_types]]`
+entry's `params`, validating and unit-converting them at config load.
+
+```rust
+#[derive(Deserialize, Serialize, Convert)]
+#[serde(deny_unknown_fields)]
+pub struct MorseBondParams {
+    pub de: Energy,
+    pub a: InverseLength,
+    pub re: Length,
+}
+```
 
 - `de: f64` — well depth, Hartrees (`E_h`). Required. Finite and
   strictly positive.
@@ -103,23 +114,27 @@ device:
 - `re: f64` — equilibrium distance, Bohr (`a_0`). Required. Finite and
   strictly positive.
 
-The parameter table on the device is three `CudaSlice<f32>` arrays
+At build time the builder deserialises `MorseBondParams` from each
+claimed entry's `params`; each `kind = "morse"` entry contributes one
+row to a per-bond-type parameter table uploaded to the device. The
+parameter table on the device is three `CudaSlice<f32>` arrays
 (`de`, `a`, `re`), one per bond type, cast from `f64` to `f32` at
 upload time. Each bond carries a `bond_type_index` (see `topology.md`)
 into this table.
 
-The supported `potential` values for bond types are `"morse"` and
-`"harmonic"` (`harmonic-bond.md`); other values are rejected at
-config-load time. Additional bonded potentials (FENE, cosine, etc.) add
-new `potential` values and reuse the existing `BondList` /
-`BondPairBuffer` / reduction infrastructure.
+The built-in claimed `kind` values for bond types are `"morse"` and
+`"harmonic"` (`harmonic-bond.md`); an entry whose `kind` no registered
+builder claims is rejected at config-load time. Additional bonded
+potentials (FENE, cosine, etc.) register builders claiming new
+`kind` values and reuse the existing `BondList` / `BondPairBuffer` /
+reduction infrastructure.
 
 ### Per-Potential Bond Selection <!-- rq-febe169b -->
 
 The parsed `BondList` (see `topology.md`) is potential-agnostic: it holds
 every bond, each carrying a global `bond_type_index` into the config's
 `[[bond_types]]` array. `MorseBondedState::new` selects the bonds whose
-type uses `potential == "morse"`, preserving the `BondList`'s
+type uses `kind == "morse"`, preserving the `BondList`'s
 `(atom_i, atom_j)` sort order, and builds its own device bond array and
 its own `atom_bond_offsets` / `atom_bond_indices` reduction map over that
 subset (constructed exactly as the shared `BondList` builds its map, but
@@ -178,7 +193,7 @@ constructed.
 
   - `MorseBondedState::new(device: Arc<CudaDevice>, bond_list: &BondList, bond_types: &[BondTypeConfig]) -> Result<MorseBondedState, GpuError>`
     - Selects the bonds of `bond_list` whose type uses
-      `potential == "morse"` and builds the slot's own device bond array
+      `kind == "morse"` and builds the slot's own device bond array
       and `atom_bond_offsets` / `atom_bond_indices` reduction map over
       that subset (see *Per-Potential Bond Selection*).
     - Uploads the `bond_types` parameters into a table addressed by the
@@ -332,7 +347,7 @@ The reduction is launched through the framework's
 
 - Other bonded potentials (harmonic bonds — see `harmonic-bond.md`;
   FENE; Buckingham; class-2 quartic bonds). Each non-Morse potential
-  lands as a new `potential` value in `[[bond_types]]` with its own
+  lands as a builder claiming a new `kind` in `[[bond_types]]` with its own
   kernel.
 - Angle, dihedral, and improper potentials.
 - Per-bond parameter overrides (every bond gets its parameters via its
@@ -367,8 +382,8 @@ Feature: Morse bonded potential
   @rq-9f2de58c
   Scenario: Construct MorseBondedState
     Given a BondList with 3 bonds among 4 atoms and two bond types
-    And [[bond_types]] with one entry "CC" potential="morse" de=1.0 a=2.0 re=1.0
-    And one entry "CN" potential="morse" de=2.0 a=3.0 re=1.5
+    And [[bond_types]] with one entry "CC" kind="morse" de=1.0 a=2.0 re=1.0
+    And one entry "CN" kind="morse" de=2.0 a=3.0 re=1.5
     When MorseBondedState::new(device, &bond_list, &bond_types) is called
     Then it returns Ok(state)
     And state.bond_count equals 3
@@ -495,13 +510,14 @@ Feature: Morse bonded potential
     Then forces_x[0] + forces_x[1] equals 0 within f32 round-off
     And similarly for y and z
 
-  # --- Rejection of non-Morse bond types in v1 ---
+  # --- Rejection of unclaimed bond-type kinds ---
 
   @rq-1fc667cd
-  Scenario: Config bond_type with an unknown potential is rejected
-    Given a [[bond_types]] entry with potential="fene"
+  Scenario: Config bond_type with an unclaimed kind is rejected
+    Given a [[bond_types]] entry with kind="fene"
     When the config is loaded
-    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].potential", reason: _ })
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "bond_types", kind: "fene" })
 
   # --- Energy and virial outputs ---
 

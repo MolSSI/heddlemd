@@ -452,108 +452,171 @@ pub struct LennardJonesConfig {
 }
 
 // rq-f001eaf8
+/// Open-shaped parsed entry for the `[[pair_interactions]]` array.
+/// `between`, `kind`, and `cutoff` are the centrally-parsed common
+/// fields; every other field is captured into `params` and owned by
+/// the potential builder claiming `(PairInteraction, kind)` (see
+/// `rqm/forces/framework.md`, *Potential Params Claims*). `cutoff` is
+/// common because the shared neighbour list's search radius and the
+/// box-compatibility check read it without consulting any builder.
 #[derive(Debug, Clone)]
 pub struct PairInteractionConfig {
+    /// Normalised so the lexicographically smaller name comes first.
     pub between: (String, String),
+    pub kind: String,
     pub cutoff: f64,
-    pub r_switch: f64,
-    pub potential: PairPotentialParams,
+    pub params: toml::Value,
 }
 
-// rq-70442e07
-#[derive(Debug, Clone)]
-pub enum PairPotentialParams {
-    LennardJones { sigma: f64, epsilon: f64 },
+impl PairInteractionConfig {
+    /// Convenience constructor for a `kind = "lennard-jones"` entry
+    /// whose params are already in atomic units (tests, embedders).
+    /// `r_switch = None` leaves the build-time `0.9 * cutoff` default
+    /// in effect.
+    pub fn lennard_jones(
+        between: (impl Into<String>, impl Into<String>),
+        sigma: f64,
+        epsilon: f64,
+        cutoff: f64,
+        r_switch: Option<f64>,
+    ) -> Self {
+        let mut table = toml::Table::new();
+        table.insert("sigma".into(), toml::Value::Float(sigma));
+        table.insert("epsilon".into(), toml::Value::Float(epsilon));
+        if let Some(rs) = r_switch {
+            table.insert("r_switch".into(), toml::Value::Float(rs));
+        }
+        let (a, b) = (between.0.into(), between.1.into());
+        PairInteractionConfig {
+            between: normalise_pair(&a, &b),
+            kind: "lennard-jones".to_string(),
+            cutoff,
+            params: toml::Value::Table(table),
+        }
+    }
 }
 
 // rq-2f230ccb
+/// Open-shaped parsed entry for the `[[bond_types]]` array. `name` is
+/// the lookup key referenced from the `.topology` file's `[bonds]`
+/// section; `params` is owned by the potential builder claiming
+/// `(BondType, kind)`.
 #[derive(Debug, Clone)]
-pub enum BondTypeConfig {
-    Morse {
-        name: String,
-        de: f64,
-        a: f64,
-        re: f64,
-    },
-    // rq-c3da9ee1
-    Harmonic {
-        name: String,
-        /// Force constant in atomic units (E_h/a₀²), in the
-        /// `U = ½ k (r − r_0)²` convention.
-        k: f64,
-        /// Equilibrium distance in Bohr (a₀).
-        r0: f64,
-    },
+pub struct BondTypeConfig {
+    pub name: String,
+    pub kind: String,
+    pub params: toml::Value,
 }
 
 impl BondTypeConfig {
-    pub fn name(&self) -> &str {
-        match self {
-            BondTypeConfig::Morse { name, .. } => name,
-            BondTypeConfig::Harmonic { name, .. } => name,
+    /// Convenience constructor for a `kind = "morse"` entry whose
+    /// params are already in atomic units (tests, embedders).
+    pub fn morse(name: impl Into<String>, de: f64, a: f64, re: f64) -> Self {
+        let mut table = toml::Table::new();
+        table.insert("de".into(), toml::Value::Float(de));
+        table.insert("a".into(), toml::Value::Float(a));
+        table.insert("re".into(), toml::Value::Float(re));
+        BondTypeConfig {
+            name: name.into(),
+            kind: "morse".to_string(),
+            params: toml::Value::Table(table),
+        }
+    }
+
+    /// Convenience constructor for a `kind = "harmonic"` entry whose
+    /// params are already in atomic units (tests, embedders).
+    pub fn harmonic(name: impl Into<String>, k: f64, r0: f64) -> Self {
+        let mut table = toml::Table::new();
+        table.insert("k".into(), toml::Value::Float(k));
+        table.insert("r0".into(), toml::Value::Float(r0));
+        BondTypeConfig {
+            name: name.into(),
+            kind: "harmonic".to_string(),
+            params: toml::Value::Table(table),
         }
     }
 }
 
 // rq-a47beb76
+/// Open-shaped parsed entry for the `[[angle_types]]` array. Same
+/// shape as `BondTypeConfig`; `name` is referenced from the
+/// `.topology` file's `[angles]` section.
 #[derive(Debug, Clone)]
-pub enum AngleTypeConfig {
-    Harmonic {
-        name: String,
-        k_theta: f64,
-        theta_0: f64,
-    },
+pub struct AngleTypeConfig {
+    pub name: String,
+    pub kind: String,
+    pub params: toml::Value,
 }
 
 impl AngleTypeConfig {
-    pub fn name(&self) -> &str {
-        match self {
-            AngleTypeConfig::Harmonic { name, .. } => name,
+    /// Convenience constructor for a `kind = "harmonic"` entry whose
+    /// params are already in atomic units (tests, embedders).
+    pub fn harmonic(name: impl Into<String>, k_theta: f64, theta_0: f64) -> Self {
+        let mut table = toml::Table::new();
+        table.insert("k_theta".into(), toml::Value::Float(k_theta));
+        table.insert("theta_0".into(), toml::Value::Float(theta_0));
+        AngleTypeConfig {
+            name: name.into(),
+            kind: "harmonic".to_string(),
+            params: toml::Value::Table(table),
         }
     }
 }
 
-/// Tagged enum carrying the chosen dihedral-potential parameters and
-/// the per-type 1-4 scale factors. The `scale_lj_14` / `scale_coul_14`
-/// fields live at the enum level (not per-variant) so the implicit 1-4
-/// exclusion derivation in `topology.rs` is independent of the
+// rq-edfc2b75
+/// Open-shaped parsed entry for the `[[dihedral_types]]` array. The
+/// 1-4 exclusion scale factors are common fields (not per-kind
+/// `params`) because the implicit 1-4 exclusion derivation in
+/// `topology.rs` is a property of the dihedral type independent of the
 /// functional form.
 #[derive(Debug, Clone)]
-pub enum DihedralTypeConfig {
-    Periodic {
-        name: String,
-        /// Force constant in atomic energy units (Hartrees).
-        k_phi: f64,
-        /// Multiplicity. Integer in `[1, 6]`.
-        n: u32,
-        /// Phase offset in radians.
-        phi_0: f64,
-        /// Lennard-Jones scale applied to the implicit 1-4 exclusion
-        /// derived from any `[dihedrals]` row of this type. Default
-        /// `0.5` (AMBER convention).
-        scale_lj_14: f64,
-        /// Coulomb scale applied to the same implicit 1-4 exclusion.
-        /// Default `1.0 / 1.2 ≈ 0.83333` (AMBER convention).
-        scale_coul_14: f64,
-    },
+pub struct DihedralTypeConfig {
+    pub name: String,
+    pub kind: String,
+    /// Lennard-Jones scale applied to the implicit 1-4 exclusion
+    /// derived from any `[dihedrals]` row of this type. Default
+    /// `0.5` (AMBER convention).
+    pub scale_lj_14: f64,
+    /// Coulomb scale applied to the same implicit 1-4 exclusion.
+    /// Default `1.0 / 1.2 ≈ 0.83333` (AMBER convention).
+    pub scale_coul_14: f64,
+    pub params: toml::Value,
 }
 
 impl DihedralTypeConfig {
-    pub fn name(&self) -> &str {
-        match self {
-            DihedralTypeConfig::Periodic { name, .. } => name,
-        }
+    /// Convenience constructor for a `kind = "periodic"` entry whose
+    /// params are already in atomic units (tests, embedders), with the
+    /// AMBER-default 1-4 scale factors.
+    pub fn periodic(name: impl Into<String>, k_phi: f64, n: u32, phi_0: f64) -> Self {
+        Self::periodic_with_scales(
+            name,
+            k_phi,
+            n,
+            phi_0,
+            default_scale_lj_14(),
+            default_scale_coul_14(),
+        )
     }
 
-    pub fn scale_lj_14(&self) -> f64 {
-        match self {
-            DihedralTypeConfig::Periodic { scale_lj_14, .. } => *scale_lj_14,
-        }
-    }
-
-    pub fn scale_coul_14(&self) -> f64 {
-        match self {
-            DihedralTypeConfig::Periodic { scale_coul_14, .. } => *scale_coul_14,
+    /// `periodic` with explicit 1-4 scale factors.
+    pub fn periodic_with_scales(
+        name: impl Into<String>,
+        k_phi: f64,
+        n: u32,
+        phi_0: f64,
+        scale_lj_14: f64,
+        scale_coul_14: f64,
+    ) -> Self {
+        let mut table = toml::Table::new();
+        table.insert("k_phi".into(), toml::Value::Float(k_phi));
+        table.insert("n".into(), toml::Value::Integer(n as i64));
+        table.insert("phi_0".into(), toml::Value::Float(phi_0));
+        DihedralTypeConfig {
+            name: name.into(),
+            kind: "periodic".to_string(),
+            scale_lj_14,
+            scale_coul_14,
+            params: toml::Value::Table(table),
         }
     }
 }
@@ -778,75 +841,71 @@ struct RawPhaseConfig {
     output: Option<RawOutputConfig>,
 }
 
-#[derive(Debug, Deserialize, crate::units::Convert)]
-#[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
-enum RawPairInteraction {
-    LennardJones {
-        between: [String; 2],
-        cutoff: crate::units::Length,
-        #[serde(default)]
-        r_switch: Option<crate::units::Length>,
-        sigma: crate::units::Length,
-        epsilon: crate::units::Energy,
-    },
+// rq-9244aae4 rq-f001eaf8
+// Open-shaped raw `[[pair_interactions]]` entry: the common fields
+// (`between`, `kind`, `cutoff`) are extracted here; every other field
+// stays in `params` for the claiming potential builder. Only `cutoff`
+// is unit-bearing among the common fields, so `Convert` is implemented
+// by hand rather than derived (the derive cannot see through the
+// custom `Deserialize`).
+#[derive(Debug)]
+struct RawPairInteraction {
+    between: [String; 2],
+    kind: String,
+    cutoff: crate::units::Length,
+    params: toml::Value,
 }
 
-#[derive(Debug, Deserialize, crate::units::Convert)]
-#[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
-enum RawBondType {
-    Morse {
-        name: String,
-        de: crate::units::Energy,
-        a: crate::units::InverseLength,
-        re: crate::units::Length,
-    },
-    Harmonic {
-        name: String,
-        k: crate::units::Stiffness,
-        r0: crate::units::Length,
-    },
+impl crate::units::Convert for RawPairInteraction {
+    fn from_user(&mut self, u: UnitSystem) {
+        self.cutoff.from_user(u);
+        // `params` is converted later by the claiming builder's
+        // `convert_params` (see `convert_all_slot_params`).
+    }
+    fn to_user(&mut self, u: UnitSystem) {
+        self.cutoff.to_user(u);
+    }
 }
 
-impl From<RawBondType> for BondTypeConfig {
-    fn from(r: RawBondType) -> Self {
-        match r {
-            RawBondType::Morse { name, de, a, re } => BondTypeConfig::Morse {
-                name,
-                de: de.0,
-                a: a.0,
-                re: re.0,
-            },
-            RawBondType::Harmonic { name, k, r0 } => BondTypeConfig::Harmonic {
-                name,
-                k: k.0,
-                r0: r0.0,
-            },
+impl<'de> Deserialize<'de> for RawPairInteraction {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut table = <toml::Table as Deserialize>::deserialize(d)?;
+        let between: [String; 2] = take_field(&mut table, "between")?;
+        let kind: String = take_field(&mut table, "kind")?;
+        let cutoff: crate::units::Length = take_field(&mut table, "cutoff")?;
+        Ok(RawPairInteraction {
+            between,
+            kind,
+            cutoff,
+            params: toml::Value::Table(table),
+        })
+    }
+}
+
+// rq-e4420955 rq-2f230ccb rq-f2946c4a rq-a47beb76
+// Open-shaped raw `[[bond_types]]` / `[[angle_types]]` entry: `name`
+// and `kind` are common; everything else flows to the claiming
+// builder. The shape is exactly `NamedSlotConfig`'s, so both tables
+// deserialise through it.
+type RawBondType = NamedSlotConfig;
+type RawAngleType = NamedSlotConfig;
+
+impl From<NamedSlotConfig> for BondTypeConfig {
+    fn from(r: NamedSlotConfig) -> Self {
+        BondTypeConfig {
+            name: r.name,
+            kind: r.kind,
+            params: r.params,
         }
     }
 }
 
-#[derive(Debug, Deserialize, crate::units::Convert)]
-#[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
-enum RawAngleType {
-    Harmonic {
-        name: String,
-        k_theta: crate::units::Energy,
-        theta_0: f64,
-    },
-}
-
-impl From<RawAngleType> for AngleTypeConfig {
-    fn from(r: RawAngleType) -> Self {
-        match r {
-            RawAngleType::Harmonic {
-                name,
-                k_theta,
-                theta_0,
-            } => AngleTypeConfig::Harmonic {
-                name,
-                k_theta: k_theta.0,
-                theta_0,
-            },
+impl From<NamedSlotConfig> for AngleTypeConfig {
+    fn from(r: NamedSlotConfig) -> Self {
+        AngleTypeConfig {
+            name: r.name,
+            kind: r.kind,
+            params: r.params,
         }
     }
 }
@@ -859,40 +918,83 @@ fn default_scale_coul_14() -> f64 {
     1.0 / 1.2
 }
 
-#[derive(Debug, Deserialize, crate::units::Convert)]
-#[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
-enum RawDihedralType {
-    Periodic {
-        name: String,
-        k_phi: crate::units::Energy,
-        n: u32,
-        phi_0: f64,
-        #[serde(default = "default_scale_lj_14")]
-        scale_lj_14: f64,
-        #[serde(default = "default_scale_coul_14")]
-        scale_coul_14: f64,
-    },
+// rq-6d4a49ac rq-edfc2b75
+// Open-shaped raw `[[dihedral_types]]` entry: `name`, `kind`, and the
+// dimensionless 1-4 scale factors are common (the topology loader
+// consumes the scales centrally); everything else flows to the
+// claiming builder. No unit-bearing common field, so `Convert` is a
+// no-op.
+#[derive(Debug)]
+struct RawDihedralType {
+    name: String,
+    kind: String,
+    scale_lj_14: f64,
+    scale_coul_14: f64,
+    params: toml::Value,
+}
+
+impl crate::units::Convert for RawDihedralType {
+    fn from_user(&mut self, _u: UnitSystem) {}
+    fn to_user(&mut self, _u: UnitSystem) {}
+}
+
+impl<'de> Deserialize<'de> for RawDihedralType {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut table = <toml::Table as Deserialize>::deserialize(d)?;
+        let name: String = take_field(&mut table, "name")?;
+        let kind: String = take_field(&mut table, "kind")?;
+        let scale_lj_14: f64 = take_field_or(&mut table, "scale_lj_14", default_scale_lj_14)?;
+        let scale_coul_14: f64 =
+            take_field_or(&mut table, "scale_coul_14", default_scale_coul_14)?;
+        Ok(RawDihedralType {
+            name,
+            kind,
+            scale_lj_14,
+            scale_coul_14,
+            params: toml::Value::Table(table),
+        })
+    }
 }
 
 impl From<RawDihedralType> for DihedralTypeConfig {
     fn from(r: RawDihedralType) -> Self {
-        match r {
-            RawDihedralType::Periodic {
-                name,
-                k_phi,
-                n,
-                phi_0,
-                scale_lj_14,
-                scale_coul_14,
-            } => DihedralTypeConfig::Periodic {
-                name,
-                k_phi: k_phi.0,
-                n,
-                phi_0,
-                scale_lj_14,
-                scale_coul_14,
-            },
+        DihedralTypeConfig {
+            name: r.name,
+            kind: r.kind,
+            scale_lj_14: r.scale_lj_14,
+            scale_coul_14: r.scale_coul_14,
+            params: r.params,
         }
+    }
+}
+
+/// Extract and deserialise a required common field from an open-shaped
+/// entry's table, surfacing serde's `missing field` shape so
+/// `serde_error_to_config_error` routes it to `MissingField`.
+fn take_field<T: serde::de::DeserializeOwned, E: serde::de::Error>(
+    table: &mut toml::Table,
+    key: &'static str,
+) -> Result<T, E> {
+    let value = table
+        .remove(key)
+        .ok_or_else(|| E::missing_field(key))?;
+    value
+        .try_into()
+        .map_err(|e| E::custom(format!("field `{key}`: {e}")))
+}
+
+/// Extract and deserialise an optional common field, filling
+/// `default` when the key is absent.
+fn take_field_or<T: serde::de::DeserializeOwned, E: serde::de::Error>(
+    table: &mut toml::Table,
+    key: &'static str,
+    default: fn() -> T,
+) -> Result<T, E> {
+    match table.remove(key) {
+        None => Ok(default()),
+        Some(value) => value
+            .try_into()
+            .map_err(|e| E::custom(format!("field `{key}`: {e}"))),
     }
 }
 
@@ -1067,7 +1169,117 @@ fn convert_all_slot_params(config: &mut Config) -> Result<(), ConfigError> {
     for ct in &mut config.constraint_types {
         conv(&registries.constraint_types, units, &ct.kind, &mut ct.params)?;
     }
+
+    // rq-73801d98 — potential-table entry params are converted by the
+    // claiming potential builder. An unclaimed kind is left untouched
+    // and rejected later by `validate_against`.
+    use crate::forces::PotentialParamsCategory as Cat;
+    fn conv_potential(
+        reg: &crate::forces::PotentialRegistry,
+        units: UnitSystem,
+        category: Cat,
+        kind: &str,
+        params: &mut toml::Value,
+        prefix: &str,
+    ) -> Result<(), ConfigError> {
+        match reg.lookup_claim(category, kind) {
+            Some(b) => b
+                .convert_params(units, params)
+                .map_err(|e| prefix_params_error(prefix, e)),
+            None => Ok(()),
+        }
+    }
+    for (i, p) in config.pair_interactions.iter_mut().enumerate() {
+        conv_potential(
+            &registries.potentials,
+            units,
+            Cat::PairInteraction,
+            &p.kind,
+            &mut p.params,
+            &format!("pair_interactions[{i}]"),
+        )?;
+    }
+    for (i, bt) in config.bond_types.iter_mut().enumerate() {
+        conv_potential(
+            &registries.potentials,
+            units,
+            Cat::BondType,
+            &bt.kind,
+            &mut bt.params,
+            &format!("bond_types[{i}]"),
+        )?;
+    }
+    for (i, at) in config.angle_types.iter_mut().enumerate() {
+        conv_potential(
+            &registries.potentials,
+            units,
+            Cat::AngleType,
+            &at.kind,
+            &mut at.params,
+            &format!("angle_types[{i}]"),
+        )?;
+    }
+    for (i, dt) in config.dihedral_types.iter_mut().enumerate() {
+        conv_potential(
+            &registries.potentials,
+            units,
+            Cat::DihedralType,
+            &dt.kind,
+            &mut dt.params,
+            &format!("dihedral_types[{i}]"),
+        )?;
+    }
     Ok(())
+}
+
+/// Prefix a table-and-index document path onto the relative `field` /
+/// `path` carried by a builder-produced params error, so potential
+/// builders can report errors relative to their entry (`"de"`) and the
+/// user still sees the full location (`"bond_types[0].de"`).
+// rq-73801d98
+pub fn prefix_params_error(prefix: &str, e: ConfigError) -> ConfigError {
+    fn join(prefix: &str, rel: &str) -> String {
+        if rel.is_empty() {
+            prefix.to_string()
+        } else {
+            format!("{prefix}.{rel}")
+        }
+    }
+    match e {
+        ConfigError::MissingField { field } => ConfigError::MissingField {
+            field: join(prefix, &field),
+        },
+        ConfigError::InvalidValue { field, reason } => ConfigError::InvalidValue {
+            field: join(prefix, &field),
+            reason,
+        },
+        ConfigError::Parse { path, message } => ConfigError::Parse {
+            path: join(prefix, &path),
+            message,
+        },
+        other => other,
+    }
+}
+
+/// Translate a `toml::de::Error` from a potential builder's typed
+/// params deserialisation into a `ConfigError` with entry-relative
+/// paths: `missing field \`x\`` becomes `MissingField { field: "x" }`,
+/// everything else `Parse { path: "", message }`. The loader prefixes
+/// the entry's document path via [`prefix_params_error`].
+// rq-73801d98
+pub fn translate_params_error_local(e: toml::de::Error) -> ConfigError {
+    let msg = e.to_string();
+    if let Some(rest) = msg.strip_prefix("missing field `") {
+        if let Some(end) = rest.find('`') {
+            return ConfigError::MissingField {
+                field: rest[..end].to_string(),
+            };
+        }
+    }
+    ConfigError::Parse {
+        path: String::new(),
+        message: msg,
+    }
 }
 
 // Translate a `serde_path_to_error::Error<toml::de::Error>` into the
@@ -1239,30 +1451,16 @@ fn build_config(
     let topology = raw.topology.as_deref().map(|s| resolve_path(base_dir, s));
 
     // Translate the pair_interactions raw form into the public form,
-    // normalising the type-name pair and filling r_switch defaults.
+    // normalising the type-name pair. Per-kind params (including any
+    // r_switch default) are owned by the claiming builder.
     let pair_interactions: Vec<PairInteractionConfig> = raw
         .pair_interactions
         .into_iter()
-        .map(|r| match r {
-            RawPairInteraction::LennardJones {
-                between,
-                cutoff,
-                r_switch,
-                sigma,
-                epsilon,
-            } => {
-                let cutoff = cutoff.0;
-                let r_switch = r_switch.map(|x| x.0).unwrap_or(0.9 * cutoff);
-                PairInteractionConfig {
-                    between: normalise_pair(&between[0], &between[1]),
-                    cutoff,
-                    r_switch,
-                    potential: PairPotentialParams::LennardJones {
-                        sigma: sigma.0,
-                        epsilon: epsilon.0,
-                    },
-                }
-            }
+        .map(|r| PairInteractionConfig {
+            between: normalise_pair(&r.between[0], &r.between[1]),
+            kind: r.kind,
+            cutoff: r.cutoff.0,
+            params: r.params,
         })
         .collect();
 
@@ -1679,6 +1877,73 @@ impl Config {
                 }
             }
         }
+        // rq-73801d98 — potential-table entries are global; each
+        // entry's `kind` must be claimed by a registered potential
+        // builder for the entry's category, and the claiming builder's
+        // `validate_params` runs on the entry. Builder errors carry
+        // entry-relative paths; prefix the document location here.
+        {
+            use crate::forces::{PotentialConfigEntry, PotentialParamsCategory as Cat};
+            fn check_entry(
+                registries: &crate::Registries,
+                category: Cat,
+                slot: &'static str,
+                kind: &str,
+                prefix: &str,
+                entry: PotentialConfigEntry<'_>,
+            ) -> Result<(), ConfigError> {
+                let b = registries
+                    .potentials
+                    .lookup_claim(category, kind)
+                    .ok_or_else(|| ConfigError::UnknownKind {
+                        slot,
+                        kind: kind.to_string(),
+                    })?;
+                b.validate_params(entry)
+                    .map_err(|e| prefix_params_error(prefix, e))
+            }
+            for (i, p) in self.pair_interactions.iter().enumerate() {
+                check_entry(
+                    registries,
+                    Cat::PairInteraction,
+                    "pair_interactions",
+                    &p.kind,
+                    &format!("pair_interactions[{i}]"),
+                    PotentialConfigEntry::PairInteraction(p),
+                )?;
+            }
+            for (i, bt) in self.bond_types.iter().enumerate() {
+                check_entry(
+                    registries,
+                    Cat::BondType,
+                    "bond_types",
+                    &bt.kind,
+                    &format!("bond_types[{i}]"),
+                    PotentialConfigEntry::BondType(bt),
+                )?;
+            }
+            for (i, at) in self.angle_types.iter().enumerate() {
+                check_entry(
+                    registries,
+                    Cat::AngleType,
+                    "angle_types",
+                    &at.kind,
+                    &format!("angle_types[{i}]"),
+                    PotentialConfigEntry::AngleType(at),
+                )?;
+            }
+            for (i, dt) in self.dihedral_types.iter().enumerate() {
+                check_entry(
+                    registries,
+                    Cat::DihedralType,
+                    "dihedral_types",
+                    &dt.kind,
+                    &format!("dihedral_types[{i}]"),
+                    PotentialConfigEntry::DihedralType(dt),
+                )?;
+            }
+        }
+
         Ok(())
     }
 
@@ -1962,6 +2227,10 @@ fn validate_particle_types(pts: &[ParticleTypeConfig]) -> Result<(), ConfigError
     Ok(())
 }
 
+// rq-9244aae4 — common-field checks only: `cutoff` domain, `between`
+// referring to declared types, and the same-pair-same-kind duplicate
+// rule. Per-kind `params` contents are validated by the claiming
+// builder during `validate_against`.
 fn validate_pair_interactions(
     pis: &[PairInteractionConfig],
     pts: &[ParticleTypeConfig],
@@ -1970,16 +2239,6 @@ fn validate_pair_interactions(
     // resolved by combining (see `check_pair_coverage`).
     for (i, p) in pis.iter().enumerate() {
         require_finite_positive(&format!("pair_interactions[{i}].cutoff"), p.cutoff)?;
-        require_finite_positive(&format!("pair_interactions[{i}].r_switch"), p.r_switch)?;
-        if p.r_switch > p.cutoff {
-            return Err(invalid(
-                format!("pair_interactions[{i}].r_switch"),
-                format!(
-                    "r_switch ({}) exceeds cutoff ({})",
-                    p.r_switch, p.cutoff
-                ),
-            ));
-        }
         // 1: every name in `between` refers to a declared type.
         for name in [&p.between.0, &p.between.1] {
             if !pts.iter().any(|t| t.name == *name) {
@@ -1989,21 +2248,13 @@ fn validate_pair_interactions(
                 });
             }
         }
-        match &p.potential {
-            PairPotentialParams::LennardJones { sigma, epsilon } => {
-                // rq-9244aae4 — sigma/epsilon are finite and >= 0. A pair
-                // with epsilon = 0 or sigma = 0 is Lennard-Jones-inert
-                // (zero LJ force/energy/virial); negatives/NaN/inf are
-                // rejected.
-                require_finite_non_negative(&format!("pair_interactions[{i}].sigma"), *sigma)?;
-                require_finite_non_negative(&format!("pair_interactions[{i}].epsilon"), *epsilon)?;
-            }
-        }
     }
-    // Duplicate-pair check.
+    // Duplicate-pair check: at most one entry per (unordered pair, kind);
+    // entries of different kinds on the same pair are additive and
+    // permitted. rq-f11e9d4c
     for i in 0..pis.len() {
         for j in 0..i {
-            if pis[i].between == pis[j].between {
+            if pis[i].between == pis[j].between && pis[i].kind == pis[j].kind {
                 return Err(ConfigError::DuplicatePairInteraction {
                     types: pis[i].between.clone(),
                 });
@@ -2031,133 +2282,78 @@ fn validate_lennard_jones(lj: &LennardJonesConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
+// rq-e4420955 — common-field checks only (`name` non-empty and unique);
+// per-kind params are validated by the claiming builder during
+// `validate_against`.
 fn validate_bond_types(bts: &[BondTypeConfig]) -> Result<(), ConfigError> {
     let mut seen: Vec<&str> = Vec::with_capacity(bts.len());
     for (i, bt) in bts.iter().enumerate() {
-        match bt {
-            BondTypeConfig::Morse { name, de, a, re } => {
-                if name.is_empty() {
-                    return Err(invalid(
-                        format!("bond_types[{i}].name"),
-                        "name must not be empty",
-                    ));
-                }
-                if seen.iter().any(|n| *n == name) {
-                    return Err(ConfigError::DuplicateBondTypeName { name: name.clone() });
-                }
-                seen.push(name);
-                require_finite_positive(&format!("bond_types[{i}].de"), *de)?;
-                require_finite_positive(&format!("bond_types[{i}].a"), *a)?;
-                require_finite_positive(&format!("bond_types[{i}].re"), *re)?;
-            }
-            // rq-4943810f
-            BondTypeConfig::Harmonic { name, k, r0 } => {
-                if name.is_empty() {
-                    return Err(invalid(
-                        format!("bond_types[{i}].name"),
-                        "name must not be empty",
-                    ));
-                }
-                if seen.iter().any(|n| *n == name) {
-                    return Err(ConfigError::DuplicateBondTypeName { name: name.clone() });
-                }
-                seen.push(name);
-                require_finite_positive(&format!("bond_types[{i}].k"), *k)?;
-                require_finite_positive(&format!("bond_types[{i}].r0"), *r0)?;
-            }
+        if bt.name.is_empty() {
+            return Err(invalid(
+                format!("bond_types[{i}].name"),
+                "name must not be empty",
+            ));
         }
+        if seen.iter().any(|n| *n == bt.name) {
+            return Err(ConfigError::DuplicateBondTypeName {
+                name: bt.name.clone(),
+            });
+        }
+        seen.push(&bt.name);
     }
     Ok(())
 }
 
+// rq-f2946c4a — common-field checks only; see `validate_bond_types`.
 fn validate_angle_types(ats: &[AngleTypeConfig]) -> Result<(), ConfigError> {
     let mut seen: Vec<&str> = Vec::with_capacity(ats.len());
     for (i, at) in ats.iter().enumerate() {
-        match at {
-            AngleTypeConfig::Harmonic {
-                name,
-                k_theta,
-                theta_0,
-            } => {
-                if name.is_empty() {
-                    return Err(invalid(
-                        format!("angle_types[{i}].name"),
-                        "name must not be empty",
-                    ));
-                }
-                if seen.iter().any(|n| *n == name) {
-                    return Err(ConfigError::DuplicateAngleTypeName { name: name.clone() });
-                }
-                seen.push(name);
-                require_finite_positive(&format!("angle_types[{i}].k_theta"), *k_theta)?;
-                if !theta_0.is_finite()
-                    || !(0.0..=std::f64::consts::PI).contains(theta_0)
-                {
-                    return Err(invalid(
-                        format!("angle_types[{i}].theta_0"),
-                        "theta_0 must be finite and in [0, π]",
-                    ));
-                }
-            }
+        if at.name.is_empty() {
+            return Err(invalid(
+                format!("angle_types[{i}].name"),
+                "name must not be empty",
+            ));
         }
+        if seen.iter().any(|n| *n == at.name) {
+            return Err(ConfigError::DuplicateAngleTypeName {
+                name: at.name.clone(),
+            });
+        }
+        seen.push(&at.name);
     }
     Ok(())
 }
 
+// rq-6d4a49ac — common-field checks: `name` non-empty and unique, and
+// the 1-4 scale factors (consumed centrally by the topology loader)
+// finite and in [0, 1]. Per-kind params are validated by the claiming
+// builder during `validate_against`.
 fn validate_dihedral_types(dts: &[DihedralTypeConfig]) -> Result<(), ConfigError> {
-    let two_pi = 2.0 * std::f64::consts::PI;
     let mut seen: Vec<&str> = Vec::with_capacity(dts.len());
     for (i, dt) in dts.iter().enumerate() {
-        match dt {
-            DihedralTypeConfig::Periodic {
-                name,
-                k_phi,
-                n,
-                phi_0,
-                scale_lj_14,
-                scale_coul_14,
-            } => {
-                if name.is_empty() {
-                    return Err(invalid(
-                        format!("dihedral_types[{i}].name"),
-                        "name must not be empty",
-                    ));
-                }
-                if seen.iter().any(|x| *x == name) {
-                    return Err(ConfigError::DuplicateDihedralTypeName { name: name.clone() });
-                }
-                seen.push(name);
-                if !k_phi.is_finite() {
-                    return Err(invalid(
-                        format!("dihedral_types[{i}].k_phi"),
-                        "k_phi must be finite",
-                    ));
-                }
-                if !(1..=6).contains(n) {
-                    return Err(invalid(
-                        format!("dihedral_types[{i}].n"),
-                        "n must be an integer in [1, 6]",
-                    ));
-                }
-                if !phi_0.is_finite() || !(-two_pi..=two_pi).contains(phi_0) {
-                    return Err(invalid(
-                        format!("dihedral_types[{i}].phi_0"),
-                        "phi_0 must be finite and in [-2π, 2π]",
-                    ));
-                }
-                if !scale_lj_14.is_finite() || !(0.0..=1.0).contains(scale_lj_14) {
-                    return Err(invalid(
-                        format!("dihedral_types[{i}].scale_lj_14"),
-                        "scale_lj_14 must be finite and in [0.0, 1.0]",
-                    ));
-                }
-                if !scale_coul_14.is_finite() || !(0.0..=1.0).contains(scale_coul_14) {
-                    return Err(invalid(
-                        format!("dihedral_types[{i}].scale_coul_14"),
-                        "scale_coul_14 must be finite and in [0.0, 1.0]",
-                    ));
-                }
-            }
+        if dt.name.is_empty() {
+            return Err(invalid(
+                format!("dihedral_types[{i}].name"),
+                "name must not be empty",
+            ));
+        }
+        if seen.iter().any(|x| *x == dt.name) {
+            return Err(ConfigError::DuplicateDihedralTypeName {
+                name: dt.name.clone(),
+            });
+        }
+        seen.push(&dt.name);
+        if !dt.scale_lj_14.is_finite() || !(0.0..=1.0).contains(&dt.scale_lj_14) {
+            return Err(invalid(
+                format!("dihedral_types[{i}].scale_lj_14"),
+                "scale_lj_14 must be finite and in [0.0, 1.0]",
+            ));
+        }
+        if !dt.scale_coul_14.is_finite() || !(0.0..=1.0).contains(&dt.scale_coul_14) {
+            return Err(invalid(
+                format!("dihedral_types[{i}].scale_coul_14"),
+                "scale_coul_14 must be finite and in [0.0, 1.0]",
+            ));
         }
     }
     Ok(())
@@ -2195,23 +2391,37 @@ fn validate_neighbor_list(n: &NeighborListConfig) -> Result<(), ConfigError> {
     }
 }
 
-// rq-9244aae4 rq-be18633a — every unordered type pair must resolve
-// exactly one way: by an explicit `[[pair_interactions]]` override, or by
-// combining the two types' per-type sigma/epsilon via the `[lennard_jones]`
-// table. A pair that is neither overridden nor combinable is rejected.
+// rq-9244aae4 rq-be18633a — whenever the config declares any
+// Lennard-Jones input (a `[lennard_jones]` table, per-type
+// sigma/epsilon, or a `kind = "lennard-jones"` entry), every unordered
+// type pair must resolve exactly one way: by an explicit
+// `kind = "lennard-jones"` entry, or by combining the two types'
+// per-type sigma/epsilon via the `[lennard_jones]` table. A pair that
+// is neither overridden nor combinable is rejected. A config with no
+// Lennard-Jones input at all carries no LJ slot and imposes no
+// coverage requirement.
 fn check_pair_coverage(
     pts: &[ParticleTypeConfig],
     pis: &[PairInteractionConfig],
     lennard_jones: Option<&LennardJonesConfig>,
 ) -> Result<(), ConfigError> {
+    let has_lj_input = lennard_jones.is_some()
+        || pts.iter().any(|t| t.sigma.is_some() || t.epsilon.is_some())
+        || pis.iter().any(|p| p.kind == crate::forces::lj::LJ_KIND);
+    if !has_lj_input {
+        return Ok(());
+    }
     let can_combine = lennard_jones.is_some();
     for i in 0..pts.len() {
         for j in i..pts.len() {
             let key = normalise_pair(&pts[i].name, &pts[j].name);
-            if pis.iter().any(|p| p.between == key) {
-                continue; // resolved by an explicit override
+            if pis
+                .iter()
+                .any(|p| p.kind == crate::forces::lj::LJ_KIND && p.between == key)
+            {
+                continue; // resolved by an explicit LJ entry
             }
-            // No override: resolvable only by combining, which requires a
+            // No LJ entry: resolvable only by combining, which requires a
             // [lennard_jones] table and sigma/epsilon on both types.
             let combinable =
                 can_combine && pts[i].sigma.is_some() && pts[j].sigma.is_some();

@@ -296,7 +296,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
 fn integrator_owns_force_evaluation_inside_step() {
     // Wire up a real LJ slot so the force pipeline runs and we can confirm
     // KernelStage::LJ_PAIR_FORCE was triggered exactly once per step() call.
-    use heddle_md::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
+    use heddle_md::io::config::{PairInteractionConfig, ParticleTypeConfig};
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -305,12 +305,7 @@ fn integrator_owns_force_evaluation_inside_step() {
         4,
         &sim_box,
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, sigma: None, epsilon: None, charge: 0.0 }],
-        &[PairInteractionConfig {
-            between: ("Ar".to_string(), "Ar".to_string()),
-            cutoff: 1.0,
-            r_switch: 1.0,
-            potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
-        }],
+        &[PairInteractionConfig::lennard_jones(("Ar".to_string(), "Ar".to_string()), 1.0, 1.0, 1.0, Some(1.0))],
         &[],
         &[],
         &[],
@@ -1248,15 +1243,7 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
             epsilon: None,
             charge: 0.0,
         }],
-        &[heddle_md::io::config::PairInteractionConfig {
-            between: ("Ar".to_string(), "Ar".to_string()),
-            cutoff: 1.0,
-            r_switch: 1.0,
-            potential: heddle_md::io::config::PairPotentialParams::LennardJones {
-                sigma: 1.0,
-                epsilon: 1.0,
-            },
-        }],
+        &[heddle_md::io::config::PairInteractionConfig::lennard_jones(("Ar".to_string(), "Ar".to_string()), 1.0, 1.0, 1.0, Some(1.0))],
         &[],
         &[],
         &[],
@@ -1309,15 +1296,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
             epsilon: None,
             charge: 0.0,
         }],
-        &[heddle_md::io::config::PairInteractionConfig {
-            between: ("Ar".to_string(), "Ar".to_string()),
-            cutoff: 1.0,
-            r_switch: 1.0,
-            potential: heddle_md::io::config::PairPotentialParams::LennardJones {
-                sigma: 1.0,
-                epsilon: 1.0,
-            },
-        }],
+        &[heddle_md::io::config::PairInteractionConfig::lennard_jones(("Ar".to_string(), "Ar".to_string()), 1.0, 1.0, 1.0, Some(1.0))],
         &[],
         &[],
         &[],
@@ -1370,15 +1349,7 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
             epsilon: None,
             charge: 0.0,
         }],
-        &[heddle_md::io::config::PairInteractionConfig {
-            between: ("Ar".to_string(), "Ar".to_string()),
-            cutoff: 1.0,
-            r_switch: 1.0,
-            potential: heddle_md::io::config::PairPotentialParams::LennardJones {
-                sigma: 1.0,
-                epsilon: 1.0,
-            },
-        }],
+        &[heddle_md::io::config::PairInteractionConfig::lennard_jones(("Ar".to_string(), "Ar".to_string()), 1.0, 1.0, 1.0, Some(1.0))],
         &[],
         &[],
         &[],

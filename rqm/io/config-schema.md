@@ -138,7 +138,7 @@ mass = 6.6335e-26   # kg
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10    # m
 epsilon = 1.65e-21  # J
 cutoff = 1.0e-9     # m
@@ -151,14 +151,14 @@ topology = "argon.in.topology"
 
 [[bond_types]]
 name = "ArAr"
-potential = "morse"
+kind = "morse"
 de = 1.65e-21       # J  (well depth)
 a = 1.9e10          # 1/m (width)
 re = 3.40e-10       # m  (equilibrium distance)
 
 [[angle_types]]
 name = "HOH"
-potential = "harmonic"
+kind = "harmonic"
 k_theta = 5.27e-19  # J/rad²  (75.9 kcal/mol/rad², flexible SPC)
 theta_0 = 1.911     # rad (~109.47°)
 
@@ -169,7 +169,7 @@ theta_0 = 1.911     # rad (~109.47°)
 # [dihedrals] row on the same (i,j,k,l) quadruple.
 [[dihedral_types]]
 name = "CT-CT-CT-CT_n3"
-potential = "periodic"
+kind = "periodic"
 k_phi = 6.276e-22   # J  (0.150 kcal/mol, AMBER n-butane n=3 term)
 n = 3
 phi_0 = 0.0         # rad
@@ -723,48 +723,47 @@ explicit `[[pair_interactions]]` override supplies its own `cutoff` /
 
 #### `[[pair_interactions]]` (array of tables) <!-- rq-9244aae4 -->
 
-Optional per-type-pair overrides. Each entry fully specifies the
-Lennard-Jones parameters of one unordered pair of declared types, taking
-precedence over the value the combining rule would produce for that pair.
-The array may be empty or absent; a pair without an override is resolved
-by combining the two types' per-type `sigma`/`epsilon` (see
-`[lennard_jones]` above). Every unordered pair — including same-type self
-pairs — must resolve exactly one way: by an override, or by combining. A
-pair that has no override and involves a type lacking `sigma`/`epsilon`
-(or a config with no `[lennard_jones]` table) is rejected (see
-*Validation*).
+Optional per-type-pair declarations. Each entry fully specifies one pair
+potential acting between one unordered pair of declared types. The array
+may be empty or absent.
 
-Each entry is a tagged variant: a required `potential` field selects the
-pair potential, and every other field is either a common field shared by
-all potentials or specific to the chosen `potential`.
+Each entry is open-shaped and kind-tagged: the common fields below are
+parsed centrally, and every other field is captured into the entry's
+`params` table, which is validated, unit-converted, and consumed by the
+registered potential builder that claims the entry's `kind` (see
+`forces/framework.md`'s *Potential params claims*).
 
 Common fields:
 
 - `between: [String; 2]` — unordered pair of declared type names. Order is
   not significant: `["A", "B"]` and `["B", "A"]` refer to the same pair.
-- `potential: String` — selects the pair potential. The only supported
-  value in `[[pair_interactions]]` is `"lennard-jones"`. Electrostatic
-  pair interactions are configured globally through the top-level
-  `[spme]` table (see below) rather than per type pair, since the
-  Coulomb pair magnitude is constructed from per-particle charges and
-  carries no per-pair parameters. Future values
-  (`"buckingham"`, ...) for `[[pair_interactions]]` are reserved.
+- `kind: String` — selects the pair potential. The value must be claimed
+  by a registered potential builder for the pair-interaction category;
+  the built-in roster claims `"lennard-jones"` (see
+  `forces/lj-pair-force.md`). Electrostatic pair interactions are
+  configured globally through the top-level `[spme]` table (see below)
+  rather than per type pair, since the Coulomb pair magnitude is
+  constructed from per-particle charges and carries no per-pair
+  parameters.
 - `cutoff: f64` — pair distance in metres beyond which the force is treated
-  as zero. Finite, strictly positive.
-- `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
-  switching function applied over `[r_switch, cutoff]` (see
-  `forces/lj-pair-force.md`). Finite, strictly positive, and
-  `r_switch <= cutoff`. Defaults to `0.9 * cutoff` when omitted.
-  Setting `r_switch = cutoff` selects the hard-cutoff degenerate case
-  in which no smoothing is applied.
+  as zero. Finite, strictly positive. Required for every kind: the shared
+  neighbour list's search radius and the simulation-box compatibility
+  check are computed from the common `cutoff` fields without consulting
+  any builder.
 
-Fields accepted for `potential = "lennard-jones"` (see
-`forces/lj-pair-force.md`):
+Per-kind fields (captured into `params`) for `kind = "lennard-jones"`,
+validated by the Lennard-Jones builder (see `forces/lj-pair-force.md`):
 
 - `sigma: f64` — LJ zero-crossing distance in metres. Finite and `>= 0`.
   Negative, NaN, and infinite values are rejected.
 - `epsilon: f64` — LJ well depth in joules. Finite and `>= 0`. Negative,
   NaN, and infinite values are rejected.
+- `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
+  switching function applied over `[r_switch, cutoff]` (see
+  `forces/lj-pair-force.md`). Finite, strictly positive, and
+  `r_switch <= cutoff` (the entry's common `cutoff`). Defaults to
+  `0.9 * cutoff` when omitted. Setting `r_switch = cutoff` selects the
+  hard-cutoff degenerate case in which no smoothing is applied.
 
 A pair with `epsilon = 0` or `sigma = 0` is Lennard-Jones-inert: it
 contributes zero LJ force, energy, and virial at every separation. This
@@ -772,11 +771,30 @@ lets a force field express genuinely non-interacting type pairs — for
 example a hydrogen that carries a partial charge but no Lennard-Jones
 site — directly, rather than through a negligible placeholder.
 
-An override may name a same-type self pair (`between = ["Ar", "Ar"]`) to
-override that type's self-interaction; a self pair without an override is
+A `kind = "lennard-jones"` entry takes precedence over the value the
+combining rule would produce for its pair. A pair without a
+`"lennard-jones"` entry is resolved by combining the two types' per-type
+`sigma`/`epsilon` (see `[lennard_jones]` above). Whenever the config
+declares any Lennard-Jones input — a `[lennard_jones]` table, a
+`sigma`/`epsilon` pair on any `[[particle_types]]` entry, or at least
+one `kind = "lennard-jones"` entry — every unordered pair of declared
+types, including same-type self pairs, must resolve exactly one way: by
+a `"lennard-jones"` entry, or by combining. A pair that has no entry and
+involves a type lacking `sigma`/`epsilon` (or a config with no
+`[lennard_jones]` table) is rejected (see *Validation*). A config with
+no Lennard-Jones input at all carries no Lennard-Jones slot and imposes
+no coverage requirement.
+
+An entry may name a same-type self pair (`between = ["Ar", "Ar"]`) to
+override that type's self-interaction; a self pair without an entry is
 combined from the type's own `sigma`/`epsilon` (which for Lorentz-Berthelot
-reproduces `(sigma, epsilon)` exactly). Unknown fields for the chosen
-`potential` are rejected.
+reproduces `(sigma, epsilon)` exactly).
+
+The same unordered pair appears in at most one entry per kind; two
+entries of the same kind covering the same pair are rejected. Entries of
+different kinds on the same pair are permitted and contribute
+additively. Unknown fields for the chosen `kind` are rejected by the
+claiming builder's `validate_params`.
 
 #### `[[bond_types]]` (optional array of tables) <!-- rq-e4420955 -->
 
@@ -787,16 +805,25 @@ one or more rows in the `.topology` file's `[bonds]` section. Bond
 types whose `name` is never used in the file are permitted
 (declared-but-unused).
 
+Each entry is open-shaped and kind-tagged: the two common fields below
+are parsed centrally, and every other field is captured into the entry's
+`params` table, which is validated, unit-converted, and consumed by the
+registered potential builder that claims the entry's `kind` (see
+`forces/framework.md`'s *Potential params claims*).
+
 Common fields:
 
 - `name: String` — unique identifier within the `[[bond_types]]` array.
   Empty strings are rejected. Case-sensitive.
-- `potential: String` — selects the bonded potential. The supported
-  values are `"morse"` and `"harmonic"`. Future values (`"fene"`, ...)
-  are reserved. A system may mix bond types of different potentials; each
-  bond is routed to the matching potential slot by its type.
+- `kind: String` — selects the bonded potential. The value must be
+  claimed by a registered potential builder for the bond-type category;
+  the built-in roster claims `"morse"` (see `forces/morse-bonded.md`) and
+  `"harmonic"` (see `forces/harmonic-bond.md`). A system may mix bond
+  types of different kinds; each bond is routed to the matching potential
+  slot by its type.
 
-Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
+Per-kind fields (captured into `params`) for `kind = "morse"`, validated
+by the Morse builder (see `forces/morse-bonded.md`):
 
 - `de: f64` — Morse well depth in joules. Required. Finite, strictly
   positive.
@@ -805,8 +832,8 @@ Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
 - `re: f64` — Morse equilibrium distance in metres. Required. Finite,
   strictly positive.
 
-Fields accepted for `potential = "harmonic"` (see
-`forces/harmonic-bond.md`):
+Per-kind fields (captured into `params`) for `kind = "harmonic"`,
+validated by the harmonic-bond builder (see `forces/harmonic-bond.md`):
 
 - `k: f64` — bond force constant in joules per metre², in the
   `U = ½ k (r − r_0)²` convention. Required. Finite, strictly positive.
@@ -814,7 +841,7 @@ Fields accepted for `potential = "harmonic"` (see
   positive.
 
 Names must be unique within the array. Unknown fields for the chosen
-`potential` are rejected.
+`kind` are rejected by the claiming builder's `validate_params`.
 
 #### `[[angle_types]]` (optional array of tables) <!-- rq-f2946c4a -->
 
@@ -825,16 +852,23 @@ of one or more rows in the `.topology` file's `[angles]` section. Angle
 types whose `name` is never used in the file are permitted
 (declared-but-unused).
 
+Each entry is open-shaped and kind-tagged: the two common fields below
+are parsed centrally, and every other field is captured into the entry's
+`params` table, which is validated, unit-converted, and consumed by the
+registered potential builder that claims the entry's `kind` (see
+`forces/framework.md`'s *Potential params claims*).
+
 Common fields:
 
 - `name: String` — unique identifier within the `[[angle_types]]`
   array. Empty strings are rejected. Case-sensitive.
-- `potential: String` — selects the angle potential. The only
-  supported value is `"harmonic"`. Future values
-  (`"cosine-harmonic"`, `"urey-bradley"`, ...) are reserved.
+- `kind: String` — selects the angle potential. The value must be
+  claimed by a registered potential builder for the angle-type category;
+  the built-in roster claims `"harmonic"` (see
+  `forces/harmonic-angle.md`).
 
-Fields accepted for `potential = "harmonic"` (see
-`forces/harmonic-angle.md`):
+Per-kind fields (captured into `params`) for `kind = "harmonic"`,
+validated by the harmonic-angle builder (see `forces/harmonic-angle.md`):
 
 - `k_theta: f64` — angle force constant in joules per radian². Required.
   Finite, strictly positive.
@@ -842,7 +876,7 @@ Fields accepted for `potential = "harmonic"` (see
   `[0, π]`.
 
 Names must be unique within the array. Unknown fields for the chosen
-`potential` are rejected.
+`kind` are rejected by the claiming builder's `validate_params`.
 
 #### `[[dihedral_types]]` (optional array of tables) <!-- rq-6d4a49ac -->
 
@@ -858,15 +892,34 @@ multiple Fourier terms by appearing once in `[dihedrals]` per term,
 with each row naming a distinct `[[dihedral_types]]` entry. This is
 the canonical multi-term representation.
 
+Each entry is open-shaped and kind-tagged: the common fields below are
+parsed centrally, and every other field is captured into the entry's
+`params` table, which is validated, unit-converted, and consumed by the
+registered potential builder that claims the entry's `kind` (see
+`forces/framework.md`'s *Potential params claims*).
+
 Common fields:
 
 - `name: String` — unique identifier within the `[[dihedral_types]]`
   array. Empty strings are rejected. Case-sensitive.
-- `potential: String` — selects the dihedral potential. The
-  currently supported value is `"periodic"`. Future values
-  (`"ryckaert-bellemans"`, …) are reserved.
+- `kind: String` — selects the dihedral potential. The value must be
+  claimed by a registered potential builder for the dihedral-type
+  category; the built-in roster claims `"periodic"` (see
+  `forces/periodic-dihedral.md`).
+- `scale_lj_14: f64` — optional. Default `0.5`. Finite, in
+  `[0.0, 1.0]`. Lennard-Jones scale factor applied to the implicit
+  1-4 exclusion derived from any `[dihedrals]` row that names this
+  type and is the first to introduce its `(atom_i, atom_l)` pair
+  (see `forces/topology.md`'s *Effective exclusions*). A common field
+  for every kind: the implicit 1-4 exclusion derivation is a property
+  of the dihedral type independent of the functional form, and is
+  performed centrally by the topology parser.
+- `scale_coul_14: f64` — optional. Default `1.0 / 1.2 ≈ 0.83333`.
+  Finite, in `[0.0, 1.0]`. Coulomb scale factor applied to the same
+  implicit 1-4 exclusion. Common for every kind, like `scale_lj_14`.
 
-Fields accepted for `potential = "periodic"` (see
+Per-kind fields (captured into `params`) for `kind = "periodic"`,
+validated by the periodic-dihedral builder (see
 `forces/periodic-dihedral.md`):
 
 - `k_phi: f64` — torsion force constant in joules. Required. Finite.
@@ -874,17 +927,9 @@ Fields accepted for `potential = "periodic"` (see
 - `n: u32` — multiplicity. Required. Integer in `[1, 6]`.
 - `phi_0: f64` — phase offset in radians. Required. Finite, in
   `[−2π, 2π]`.
-- `scale_lj_14: f64` — optional. Default `0.5`. Finite, in
-  `[0.0, 1.0]`. Lennard-Jones scale factor applied to the implicit
-  1-4 exclusion derived from any `[dihedrals]` row that names this
-  type and is the first to introduce its `(atom_i, atom_l)` pair
-  (see `forces/topology.md`'s *Effective exclusions*).
-- `scale_coul_14: f64` — optional. Default `1.0 / 1.2 ≈ 0.83333`.
-  Finite, in `[0.0, 1.0]`. Coulomb scale factor applied to the same
-  implicit 1-4 exclusion.
 
 Names must be unique within the array. Unknown fields for the chosen
-`potential` are rejected.
+`kind` are rejected by the claiming builder's `validate_params`.
 
 #### `[[constraint_types]]` (optional array of tables) <!-- rq-7e9cb164 -->
 
@@ -1193,16 +1238,23 @@ path:
    `[[particle_types]]`. Unknown names produce `UnknownTypeInPair { name,
    pair_index }` where `pair_index` is the zero-based index in the
    `pair_interactions` array.
-2. Every unordered pair of declared types **resolves** to exactly one set
-   of Lennard-Jones parameters, by one of two routes: an explicit
-   `[[pair_interactions]]` override for that pair, or combining the two
+2. Whenever the config declares any Lennard-Jones input — a
+   `[lennard_jones]` table, a `sigma`/`epsilon` pair on any
+   `[[particle_types]]` entry, or at least one
+   `kind = "lennard-jones"` `[[pair_interactions]]` entry — every
+   unordered pair of declared types **resolves** to exactly one set of
+   Lennard-Jones parameters, by one of two routes: an explicit
+   `kind = "lennard-jones"` entry for that pair, or combining the two
    types' per-type `sigma`/`epsilon` via the `[lennard_jones]` table's
-   `combining_rule`. A pair that has no override and cannot be combined
+   `combining_rule`. A pair that has no entry and cannot be combined
    (the `[lennard_jones]` table is absent, or one of the two types omits
    `sigma`/`epsilon`) produces
-   `UnresolvedPairInteraction { types: (String, String) }`. Two overrides
-   for the same pair produce
-   `DuplicatePairInteraction { types: (String, String) }`. All reported
+   `UnresolvedPairInteraction { types: (String, String) }`. A config
+   with no Lennard-Jones input at all skips this check entirely. Two
+   `[[pair_interactions]]` entries of the same `kind` covering the same
+   pair produce
+   `DuplicatePairInteraction { types: (String, String) }`; entries of
+   different kinds on the same pair are permitted. All reported
    tuples are normalised so the lexicographically smaller name comes
    first.
 2a. When the `[lennard_jones]` table is present, `combining_rule` is a
@@ -1212,6 +1264,16 @@ path:
     (`InvalidValue` otherwise). Each `[[particle_types]]` entry supplies
     `sigma`/`epsilon` together or omits both, and each supplied value is
     finite and `>= 0` (`InvalidValue` otherwise).
+2b. Every `[[pair_interactions]]` entry's common `cutoff` is finite and
+    strictly positive, and every `[[dihedral_types]]` entry's common
+    `scale_lj_14` / `scale_coul_14` (when supplied) is finite and in
+    `[0.0, 1.0]` (`InvalidValue` otherwise). Every `[[bond_types]]` /
+    `[[angle_types]]` / `[[dihedral_types]]` entry's `name` is non-empty
+    and unique within its array (`InvalidValue` /
+    `DuplicateBondTypeName` / `DuplicateAngleTypeName` /
+    `DuplicateDihedralTypeName` otherwise). Per-kind `params` contents
+    are not inspected here; they are validated by the claiming builders
+    during `validate_against` (item 13a below).
 3. The merged phase sequence (`[[phase]]` ∪ `[[minimization]]`) is
    non-empty (`EmptyPhases` otherwise).
 4. Every phase (MD or minimization) has a non-empty ASCII-only `name`
@@ -1258,6 +1320,17 @@ per phase, in declaration order:
 13. Same as (10) and (11) for every `[[constraint_types]]` entry
     against `registries.constraint_types` (checked once, not per
     phase — constraint types are global).
+13a. Every `[[pair_interactions]]`, `[[bond_types]]`,
+    `[[angle_types]]`, and `[[dihedral_types]]` entry's `kind` is
+    claimed by a registered builder in `registries.potentials` for the
+    entry's category (checked once — potential tables are global).
+    An unclaimed kind surfaces as
+    `ConfigError::UnknownKind { slot, kind }` with `slot` carrying
+    `"pair_interactions"`, `"bond_types"`, `"angle_types"`, or
+    `"dihedral_types"`. The claiming builder's
+    `validate_params(entry)` (see `forces/framework.md`'s *Potential
+    params claims*) then runs on each claimed entry and any
+    builder-produced `ConfigError` propagates.
 14. If `[phase.thermostat]` is present and
     `registries.integrators.lookup(&phase.integrator.kind).unwrap()
     .owns_thermostat(&phase.integrator.params)` returns `true`,
@@ -1331,11 +1404,13 @@ phase failures.
     `[[minimization]]` entries. The `MinimizationConfig` type is
     documented in `rqm/minimization/steepest-descent.md`.
   - `particle_types: Vec<ParticleTypeConfig>`
-  - `pair_interactions: Vec<PairInteractionConfig>` — explicit per-pair
-    LJ overrides; empty when the `[[pair_interactions]]` array is absent.
+  - `pair_interactions: Vec<PairInteractionConfig>` — open-shaped
+    per-pair potential entries; empty when the `[[pair_interactions]]`
+    array is absent.
   - `lennard_jones: Option<LennardJonesConfig>` — `Some` when the
     `[lennard_jones]` table is present, `None` otherwise. Carries the
-    combining rule and the cutoff for pairs without an override.
+    combining rule and the cutoff for pairs without a
+    `kind = "lennard-jones"` entry.
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
     array is absent.
   - `angle_types: Vec<AngleTypeConfig>` — empty when the
@@ -1440,22 +1515,34 @@ phase failures.
     is `Some`.
   - `charge: f64` — defaults to `0.0` when the TOML field is omitted.
 
-- `PairInteractionConfig` <!-- rq-f001eaf8 -->
-  - `between: (String, String)` — stored normalised so the lexicographically
-    smaller string comes first, regardless of source order.
-  - `cutoff: f64` — pair distance in metres beyond which the force is
-    treated as zero.
-  - `r_switch: f64` — inner switching radius. Populated from the
-    user-supplied `r_switch` when present, otherwise from the default
-    `0.9 * cutoff`. Always satisfies `0 < r_switch <= cutoff`.
-  - `potential: PairPotentialParams` — tagged enum carrying the chosen
-    pair potential's functional-form parameters.
+- `PairInteractionConfig` — open-shaped parsed entry for the <!-- rq-f001eaf8 -->
+  `[[pair_interactions]]` array.
 
-- `PairPotentialParams` — tagged enum carrying the functional-form <!-- rq-70442e07 -->
-  parameters of a pair potential. Variants:
-  - `LennardJones { sigma: f64, epsilon: f64 }` — selected by
-    `potential = "lennard-jones"`. `sigma` is the LJ zero-crossing
-    distance in metres; `epsilon` is the LJ well depth in joules.
+  ```rust
+  pub struct PairInteractionConfig {
+      pub between: (String, String),
+      pub kind: String,
+      pub cutoff: f64,
+      pub params: toml::Value,
+  }
+  ```
+
+  - `between` — stored normalised so the lexicographically smaller
+    string comes first, regardless of source order.
+  - `kind` — the user-supplied `kind = "..."` field verbatim
+    (case-sensitive); matched against registered potential builders'
+    pair-interaction claims (see `forces/framework.md`'s *Potential
+    params claims*).
+  - `cutoff` — pair distance in metres beyond which the force is
+    treated as zero. Parsed and validated centrally because the shared
+    neighbour list's search radius and the box-compatibility check
+    read it without consulting any builder.
+  - `params` — every other field of the entry flattened into a
+    `toml::Value`. The framework never inspects `params`; the claiming
+    builder deserialises its own typed parameter struct from it (for
+    `kind = "lennard-jones"`, `LjPairParams` — see
+    `forces/lj-pair-force.md`, which owns the `sigma` / `epsilon` /
+    `r_switch` fields and the `r_switch` default of `0.9 * cutoff`).
 
 - `LennardJonesConfig` — parsed `[lennard_jones]` table. <!-- rq-b248aadf -->
   - `combining_rule: CombiningRule` — how a combined pair's `(sigma,
@@ -1473,40 +1560,61 @@ phase failures.
     `epsilon_ij = sqrt(epsilon_i · epsilon_j)`. See
     `forces/lj-pair-force.md`.
 
-- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential <!-- rq-2f230ccb -->
-  parameters. Variants:
-  - `Morse { name: String, de: f64, a: f64, re: f64 }` — selected by
-    `potential = "morse"`.
-  - `Harmonic { name: String, k: f64, r0: f64 }` — selected by
-    `potential = "harmonic"`. `k` uses the `U = ½ k (r − r_0)²`
-    convention.
+- `BondTypeConfig` — open-shaped parsed entry for the <!-- rq-2f230ccb -->
+  `[[bond_types]]` array.
 
-  The `name` field is the lookup key referenced from the `.topology`
-  file's `[bonds]` section.
+  ```rust
+  pub struct BondTypeConfig {
+      pub name: String,
+      pub kind: String,
+      pub params: toml::Value,
+  }
+  ```
 
-- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential <!-- rq-a47beb76 -->
-  parameters. Variants:
-  - `Harmonic { name: String, k_theta: f64, theta_0: f64 }` — selected
-    by `potential = "harmonic"`.
+  - `name` — the lookup key referenced from the `.topology` file's
+    `[bonds]` section.
+  - `kind` — matched against registered potential builders' bond-type
+    claims. The built-in roster claims `"morse"` (params `de` / `a` /
+    `re`; see `forces/morse-bonded.md`) and `"harmonic"` (params `k` /
+    `r0` in the `U = ½ k (r − r_0)²` convention; see
+    `forces/harmonic-bond.md`).
+  - `params` — every other field flattened into a `toml::Value`,
+    consumed by the claiming builder.
 
-  The `name` field is the lookup key referenced from the `.topology`
-  file's `[angles]` section.
+- `AngleTypeConfig` — open-shaped parsed entry for the <!-- rq-a47beb76 -->
+  `[[angle_types]]` array. Same shape as `BondTypeConfig`
+  (`name`, `kind`, `params`); `name` is the lookup key referenced from
+  the `.topology` file's `[angles]` section, and the built-in roster
+  claims `"harmonic"` (params `k_theta` / `theta_0`; see
+  `forces/harmonic-angle.md`).
 
-- `DihedralTypeConfig` — tagged enum carrying the chosen <!-- rq-edfc2b75 -->
-  dihedral-potential parameters and the per-type 1-4 scale factors.
-  Variants:
-  - `Periodic { name: String, k_phi: f64, n: u32, phi_0: f64, scale_lj_14: f64, scale_coul_14: f64 }`
-    — selected by `potential = "periodic"`. `scale_lj_14` and
-    `scale_coul_14` carry the validated defaults (`0.5` and
-    `1.0 / 1.2`) when omitted from the TOML source.
+- `DihedralTypeConfig` — open-shaped parsed entry for the <!-- rq-edfc2b75 -->
+  `[[dihedral_types]]` array.
 
-  The `name` field is the lookup key referenced from the
-  `.topology` file's `[dihedrals]` section. The enum is designed so
-  that future dihedral functional forms (Ryckaert-Bellemans, …)
-  land as additional variants without disturbing the
-  `Periodic` variant. Every variant carries `scale_lj_14` and
-  `scale_coul_14`, since the implicit 1-4 exclusion derivation is a
-  property of the dihedral type independent of the functional form.
+  ```rust
+  pub struct DihedralTypeConfig {
+      pub name: String,
+      pub kind: String,
+      pub scale_lj_14: f64,
+      pub scale_coul_14: f64,
+      pub params: toml::Value,
+  }
+  ```
+
+  - `name` — the lookup key referenced from the `.topology` file's
+    `[dihedrals]` section.
+  - `kind` — matched against registered potential builders'
+    dihedral-type claims. The built-in roster claims `"periodic"`
+    (params `k_phi` / `n` / `phi_0`; see
+    `forces/periodic-dihedral.md`).
+  - `scale_lj_14` / `scale_coul_14` — common typed fields carrying the
+    validated defaults (`0.5` and `1.0 / 1.2`) when omitted from the
+    TOML source. They are common rather than per-kind because the
+    implicit 1-4 exclusion derivation is a property of the dihedral
+    type independent of the functional form, and is performed
+    centrally by the topology parser.
+  - `params` — every other field flattened into a `toml::Value`,
+    consumed by the claiming builder.
 
 - `[[constraint_types]]` entries deserialise into `NamedSlotConfig` <!-- rq-ac8fc96a -->
   values (see `NamedSlotConfig` above). Each entry's `kind` selects
@@ -1573,17 +1681,16 @@ phase failures.
   - `Parse { path: String, message: String }` — the TOML deserialiser
     rejected the document for a structural reason: a syntax error, a
     type mismatch, a field that is unknown for its enclosing table,
-    or an enum tag (`kind`, `potential`, `mode`) whose string does not
-    match any registered variant. `path` is a dotted, JSON-pointer-like
-    location within the document; `message` is the underlying
-    parser/deserialiser message.
-    - For an **unknown enum tag** (e.g. `[integrator] kind =
-      "custom"`), `path` is the path of the tag field itself
-      (`"integrator.kind"`, `"pair_interactions[0].potential"`,
-      `"bond_types[0].potential"`, `"angle_types[0].potential"`,
-      `"neighbor_list.mode"`, etc.).
+    or a closed-enum tag (`mode`) whose string does not match any
+    variant. `path` is a dotted, JSON-pointer-like location within the
+    document; `message` is the underlying parser/deserialiser message.
+    An unregistered / unclaimed `kind` string is not a `Parse` error;
+    it surfaces as `UnknownKind` from `validate_against` (which
+    `load_config` runs against the built-in registries).
     - For an **unknown field** (e.g. `[integrator] kind =
-      "velocity-verlet" friction = 1.0e12`), `path` is the path of
+      "velocity-verlet" friction = 1.0e12`, or a
+      `[[pair_interactions]]` entry with a field its claiming
+      builder's typed params do not declare), `path` is the path of
       the enclosing table (`"integrator"`, `"thermostat"`,
       `"barostat"`, `"pair_interactions[0]"`, `"bond_types[0]"`,
       `"angle_types[0]"`, `"neighbor_list"`). The offending field
@@ -1597,10 +1704,13 @@ phase failures.
   - `UnknownUnits { got: String }` — the top-level `units` field is
     present but is not one of the accepted lowercase strings (`"si"`
     or `"atomic"`). Comparison is case-sensitive.
-  - `MissingField { field: String }` — a required field is absent at
-    deserialisation time. `field` uses the same dotted notation as
-    `Parse.path` (e.g. `"simulation.dt"`, `"integrator.kind"`,
-    `"pair_interactions[0].sigma"`).
+  - `MissingField { field: String }` — a required field is absent,
+    either at deserialisation time (a common field, e.g.
+    `"simulation.dt"`, `"integrator.kind"`, `"bond_types[0].kind"`)
+    or when a claiming builder's typed params deserialisation finds a
+    required per-kind field missing (e.g.
+    `"pair_interactions[0].sigma"`). `field` uses the same dotted
+    notation as `Parse.path`.
   - `InvalidValue { field: String, reason: String }` — a field
     deserialised to the right type but failed a range, finiteness, or
     domain check (positive, non-NaN, in `[0, π]`, non-empty string,
@@ -1612,14 +1722,16 @@ phase failures.
   - `UnknownTypeInPair { name: String, pair_index: usize }` — a
     `[[pair_interactions]]` entry's `between` field names a type not
     declared in `[[particle_types]]`.
-  - `UnresolvedPairInteraction { types: (String, String) }` — an
-    unordered pair of declared types has no `[[pair_interactions]]`
-    override and cannot be combined (the `[lennard_jones]` table is
-    absent, or one of the two types omits `sigma`/`epsilon`). Tuple is
-    normalised so the lexicographically smaller name comes first.
+  - `UnresolvedPairInteraction { types: (String, String) }` — the
+    config declares Lennard-Jones input, and an unordered pair of
+    declared types has no `kind = "lennard-jones"`
+    `[[pair_interactions]]` entry and cannot be combined (the
+    `[lennard_jones]` table is absent, or one of the two types omits
+    `sigma`/`epsilon`). Tuple is normalised so the lexicographically
+    smaller name comes first.
   - `DuplicatePairInteraction { types: (String, String) }` — two
-    `[[pair_interactions]]` entries cover the same unordered pair.
-    Tuple normalised as above.
+    `[[pair_interactions]]` entries of the same `kind` cover the same
+    unordered pair. Tuple normalised as above.
   - `UnknownCombiningRule { got: String }` — the `[lennard_jones]`
     table's `combining_rule` is not a recognised value. The only
     supported value is `"lorentz-berthelot"`.
@@ -1673,9 +1785,13 @@ phase failures.
     `[integrator]`, `[thermostat]`, `[barostat]`,
     `[[constraint_types]]`, or `[minimization.algorithm]` entry's
     `kind` field does not match any registered builder in the
-    corresponding registry. `slot` carries `"integrator"`,
-    `"thermostat"`, `"barostat"`, `"constraint_types"`, or
-    `"minimization"`.
+    corresponding registry, or a `[[pair_interactions]]`,
+    `[[bond_types]]`, `[[angle_types]]`, or `[[dihedral_types]]`
+    entry's `kind` is not claimed by any registered potential builder
+    for the entry's category. `slot` carries `"integrator"`,
+    `"thermostat"`, `"barostat"`, `"constraint_types"`,
+    `"minimization"`, `"pair_interactions"`, `"bond_types"`,
+    `"angle_types"`, or `"dihedral_types"`.
   - `ShakeParamsMalformed { name: String, reason: String }`
     — a `[[constraint_types]]` entry with `kind = "shake"` violates
     one of the `ShakeParams` constraints documented in
@@ -1686,20 +1802,24 @@ phase failures.
   `Parse` covers every shape error the typed deserialiser flags
   structurally that does not require registry knowledge: unknown
   fields under a closed-enum table (e.g. `mode` outside the accepted
-  set in `[neighbor_list]`, an unknown `potential` in
-  `[[pair_interactions]]`); wrong TOML types (e.g. a string where an
+  set in `[neighbor_list]`); wrong TOML types (e.g. a string where an
   integer is required); and raw TOML syntax errors. `path` carries the
   document location so callers can present a useful diagnostic without
   inspecting `message`.
 
   Per-kind parameter shape errors for the open-builder slots
   (`[integrator]`, `[thermostat]`, `[barostat]`,
-  `[[constraint_types]]`) — including unknown fields under the chosen
-  `kind` and out-of-domain numeric values — surface from the matching
-  builder's `validate_params(&toml::Value)` during
-  `Config::validate_against(&registries)`. Builders return
-  `ConfigError::InvalidValue`, `ConfigError::ShakeParamsMalformed`,
-  or `ConfigError::Parse` as appropriate for their parameter shape.
+  `[[constraint_types]]`) and the open potential tables
+  (`[[pair_interactions]]`, `[[bond_types]]`, `[[angle_types]]`,
+  `[[dihedral_types]]`) — including unknown fields under the chosen
+  `kind`, missing required per-kind fields, and out-of-domain numeric
+  values — surface from the matching builder's `validate_params`
+  during `Config::validate_against(&registries)`. Builders return
+  `ConfigError::MissingField`, `ConfigError::InvalidValue`,
+  `ConfigError::ShakeParamsMalformed`, or `ConfigError::Parse` as
+  appropriate for their parameter shape, with `field` / `path`
+  carrying the full document-relative dotted path (e.g.
+  `"bond_types[0].de"`).
 
 ### Functions <!-- rq-39891001 -->
 
@@ -1841,13 +1961,16 @@ phase failures.
   (e.g. LJ-reduced, GROMACS nm/ps, LAMMPS real/metal).
 - Non-orthorhombic boxes (the box lives in the init file; see
   `init-state-file.md`).
-- Potentials other than Lennard-Jones; bonded terms; long-range
-  electrostatics.
-- Mixing rules (Lorentz-Berthelot, geometric); every pair is enumerated
-  explicitly.
+- Combining rules other than Lorentz-Berthelot (`"geometric"`,
+  `"waldman-hagler"`, ... are reserved and rejected).
+- An open params passthrough for the `[lennard_jones]` and `[spme]`
+  tables. These are slot-global configuration owned by the loader as
+  typed, closed tables, not per-entry potential selections; only the
+  four potential type tables (`[[pair_interactions]]`,
+  `[[bond_types]]`, `[[angle_types]]`, `[[dihedral_types]]`) carry
+  builder-owned `params`.
 - Restart files and resume semantics (a separate planned feature).
 - CLI flag overrides of config fields. Every parameter lives in the file.
-- Thermostats and barostats; the integrator is microcanonical.
 - Per-particle or per-type initial temperatures (one global field).
 - Compile-time `f64` precision feature flag.
 - Filesystem existence checks for resolved paths; that is the runner's
@@ -1866,7 +1989,7 @@ Feature: TOML simulation config schema
       one [[phase]] entry with name="run", n_steps=10, dt=1.0e-15,
         [phase.integrator] kind="velocity-verlet" and lossless=false,
       one [[particle_types]] entry with name="Ar" and mass=6.6335e-26,
-      one [[pair_interactions]] entry between=["Ar","Ar"], potential="lennard-jones",
+      one [[pair_interactions]] entry between=["Ar","Ar"], kind="lennard-jones",
         sigma=3.40e-10, epsilon=1.65e-21, cutoff=1.0e-9
 
   # --- Happy path ---
@@ -1888,7 +2011,9 @@ Feature: TOML simulation config schema
     And config.pair_interactions has length 1
     And config.pair_interactions[0].between equals ("Ar", "Ar")
     And config.pair_interactions[0].cutoff equals 1.0e-9
-    And config.pair_interactions[0].potential matches PairPotentialParams::LennardJones { sigma: 3.40e-10, epsilon: 1.65e-21 }
+    And config.pair_interactions[0].kind equals "lennard-jones"
+    And config.pair_interactions[0].params.get("sigma") equals Some(toml::Value::Float(3.40e-10))
+    And config.pair_interactions[0].params.get("epsilon") equals Some(toml::Value::Float(1.65e-21))
     And config.init equals "/tmp/sim/argon.in.xyz"
     And config.config_path equals "/tmp/sim/argon.in.toml"
 
@@ -2237,14 +2362,14 @@ Feature: TOML simulation config schema
     Given the Background config with pair_interactions[0].epsilon=0.0
     When load_config is called
     Then it returns Ok(config)
-    And config.pair_interactions[0] carries epsilon = 0.0
+    And config.pair_interactions[0].params.get("epsilon") equals Some(toml::Value::Float(0.0))
 
   @rq-cbcc4e3b
   Scenario: Accept sigma = 0
     Given the Background config with pair_interactions[0].sigma=0.0
     When load_config is called
     Then it returns Ok(config)
-    And config.pair_interactions[0] carries sigma = 0.0
+    And config.pair_interactions[0].params.get("sigma") equals Some(toml::Value::Float(0.0))
 
   @rq-ae65c293
   Scenario: Reject non-positive cutoff
@@ -2258,15 +2383,17 @@ Feature: TOML simulation config schema
       and pair_interactions[0].r_switch=9.0e-10
     When load_config is called
     Then it returns Ok
-    And config.pair_interactions[0].r_switch equals 9.0e-10
+    And config.pair_interactions[0].params.get("r_switch") equals Some(toml::Value::Float(9.0e-10))
 
   @rq-6f4f5ece
-  Scenario: Default r_switch to 0.9 * cutoff when omitted
+  Scenario: An omitted r_switch stays absent from params (defaulted at build time)
     Given the Background config with pair_interactions[0].cutoff=1.0e-9
       and no r_switch field on pair_interactions[0]
     When load_config is called
     Then it returns Ok
-    And config.pair_interactions[0].r_switch equals 9.0e-10 within f64 round-off
+    And config.pair_interactions[0].params has no "r_switch" key
+    # The Lennard-Jones builder resolves the omitted r_switch to
+    # 0.9 * cutoff at build time; see forces/lj-pair-force.md.
 
   @rq-1d8b8efe
   Scenario: Accept r_switch equal to cutoff (hard-cutoff degenerate case)
@@ -2274,7 +2401,7 @@ Feature: TOML simulation config schema
       and pair_interactions[0].r_switch=1.0e-9
     When load_config is called
     Then it returns Ok
-    And config.pair_interactions[0].r_switch equals 1.0e-9
+    And config.pair_interactions[0].params.get("r_switch") equals Some(toml::Value::Float(1.0e-9))
 
   @rq-7cd9471a
   Scenario: Reject r_switch greater than cutoff
@@ -2296,22 +2423,24 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
 
   @rq-e38aac7b
-  Scenario: Reject unknown pair potential
-    Given the Background config with pair_interactions[0].potential="morse"
+  Scenario: Reject a pair kind no registered builder claims
+    Given the Background config with pair_interactions[0].kind="morse"
+    # "morse" is claimed for the bond-type category, not the
+    # pair-interaction category; category-scoped claims do not cross over.
     When load_config is called
-    Then it returns Err(ConfigError::Parse { path, .. })
-    And path equals "pair_interactions[0].potential"
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "pair_interactions", kind: "morse" })
 
   @rq-45a14d49
   Scenario: Lennard-Jones pair interaction missing sigma is rejected
-    Given the Background config with pair_interactions[0] having potential="lennard-jones",
+    Given the Background config with pair_interactions[0] having kind="lennard-jones",
       epsilon=1.65e-21, cutoff=1.0e-9, and no sigma field
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "pair_interactions[0].sigma" })
 
   @rq-053613b6
-  Scenario: Pair interaction rejects an extra field for the chosen potential
-    Given the Background config with pair_interactions[0] having potential="lennard-jones"
+  Scenario: Pair interaction rejects an extra field for the chosen kind
+    Given the Background config with pair_interactions[0] having kind="lennard-jones"
       and an unknown field stiffness=1.0
     When load_config is called
     Then it returns Err(ConfigError::Parse { path, message })
@@ -2347,10 +2476,23 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::UnresolvedPairInteraction { types: ("Ar", "Kr") })
 
   @rq-f11e9d4c
-  Scenario: Reject duplicate pair interaction
-    Given a config with two pair_interactions both between=["Ar","Ar"]
+  Scenario: Reject duplicate pair interaction of the same kind
+    Given a config with two kind="lennard-jones" pair_interactions both between=["Ar","Ar"]
     When load_config is called
     Then it returns Err(ConfigError::DuplicatePairInteraction { types: ("Ar", "Ar") })
+
+  @rq-a7ecc7be
+  Scenario: A config with no Lennard-Jones input skips pair resolution
+    Given a config with two declared types "Ar" and "Kr" carrying no sigma/epsilon,
+      no [lennard_jones] table, no [[pair_interactions]] entries,
+      and [neighbor_list] mode = "all-pairs"
+    When load_config is called
+    Then it returns Ok(config)
+    # No Lennard-Jones input means no Lennard-Jones slot and no
+    # pair-coverage requirement; forces come from whatever other
+    # potentials the config activates. The explicit all-pairs neighbour
+    # list avoids the cell-list default's r_skin = 0.3 * max_cutoff,
+    # which is zero when no potential contributes a cutoff.
 
   # --- Lennard-Jones combining rules ---
 
@@ -2515,52 +2657,54 @@ Feature: TOML simulation config schema
   @rq-f704561b
   Scenario: Valid Morse bond_type is accepted
     Given the Background config plus
-      [[bond_types]] name="ArAr" potential="morse" de=1.65e-21 a=1.9e10 re=3.4e-10
+      [[bond_types]] name="ArAr" kind="morse" de=1.65e-21 a=1.9e10 re=3.4e-10
     When load_config is called
     Then it returns Ok(config)
     And config.bond_types has length 1
-    And config.bond_types[0] matches BondTypeConfig::Morse { name: "ArAr", de: 1.65e-21, a: 1.9e10, re: 3.4e-10 }
+    And config.bond_types[0].name equals "ArAr"
+    And config.bond_types[0].kind equals "morse"
+    And config.bond_types[0].params carries de=1.65e-21, a=1.9e10, re=3.4e-10
 
   @rq-c79a1408
-  Scenario: bond_type missing potential field
-    Given the Background config plus a [[bond_types]] entry with name="X" but no potential
+  Scenario: bond_type missing kind field
+    Given the Background config plus a [[bond_types]] entry with name="X" but no kind
     When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "bond_types[0].potential" })
+    Then it returns Err(ConfigError::MissingField { field: "bond_types[0].kind" })
 
   @rq-3f01c746
-  Scenario: bond_type unknown potential is rejected
-    Given a [[bond_types]] entry with potential="fene"
+  Scenario: bond_type kind with no claiming builder is rejected
+    Given a [[bond_types]] entry with kind="fene"
     When load_config is called
-    Then it returns Err(ConfigError::Parse { path, .. })
-    And path equals "bond_types[0].potential"
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "bond_types", kind: "fene" })
 
   @rq-3b0e8140
   Scenario: Morse bond_type missing de is rejected
-    Given a [[bond_types]] entry with potential="morse", a=1.9e10, re=3.4e-10 (no de)
+    Given a [[bond_types]] entry with kind="morse", a=1.9e10, re=3.4e-10 (no de)
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "bond_types[0].de" })
 
   @rq-ecc8f632
   Scenario: Morse bond_type rejects non-positive de
-    Given a [[bond_types]] entry with potential="morse", de=0.0, a=1.9e10, re=3.4e-10
+    Given a [[bond_types]] entry with kind="morse", de=0.0, a=1.9e10, re=3.4e-10
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].de", reason: _ })
 
   @rq-ae85bf7b
   Scenario: Morse bond_type rejects non-positive a
-    Given a [[bond_types]] entry with potential="morse", de=1.0, a=-1.0, re=1.0
+    Given a [[bond_types]] entry with kind="morse", de=1.0, a=-1.0, re=1.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].a", reason: _ })
 
   @rq-3533e8a9
   Scenario: Morse bond_type rejects non-positive re
-    Given a [[bond_types]] entry with potential="morse", de=1.0, a=1.0, re=0.0
+    Given a [[bond_types]] entry with kind="morse", de=1.0, a=1.0, re=0.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].re", reason: _ })
 
   @rq-a208c9ba
   Scenario: Morse bond_type rejects extra fields
-    Given a [[bond_types]] entry with potential="morse" and an unknown field stiffness=1.0
+    Given a [[bond_types]] entry with kind="morse" and an unknown field stiffness=1.0
     When load_config is called
     Then it returns Err(ConfigError::Parse { path, message })
     And path equals "bond_types[0]"
@@ -2568,43 +2712,45 @@ Feature: TOML simulation config schema
   @rq-03ce839c
   Scenario: Valid harmonic bond_type is accepted
     Given the Background config plus
-      [[bond_types]] name="CT-CT" potential="harmonic" k=2.0e5 r0=1.526e-10
+      [[bond_types]] name="CT-CT" kind="harmonic" k=2.0e5 r0=1.526e-10
     When load_config is called
     Then it returns Ok(config)
     And config.bond_types has length 1
-    And config.bond_types[0] matches BondTypeConfig::Harmonic { name: "CT-CT", k: 2.0e5, r0: 1.526e-10 }
+    And config.bond_types[0].name equals "CT-CT"
+    And config.bond_types[0].kind equals "harmonic"
+    And config.bond_types[0].params carries k=2.0e5, r0=1.526e-10
 
   @rq-358e14aa
   Scenario: harmonic bond_type missing k is rejected
-    Given a [[bond_types]] entry with potential="harmonic", r0=1.0e-10 (no k)
+    Given a [[bond_types]] entry with kind="harmonic", r0=1.0e-10 (no k)
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "bond_types[0].k" })
 
   @rq-80d00b52
   Scenario: harmonic bond_type missing r0 is rejected
-    Given a [[bond_types]] entry with potential="harmonic", k=2.0e5 (no r0)
+    Given a [[bond_types]] entry with kind="harmonic", k=2.0e5 (no r0)
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "bond_types[0].r0" })
 
   @rq-0fdb2912
   Scenario: harmonic bond_type rejects non-positive k
-    Given a [[bond_types]] entry with potential="harmonic", k=0.0, r0=1.0e-10
+    Given a [[bond_types]] entry with kind="harmonic", k=0.0, r0=1.0e-10
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].k", reason: _ })
 
   @rq-9e91d178
   Scenario: harmonic bond_type rejects non-positive r0
-    Given a [[bond_types]] entry with potential="harmonic", k=2.0e5, r0=0.0
+    Given a [[bond_types]] entry with kind="harmonic", k=2.0e5, r0=0.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].r0", reason: _ })
 
   @rq-a21c5539
   Scenario: harmonic bond_type rejects extra fields
-    Given a [[bond_types]] entry with potential="harmonic", k=2.0e5, r0=1.0e-10 and an unknown field de=1.0
+    Given a [[bond_types]] entry with kind="harmonic", k=2.0e5, r0=1.0e-10 and an unknown field de=1.0
     When load_config is called
     Then it returns Err(ConfigError::Parse { path, message })
     And path equals "bond_types[0]"
-    And message mentions "stiffness"
+    And message mentions "de"
 
   @rq-ed1d6c71
   Scenario: Reject duplicate bond_type names
@@ -2630,46 +2776,48 @@ Feature: TOML simulation config schema
   @rq-91bf10ec
   Scenario: Valid harmonic angle_type is accepted
     Given the Background config plus
-      [[angle_types]] name="HOH" potential="harmonic" k_theta=5.27e-19 theta_0=1.911
+      [[angle_types]] name="HOH" kind="harmonic" k_theta=5.27e-19 theta_0=1.911
     When load_config is called
     Then it returns Ok(config)
     And config.angle_types has length 1
-    And config.angle_types[0] matches AngleTypeConfig::Harmonic { name: "HOH", k_theta: 5.27e-19, theta_0: 1.911 }
+    And config.angle_types[0].name equals "HOH"
+    And config.angle_types[0].kind equals "harmonic"
+    And config.angle_types[0].params carries k_theta=5.27e-19, theta_0=1.911
 
   @rq-57518e01
-  Scenario: angle_type missing potential field
-    Given the Background config plus an [[angle_types]] entry with name="X" but no potential
+  Scenario: angle_type missing kind field
+    Given the Background config plus an [[angle_types]] entry with name="X" but no kind
     When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "angle_types[0].potential" })
+    Then it returns Err(ConfigError::MissingField { field: "angle_types[0].kind" })
 
   @rq-ffa771bd
-  Scenario: angle_type unknown potential is rejected
-    Given an [[angle_types]] entry with potential="cosine-harmonic"
+  Scenario: angle_type kind with no claiming builder is rejected
+    Given an [[angle_types]] entry with kind="cosine-harmonic"
     When load_config is called
-    Then it returns Err(ConfigError::Parse { path, .. })
-    And path equals "angle_types[0].potential"
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "angle_types", kind: "cosine-harmonic" })
 
   @rq-dc94d9e3
   Scenario: Harmonic angle_type missing k_theta is rejected
-    Given an [[angle_types]] entry with potential="harmonic", theta_0=1.911 (no k_theta)
+    Given an [[angle_types]] entry with kind="harmonic", theta_0=1.911 (no k_theta)
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "angle_types[0].k_theta" })
 
   @rq-aad6ca63
   Scenario: Harmonic angle_type rejects non-positive k_theta
-    Given an [[angle_types]] entry with potential="harmonic", k_theta=0.0, theta_0=1.911
+    Given an [[angle_types]] entry with kind="harmonic", k_theta=0.0, theta_0=1.911
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].k_theta", reason: _ })
 
   @rq-e399422c
   Scenario: Harmonic angle_type rejects theta_0 outside [0, π]
-    Given an [[angle_types]] entry with potential="harmonic", k_theta=5.27e-19, theta_0=4.0
+    Given an [[angle_types]] entry with kind="harmonic", k_theta=5.27e-19, theta_0=4.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].theta_0", reason: _ })
 
   @rq-c5fa34f5
   Scenario: Harmonic angle_type rejects extra fields
-    Given an [[angle_types]] entry with potential="harmonic" and an unknown field stiffness=1.0
+    Given an [[angle_types]] entry with kind="harmonic" and an unknown field stiffness=1.0
     When load_config is called
     Then it returns Err(ConfigError::Parse { path, message })
     And path equals "angle_types[0]"
@@ -2699,99 +2847,102 @@ Feature: TOML simulation config schema
   @rq-53e43a30
   Scenario: Valid periodic dihedral_type is accepted
     Given the Background config plus
-      [[dihedral_types]] name="CT-CT-CT-CT_n3" potential="periodic"
+      [[dihedral_types]] name="CT-CT-CT-CT_n3" kind="periodic"
         k_phi=6.276e-22 n=3 phi_0=0.0
     When load_config is called
     Then it returns Ok(config)
     And config.dihedral_types has length 1
-    And config.dihedral_types[0] matches DihedralTypeConfig::Periodic {
-      name: "CT-CT-CT-CT_n3", k_phi: 6.276e-22, n: 3, phi_0: 0.0,
-      scale_lj_14: 0.5, scale_coul_14: ~0.8333 }
+    And config.dihedral_types[0].name equals "CT-CT-CT-CT_n3"
+    And config.dihedral_types[0].kind equals "periodic"
+    And config.dihedral_types[0].scale_lj_14 equals 0.5
+    And config.dihedral_types[0].scale_coul_14 equals ~0.8333
+    And config.dihedral_types[0].params carries k_phi=6.276e-22, n=3, phi_0=0.0
 
   @rq-2a0dcb1e
   Scenario: Periodic dihedral_type with explicit 1-4 scales overrides defaults
-    Given a [[dihedral_types]] entry with potential="periodic" k_phi=1.0 n=1
+    Given a [[dihedral_types]] entry with kind="periodic" k_phi=1.0 n=1
       phi_0=0.0 scale_lj_14=0.25 scale_coul_14=0.75
     When load_config is called
     Then config.dihedral_types[0].scale_lj_14 equals 0.25
     And config.dihedral_types[0].scale_coul_14 equals 0.75
 
   @rq-cd2911bd
-  Scenario: dihedral_type missing potential field
+  Scenario: dihedral_type missing kind field
     Given the Background config plus an [[dihedral_types]] entry with name="X"
-      but no potential
+      but no kind
     When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].potential" })
+    Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].kind" })
 
   @rq-180d0e97
-  Scenario: dihedral_type unknown potential is rejected
-    Given an [[dihedral_types]] entry with potential="not-a-real-potential"
+  Scenario: dihedral_type kind with no claiming builder is rejected
+    Given an [[dihedral_types]] entry with kind="not-a-real-kind"
     When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].potential", reason: _ })
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "dihedral_types", kind: "not-a-real-kind" })
 
   @rq-0c5e7b0d
   Scenario: Periodic dihedral_type missing k_phi is rejected
-    Given an [[dihedral_types]] entry with potential="periodic", n=1, phi_0=0.0
+    Given an [[dihedral_types]] entry with kind="periodic", n=1, phi_0=0.0
       (no k_phi)
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].k_phi" })
 
   @rq-c6575989
   Scenario: Periodic dihedral_type missing n is rejected
-    Given an [[dihedral_types]] entry with potential="periodic", k_phi=1.0,
+    Given an [[dihedral_types]] entry with kind="periodic", k_phi=1.0,
       phi_0=0.0 (no n)
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].n" })
 
   @rq-17bee31c
   Scenario: Periodic dihedral_type missing phi_0 is rejected
-    Given an [[dihedral_types]] entry with potential="periodic", k_phi=1.0, n=1
+    Given an [[dihedral_types]] entry with kind="periodic", k_phi=1.0, n=1
       (no phi_0)
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "dihedral_types[0].phi_0" })
 
   @rq-06369a61
   Scenario: Periodic dihedral_type rejects n = 0
-    Given an [[dihedral_types]] entry with potential="periodic" n=0
+    Given an [[dihedral_types]] entry with kind="periodic" n=0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].n", reason: _ })
 
   @rq-378b96c9
   Scenario: Periodic dihedral_type rejects n > 6
-    Given an [[dihedral_types]] entry with potential="periodic" n=7
+    Given an [[dihedral_types]] entry with kind="periodic" n=7
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].n", reason: _ })
 
   @rq-6afeb5c1
   Scenario: Periodic dihedral_type rejects non-finite k_phi
-    Given an [[dihedral_types]] entry with potential="periodic" k_phi=nan n=1 phi_0=0.0
+    Given an [[dihedral_types]] entry with kind="periodic" k_phi=nan n=1 phi_0=0.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].k_phi", reason: _ })
 
   @rq-c42b0c81
   Scenario: Periodic dihedral_type rejects phi_0 outside [-2π, 2π]
-    Given an [[dihedral_types]] entry with potential="periodic" k_phi=1.0 n=1
+    Given an [[dihedral_types]] entry with kind="periodic" k_phi=1.0 n=1
       phi_0=10.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].phi_0", reason: _ })
 
   @rq-480f7a8b
   Scenario: Periodic dihedral_type rejects scale_lj_14 outside [0, 1]
-    Given an [[dihedral_types]] entry with potential="periodic" k_phi=1.0 n=1
+    Given an [[dihedral_types]] entry with kind="periodic" k_phi=1.0 n=1
       phi_0=0.0 scale_lj_14=1.5
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].scale_lj_14", reason: _ })
 
   @rq-371e20eb
   Scenario: Periodic dihedral_type rejects scale_coul_14 outside [0, 1]
-    Given an [[dihedral_types]] entry with potential="periodic" k_phi=1.0 n=1
+    Given an [[dihedral_types]] entry with kind="periodic" k_phi=1.0 n=1
       phi_0=0.0 scale_coul_14=-0.1
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "dihedral_types[0].scale_coul_14", reason: _ })
 
   @rq-93536cac
   Scenario: Periodic dihedral_type rejects extra fields
-    Given an [[dihedral_types]] entry with potential="periodic" and an unknown
+    Given an [[dihedral_types]] entry with kind="periodic" and an unknown
       field foo=1.0
     When load_config is called
     Then it returns Err(ConfigError::Parse { path: "dihedral_types[0]", message })
@@ -3188,6 +3339,40 @@ Feature: TOML simulation config schema
     When config.validate_against(&registries) is called
     Then it returns Err(ConfigError::InvalidValue { field: "integrator.friction", .. })
 
+  @rq-03b385ae
+  Scenario: validate_against rejects a potential-table kind no builder claims
+    Given a Config whose bond_types[0].kind equals "fene"
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "bond_types", kind: "fene" })
+
+  @rq-6b721a52
+  Scenario: validate_against accepts a potential-table kind claimed by a registered custom builder
+    Given a Config whose bond_types[0].kind equals "fene"
+    And a Registries::with_builtins() extended by register_potential with a
+      builder whose params claim is (BondType, "fene") and whose
+      validate_params accepts the entry
+    When config.validate_against(&registries) is called
+    Then it returns Ok(())
+
+  @rq-c118d720
+  Scenario: validate_against surfaces a claiming potential builder's validate_params error
+    Given a Config with a bond_types[0] entry kind="morse", de=0.0, a=1.9e10, re=3.4e-10
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].de", .. })
+
+  @rq-47be884d
+  Scenario: Potential params claims are category-scoped
+    Given a Config whose pair_interactions[0].kind equals "harmonic"
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "pair_interactions", kind: "harmonic" })
+    # "harmonic" is claimed for the bond-type and angle-type categories;
+    # a claim in one category never satisfies another.
+
   @rq-0040baca
   Scenario: validate_against enforces IncompatibleThermostat from the builder predicate
     Given a Config whose integrator is "langevin-baoab" and whose thermostat is "csvr"
@@ -3352,17 +3537,17 @@ Feature: TOML simulation config schema
     Given a TOML file with `units = "si"` and a pair_interaction
       sigma written in metres
     When load_config is called
-    Then config.pair_interactions[0].potential's sigma equals the input
-      sigma divided by the bohr -> meter conversion factor (i.e. expressed
-      in Bohr)
+    Then config.pair_interactions[0].params carries sigma equal to the
+      input sigma divided by the bohr -> meter conversion factor (i.e.
+      expressed in Bohr)
 
   @rq-6c7779ef
   Scenario: Atomic-mode physical scalars pass through unchanged
     Given a TOML file with `units = "atomic"` and a pair_interaction
       sigma written in Bohr
     When load_config is called
-    Then config.pair_interactions[0].potential's sigma equals the input
-      sigma exactly
+    Then config.pair_interactions[0].params carries sigma equal to the
+      input sigma exactly
 
   @rq-cedbd670
   Scenario: Validation of SI-mode input runs on post-conversion atomic values

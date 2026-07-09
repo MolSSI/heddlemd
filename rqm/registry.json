@@ -515,6 +515,18 @@
     "title": "apply_move",
     "type": "api-item"
   },
+  "rq-03b385ae": {
+    "decl": "Scenario: validate_against rejects a potential-table kind no builder claims",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "validate_against rejects a potential-table kind no builder claims",
+    "type": "scenario"
+  },
   "rq-03c6490c": {
     "decl": "### File format precision selection",
     "file": "precision",
@@ -707,7 +719,7 @@
     "type": "scenario"
   },
   "rq-053613b6": {
-    "decl": "Scenario: Pair interaction rejects an extra field for the chosen potential",
+    "decl": "Scenario: Pair interaction rejects an extra field for the chosen kind",
     "file": "io/config-schema",
     "refs": [
       {
@@ -715,7 +727,7 @@
         "kind": "code"
       }
     ],
-    "title": "Pair interaction rejects an extra field for the chosen potential",
+    "title": "Pair interaction rejects an extra field for the chosen kind",
     "type": "scenario"
   },
   "rq-053a026c": {
@@ -2653,7 +2665,12 @@
     "decl": "## Parameters",
     "file": "forces/morse-bonded",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/morse.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Parameters",
     "type": "section"
   },
@@ -3105,6 +3122,18 @@
     "title": "Cloning a registry deep-copies its builders",
     "type": "scenario"
   },
+  "rq-165037d6": {
+    "decl": "Scenario: Built-in builders declare category-scoped params claims",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Built-in builders declare category-scoped params claims",
+    "type": "scenario"
+  },
   "rq-1658f77d": {
     "decl": "## File Format",
     "file": "io/trajectory-output",
@@ -3348,10 +3377,10 @@
     "type": "scenario"
   },
   "rq-180d0e97": {
-    "decl": "Scenario: dihedral_type unknown potential is rejected",
+    "decl": "Scenario: dihedral_type kind with no claiming builder is rejected",
     "file": "io/config-schema",
     "refs": [],
-    "title": "dihedral_type unknown potential is rejected",
+    "title": "dihedral_type kind with no claiming builder is rejected",
     "type": "scenario"
   },
   "rq-18165336": {
@@ -3691,6 +3720,10 @@
     "decl": "- `LennardJonesParameterTable::from_config(device: &Arc<CudaDevice>, <!-- inline -->",
     "file": "forces/lj-pair-force",
     "refs": [
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
       {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
@@ -4448,7 +4481,7 @@
     "type": "api-item"
   },
   "rq-1fc667cd": {
-    "decl": "Scenario: Config bond_type with an unknown potential is rejected",
+    "decl": "Scenario: Config bond_type with an unclaimed kind is rejected",
     "file": "forces/morse-bonded",
     "refs": [
       {
@@ -4456,7 +4489,7 @@
         "kind": "code"
       }
     ],
-    "title": "Config bond_type with an unknown potential is rejected",
+    "title": "Config bond_type with an unclaimed kind is rejected",
     "type": "scenario"
   },
   "rq-1fc720f6": {
@@ -4896,7 +4929,7 @@
     "type": "section"
   },
   "rq-225633c4": {
-    "decl": "Scenario: Config angle_type with potential != \"harmonic\" is rejected",
+    "decl": "Scenario: Config angle_type with an unclaimed kind is rejected",
     "file": "forces/harmonic-angle",
     "refs": [
       {
@@ -4904,7 +4937,7 @@
         "kind": "code"
       }
     ],
-    "title": "Config angle_type with potential != \"harmonic\" is rejected",
+    "title": "Config angle_type with an unclaimed kind is rejected",
     "type": "scenario"
   },
   "rq-22755b52": {
@@ -6664,7 +6697,7 @@
     "type": "api-item"
   },
   "rq-2f230ccb": {
-    "decl": "- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential",
+    "decl": "- `BondTypeConfig` — open-shaped parsed entry for the",
     "file": "io/config-schema",
     "refs": [
       {
@@ -7389,6 +7422,38 @@
     "title": "CombiningRule",
     "type": "api-item"
   },
+  "rq-35a89768": {
+    "decl": "- `PotentialParamsClaim` — a builder's declaration of the potential-table",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "src/forces/angle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/harmonic_bond.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PotentialParamsClaim",
+    "type": "api-item"
+  },
   "rq-35af4d98": {
     "decl": "Scenario: apply_influence produces V_hat[k] = G[k] * rho_hat[k] for k != 0",
     "file": "forces/spme",
@@ -7406,6 +7471,13 @@
       }
     ],
     "title": "spme_force_gather",
+    "type": "api-item"
+  },
+  "rq-35ba2154": {
+    "decl": "- `LjPairParams` — the typed per-entry parameter struct the",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LjPairParams",
     "type": "api-item"
   },
   "rq-36026b97": {
@@ -7777,6 +7849,18 @@
       }
     ],
     "title": "Load a two-particle file with no velocities",
+    "type": "scenario"
+  },
+  "rq-38fd4430": {
+    "decl": "Scenario: Claim dispatch selects the first matching builder in registration order",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Claim dispatch selects the first matching builder in registration order",
     "type": "scenario"
   },
   "rq-38fe4b81": {
@@ -8596,7 +8680,7 @@
     "type": "scenario"
   },
   "rq-3f01c746": {
-    "decl": "Scenario: bond_type unknown potential is rejected",
+    "decl": "Scenario: bond_type kind with no claiming builder is rejected",
     "file": "io/config-schema",
     "refs": [
       {
@@ -8604,7 +8688,7 @@
         "kind": "code"
       }
     ],
-    "title": "bond_type unknown potential is rejected",
+    "title": "bond_type kind with no claiming builder is rejected",
     "type": "scenario"
   },
   "rq-3f080cf2": {
@@ -9462,6 +9546,18 @@
     "title": "LangevinBaoabIntegrator",
     "type": "api-item"
   },
+  "rq-47be884d": {
+    "decl": "Scenario: Potential params claims are category-scoped",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Potential params claims are category-scoped",
+    "type": "scenario"
+  },
   "rq-47d91c7d": {
     "decl": "- `CsvrThermostat` — implements the `Thermostat` trait declared in",
     "file": "integration/csvr",
@@ -9612,10 +9708,6 @@
     "refs": [
       {
         "file": "src/forces/harmonic_bond.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/io/config.rs",
         "kind": "code"
       }
     ],
@@ -10187,7 +10279,12 @@
     "decl": "## Parameters",
     "file": "forces/periodic-dihedral",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Parameters",
     "type": "section"
   },
@@ -10578,6 +10675,38 @@
     "refs": [],
     "title": "Composed-module name and entry points",
     "type": "section"
+  },
+  "rq-529b9e4b": {
+    "decl": "- `PotentialParamsCategory` — the four open potential-table categories.",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "src/forces/angle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/harmonic_bond.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PotentialParamsCategory",
+    "type": "api-item"
   },
   "rq-52b69f09": {
     "decl": "### Composed-kernel module name and entry points",
@@ -11224,7 +11353,7 @@
     "type": "section"
   },
   "rq-57518e01": {
-    "decl": "Scenario: angle_type missing potential field",
+    "decl": "Scenario: angle_type missing kind field",
     "file": "io/config-schema",
     "refs": [
       {
@@ -11232,7 +11361,7 @@
         "kind": "code"
       }
     ],
-    "title": "angle_type missing potential field",
+    "title": "angle_type missing kind field",
     "type": "scenario"
   },
   "rq-576561a2": {
@@ -13678,6 +13807,18 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-6b721a52": {
+    "decl": "Scenario: validate_against accepts a potential-table kind claimed by a registered custom builder",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "validate_against accepts a potential-table kind claimed by a registered custom builder",
+    "type": "scenario"
+  },
   "rq-6b8e5397": {
     "decl": "Scenario: Atomic-mode .xyz lattice and positions pass through unchanged",
     "file": "io/unit-system",
@@ -13952,7 +14093,12 @@
     "decl": "#### `[[dihedral_types]]` (optional array of tables)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[[dihedral_types]]` (optional array of tables)",
     "type": "section"
   },
@@ -14258,7 +14404,7 @@
     "type": "scenario"
   },
   "rq-6f4f5ece": {
-    "decl": "Scenario: Default r_switch to 0.9 * cutoff when omitted",
+    "decl": "Scenario: An omitted r_switch stays absent from params (defaulted at build time)",
     "file": "io/config-schema",
     "refs": [
       {
@@ -14266,7 +14412,7 @@
         "kind": "code"
       }
     ],
-    "title": "Default r_switch to 0.9 * cutoff when omitted",
+    "title": "An omitted r_switch stays absent from params (defaulted at build time)",
     "type": "scenario"
   },
   "rq-6f6fe328": {
@@ -14392,18 +14538,6 @@
     "refs": [],
     "title": "Two runs of apply_influence on identical inputs are byte-identical",
     "type": "scenario"
-  },
-  "rq-70442e07": {
-    "decl": "- `PairPotentialParams` — tagged enum carrying the functional-form",
-    "file": "io/config-schema",
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PairPotentialParams",
-    "type": "api-item"
   },
   "rq-7047ea32": {
     "decl": "Scenario: Integrator without constraints skips all three hooks",
@@ -14685,6 +14819,27 @@
     "refs": [],
     "title": "Per-block SPC predicate is true when every axis margin exceeds MAX_CUTOFF",
     "type": "scenario"
+  },
+  "rq-73801d98": {
+    "decl": "## Potential Params Claims",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Potential Params Claims",
+    "type": "section"
   },
   "rq-73a3b802": {
     "decl": "### PTX Module Loading",
@@ -15648,7 +15803,7 @@
     "type": "scenario"
   },
   "rq-79938dbf": {
-    "decl": "- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], dihedral_types: &[DihedralTypeConfig], spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, dihedral_list: &DihedralList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
+    "decl": "- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], lennard_jones: Option<&LennardJonesConfig>, bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], dihedral_types: &[DihedralTypeConfig], spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, dihedral_list: &DihedralList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
     "file": "forces/framework",
     "refs": [
       {
@@ -17066,6 +17221,18 @@
     "refs": [],
     "title": "ConstraintCapableIntegrator marker",
     "type": "section"
+  },
+  "rq-8670941b": {
+    "decl": "Scenario: A claiming builder converts its own unit-bearing entry params",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A claiming builder converts its own unit-bearing entry params",
+    "type": "scenario"
   },
   "rq-86741731": {
     "decl": "Scenario: Each slot's contribution is reflected in its class accumulator after step()",
@@ -18503,6 +18670,10 @@
     "level": 4,
     "refs": [
       {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/io/config.rs",
         "kind": "code"
       }
@@ -18765,6 +18936,18 @@
     "title": "wrap_position is idempotent",
     "type": "scenario"
   },
+  "rq-943724af": {
+    "decl": "Scenario: build deserialises typed params from claimed entries",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "build deserialises typed params from claimed entries",
+    "type": "scenario"
+  },
   "rq-9447dfcf": {
     "decl": "Scenario: NaN values are accepted at construction",
     "file": "particle-state",
@@ -18940,6 +19123,38 @@
     ],
     "title": "Download overwrites in-place after host mutation",
     "type": "scenario"
+  },
+  "rq-95a50109": {
+    "decl": "- `PotentialConfigEntry<'a>` — borrowed view of one parsed",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "src/forces/angle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/dihedral.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/harmonic_bond.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PotentialConfigEntry",
+    "type": "api-item"
   },
   "rq-95b66af0": {
     "decl": "Scenario: MtkNpt builder owns both its thermostat and its barostat",
@@ -20887,7 +21102,7 @@
     "type": "scenario"
   },
   "rq-a47beb76": {
-    "decl": "- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential",
+    "decl": "- `AngleTypeConfig` — open-shaped parsed entry for the",
     "file": "io/config-schema",
     "refs": [
       {
@@ -21237,6 +21452,18 @@
     "title": "Cell counts reflect perpendicular widths for a tilted box",
     "type": "scenario"
   },
+  "rq-a7ecc7be": {
+    "decl": "Scenario: A config with no Lennard-Jones input skips pair resolution",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A config with no Lennard-Jones input skips pair resolution",
+    "type": "scenario"
+  },
   "rq-a7fdf81f": {
     "decl": "Scenario: Lossy run includes lossy kick rows and excludes lossless rows",
     "file": "performance-analysis",
@@ -21430,12 +21657,7 @@
   "rq-a94d2c13": {
     "decl": "Scenario: A pair with no override and no combining source is rejected",
     "file": "io/config-schema",
-    "refs": [
-      {
-        "file": "tests/io_config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "A pair with no override and no combining source is rejected",
     "type": "scenario"
   },
@@ -22779,7 +23001,12 @@
     "decl": "## Parameters",
     "file": "forces/harmonic-angle",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Parameters",
     "type": "section"
   },
@@ -24396,6 +24623,18 @@
     "title": "Class-Combine Kernel",
     "type": "section"
   },
+  "rq-c118d720": {
+    "decl": "Scenario: validate_against surfaces a claiming potential builder's validate_params error",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "validate_against surfaces a claiming potential builder's validate_params error",
+    "type": "scenario"
+  },
   "rq-c129167f": {
     "decl": "Scenario: A run with no Constraint slot active leaves constraint distances drifting",
     "file": "integration/settle",
@@ -24644,6 +24883,18 @@
     "title": "Custom sub-step alone fires no constraint hooks",
     "type": "scenario"
   },
+  "rq-c3b69180": {
+    "decl": "Scenario: A claiming builder reads a common field during validation",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A claiming builder reads a common field during validation",
+    "type": "scenario"
+  },
   "rq-c3d3dc8e": {
     "decl": "- `__device__ __forceinline__ Real Real_sqrt(Real x);`",
     "file": "precision",
@@ -24669,10 +24920,6 @@
     "refs": [
       {
         "file": "src/forces/harmonic_bond.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/io/config.rs",
         "kind": "code"
       }
     ],
@@ -25227,7 +25474,7 @@
     "type": "scenario"
   },
   "rq-c79a1408": {
-    "decl": "Scenario: bond_type missing potential field",
+    "decl": "Scenario: bond_type missing kind field",
     "file": "io/config-schema",
     "refs": [
       {
@@ -25235,7 +25482,7 @@
         "kind": "code"
       }
     ],
-    "title": "bond_type missing potential field",
+    "title": "bond_type missing kind field",
     "type": "scenario"
   },
   "rq-c79e35dc": {
@@ -25978,10 +26225,10 @@
     "type": "section"
   },
   "rq-cd2911bd": {
-    "decl": "Scenario: dihedral_type missing potential field",
+    "decl": "Scenario: dihedral_type missing kind field",
     "file": "io/config-schema",
     "refs": [],
-    "title": "dihedral_type missing potential field",
+    "title": "dihedral_type missing kind field",
     "type": "scenario"
   },
   "rq-cd3943e1": {
@@ -27139,6 +27386,18 @@
       }
     ],
     "title": "Reject image column whose value does not parse as i32",
+    "type": "scenario"
+  },
+  "rq-d6888c00": {
+    "decl": "Scenario: params_claim defaults to None",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/potential_claims.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "params_claim defaults to None",
     "type": "scenario"
   },
   "rq-d6a1b8eb": {
@@ -28813,7 +29072,7 @@
     "type": "api-item"
   },
   "rq-e38aac7b": {
-    "decl": "Scenario: Reject unknown pair potential",
+    "decl": "Scenario: Reject a pair kind no registered builder claims",
     "file": "io/config-schema",
     "refs": [
       {
@@ -28821,7 +29080,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reject unknown pair potential",
+    "title": "Reject a pair kind no registered builder claims",
     "type": "scenario"
   },
   "rq-e38eed0c": {
@@ -28918,7 +29177,12 @@
     "decl": "#### `[[bond_types]]` (optional array of tables)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[[bond_types]]` (optional array of tables)",
     "type": "section"
   },
@@ -30131,9 +30395,14 @@
     "type": "section"
   },
   "rq-edfc2b75": {
-    "decl": "- `DihedralTypeConfig` — tagged enum carrying the chosen",
+    "decl": "- `DihedralTypeConfig` — open-shaped parsed entry for the",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "DihedralTypeConfig",
     "type": "api-item"
   },
@@ -30419,7 +30688,7 @@
     "type": "scenario"
   },
   "rq-f001eaf8": {
-    "decl": "- `PairInteractionConfig`",
+    "decl": "- `PairInteractionConfig` — open-shaped parsed entry for the",
     "file": "io/config-schema",
     "refs": [
       {
@@ -30645,15 +30914,19 @@
     "type": "section"
   },
   "rq-f11e9d4c": {
-    "decl": "Scenario: Reject duplicate pair interaction",
+    "decl": "Scenario: Reject duplicate pair interaction of the same kind",
     "file": "io/config-schema",
     "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
       {
         "file": "tests/io_config.rs",
         "kind": "code"
       }
     ],
-    "title": "Reject duplicate pair interaction",
+    "title": "Reject duplicate pair interaction of the same kind",
     "type": "scenario"
   },
   "rq-f1210419": {
@@ -30853,7 +31126,12 @@
     "decl": "#### `[[angle_types]]` (optional array of tables)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[[angle_types]]` (optional array of tables)",
     "type": "section"
   },
@@ -32514,7 +32792,7 @@
     "type": "file"
   },
   "rq-ffa771bd": {
-    "decl": "Scenario: angle_type unknown potential is rejected",
+    "decl": "Scenario: angle_type kind with no claiming builder is rejected",
     "file": "io/config-schema",
     "refs": [
       {
@@ -32522,7 +32800,7 @@
         "kind": "code"
       }
     ],
-    "title": "angle_type unknown potential is rejected",
+    "title": "angle_type kind with no claiming builder is rejected",
     "type": "scenario"
   },
   "rq-ffbee244": {

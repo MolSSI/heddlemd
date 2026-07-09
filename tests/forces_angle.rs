@@ -21,11 +21,7 @@ fn box_10(gpu: &GpuContext) -> SimulationBox {
 }
 
 fn harmonic_type(k_theta: f64, theta_0: f64) -> AngleTypeConfig {
-    AngleTypeConfig::Harmonic {
-        name: "AAA".to_string(),
-        k_theta,
-        theta_0,
-    }
+    AngleTypeConfig::harmonic("AAA", k_theta, theta_0)
 }
 
 fn three_particle_state(positions: [[Real; 3]; 3]) -> ParticleState {

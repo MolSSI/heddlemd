@@ -5,8 +5,7 @@
 
 use heddle_md::gpu::{LennardJonesParameterTable, init_device};
 use heddle_md::io::config::{
-    CombiningRule, LennardJonesConfig, PairInteractionConfig, PairPotentialParams,
-    ParticleTypeConfig,
+    CombiningRule, LennardJonesConfig, PairInteractionConfig, ParticleTypeConfig,
 };
 use heddle_md::precision::Real;
 
@@ -59,15 +58,8 @@ fn from_config_override_beats_combination() {
     let gpu = init_device().unwrap();
     let types = [ptype("A", 3.0e-10, 1.0e-21), ptype("B", 4.0e-10, 4.0e-21)];
     let lj = lb(9.0e-10);
-    let over = PairInteractionConfig {
-        between: ("A".to_string(), "B".to_string()),
-        cutoff: 7.0e-10,
-        r_switch: 0.9 * 7.0e-10,
-        potential: PairPotentialParams::LennardJones {
-            sigma: 2.5e-10,
-            epsilon: 5.0e-22,
-        },
-    };
+    let over = PairInteractionConfig::lennard_jones(("A", "B"), 2.5e-10, 5.0e-22, 7.0e-10, Some(0.9 * 7.0e-10));
+    let over = heddle_md::forces::resolve_lj_pair(&over).unwrap();
     let table =
         LennardJonesParameterTable::from_config(&gpu.device, &types, &[over], Some(&lj)).unwrap();
     let n = 2usize;

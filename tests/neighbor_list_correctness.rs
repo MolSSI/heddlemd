@@ -40,7 +40,7 @@ use heddle_md::forces::{
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{
     AngleTypeConfig, BondTypeConfig, DihedralTypeConfig, NeighborListConfig,
-    PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
+    PairInteractionConfig, ParticleTypeConfig,
 };
 use heddle_md::pbc::SimulationBox;
 use heddle_md::precision::Real;
@@ -171,33 +171,9 @@ fn eth_pair_interactions() -> Vec<PairInteractionConfig> {
     let cut = R_CUT / m_per_bohr;
     let sw = R_SWITCH / m_per_bohr;
     vec![
-        PairInteractionConfig {
-            between: ("C".into(), "C".into()),
-            cutoff: cut,
-            r_switch: sw,
-            potential: PairPotentialParams::LennardJones {
-                sigma: sigma(3.40e-10),
-                epsilon: eps(4.585e-22),
-            },
-        },
-        PairInteractionConfig {
-            between: ("H".into(), "H".into()),
-            cutoff: cut,
-            r_switch: sw,
-            potential: PairPotentialParams::LennardJones {
-                sigma: sigma(2.50e-10),
-                epsilon: eps(2.085e-22),
-            },
-        },
-        PairInteractionConfig {
-            between: ("C".into(), "H".into()),
-            cutoff: cut,
-            r_switch: sw,
-            potential: PairPotentialParams::LennardJones {
-                sigma: sigma(2.95e-10),
-                epsilon: eps(3.093e-22),
-            },
-        },
+        PairInteractionConfig::lennard_jones(("C", "C"), sigma(3.40e-10), eps(4.585e-22), cut, Some(sw)),
+        PairInteractionConfig::lennard_jones(("H", "H"), sigma(2.50e-10), eps(2.085e-22), cut, Some(sw)),
+        PairInteractionConfig::lennard_jones(("C", "H"), sigma(2.95e-10), eps(3.093e-22), cut, Some(sw)),
     ]
 }
 
@@ -205,47 +181,22 @@ fn eth_bond_types() -> Vec<BondTypeConfig> {
     let j_per_hartree = 4.3597447222071e-18;
     let m_per_bohr = M_PER_BOHR;
     vec![
-        BondTypeConfig::Morse {
-            name: "CC".into(),
-            de: 5.57e-19 / j_per_hartree,
-            a: 1.4e10 * m_per_bohr,
-            re: R_CC / m_per_bohr,
-        },
-        BondTypeConfig::Morse {
-            name: "CH".into(),
-            de: 6.96e-19 / j_per_hartree,
-            a: 1.8e10 * m_per_bohr,
-            re: R_CH / m_per_bohr,
-        },
+        BondTypeConfig::morse("CC", 5.57e-19 / j_per_hartree, 1.4e10 * m_per_bohr, R_CC / m_per_bohr),
+        BondTypeConfig::morse("CH", 6.96e-19 / j_per_hartree, 1.8e10 * m_per_bohr, R_CH / m_per_bohr),
     ]
 }
 
 fn eth_angle_types() -> Vec<AngleTypeConfig> {
     let j_per_hartree = 4.3597447222071e-18;
     vec![
-        AngleTypeConfig::Harmonic {
-            name: "HCH".into(),
-            k_theta: 2.43e-19 / j_per_hartree,
-            theta_0: 1.910611931,
-        },
-        AngleTypeConfig::Harmonic {
-            name: "HCC".into(),
-            k_theta: 3.47e-19 / j_per_hartree,
-            theta_0: 1.910611931,
-        },
+        AngleTypeConfig::harmonic("HCH", 2.43e-19 / j_per_hartree, 1.910611931),
+        AngleTypeConfig::harmonic("HCC", 3.47e-19 / j_per_hartree, 1.910611931),
     ]
 }
 
 fn eth_dihedral_types() -> Vec<DihedralTypeConfig> {
     let j_per_hartree = 4.3597447222071e-18;
-    vec![DihedralTypeConfig::Periodic {
-        name: "HCCH".into(),
-        k_phi: 1.086e-21 / j_per_hartree,
-        n: 3,
-        phi_0: 0.0,
-        scale_lj_14: 0.5,
-        scale_coul_14: 1.0 / 1.2,
-    }]
+    vec![DihedralTypeConfig::periodic_with_scales("HCCH", 1.086e-21 / j_per_hartree, 3, 0.0, 0.5, 1.0 / 1.2)]
 }
 
 /// Build BondList / AngleList / DihedralList / ExclusionList for an

@@ -487,8 +487,8 @@ pub fn lint_simulation_with_registries(
     }
 
     // Stage 5: topology.
-    let bond_type_names: Vec<&str> = config.bond_types.iter().map(|bt| bt.name()).collect();
-    let angle_type_names: Vec<&str> = config.angle_types.iter().map(|at| at.name()).collect();
+    let bond_type_names: Vec<&str> = config.bond_types.iter().map(|bt| bt.name.as_str()).collect();
+    let angle_type_names: Vec<&str> = config.angle_types.iter().map(|at| at.name.as_str()).collect();
     let topology = match config.topology.as_ref() {
         Some(path) => match load_topology_file(
             path,
@@ -898,9 +898,9 @@ fn simulation_setup_new_impl(
     // Load the .topology file when supplied, otherwise build empty bond /
     // angle / exclusion lists keyed to `n`.
     let bond_type_names: Vec<&str> =
-        config.bond_types.iter().map(|bt| bt.name()).collect();
+        config.bond_types.iter().map(|bt| bt.name.as_str()).collect();
     let angle_type_names: Vec<&str> =
-        config.angle_types.iter().map(|at| at.name()).collect();
+        config.angle_types.iter().map(|at| at.name.as_str()).collect();
     let topology: (
         BondList,
         AngleList,

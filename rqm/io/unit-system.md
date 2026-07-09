@@ -122,18 +122,22 @@ independently.
 
 Input-side conversion targets:
 
-- Every unit-bearing scalar in the loaded `Config` (typed fields under
-  `[simulation]`, `[[phase]]`, `[[particle_types]]`,
-  `[[pair_interactions]]`, `[[bond_types]]`, `[[angle_types]]`,
-  `[spme]`, `[neighbor_list]`). Each such scalar has a
+- Every unit-bearing scalar in the loaded `Config`'s typed fields
+  (under `[simulation]`, `[[phase]]`, `[[particle_types]]`,
+  `[lennard_jones]`, `[spme]`, `[neighbor_list]`, and the common
+  fields of the potential type tables — notably each
+  `[[pair_interactions]]` entry's `cutoff`). Each such scalar has a
   dimensioned newtype (see *Dimensioned Types and the Convert Trait*),
   and the whole `Config` is rescaled by one recursive `Convert`
   pass during load.
 - The unit-bearing fields of every open-shaped slot's
   `params: toml::Value` (`[phase.integrator]`, `[phase.thermostat]`,
-  `[phase.barostat]`, `[[constraint_types]]`, `[minimization.algorithm]`).
-  The matching registered builder converts its own params (see
-  *Builder-Owned Slot-Parameter Conversion*).
+  `[phase.barostat]`, `[[constraint_types]]`, `[minimization.algorithm]`)
+  and of every open-shaped potential-table entry's
+  `params: toml::Value` (`[[pair_interactions]]`, `[[bond_types]]`,
+  `[[angle_types]]`, `[[dihedral_types]]`). The matching registered
+  builder converts its own params (see *Builder-Owned Slot-Parameter
+  Conversion*).
 - The `Lattice` attribute, position columns, and velocity columns of
   the `.in.xyz` initial-state file passed to `load_init_state`.
 
@@ -212,11 +216,16 @@ any external table.
 
 Open-shaped slot `params: toml::Value` blocks
 (`[phase.integrator]`, `[phase.thermostat]`, `[phase.barostat]`,
-`[[constraint_types]]`, `[minimization.algorithm]`) are converted by
-the registered builder that owns each kind's schema, not by any
-centralised table. Every named-selection builder converts its own
-params through `KindedBuilder::convert_params` (see
-`registry-framework.md`): the builder deserialises the `params` table
+`[[constraint_types]]`, `[minimization.algorithm]`) and open-shaped
+potential-table entry `params` (`[[pair_interactions]]`,
+`[[bond_types]]`, `[[angle_types]]`, `[[dihedral_types]]`) are
+converted by the registered builder that owns each kind's schema, not
+by any centralised table. Every named-selection builder converts its
+own params through `KindedBuilder::convert_params`, and every
+claiming potential builder through
+`PotentialBuilder::convert_params` (see `registry-framework.md` and
+`forces/framework.md`'s *Potential Params Claims*; both share the
+same contract): the builder deserialises the `params` table
 into its typed parameter struct — which derives `Convert` and so
 declares each field's dimension on the field, and which fills every
 field the user omitted with that field's builder-declared serde default
@@ -506,8 +515,11 @@ Feature: Unit-system selector and atomic-units internals
     When load_config is called on that file
     Then config.pair_interactions[0].cutoff equals the input cutoff
       divided by the bohr -> meter factor (≈ 18.9 Bohr)
-    And sigma equals the input divided by the bohr -> meter factor
-    And epsilon equals the input divided by the hartree -> joule factor
+    And config.pair_interactions[0].params carries sigma equal to the
+      input divided by the bohr -> meter factor (converted by the
+      claiming Lennard-Jones builder's convert_params)
+    And params carries epsilon equal to the input divided by the
+      hartree -> joule factor
 
   @rq-7bcdd62f
   Scenario: SI-mode mass and charge are converted to atomic units
@@ -751,10 +763,12 @@ Feature: Unit-system selector and atomic-units internals
   Scenario: r_switch default tracks the atomic-unit cutoff
     Given a TOML file with `units = "si"` and a pair_interaction with
       `cutoff` set but `r_switch` omitted
-    When load_config is called on that file
-    Then config.pair_interactions[0].r_switch equals
-      0.9 * config.pair_interactions[0].cutoff in atomic units (cutoff
-      is converted once, then multiplied by 0.9; no double conversion)
+    When load_config is called and the Lennard-Jones slot is built
+    Then config.pair_interactions[0].params has no "r_switch" key
+    And the slot's effective r_switch equals
+      0.9 * config.pair_interactions[0].cutoff in atomic units (the
+      builder multiplies the dimensionless ratio by the
+      already-converted cutoff at build time; no double conversion)
 
   @rq-eebf9f95
   Scenario: r_skin default tracks the maximum atomic-unit cutoff

@@ -28,7 +28,7 @@ mass = 6.6335e-26   # kg (argon)
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10    # m
 epsilon = 1.65e-21  # J  (~120 K * k_B)
 cutoff = 8.5e-10    # m  (2.5 sigma)

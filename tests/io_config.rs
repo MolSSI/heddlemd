@@ -77,7 +77,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -164,11 +164,11 @@ fn load_valid_minimal_config() {
     assert_eq!(cfg.pair_interactions.len(), 1);
     assert_eq!(cfg.pair_interactions[0].between, ("Ar".to_string(), "Ar".to_string()));
     assert_eq!(cfg.pair_interactions[0].cutoff, 1.0e-9);
-    assert!(matches!(
-        cfg.pair_interactions[0].potential,
-        heddle_md::io::PairPotentialParams::LennardJones { sigma, epsilon }
-            if sigma == 3.40e-10 && epsilon == 1.65e-21
-    ));
+    // rq-7df1515f — open-shaped entry: kind tag plus builder-owned params.
+    assert_eq!(cfg.pair_interactions[0].kind, "lennard-jones");
+    let params = cfg.pair_interactions[0].params.as_table().unwrap();
+    assert_eq!(params.get("sigma").unwrap().as_float().unwrap(), 3.40e-10);
+    assert_eq!(params.get("epsilon").unwrap().as_float().unwrap(), 1.65e-21);
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
     assert_eq!(cfg.init, canonical_dir.join("argon.in.xyz"));
     assert_eq!(cfg.config_path, canonical_dir.join("sim.in.toml"));
@@ -227,7 +227,7 @@ fn absolute_paths_honored() {
     let abs_traj = dir.join("abs-traj.xyz");
     let abs_log = dir.join("abs.log");
     let body = format!(
-        "schema_version = 1\ninit = \"{}\"\n[simulation]\nseed=1\ntemperature=0.0\n[[phase]]\nname=\"run\"\nn_steps=1\ndt=1.0e-15\n[phase.integrator]\nkind=\"velocity-verlet\"\nlossless=false\n[phase.output]\ntrajectory_path=\"{}\"\nlog_path=\"{}\"\n[[particle_types]]\nname=\"Ar\"\nmass=1.0\n[[pair_interactions]]\nbetween=[\"Ar\",\"Ar\"]\npotential=\"lennard-jones\"\nsigma=1.0\nepsilon=1.0\ncutoff=1.0\n",
+        "schema_version = 1\ninit = \"{}\"\n[simulation]\nseed=1\ntemperature=0.0\n[[phase]]\nname=\"run\"\nn_steps=1\ndt=1.0e-15\n[phase.integrator]\nkind=\"velocity-verlet\"\nlossless=false\n[phase.output]\ntrajectory_path=\"{}\"\nlog_path=\"{}\"\n[[particle_types]]\nname=\"Ar\"\nmass=1.0\n[[pair_interactions]]\nbetween=[\"Ar\",\"Ar\"]\nkind=\"lennard-jones\"\nsigma=1.0\nepsilon=1.0\ncutoff=1.0\n",
         abs_init.display(),
         abs_traj.display(),
         abs_log.display(),
@@ -290,21 +290,21 @@ mass = 2.0
 
 [[pair_interactions]]
 between = ["Kr", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Kr", "Kr"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -496,7 +496,7 @@ lossless = false
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -508,9 +508,9 @@ cutoff = 1.0
     }
 }
 
-// rq-a94d2c13
+// rq-a7ecc7be
 #[test]
-fn missing_pair_interactions() {
+fn config_with_no_lennard_jones_input_skips_pair_coverage() {
     let dir = tmp_path("missing_pair");
     let body = r#"schema_version = 1
 init = "init.in.xyz"
@@ -532,14 +532,21 @@ lossless = false
 [[particle_types]]
 name = "Ar"
 mass = 1.0
+
+[[particle_types]]
+name = "Kr"
+mass = 2.0
+
+[neighbor_list]
+mode = "all-pairs"
 "#;
     let path = write_config(&dir, body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnresolvedPairInteraction { types } => {
-            assert_eq!(types, ("Ar".to_string(), "Ar".to_string()));
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    // No [lennard_jones] table, no per-type sigma/epsilon, no
+    // pair_interactions entries: no Lennard-Jones input at all, so the
+    // pair-coverage requirement does not apply and the config loads.
+    let cfg = load_config(&path).expect("no-LJ-input config loads");
+    assert!(cfg.pair_interactions.is_empty());
+    assert!(cfg.lennard_jones.is_none());
 }
 
 // rq-025b2c3b rq-96d9c9df
@@ -657,11 +664,8 @@ fn accept_inert_pair_with_zero_epsilon() {
     let body = minimal_config().replace("epsilon = 1.65e-21", "epsilon = 0.0");
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match &cfg.pair_interactions[0].potential {
-        heddle_md::io::PairPotentialParams::LennardJones { epsilon, .. } => {
-            assert_eq!(*epsilon, 0.0);
-        }
-    }
+    let params = cfg.pair_interactions[0].params.as_table().unwrap();
+    assert_eq!(params.get("epsilon").unwrap().as_float().unwrap(), 0.0);
 }
 
 #[test] // rq-cbcc4e3b
@@ -670,11 +674,8 @@ fn accept_pair_with_zero_sigma() {
     let body = minimal_config().replace("sigma = 3.40e-10", "sigma = 0.0");
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match &cfg.pair_interactions[0].potential {
-        heddle_md::io::PairPotentialParams::LennardJones { sigma, .. } => {
-            assert_eq!(*sigma, 0.0);
-        }
-    }
+    let params = cfg.pair_interactions[0].params.as_table().unwrap();
+    assert_eq!(params.get("sigma").unwrap().as_float().unwrap(), 0.0);
 }
 
 // rq-ae65c293
@@ -699,19 +700,23 @@ fn accept_user_supplied_r_switch() {
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).expect("load_config");
-    assert_eq!(cfg.pair_interactions[0].r_switch, 9.0e-10);
+    let params = cfg.pair_interactions[0].params.as_table().unwrap();
+    assert_eq!(params.get("r_switch").unwrap().as_float().unwrap(), 9.0e-10);
 }
 
 // rq-6f4f5ece rq-c195ddf0
 #[test]
-fn default_r_switch_to_0_9_times_cutoff_when_omitted() {
+fn omitted_r_switch_stays_absent_and_defaults_at_build_time() {
     let dir = tmp_path("default_r_switch");
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).expect("load_config");
-    // 0.9 * 1.0e-9 = 9.0e-10 exactly in f64 since 0.9 is not exact but
-    // the relative tolerance below tolerates the round-off.
+    // The omitted r_switch stays absent from the entry's params; the
+    // Lennard-Jones builder resolves it to 0.9 * cutoff at build time.
+    let params = cfg.pair_interactions[0].params.as_table().unwrap();
+    assert!(!params.contains_key("r_switch"));
+    let resolved = heddle_md::forces::resolve_lj_pair(&cfg.pair_interactions[0]).unwrap();
     let expected = 0.9_f64 * 1.0e-9;
-    assert!((cfg.pair_interactions[0].r_switch - expected).abs() < 1.0e-25);
+    assert!((resolved.r_switch - expected).abs() < 1.0e-25);
 }
 
 // rq-1d8b8efe
@@ -724,7 +729,8 @@ fn accept_r_switch_equal_to_cutoff() {
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).expect("load_config");
-    assert_eq!(cfg.pair_interactions[0].r_switch, 1.0e-9);
+    let params = cfg.pair_interactions[0].params.as_table().unwrap();
+    assert_eq!(params.get("r_switch").unwrap().as_float().unwrap(), 1.0e-9);
 }
 
 // rq-7cd9471a
@@ -780,14 +786,19 @@ fn reject_nonfinite_r_switch() {
 
 // rq-e38aac7b
 #[test]
-fn reject_unknown_potential() {
+fn reject_pair_kind_with_no_claiming_builder() {
     let dir = tmp_path("unknown_potential");
-    let body = minimal_config().replace("potential = \"lennard-jones\"", "potential = \"morse\"");
+    // "morse" is claimed for the bond-type category, not the
+    // pair-interaction category; category-scoped claims do not cross over.
+    let body = minimal_config().replace("kind = \"lennard-jones\"", "kind = \"morse\"");
     let path = write_config(&dir, &body);
-    assert_parse(
-        &load_config(&path).unwrap_err(),
-        "pair_interactions[0].potential",
-    );
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownKind { slot, kind } => {
+            assert_eq!(slot, "pair_interactions");
+            assert_eq!(kind, "morse");
+        }
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
 }
 
 // rq-45a14d49
@@ -863,7 +874,7 @@ mass = 2.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -880,7 +891,7 @@ cutoff = 1.0
 fn reject_pair_unknown_type() {
     let dir = tmp_path("pair_unknown_type");
     let body = format!(
-        "{}\n[[pair_interactions]]\nbetween = [\"Ar\", \"Xe\"]\npotential = \"lennard-jones\"\nsigma = 1.0\nepsilon = 1.0\ncutoff = 1.0\n",
+        "{}\n[[pair_interactions]]\nbetween = [\"Ar\", \"Xe\"]\nkind = \"lennard-jones\"\nsigma = 1.0\nepsilon = 1.0\ncutoff = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -924,14 +935,14 @@ mass = 2.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Kr", "Kr"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -950,7 +961,7 @@ cutoff = 1.0
 fn reject_duplicate_pair() {
     let dir = tmp_path("dup_pair");
     let body = format!(
-        "{}\n[[pair_interactions]]\nbetween = [\"Ar\", \"Ar\"]\npotential = \"lennard-jones\"\nsigma = 1.0\nepsilon = 1.0\ncutoff = 1.0\n",
+        "{}\n[[pair_interactions]]\nbetween = [\"Ar\", \"Ar\"]\nkind = \"lennard-jones\"\nsigma = 1.0\nepsilon = 1.0\ncutoff = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -993,28 +1004,28 @@ mass = 2.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Kr", "Kr"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Ar", "Kr"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Kr", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -1113,21 +1124,21 @@ mass = 2.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Ar", "Kr"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Kr", "Kr"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -1169,14 +1180,14 @@ mass = 2.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
 [[pair_interactions]]
 between = ["Kr", "Kr"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
@@ -1547,21 +1558,19 @@ fn bond_types_optional_empty() {
 fn valid_morse_bond_type_accepted() {
     let dir = tmp_path("morse_valid");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"ArAr\"\npotential = \"morse\"\nde = 1.65e-21\na = 1.9e10\nre = 3.4e-10\n",
+        "{}\n[[bond_types]]\nname = \"ArAr\"\nkind = \"morse\"\nde = 1.65e-21\na = 1.9e10\nre = 3.4e-10\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.bond_types.len(), 1);
-    match &cfg.bond_types[0] {
-        heddle_md::io::BondTypeConfig::Morse { name, de, a, re } => {
-            assert_eq!(name, "ArAr");
-            assert_eq!(*de, 1.65e-21);
-            assert_eq!(*a, 1.9e10);
-            assert_eq!(*re, 3.4e-10);
-        }
-        other => panic!("expected Morse, got {other:?}"),
-    }
+    let bt = &cfg.bond_types[0];
+    assert_eq!(bt.name, "ArAr");
+    assert_eq!(bt.kind, "morse");
+    let params = bt.params.as_table().unwrap();
+    assert_eq!(params.get("de").unwrap().as_float().unwrap(), 1.65e-21);
+    assert_eq!(params.get("a").unwrap().as_float().unwrap(), 1.9e10);
+    assert_eq!(params.get("re").unwrap().as_float().unwrap(), 3.4e-10);
 }
 
 // rq-c79a1408
@@ -1574,24 +1583,27 @@ fn bond_type_missing_potential() {
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => assert_eq!(field, "bond_types[0].potential"),
+        ConfigError::MissingField { field } => assert_eq!(field, "bond_types[0].kind"),
         other => panic!("unexpected: {other:?}"),
     }
 }
 
 // rq-3f01c746 rq-1fc667cd
 #[test]
-fn bond_type_unknown_potential() {
+fn bond_type_unknown_kind() {
     let dir = tmp_path("bond_type_unknown");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"ArAr\"\npotential = \"fene\"\n",
+        "{}\n[[bond_types]]\nname = \"ArAr\"\nkind = \"fene\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
-    assert_parse(
-        &load_config(&path).unwrap_err(),
-        "bond_types[0].potential",
-    );
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownKind { slot, kind } => {
+            assert_eq!(slot, "bond_types");
+            assert_eq!(kind, "fene");
+        }
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
 }
 
 // rq-3b0e8140
@@ -1599,7 +1611,7 @@ fn bond_type_unknown_potential() {
 fn morse_bond_type_missing_de() {
     let dir = tmp_path("morse_missing_de");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\na = 1.0\nre = 1.0\n",
+        "{}\n[[bond_types]]\nname = \"X\"\nkind = \"morse\"\na = 1.0\nre = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1614,7 +1626,7 @@ fn morse_bond_type_missing_de() {
 fn morse_bond_type_rejects_zero_de() {
     let dir = tmp_path("morse_zero_de");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 0.0\na = 1.0\nre = 1.0\n",
+        "{}\n[[bond_types]]\nname = \"X\"\nkind = \"morse\"\nde = 0.0\na = 1.0\nre = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1629,7 +1641,7 @@ fn morse_bond_type_rejects_zero_de() {
 fn morse_bond_type_rejects_negative_a() {
     let dir = tmp_path("morse_neg_a");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 1.0\na = -1.0\nre = 1.0\n",
+        "{}\n[[bond_types]]\nname = \"X\"\nkind = \"morse\"\nde = 1.0\na = -1.0\nre = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1644,7 +1656,7 @@ fn morse_bond_type_rejects_negative_a() {
 fn morse_bond_type_rejects_zero_re() {
     let dir = tmp_path("morse_zero_re");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 1.0\na = 1.0\nre = 0.0\n",
+        "{}\n[[bond_types]]\nname = \"X\"\nkind = \"morse\"\nde = 1.0\na = 1.0\nre = 0.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1659,7 +1671,7 @@ fn morse_bond_type_rejects_zero_re() {
 fn morse_bond_type_rejects_extra_field() {
     let dir = tmp_path("morse_extra_field");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\nstiffness = 2.0\n",
+        "{}\n[[bond_types]]\nname = \"X\"\nkind = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\nstiffness = 2.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1675,7 +1687,7 @@ fn morse_bond_type_rejects_extra_field() {
 fn reject_duplicate_bond_type_name() {
     let dir = tmp_path("dup_bond_type");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 2.0\na = 2.0\nre = 2.0\n",
+        "{}\n[[bond_types]]\nname = \"X\"\nkind = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\n[[bond_types]]\nname = \"X\"\nkind = \"morse\"\nde = 2.0\na = 2.0\nre = 2.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1690,7 +1702,7 @@ fn reject_duplicate_bond_type_name() {
 fn empty_bond_type_name_rejected() {
     let dir = tmp_path("empty_bond_name");
     let body = format!(
-        "{}\n[[bond_types]]\nname = \"\"\npotential = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\n",
+        "{}\n[[bond_types]]\nname = \"\"\nkind = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1915,19 +1927,18 @@ fn angle_types_optional_empty() {
 fn valid_harmonic_angle_type_accepted() {
     let dir = tmp_path("angle_types_harmonic");
     let body = format!(
-        "{}\n[[angle_types]]\nname = \"HOH\"\npotential = \"harmonic\"\nk_theta = 5.27e-19\ntheta_0 = 1.911\n",
+        "{}\n[[angle_types]]\nname = \"HOH\"\nkind = \"harmonic\"\nk_theta = 5.27e-19\ntheta_0 = 1.911\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.angle_types.len(), 1);
-    match &cfg.angle_types[0] {
-        heddle_md::io::config::AngleTypeConfig::Harmonic { name, k_theta, theta_0 } => {
-            assert_eq!(name, "HOH");
-            assert!((k_theta - 5.27e-19).abs() < 1.0e-28);
-            assert!((theta_0 - 1.911).abs() < 1.0e-9);
-        }
-    }
+    let at = &cfg.angle_types[0];
+    assert_eq!(at.name, "HOH");
+    assert_eq!(at.kind, "harmonic");
+    let params = at.params.as_table().unwrap();
+    assert!((params.get("k_theta").unwrap().as_float().unwrap() - 5.27e-19).abs() < 1.0e-28);
+    assert!((params.get("theta_0").unwrap().as_float().unwrap() - 1.911).abs() < 1.0e-9);
 }
 
 // rq-57518e01 rq-dc94d9e3
@@ -1941,7 +1952,7 @@ fn angle_type_missing_potential_rejected() {
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::MissingField { field } => {
-            assert_eq!(field, "angle_types[0].potential");
+            assert_eq!(field, "angle_types[0].kind");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1949,17 +1960,20 @@ fn angle_type_missing_potential_rejected() {
 
 // rq-ffa771bd rq-225633c4
 #[test]
-fn angle_type_unknown_potential_rejected() {
+fn angle_type_unknown_kind_rejected() {
     let dir = tmp_path("angle_unk_pot");
     let body = format!(
-        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"cosine-harmonic\"\n",
+        "{}\n[[angle_types]]\nname = \"X\"\nkind = \"cosine-harmonic\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
-    assert_parse(
-        &load_config(&path).unwrap_err(),
-        "angle_types[0].potential",
-    );
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownKind { slot, kind } => {
+            assert_eq!(slot, "angle_types");
+            assert_eq!(kind, "cosine-harmonic");
+        }
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
 }
 
 // rq-aad6ca63
@@ -1967,7 +1981,7 @@ fn angle_type_unknown_potential_rejected() {
 fn harmonic_angle_rejects_non_positive_k_theta() {
     let dir = tmp_path("angle_k_neg");
     let body = format!(
-        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 0.0\ntheta_0 = 1.0\n",
+        "{}\n[[angle_types]]\nname = \"X\"\nkind = \"harmonic\"\nk_theta = 0.0\ntheta_0 = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1984,7 +1998,7 @@ fn harmonic_angle_rejects_non_positive_k_theta() {
 fn harmonic_angle_rejects_theta_0_outside_zero_pi() {
     let dir = tmp_path("angle_t0_oor");
     let body = format!(
-        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 4.0\n",
+        "{}\n[[angle_types]]\nname = \"X\"\nkind = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 4.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -2001,7 +2015,7 @@ fn harmonic_angle_rejects_theta_0_outside_zero_pi() {
 fn harmonic_angle_rejects_extra_fields() {
     let dir = tmp_path("angle_extra");
     let body = format!(
-        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\nstiffness = 2.0\n",
+        "{}\n[[angle_types]]\nname = \"X\"\nkind = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\nstiffness = 2.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -2017,7 +2031,7 @@ fn harmonic_angle_rejects_extra_fields() {
 fn reject_duplicate_angle_type_name() {
     let dir = tmp_path("angle_dup_name");
     let body = format!(
-        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n",
+        "{}\n[[angle_types]]\nname = \"X\"\nkind = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n\n[[angle_types]]\nname = \"X\"\nkind = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -2032,7 +2046,7 @@ fn reject_duplicate_angle_type_name() {
 fn empty_angle_type_name_rejected() {
     let dir = tmp_path("angle_empty_name");
     let body = format!(
-        "{}\n[[angle_types]]\nname = \"\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n",
+        "{}\n[[angle_types]]\nname = \"\"\nkind = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -2084,7 +2098,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -2657,7 +2671,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -2769,7 +2783,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -2911,7 +2925,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -2963,7 +2977,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -3020,7 +3034,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -3071,7 +3085,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -3482,7 +3496,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -3665,7 +3679,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -3724,7 +3738,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -3800,7 +3814,6 @@ fn filename_check_runs_before_io() {
 // Unit-system selector (`units = "si" | "atomic"`)
 // =====================================================================
 
-use heddle_md::io::PairPotentialParams;
 use heddle_md::units::{Dimension, UnitSystem};
 
 // Build a minimal SI-mode config (the test helper `minimal_config()`
@@ -3905,7 +3918,7 @@ mass = {mass_si:.16e}
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = {sigma_si:.16e}
 epsilon = {epsilon_si:.16e}
 cutoff = {cutoff_si:.16e}
@@ -3935,7 +3948,7 @@ mass = {mass_au:.16e}
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = {sigma_au:.16e}
 epsilon = {epsilon_au:.16e}
 cutoff = {cutoff_au:.16e}
@@ -3980,22 +3993,11 @@ cutoff = {cutoff_au:.16e}
     let pi_si = &loaded_si.pair_interactions[0];
     let pi_au = &loaded_au.pair_interactions[0];
     assert!(approx_eq(pi_au.cutoff, pi_si.cutoff, rel));
-    assert!(approx_eq(pi_au.r_switch, pi_si.r_switch, rel));
-    match (&pi_si.potential, &pi_au.potential) {
-        (
-            PairPotentialParams::LennardJones {
-                sigma: s_si,
-                epsilon: e_si,
-            },
-            PairPotentialParams::LennardJones {
-                sigma: s_au,
-                epsilon: e_au,
-            },
-        ) => {
-            assert!(approx_eq(*s_au, *s_si, rel));
-            assert!(approx_eq(*e_au, *e_si, rel));
-        }
-    }
+    let r_si = heddle_md::forces::resolve_lj_pair(pi_si).unwrap();
+    let r_au = heddle_md::forces::resolve_lj_pair(pi_au).unwrap();
+    assert!(approx_eq(r_au.r_switch, r_si.r_switch, rel));
+    assert!(approx_eq(r_au.sigma, r_si.sigma, rel));
+    assert!(approx_eq(r_au.epsilon, r_si.epsilon, rel));
 }
 
 // rq-a17033aa
@@ -4035,7 +4037,7 @@ mass = 72820.0
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 6.43
 epsilon = 3.78e-4
 cutoff = 18.9
@@ -4097,7 +4099,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -4178,7 +4180,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -4250,7 +4252,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -4301,7 +4303,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -4361,7 +4363,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -4515,7 +4517,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -4568,7 +4570,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
@@ -4593,19 +4595,17 @@ fn config_with_bond_types(block: &str) -> String {
 fn valid_harmonic_bond_type_is_accepted() {
     let dir = tmp_path("harmonic_bond_valid");
     let cfg_str = config_with_bond_types(
-        "[[bond_types]]\nname = \"CT-CT\"\npotential = \"harmonic\"\nk = 500.0\nr0 = 2.0\n",
+        "[[bond_types]]\nname = \"CT-CT\"\nkind = \"harmonic\"\nk = 500.0\nr0 = 2.0\n",
     );
     let path = write_config(&dir, &cfg_str);
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.bond_types.len(), 1);
-    match &cfg.bond_types[0] {
-        heddle_md::io::config::BondTypeConfig::Harmonic { name, k, r0 } => {
-            assert_eq!(name, "CT-CT");
-            assert_eq!(*k, 500.0);
-            assert_eq!(*r0, 2.0);
-        }
-        other => panic!("expected Harmonic, got {other:?}"),
-    }
+    let bt = &cfg.bond_types[0];
+    assert_eq!(bt.name, "CT-CT");
+    assert_eq!(bt.kind, "harmonic");
+    let params = bt.params.as_table().unwrap();
+    assert_eq!(params.get("k").unwrap().as_float().unwrap(), 500.0);
+    assert_eq!(params.get("r0").unwrap().as_float().unwrap(), 2.0);
 }
 
 // rq-358e14aa
@@ -4613,7 +4613,7 @@ fn valid_harmonic_bond_type_is_accepted() {
 fn harmonic_bond_type_missing_k_is_rejected() {
     let dir = tmp_path("harmonic_bond_missing_k");
     let cfg_str = config_with_bond_types(
-        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nr0 = 2.0\n",
+        "[[bond_types]]\nname = \"X\"\nkind = \"harmonic\"\nr0 = 2.0\n",
     );
     let path = write_config(&dir, &cfg_str);
     match load_config(&path).unwrap_err() {
@@ -4627,7 +4627,7 @@ fn harmonic_bond_type_missing_k_is_rejected() {
 fn harmonic_bond_type_missing_r0_is_rejected() {
     let dir = tmp_path("harmonic_bond_missing_r0");
     let cfg_str = config_with_bond_types(
-        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nk = 500.0\n",
+        "[[bond_types]]\nname = \"X\"\nkind = \"harmonic\"\nk = 500.0\n",
     );
     let path = write_config(&dir, &cfg_str);
     match load_config(&path).unwrap_err() {
@@ -4641,7 +4641,7 @@ fn harmonic_bond_type_missing_r0_is_rejected() {
 fn harmonic_bond_type_rejects_non_positive_k() {
     let dir = tmp_path("harmonic_bond_neg_k");
     let cfg_str = config_with_bond_types(
-        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nk = 0.0\nr0 = 2.0\n",
+        "[[bond_types]]\nname = \"X\"\nkind = \"harmonic\"\nk = 0.0\nr0 = 2.0\n",
     );
     let path = write_config(&dir, &cfg_str);
     match load_config(&path).unwrap_err() {
@@ -4655,7 +4655,7 @@ fn harmonic_bond_type_rejects_non_positive_k() {
 fn harmonic_bond_type_rejects_non_positive_r0() {
     let dir = tmp_path("harmonic_bond_neg_r0");
     let cfg_str = config_with_bond_types(
-        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nk = 500.0\nr0 = 0.0\n",
+        "[[bond_types]]\nname = \"X\"\nkind = \"harmonic\"\nk = 500.0\nr0 = 0.0\n",
     );
     let path = write_config(&dir, &cfg_str);
     match load_config(&path).unwrap_err() {
@@ -4669,7 +4669,7 @@ fn harmonic_bond_type_rejects_non_positive_r0() {
 fn harmonic_bond_type_rejects_extra_fields() {
     let dir = tmp_path("harmonic_bond_extra");
     let cfg_str = config_with_bond_types(
-        "[[bond_types]]\nname = \"X\"\npotential = \"harmonic\"\nk = 500.0\nr0 = 2.0\nde = 1.0\n",
+        "[[bond_types]]\nname = \"X\"\nkind = \"harmonic\"\nk = 500.0\nr0 = 2.0\nde = 1.0\n",
     );
     let path = write_config(&dir, &cfg_str);
     assert_parse(&load_config(&path).unwrap_err(), "bond_types[0]");
@@ -4755,7 +4755,7 @@ cutoff = 8.5e-10
 
 [[pair_interactions]]
 between = ["Ar", "Kr"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.0e-10
 epsilon = 1.0e-21
 cutoff = 8.5e-10
@@ -4768,12 +4768,9 @@ cutoff = 8.5e-10
         .iter()
         .find(|p| p.between == ("Ar".to_string(), "Kr".to_string()))
         .expect("override present");
-    match over.potential {
-        heddle_md::io::config::PairPotentialParams::LennardJones { sigma, epsilon } => {
-            assert!((sigma - 3.0e-10).abs() < 1e-22);
-            assert!((epsilon - 1.0e-21).abs() < 1e-33);
-        }
-    }
+    let resolved = heddle_md::forces::resolve_lj_pair(over).unwrap();
+    assert!((resolved.sigma - 3.0e-10).abs() < 1e-22);
+    assert!((resolved.epsilon - 1.0e-21).abs() < 1e-33);
 }
 
 // rq-8fbf23bb
@@ -4798,14 +4795,14 @@ cutoff = 8.5e-10
 
 [[pair_interactions]]
 between = ["Ar", "X"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.0e-10
 epsilon = 1.0e-21
 cutoff = 8.5e-10
 
 [[pair_interactions]]
 between = ["X", "X"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.0e-10
 epsilon = 1.0e-21
 cutoff = 8.5e-10

@@ -881,7 +881,7 @@ mass = 6.6335e-26
 
 [[pair_interactions]]
 between = ["Ar", "Ar"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.5e-9
@@ -1244,7 +1244,7 @@ charge = 0.0
 
 [[pair_interactions]]
 between = ["O", "O"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 3.166e-10
 epsilon = 1.080e-21
 cutoff = 1.0e-9
@@ -1252,7 +1252,7 @@ r_switch = 1.0e-9
 
 [[pair_interactions]]
 between = ["H", "H"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0e-10
 epsilon = 1.0e-30
 cutoff = 1.0e-9
@@ -1260,7 +1260,7 @@ r_switch = 1.0e-9
 
 [[pair_interactions]]
 between = ["H", "O"]
-potential = "lennard-jones"
+kind = "lennard-jones"
 sigma = 1.0e-10
 epsilon = 1.0e-30
 cutoff = 1.0e-9
