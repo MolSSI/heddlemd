@@ -271,11 +271,17 @@ by the runner at log-write time.
   `Ok(())` without launching any kernel. The chain state arrays are
   allocated with `M` elements regardless (since `M` is a config-time
   constant); the `g_dof` is `0`.
-- `particle_count == 1`: `g_dof = 0`. The chain still propagates but
-  drives the kinetic energy toward zero (the target `g T` is
-  zero). This is the mathematically correct behaviour for a system
-  with zero thermal degrees of freedom; users should not run NHC on a
-  one-particle system but the thermostat does not refuse to construct.
+- `g_dof == 0` with `particle_count > 0` (a one-particle system, or a
+  system whose constraints leave `3N − n_constraints − 3 <= 0`): the
+  thermostat is **inert**. `q_mass[0] = g · T · τ² = 0` makes the
+  chain equations singular, so `apply_pre` and `apply_post` skip the
+  chain math and the velocity rescale entirely (cumulative factor
+  `1`, chain state untouched, no `rescale_velocities` launch beyond
+  the kinetic-energy reduce), and `log_column_values` reports
+  `H' = K + U` with a zero chain term. A system with zero thermal
+  degrees of freedom has nothing to thermostat; users should not run
+  NHC on such systems, but the thermostat does not refuse to
+  construct and produces no non-finite values.
 - `M == 1`: vanilla Nosé-Hoover. The "outermost chain-momentum kick"
   steps 1 and 6 in the sub-step are skipped (no `Q_{M-1}` exists);
   the M−1 → 1 and 1 → M−1 inner-update loops both reduce to a single
@@ -332,13 +338,18 @@ by the runner at log-write time.
   `e^(L_chain · dt/2)` factor: one `kinetic_energy_reduce` launch
   followed by `N_sub` chain sub-steps, each of which performs the
   host-side MKT chain math and one `rescale_velocities` launch.
+  When `g_dof == 0` the chain sub-steps and the rescale are skipped
+  (see *Empty State and degenerate cases*).
 - `apply_post(buffers, dt, timings)` — runs the right <!-- rq-370bf3a8 -->
-  `e^(L_chain · dt/2)` factor: same shape as `apply_pre`.
+  `e^(L_chain · dt/2)` factor: same shape as `apply_pre`, including
+  the `g_dof == 0` skip.
 - `log_column_names() -> &'static ["nhc_conserved"]`. <!-- rq-8a571737 -->
 - `log_column_values(ke, pe) -> vec![H']` where `H'` follows the <!-- rq-f94f6bac -->
   formula in *NHC conserved Hamiltonian* above, with `K = ke`,
   `U = pe`, and the chain term computed from `xi`, `p_xi`, `q_mass`,
-  `g_dof`, `temperature`.
+  `g_dof`, `temperature`. When `g_dof == 0` the chain term is `0.0`
+  (the `p_ξ²/(2Q)` sum is skipped, never evaluated against
+  `q_mass[0] == 0`) and `H' = ke + pe`.
 
 ### CUDA Kernels <!-- rq-a4eb7957 -->
 
@@ -647,6 +658,24 @@ Feature: Nosé-Hoover chain (NHC) thermostat
     Then it returns Ok(Some(thermostat))
     And g_dof equals 0
     And the ke_scratch device buffer has length 1
+
+  @rq-7c06a10c
+  Scenario: g_dof = 0 thermostat is inert under apply
+    Given an NHC thermostat built with particle_count=1 and n_constraints=0 (g_dof = 0)
+    And chain_length=3
+    And a one-particle system with a non-zero velocity
+    When apply_pre and apply_post are each called once
+    Then every velocity component is bit-identical to its pre-apply value
+    And every velocity component is finite
+    And xi and p_xi are all exactly 0.0
+
+  @rq-a8dc62ec
+  Scenario: nhc_conserved with g_dof = 0 equals K + PE
+    Given an NHC thermostat built with particle_count=1 and n_constraints=0 (g_dof = 0)
+    And chain_length=3
+    When log_column_values(ke, pe) is called
+    Then it returns vec![ke + pe]
+    And the returned value is finite
 
   @rq-6dc8454d
   Scenario: Reject yoshida_order outside {1, 3, 5, 7}

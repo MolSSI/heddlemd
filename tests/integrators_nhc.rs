@@ -430,6 +430,58 @@ fn nhc_log_column_values_combines_ke_pe_and_chain_term() {
     assert!(rel < 1.0e-12);
 }
 
+// --- Zero thermal DOF: inert thermostat ---
+
+// rq-7c06a10c
+#[test]
+fn nhc_g_dof_zero_is_inert_under_apply() {
+    let gpu = init_device().unwrap();
+    // One unconstrained particle: g_dof = max(0, 3 - 0 - 3) = 0.
+    let state = ParticleState::new(
+        vec![0.0],
+        vec![0.0],
+        vec![0.0],
+        vec![0.25],
+        vec![-0.5],
+        vec![0.125],
+        vec![1.0],
+        vec![0.0],
+        vec![0u32],
+        None,
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut t = unbox_nhc(build_nhc(&gpu, 1, &nhc_kind(300.0, 1.0e-13, 3, 3, 1)));
+    assert_eq!(t.g_dof, 0);
+    let mut timings = Timings::new(&gpu).unwrap();
+    let dt = (1.0e-15 / TIME_F) as Real;
+    t.apply_pre(&mut buffers, dt, &mut timings).unwrap();
+    t.apply_post(&mut buffers, dt, &mut timings).unwrap();
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
+    let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
+    // Bit-identical to the pre-apply values, and finite.
+    assert_eq!(vx, vec![0.25 as Real]);
+    assert_eq!(vy, vec![-0.5 as Real]);
+    assert_eq!(vz, vec![0.125 as Real]);
+    assert!(vx[0].is_finite() && vy[0].is_finite() && vz[0].is_finite());
+    // Chain state untouched.
+    assert!(t.xi.iter().all(|&x| x == 0.0));
+    assert!(t.p_xi.iter().all(|&p| p == 0.0));
+}
+
+// rq-a8dc62ec
+#[test]
+fn nhc_g_dof_zero_conserved_is_ke_plus_pe() {
+    let gpu = init_device().unwrap();
+    let t = unbox_nhc(build_nhc(&gpu, 1, &nhc_kind(300.0, 1.0e-13, 3, 3, 1)));
+    assert_eq!(t.g_dof, 0);
+    let vals = t.log_column_values(1.25, 2.5);
+    assert_eq!(vals, vec![3.75]);
+    assert!(vals[0].is_finite());
+}
+
 // --- End-to-end determinism + COM conservation ---
 
 fn atomic_state(n: usize) -> ParticleState {

@@ -16133,6 +16133,18 @@
     "title": "n = 0 is rejected at config-load time",
     "type": "scenario"
   },
+  "rq-7c06a10c": {
+    "decl": "Scenario: g_dof = 0 thermostat is inert under apply",
+    "file": "integration/nose-hoover-chain",
+    "refs": [
+      {
+        "file": "tests/integrators_nhc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "g_dof = 0 thermostat is inert under apply",
+    "type": "scenario"
+  },
   "rq-7c13040a": {
     "decl": "Scenario: shake_positions restores constraint distances after a small per-atom kick",
     "file": "integration/shake",
@@ -21638,6 +21650,22 @@
     "refs": [],
     "title": "Parameters",
     "type": "section"
+  },
+  "rq-a8dc62ec": {
+    "decl": "Scenario: nhc_conserved with g_dof = 0 equals K + PE",
+    "file": "integration/nose-hoover-chain",
+    "refs": [
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/integrators_nhc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "nhc_conserved with g_dof = 0 equals K + PE",
+    "type": "scenario"
   },
   "rq-a8df30ac": {
     "decl": "Scenario: minimum_image just past -L/2 wraps by one period",
@@ -32513,7 +32541,12 @@
     "decl": "## Empty State and degenerate cases",
     "file": "integration/nose-hoover-chain",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Empty State and degenerate cases",
     "type": "section"
   },

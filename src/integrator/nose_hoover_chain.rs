@@ -253,6 +253,11 @@ impl NoseHooverChainThermostat {
         dt: Real,
         mut k: f64,
     ) -> (f64, f64) {
+        // rq-fd90fab3 — zero thermal DOF makes q_mass[0] = 0 and the
+        // chain equations singular; the thermostat is inert.
+        if self.g_dof == 0 {
+            return (1.0, k);
+        }
         let dt = dt as f64;
         let n_resp = self.n_resp as f64;
         let g_dof = self.g_dof as f64;
@@ -320,9 +325,12 @@ impl Thermostat for NoseHooverChainThermostat {
         let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let (cumulative, _k_final) = self.thermostat_half_step_cumulative(dt, k);
-        timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
-        rescale_velocities(buffers, cumulative as Real)?;
-        timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
+        // rq-a9c46f51 — inert when g_dof == 0: no rescale launch.
+        if self.g_dof != 0 {
+            timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
+            rescale_velocities(buffers, cumulative as Real)?;
+            timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
+        }
         Ok(())
     }
 
@@ -367,6 +375,12 @@ impl Thermostat for NoseHooverChainThermostat {
         kinetic_energy: f64,
         potential_energy: f64,
     ) -> Vec<f64> {
+        // rq-a8dc62ec — inert thermostat (g_dof == 0): the chain never
+        // propagates and p_xi[0]²/(2·q_mass[0]) would be 0/0; report
+        // H' = K + U with a zero chain term.
+        if self.g_dof == 0 {
+            return vec![kinetic_energy + potential_energy];
+        }
         let mut chain_term = 0.0_f64;
         for (p, q) in self.p_xi.iter().zip(self.q_mass.iter()) {
             chain_term += (*p) * (*p) / (2.0 * (*q));
