@@ -209,6 +209,13 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
         true
     }
 
+    // `_n_constraints` is deliberately unused: Langevin needs no DOF
+    // count. The OU step couples each Cartesian velocity component to
+    // its own noise, so the dynamics are per-particle and momentum is
+    // NOT conserved — equilibrium KE corresponds to `3N −
+    // n_constraints` DOF, not the COM-removed `3N − n_constraints − 3`
+    // used by the reported `temperature` column (bias documented in
+    // `rqm/integration/langevin-baoab.md`, rq-adc3a32f).
     fn build(
         &self,
         gpu: &GpuContext,

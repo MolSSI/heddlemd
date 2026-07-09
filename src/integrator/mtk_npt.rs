@@ -134,6 +134,13 @@ impl MtkNptIntegrator {
         n_resp: u32,
     ) -> Result<Self, GpuError> {
         let m = chain_length as usize;
+        // Thermal DOF: `3N − n_constraints − 3` (COM momentum removed
+        // at init and preserved by MTK's uniform exponential velocity
+        // scaling). Floored to 1 — `N_f` divides the barostat force
+        // term `(6/N_f)·K` and the kick exponent `α = 1 + 3/N_f`, and
+        // sets the leading chain mass, so a zero would be singular.
+        // The floor only engages for systems with no thermal DOF (see
+        // `rqm/integration/mtk-npt.md`, degenerate cases).
         let g_dof =
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
         // k_B = 1 in atomic units; temperature is already k_B · T.
@@ -141,6 +148,9 @@ impl MtkNptIntegrator {
         let tau_t2 = tau_t * tau_t;
         let tau_p2 = tau_p * tau_p;
 
+        // Particle-chain masses: `Q_1 = N_f · kT · τ_t²` (link 1
+        // thermostats all N_f particle DOF), `Q_j = kT · τ_t²` for
+        // j > 1 (each higher link thermostats the single DOF below it).
         let mut q_mass_part = vec![0.0_f64; m];
         if m > 0 {
             q_mass_part[0] = (g_dof as f64) * kt * tau_t2;
@@ -148,7 +158,10 @@ impl MtkNptIntegrator {
                 q_mass_part[j] = kt * tau_t2;
             }
         }
+        // Cell chain thermostats the 1-DOF piston: every mass kT · τ_t².
         let q_mass_cell = vec![kt * tau_t2; m];
+        // MTK piston mass `W = (N_f + d) · kT · τ_p²` with d = 3
+        // (Martyna-Tobias-Klein 1994, Eq. 2.23).
         let w_cell = (g_dof as f64 + 3.0) * kt * tau_p2;
 
         let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
@@ -229,6 +242,10 @@ impl MtkNptIntegrator {
             for _ in 0..self.n_resp {
                 let delta_t = w * dt / (2.0 * n_resp);
                 let k_thermalized = self.p_eps * self.p_eps / self.w_cell;
+                // g_dof = 1.0: the cell chain thermostats exactly one
+                // DOF — the isotropic barostat piston `p_eps` — so its
+                // target kinetic energy is `1 · kT`, independent of the
+                // particle DOF count.
                 let factor = nhc_chain_sub_step(
                     &mut self.xi_cell,
                     &mut self.p_xi_cell,
@@ -390,7 +407,11 @@ impl Integrator for MtkNptIntegrator {
                 Ok(())
             }
             SubStep::Custom { label: "baro_kick_pre", .. } => {
-                // p_eps ← p_eps + (dt/2) · (3V(P − P_ext) + (6/N_f) · K)
+                // p_eps ← p_eps + (dt/2) · (3V(P − P_ext) + (6/N_f) · K).
+                // `(6/N_f)·K` is MTK's `(d/N_f)·2K` correction (d = 3):
+                // the piston force term arising from the `1 + d/N_f`
+                // coupling; `N_f` is the constraint- and COM-removed
+                // thermal DOF count (floored to 1 at construction).
                 self.p_eps += 0.5
                     * dt_f64
                     * (3.0 * self.scratch_volume * (self.scratch_pressure - self.pressure)
@@ -399,6 +420,11 @@ impl Integrator for MtkNptIntegrator {
             }
             SubStep::KickHalf { label: "vel_kick_pre", .. }
             | SubStep::KickHalf { label: "vel_kick_post", .. } => {
+                // `α = (1 + d/N_f) · v_eps` with d = 3: the MTK
+                // velocity-kick damping exponent. The `d/N_f` excess
+                // over plain cell scaling compensates the COM-frame
+                // kinetic-energy change so the NPT partition function
+                // is exact (MTK 1994, Eq. 2.19).
                 let alpha_v = (1.0 + 3.0 / nf) * (self.p_eps / self.w_cell);
                 let exp_ma_half = (-alpha_v * dt_f64 / 2.0).exp();
                 let phi_v_dt_half = 0.5
@@ -458,6 +484,8 @@ impl Integrator for MtkNptIntegrator {
                 Ok(())
             }
             SubStep::Custom { label: "baro_kick_post", .. } => {
+                // Mirror of `baro_kick_pre`; see the `(6/N_f)·K` note
+                // there for the DOF form.
                 self.p_eps += 0.5
                     * dt_f64
                     * (3.0 * self.scratch_volume * (self.scratch_pressure - self.pressure)

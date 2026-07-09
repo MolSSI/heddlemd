@@ -181,6 +181,12 @@ pub struct SimulationSetup {
     pub charges: Vec<Real>,
     pub type_indices: Vec<u32>,
     pub n_constraints: u32,
+    /// `max(0, 3N − n_constraints − 3)`: the constraint- and
+    /// COM-removed thermal DOF count used by `compute_temperature`
+    /// and the initial-velocity equipartition rescale. Zero is a
+    /// legitimate value (reported temperature is then 0.0); the
+    /// thermostats compute their own per-slot counts with the clamp
+    /// each algorithm needs.
     pub n_thermal_dof: u32,
     pub pre_phase_durations: PrePhaseDurations,
 }
@@ -1024,8 +1030,14 @@ fn simulation_setup_finish_gpu(
 
     let n_constraints = constraint_list.total_constraint_count();
     // Thermal degrees of freedom used by `compute_temperature` and by
-    // the initial-velocity equipartition rescale: constraint- and
-    // COM-removed.
+    // the initial-velocity equipartition rescale: `3N` Cartesian
+    // components, minus one per holonomic constraint, minus 3 for the
+    // COM momentum (subtracted at velocity generation and preserved by
+    // the momentum-conserving dynamics). Clamped to 0, not 1: zero
+    // thermal DOF is a legitimate state — `compute_temperature`
+    // reports 0.0 for it and velocity generation zeroes all velocities
+    // — unlike the thermostats' `max(1)` floors, which exist to keep
+    // their internal divisions by `N_f` well-defined.
     let n_thermal_dof: u32 = ((3 * n as i64) - n_constraints as i64 - 3).max(0) as u32;
 
     // Build velocities: either from the init state or sampled.
@@ -1111,6 +1123,9 @@ fn simulation_setup_finish_gpu(
                 .map_err(RunnerError::Gpu)? as f64;
             let n_thermal_dof_f64 = n_thermal_dof as f64;
             // k_B = 1 in atomic units; simulation.temperature is k_B · T in Hartrees.
+            // Equipartition target over the thermal DOF only: the 3 COM
+            // modes were just subtracted and constrained modes carry no
+            // kinetic energy, so `K_target = (N_thermal_dof / 2) · k_B·T`.
             let target_ke = 0.5 * n_thermal_dof_f64 * config.simulation.temperature;
             if ke_after > 0.0 && target_ke > 0.0 {
                 let factor = (target_ke / ke_after).sqrt() as Real;

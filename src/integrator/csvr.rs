@@ -95,6 +95,13 @@ impl CsvrThermostat {
         tau: f64,
         seed: u64,
     ) -> Result<Self, GpuError> {
+        // Thermal DOF: `3N − n_constraints − 3` (COM momentum removed
+        // at init and preserved by CSVR's uniform velocity rescale).
+        // Floored to 1 — CSVR divides by `N_f` in the rescale factor
+        // and draws `N_f − 1` chi-squared terms, so a zero would be
+        // singular. The floor only engages for systems with no thermal
+        // DOF, which should not be thermostatted anyway (see
+        // `rqm/integration/csvr.md`, degenerate cases).
         let g_dof =
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
         // k_B = 1 in atomic units; the temperature parameter is already
@@ -211,6 +218,10 @@ impl Thermostat for CsvrThermostat {
         let c = (-(dt as f64) / self.tau).exp();
         let one_minus_c = 1.0 - c;
         let nf = self.g_dof as f64;
+        // Equipartition: `K_target = (N_f / 2) · k_B·T` over the
+        // constraint- and COM-removed DOF computed at construction;
+        // `K_target / N_f = k_B·T / 2` feeds the per-DOF noise terms
+        // (the `max(1)` floor guarantees the division is well-defined).
         let k_target = (nf / 2.0) * self.kt_target;
         let k_target_over_nf = k_target / nf;
         timings.kernel_start(KernelStage::CSVR_SAMPLE_AND_FACTOR)?;

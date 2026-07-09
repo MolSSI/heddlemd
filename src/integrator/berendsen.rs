@@ -69,6 +69,12 @@ impl BerendsenThermostat {
         temperature: f64,
         tau: f64,
     ) -> Result<Self, GpuError> {
+        // Thermal DOF: `3N − n_constraints − 3` (COM momentum removed
+        // at init and preserved by the uniform velocity rescale).
+        // Floored to 1 — the rescale factor divides by `N_f` via
+        // `T_inst = 2K / N_f`. The floor only engages for systems with
+        // no thermal DOF, which should not be thermostatted anyway
+        // (see `rqm/integration/berendsen.md`, degenerate cases).
         let g_dof =
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
         // k_B = 1 in atomic units; temperature is already k_B · T.
@@ -151,6 +157,8 @@ impl Thermostat for BerendsenThermostat {
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
 
         let nf = self.g_dof as f64;
+        // Equipartition: `K_target = (N_f / 2) · k_B·T` over the
+        // constraint- and COM-removed DOF computed at construction.
         let k_target = (nf / 2.0) * self.kt_target;
         let dt_over_tau = (dt as f64) / self.tau;
         timings.kernel_start(KernelStage::BERENDSEN_COMPUTE_FACTOR)?;

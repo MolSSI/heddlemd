@@ -207,11 +207,21 @@ impl NoseHooverChainThermostat {
         n_resp: u32,
     ) -> Result<Self, GpuError> {
         let m = chain_length as usize;
+        // Thermal DOF: `3N − n_constraints − 3` (COM momentum removed
+        // at init and preserved by NHC's uniform velocity rescale).
+        // Clamped to 0, NOT floored to 1 like CSVR/Berendsen/MTK: NHC
+        // keeps the honest count and instead goes inert when it is 0
+        // (`q_mass[0]` below would be 0, making the chain equations
+        // singular — see the `g_dof == 0` guards in
+        // `thermostat_half_step_cumulative` and `log_column_values`).
         let g_dof =
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(0) as u32;
         // k_B = 1 in atomic units; temperature is already k_B · T.
         let kt = temperature;
         let tau2 = tau * tau;
+        // Chain masses: `Q_1 = g · kT · τ²` (link 1 thermostats all g
+        // particle DOF), `Q_j = kT · τ²` for j > 1 (each higher link
+        // thermostats the single chain DOF below it).
         let mut q_mass = vec![0.0_f64; m];
         if m > 0 {
             q_mass[0] = (g_dof as f64) * kt * tau2;

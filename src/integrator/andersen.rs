@@ -342,6 +342,12 @@ impl ThermostatBuilder for AndersenBuilder {
         Ok(())
     }
 
+    // `_n_constraints` is deliberately unused: Andersen needs no DOF
+    // count. Collisions resample a particle's full velocity from the
+    // Maxwell-Boltzmann distribution independently per particle, so
+    // momentum is NOT conserved and no `3N − n_constraints − 3` target
+    // enters the dynamics (same reported-temperature convention note
+    // as Langevin; see `rqm/integration/andersen.md`).
     fn build(
         &self,
         gpu: &GpuContext,
