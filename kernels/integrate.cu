@@ -215,6 +215,55 @@ extern "C" __global__ void vv_kick(
       masses, dt);
 }
 
+// Class-sourced kicks for impulse-splitting multiple-timestep
+// integrators (rqm/integration/respa.md): identical arithmetic to
+// vv_kick / vv_kick_drift, but the launch passes a force-class
+// accumulator (fast_total_forces_* or slow_total_forces_*) as the
+// force arrays instead of the combined ParticleBuffers.forces_*.
+extern "C" __global__ void class_kick_half(
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
+    const Real *forces_x, const Real *forces_y, const Real *forces_z,
+    const Real *masses,
+    Real dt,
+    unsigned int n)
+{
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) {
+    return;
+  }
+  vv_kick_body<false>(
+      i,
+      velocities_x, velocities_y, velocities_z,
+      nullptr, nullptr, nullptr,
+      forces_x, forces_y, forces_z,
+      masses, dt);
+}
+
+extern "C" __global__ void class_kick_drift(
+    Real4 *posq,
+    int *images_x, int *images_y, int *images_z,
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
+    const Real *forces_x, const Real *forces_y, const Real *forces_z,
+    const Real *masses,
+    const Real *lattice,
+    Real dt,
+    unsigned int n)
+{
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) {
+    return;
+  }
+  vv_kick_drift_body<false>(
+      i,
+      posq,
+      images_x, images_y, images_z,
+      velocities_x, velocities_y, velocities_z,
+      nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr,
+      forces_x, forces_y, forces_z,
+      masses, lattice, dt);
+}
+
 extern "C" __global__ void vv_kick_drift_lossless(
     Real4 *posq,
     int *images_x, int *images_y, int *images_z,

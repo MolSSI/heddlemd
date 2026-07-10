@@ -881,6 +881,25 @@ impl ForceField {
         self.slots.iter().all(|slot| slot.graph_compatible())
     }
 
+    /// The three force-component buffers of one class accumulator,
+    /// bundled for the runner's class-sourced kick dispatch
+    /// (`rqm/integration/framework.md`, `KickSource::Class`).
+    // rq-8fe78f4c
+    pub fn class_forces(&self, class: ForceClass) -> crate::gpu::ClassForceViews<'_> {
+        match class {
+            ForceClass::Fast => crate::gpu::ClassForceViews {
+                force_x: &self.fast_total_forces_x,
+                force_y: &self.fast_total_forces_y,
+                force_z: &self.fast_total_forces_z,
+            },
+            ForceClass::Slow => crate::gpu::ClassForceViews {
+                force_x: &self.slow_total_forces_x,
+                force_y: &self.slow_total_forces_y,
+                force_z: &self.slow_total_forces_z,
+            },
+        }
+    }
+
     // rq-be1eb548
     pub fn step_class(
         &mut self,

@@ -1575,7 +1575,12 @@ pub(crate) fn run_md_phase_inner(
     // run-wide override flag must be off, and capture must succeed
     // at runtime; otherwise the phase runs the per-step launch loop
     // with full per-kernel `Timings`.
+    // rq-9fbba3be — a plan containing ThermostatHalf sub-steps
+    // dispatches host-side thermostat arithmetic mid-plan, which
+    // cannot be captured; marker-bearing plans run on the eager path.
+    let plan_has_thermostat_points = integrator.plan(dt).has_thermostat_points();
     let graph_eligible = !setup.config.simulation.cuda_graphs_disable
+        && !plan_has_thermostat_points
         && phase_slots_graph_compatible(setup, phase);
 
     // Graph-timing calibration: CUDA forbids `cuEventElapsedTime` on the
@@ -1603,6 +1608,7 @@ pub(crate) fn run_md_phase_inner(
             &mut barostat,
             &mut constraint,
             supports_constraints,
+            plan_has_thermostat_points,
             dt,
             composed_post_force.as_ref(),
             post_force_substep_index,
@@ -1699,6 +1705,7 @@ pub(crate) fn run_md_phase_inner(
                 &mut barostat,
                 &mut constraint,
                 supports_constraints,
+            plan_has_thermostat_points,
                 dt,
                 composed_post_force.as_ref(),
                 post_force_substep_index,
@@ -1734,6 +1741,7 @@ pub(crate) fn run_md_phase_inner(
             &mut barostat,
             &mut constraint,
             supports_constraints,
+            plan_has_thermostat_points,
             dt,
             composed_post_force.as_ref(),
             post_force_substep_index,
@@ -2235,6 +2243,7 @@ fn launch_composed_post_force(
     composed: &crate::forces::JitComposedPostForcePerParticle,
     buffers: &crate::gpu::ParticleBuffers,
     sim_box: &crate::pbc::SimulationBox,
+    force_field: &crate::forces::ForceField,
     integrator: &dyn crate::integrator::Integrator,
     thermostat: &Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &Option<Box<dyn crate::integrator::Barostat>>,
@@ -2260,6 +2269,7 @@ fn launch_composed_post_force(
     let bind_ctx = crate::forces::PostForceBindContext {
         buffers,
         sim_box,
+        force_field,
         dt,
     };
     integrator
@@ -2485,6 +2495,10 @@ fn capture_one_graph(
                 sim_box,
                 force_field,
                 constraint_arg,
+                // Marker-bearing plans are excluded from capture, so
+                // there is never a ThermostatHalf to dispatch here;
+                // the capture path wraps the thermostat explicitly.
+                None,
                 dt,
                 timings,
                 crate::integrator::RunStepOptions {
@@ -2501,6 +2515,7 @@ fn capture_one_graph(
                 sim_box,
                 force_field,
                 constraint_arg,
+                None,
                 dt,
                 timings,
                 crate::integrator::RunStepOptions {
@@ -2535,6 +2550,7 @@ fn capture_one_graph(
                 composed,
                 buffers,
                 sim_box,
+                force_field,
                 integrator,
                 thermostat,
                 barostat,
@@ -2576,6 +2592,7 @@ fn run_per_step_range(
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
     supports_constraints: bool,
+    plan_owns_thermostat: bool,
     dt: Real,
     composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
     post_force_substep_index: Option<usize>,
@@ -2595,14 +2612,21 @@ fn run_per_step_range(
     log_rows_written: &mut u64,
 ) -> Result<(), (RunnerError, ExitPhase)> {
     for step in start_step..=n_steps {
-        if let Some(t) = thermostat.as_mut() {
-            t.apply_pre(&mut setup.buffers, dt, &mut *timings)
-                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        if !plan_owns_thermostat {
+            if let Some(t) = thermostat.as_mut() {
+                t.apply_pre(&mut setup.buffers, dt, &mut *timings)
+                    .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+            }
         }
         {
             let constraint_arg: Option<&mut dyn crate::integrator::Constraint> =
                 match constraint.as_mut() {
                     Some(b) => Some(b.as_mut()),
+                    None => None,
+                };
+            let thermostat_arg: Option<&mut dyn crate::integrator::Thermostat> =
+                match thermostat.as_mut() {
+                    Some(t) => Some(t.as_mut()),
                     None => None,
                 };
             // rq-76db55bb — the force evaluation computes total PE and
@@ -2628,6 +2652,7 @@ fn run_per_step_range(
                     &mut setup.sim_box,
                     &mut setup.force_field,
                     constraint_arg,
+                    thermostat_arg,
                     dt,
                     &mut *timings,
                     crate::integrator::RunStepOptions {
@@ -2644,6 +2669,7 @@ fn run_per_step_range(
                     &mut setup.sim_box,
                     &mut setup.force_field,
                     constraint_arg,
+                    thermostat_arg,
                     dt,
                     &mut *timings,
                     crate::integrator::RunStepOptions {
@@ -2671,13 +2697,18 @@ fn run_per_step_range(
                     crate::integrator::StepError::PostForceFragmentLoadFailed(e) => {
                         RunnerError::PostForceFragmentLoadFailed(e)
                     }
+                    crate::integrator::StepError::Gpu(e) => RunnerError::Gpu(e),
+                    crate::integrator::StepError::Thermostat(e) => RunnerError::Thermostat(e),
+                    crate::integrator::StepError::Timings(e) => RunnerError::Timings(e),
                 };
                 (runner_err, ExitPhase::Loop)
             })?;
         }
-        if let Some(t) = thermostat.as_mut() {
-            t.apply_post(&mut setup.buffers, dt, &mut *timings)
-                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        if !plan_owns_thermostat {
+            if let Some(t) = thermostat.as_mut() {
+                t.apply_post(&mut setup.buffers, dt, &mut *timings)
+                    .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+            }
         }
         if let Some(b) = barostat.as_mut() {
             b.apply(&mut setup.buffers, &mut setup.sim_box, dt, &mut *timings)
@@ -2688,6 +2719,7 @@ fn run_per_step_range(
                 composed,
                 &setup.buffers,
                 &setup.sim_box,
+                &setup.force_field,
                 integrator.as_ref(),
                 thermostat,
                 barostat,

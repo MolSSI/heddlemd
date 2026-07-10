@@ -118,7 +118,7 @@ impl Integrator for LangevinBaoabState {
         // appropriate factor inside the `lan_drift_half` kernel.
         StepPlan {
             steps: vec![
-                SubStep::KickHalf { dt, label: "B" },
+                SubStep::KickHalf { dt, label: "B", source: crate::integrator::KickSource::Total },
                 SubStep::Drift { dt, label: "A_pre" },
                 SubStep::Custom { dt, label: "O" },
                 SubStep::Drift { dt, label: "A_post" },
@@ -126,7 +126,7 @@ impl Integrator for LangevinBaoabState {
                     class: None,
                     level: Some(crate::forces::AggregateLevel::ForcesOnly),
                 },
-                SubStep::KickHalf { dt, label: "B" },
+                SubStep::KickHalf { dt, label: "B", source: crate::integrator::KickSource::Total },
             ],
         }
     }

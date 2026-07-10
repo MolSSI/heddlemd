@@ -94,12 +94,20 @@ hooks at the canonical sub-step boundaries (see `constraint-framework.md`
 for the hook contract). Integrators never reference the constraint
 slot directly.
 
-The runner drives the timestep loop in a fixed pattern:
+The runner drives the timestep loop in a fixed pattern. Thermostat
+placement has two topologies, selected by the plan itself: a plan with
+no `ThermostatHalf` sub-steps is wrapped by the runner (`apply_pre`
+before the walk, `apply_post` after — the default topology every
+single-timestep integrator uses); a plan containing `ThermostatHalf`
+sub-steps owns its thermostat placement and receives no wrapping.
 
 ```text
 loop step in 1..=n_steps:
-    if let Some(t) = thermostat { t.apply_pre(buffers, dt, timings) }
     let plan = integrator.plan(dt)
+    let plan_owns_thermostat = plan.has_thermostat_points()
+    if let Some(t) = thermostat, !plan_owns_thermostat {
+        t.apply_pre(buffers, dt, timings)
+    }
     let install_hooks = constraint.is_some()
         && integrator_builder.supports_constraints(&integrator_slot.params)
     let post_force_sub_idx = plan.last_post_force_substep_index()
@@ -115,6 +123,16 @@ loop step in 1..=n_steps:
             SubStep::ForceEval { class: Some(c), level } =>
                 force_field.step_class(c, buffers, sim_box, timings,
                                        runner.resolve_level(level))
+            SubStep::ThermostatHalf { dt: sub_dt, phase } =>
+                /* no-op when thermostat is None */
+                match phase:
+                    Pre  => thermostat.apply_pre(buffers, sub_dt, timings)
+                    Post => thermostat.apply_post(buffers, sub_dt, timings)
+            SubStep::KickHalf { dt: sub_dt, source: Class(c), .. } =>
+                /* runner-dispatched: only the runner holds ForceField */
+                class_kick_half(buffers, force_field.class_forces(c), sub_dt)
+            SubStep::KickDrift { dt: sub_dt, source: Class(c), .. } =>
+                class_kick_drift(buffers, force_field.class_forces(c), sub_dt)
             other if Some(i) == post_force_sub_idx
                     && post_force_composed_kernel.is_some() =>
                 /* skip — composed kernel handles this SubStep */
@@ -129,7 +147,9 @@ loop step in 1..=n_steps:
     if install_hooks && last_is_kick {
         constraint.apply_after_kick(buffers, sim_box, dt, timings)
     }
-    if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }  /* scalar prep */
+    if let Some(t) = thermostat, !plan_owns_thermostat {
+        t.apply_post(buffers, dt, timings)  /* scalar prep */
+    }
     if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }  /* scalar prep */
     if let Some(k) = post_force_composed_kernel {
         k.launch(buffers, integrator, thermostat.as_ref(), barostat.as_ref(),
@@ -158,7 +178,9 @@ and `runner_needs_scalars` forces the scalar-aggregating force level.
 `run_step` is the only plan walker; there are no per-combination
 wrapper functions.
 
-The runner calls `integrator.plan(dt)` once per timestep. `plan(dt)` is
+The runner calls `integrator.plan(dt)` once per timestep, plus once
+per phase as a shape probe (`has_thermostat_points()` selects the
+thermostat topology and CUDA-graph eligibility). `plan(dt)` is
 a pure function of `dt` and the integrator's static configuration; it
 returns the same `StepPlan` shape every call with the same `dt` (no
 per-step branching on simulation state). Plans may contain zero or
@@ -314,15 +336,28 @@ successfully.
   pub enum SubStep {
       /// Velocity half-kick: v ← v + (F/m) · dt/2 (or the
       /// integrator-private equivalent). No position update.
-      KickHalf { dt: f32, label: &'static str },
+      /// `source` selects which force the kick consumes and who
+      /// dispatches it (see `KickSource`).
+      KickHalf { dt: f32, label: &'static str, source: KickSource },
 
       /// Position drift: x ← x + v · dt (or the integrator-private
       /// equivalent). No velocity update.
       Drift { dt: f32, label: &'static str },
 
       /// Fused KickHalf + Drift in a single kernel launch (e.g. the
-      /// `vv_kick_drift` kernel for velocity-Verlet).
-      KickDrift { dt: f32, label: &'static str },
+      /// `vv_kick_drift` kernel for velocity-Verlet): the kick part
+      /// uses `dt/2`, the drift part `dt`. `source` as on `KickHalf`.
+      KickDrift { dt: f32, label: &'static str, source: KickSource },
+
+      /// Dispatch the configured thermostat's pre- or post-half at
+      /// this point in the plan, with the given `dt`. Dispatched by
+      /// the runner, not by the integrator's `execute()`; a no-op
+      /// when the run has no thermostat. A plan containing one or
+      /// more `ThermostatHalf` sub-steps takes full ownership of
+      /// thermostat placement: the runner's default wrapping
+      /// (`apply_pre` before the walk, `apply_post` after) is
+      /// suppressed for that plan.
+      ThermostatHalf { dt: f32, phase: ThermostatPhase },
 
       /// Force-pipeline evaluation. Dispatched by the runner, not by
       /// the integrator's `execute()`. The `class` field selects
@@ -360,18 +395,61 @@ successfully.
       /// Integrator-private sub-step that doesn't fit the
       /// kick/drift/force triad (Langevin's OU step, MTK's chain or
       /// barostat sub-steps, kinetic-energy reductions for a
-      /// barostat, etc.). The `label` lets the integrator's
-      /// `execute()` dispatch to the right kernel.
-      Custom { label: &'static str },
+      /// barostat, etc.). `dt` carries the plan timestep so
+      /// `execute()` can compute sub-step factors statelessly; the
+      /// `label` lets `execute()` dispatch to the right kernel.
+      Custom { dt: f32, label: &'static str },
   }
   ```
 
-  - `label` on every variant is integrator-private and exists for
-    debugging, timings stage selection, and (for `Custom`) dispatch
-    inside `execute()`. The runner does not interpret the label.
+- `KickSource` — selects the force a `KickHalf` / `KickDrift` <!-- rq-8fe78f4c -->
+  consumes, and thereby its dispatcher:
+
+  ```rust
+  pub enum KickSource {
+      /// The combined per-particle total force
+      /// (`ParticleBuffers.forces_*`, as written by the class
+      /// combiner). Dispatched to `integrator.execute()`; the
+      /// integrator launches its own kick kernel.
+      Total,
+
+      /// A single class accumulator (`ForceField`'s
+      /// `fast_total_forces_*` or `slow_total_forces_*` — see
+      /// `rqm/forces/framework.md`, *Class Output Accumulators*).
+      /// Dispatched by the runner, not by `execute()`: only the
+      /// runner holds the `ForceField`, so it launches the
+      /// framework-owned `class_kick_half` / `class_kick_drift`
+      /// kernels with the selected class's force buffers. This is
+      /// the kick form used by impulse-splitting multiple-timestep
+      /// integrators (RESPA, `respa.md`), whose inner kicks consume
+      /// only fast-class forces and outer kicks only slow-class
+      /// forces.
+      Class(ForceClass),
+  }
+  ```
+
+- `ThermostatPhase` — which thermostat half a `ThermostatHalf` <!-- rq-ab6c5844 -->
+  sub-step dispatches:
+
+  ```rust
+  pub enum ThermostatPhase {
+      /// `thermostat.apply_pre(buffers, dt, timings)`.
+      Pre,
+      /// `thermostat.apply_post(buffers, dt, timings)`.
+      Post,
+  }
+  ```
+
+  - `label` on every variant that carries one is integrator-private
+    and exists for debugging, timings stage selection, and (for
+    `Custom`) dispatch inside `execute()`. The runner does not
+    interpret the label.
   - The constraint slot's hook insertion logic
     (`constraint-framework.md`) reads only the variant tag, not the
-    label or the `class` payload.
+    label, `class`, or `source` payloads. `KickHalf` and `KickDrift`
+    count as velocity updates regardless of `source`;
+    `ThermostatHalf` is neither a drift nor a velocity update and
+    attracts no constraint hooks.
   - Single-step integrators (velocity-Verlet, Langevin BAOAB,
     NHC/CSVR/Andersen/Berendsen-paired plans) emit
     `ForceEval { class: None, level: Some(ForcesOnly) }` so the runner
@@ -381,12 +459,11 @@ successfully.
     MTK-NPT (its barostat reads virial every step) and the constant-
     pressure c-rescale integrator both fall in this group. An
     integrator that has no scalar requirement of its own emits
-    `level: None` and defers entirely to the runner. A future
-    RESPA-style integrator emits
-    `ForceEval { class: Some(Fast), level: ... }` many times per
-    outer step and `ForceEval { class: Some(Slow), level: ... }` once,
-    with `level` set to whichever level that integrator needs at each
-    sub-step.
+    `level: None` and defers entirely to the runner. The RESPA
+    integrator (`respa.md`) emits
+    `ForceEval { class: Some(Fast), level: None }` once per inner
+    step and `ForceEval { class: Some(Slow), level: None }` once per
+    outer step, together with `KickSource::Class`-sourced kicks.
   - `ForceClass` and `AggregateLevel` are both re-exported from
     `crate::forces` (see `rqm/forces/framework.md` for their
     definitions).
@@ -406,8 +483,17 @@ successfully.
   - The plan may contain zero, one, or more `ForceEval` sub-steps.
     Zero: forces stay at their previous value (suitable for inertial
     drift or analytic propagation). One: the standard symplectic
-    pattern. More than one: predictor-corrector or future multi-step
-    integrators.
+    pattern. More than one: multiple-timestep integrators (RESPA,
+    `respa.md`) and predictor-corrector schemes; a RESPA plan is the
+    inner loop unrolled, so the plan shape stays a pure function of
+    `dt` and the integrator's static configuration.
+  - `StepPlan::has_thermostat_points() -> bool` — `true` iff any
+    sub-step is a `ThermostatHalf`. The runner consults this once
+    per step to choose the thermostat topology (see *Per-Step
+    Interface*) and at phase setup to exclude marker-bearing plans
+    from CUDA-graph capture (a `ThermostatHalf` dispatches host-side
+    thermostat arithmetic, which cannot be captured; such plans run
+    on the eager path — see `cuda-graphs.md`).
 
 - `RunStepOptions` — per-call options for `run_step`, bundling the four <!-- rq-1d366b88 -->
   flags that select among plan-walk modes. Plain `Copy` data; a caller
@@ -499,7 +585,8 @@ successfully.
   }
   ```
 
-  - `plan(dt)` is called once per timestep by the runner. It does
+  - `plan(dt)` is called once per timestep by the runner, plus once
+    per phase as a shape probe. It does
     no I/O, launches no kernels, and may not allocate per-particle
     GPU buffers (those are constructed once at slot construction).
   - `execute(sub, ...)` is called once per non-`ForceEval` sub-step,
@@ -958,14 +1045,29 @@ successfully.
     correct when called on its other SubSteps regardless of
     whether the composed-kernel path is active.
 
-- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>` <!-- rq-277dbeb2 -->
+- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, thermostat: Option<&mut dyn Thermostat>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>` <!-- rq-277dbeb2 -->
   - The single free-function plan walker: realises the *Per-Step
-    Interface* for one timestep. Calls `integrator.plan(dt)`, then for
-    each sub-step dispatches `SubStep::ForceEval` to
-    `force_field.step{,_class}(...)` (or their `_no_neighbor_check`
-    variants when `opts.run_neighbor_pre_step == false`) and every
-    other sub-step to `integrator.execute(...)`, skipping the sub-step
-    at `opts.skip_substep_index` when set.
+    Interface* for one timestep. Calls `integrator.plan(dt)`, then
+    dispatches each sub-step, skipping the sub-step at
+    `opts.skip_substep_index` when set:
+    - `SubStep::ForceEval` → `force_field.step{,_class}(...)` (or
+      their `_no_neighbor_check` variants when
+      `opts.run_neighbor_pre_step == false`).
+    - `SubStep::KickHalf` / `KickDrift` with
+      `source: KickSource::Class(c)` → the framework-owned
+      `class_kick_half` / `class_kick_drift` launch helpers, reading
+      class `c`'s accumulator buffers from `force_field`.
+    - `SubStep::ThermostatHalf { dt, phase }` →
+      `thermostat.apply_pre(buffers, dt, timings)` (`phase: Pre`) or
+      `thermostat.apply_post(buffers, dt, timings)` (`phase: Post`).
+      A no-op when `thermostat` is `None`.
+    - Every other sub-step (including `Total`-sourced kicks) →
+      `integrator.execute(...)`.
+  - `run_step` dispatches only the plan's explicit `ThermostatHalf`
+    sub-steps; the default wrapping topology for marker-free plans
+    (`apply_pre` before the walk, `apply_post` after) belongs to the
+    runner's timestep loop, which consults
+    `plan.has_thermostat_points()` (see *Per-Step Interface*).
   - When `opts.install_constraint_hooks` is `true` and `constraint` is
     `Some`, fires `apply_before_drift` / `apply_after_drift` around each
     Drift / KickDrift sub-step and `apply_after_kick` after a terminal
@@ -988,6 +1090,25 @@ successfully.
   - Returns `AggregateLevel::ForcesAndScalars` when `runner_needs_scalars`
     is `true` or the sub-step itself requested scalars; otherwise returns
     `sub_step_level.unwrap_or(AggregateLevel::ForcesOnly)`.
+
+- `class_kick_half(buffers: &mut ParticleBuffers, class_forces: ClassForceViews<'_>, dt: Real) -> Result<(), GpuError>` <!-- rq-85102698 -->
+  - Framework-owned launch helper for a class-sourced velocity
+    half-kick: one thread per particle computing
+    `v ← v + (F_c/m) · dt/2`, where `F_c` is the selected class
+    accumulator (`ClassForceViews` bundles the three force-component
+    views the runner extracts from `ForceField`'s
+    `{fast,slow}_total_forces_{x,y,z}`). Deterministic: one thread
+    per particle, no reductions, no atomics.
+
+- `class_kick_drift(buffers: &mut ParticleBuffers, class_forces: ClassForceViews<'_>, dt: Real) -> Result<(), GpuError>` <!-- rq-e3317d5a -->
+  - Fused class-sourced kick + drift, matching the `KickDrift`
+    convention: `v ← v + (F_c/m) · dt/2` then `x ← x + v · dt`, with
+    the same position wrapping and image-flag updates as
+    `vv_kick_drift` (see `velocity-verlet.md`). Deterministic as
+    above.
+  - Both kernels live in `kernels/integrate.cu` alongside the
+    velocity-Verlet kernels and are loaded through the standard
+    `gpu_kernels!` manifest.
 
 - `Integrator::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-2e33e1b8 -->
   - Declares whether the integrator contributes a per-thread update
@@ -1105,13 +1226,11 @@ invariant under the same conditions each slot individually guarantees:
   OpenMM's `CustomIntegrator`). New slot implementations are Rust
   source code that implement the corresponding trait and register a
   builder.
-- Concrete multi-time-step / RESPA integrators. The integrator and
-  force-field trait shapes support RESPA-style plans: an integrator
-  can emit `SubStep::ForceEval { class: Some(Fast) }` many times per
-  outer step and `SubStep::ForceEval { class: Some(Slow) }` once, and
-  the runner dispatches each via `ForceField::step` / `step_class`
-  (see `rqm/forces/framework.md`). No RESPA implementation ships in
-  the default `IntegratorRegistry`.
+- Constrained and constant-pressure multiple-timestepping. The RESPA
+  integrator (`respa.md`) covers NVE/NVT; RESPA with holonomic
+  constraints (RATTLE inside the inner loop) and RESPA-NPT splittings
+  are out of scope and rejected at config validation (see `respa.md`,
+  *Compatibility*).
 - Constraint algorithms other than SETTLE. M-SHAKE, P-LINCS, and
   every other constraint algorithm are out of scope for this
   framework file; they share the `Constraint` slot defined in
@@ -1555,5 +1674,65 @@ Feature: Pluggable integration framework
     Then the only free plan-walk function is run_step(.., opts: RunStepOptions)
     And no run_step_no_neighbor_check / run_step_with_skipped_substep /
       run_step_with_skipped_substep_no_neighbor_check / run_step_no_constraint functions exist
+
+  # --- Class-sourced kicks ---
+
+  @rq-cac5cc99
+  Scenario: A Class-sourced KickHalf reads the class accumulator, not the combined force
+    Given a ForceField whose Fast accumulator holds force (1, 0, 0) and Slow accumulator (2, 0, 0) for particle 0
+    And an integrator whose plan is [KickHalf { dt, source: Class(Slow), .. }]
+    When run_step walks the plan
+    Then particle 0's velocity gains (2 / m) · dt/2 along x
+    And integrator.execute is not called for that sub-step
+
+  @rq-5edc2d8f
+  Scenario: A Class-sourced KickDrift kicks with dt/2 and drifts with dt
+    Given a Fast accumulator holding force (f, 0, 0) and a particle at rest at x0
+    And an integrator whose plan is [KickDrift { dt, source: Class(Fast), .. }]
+    When run_step walks the plan
+    Then the particle's velocity is (f/m) · dt/2
+    And its position is x0 + (f/m) · dt/2 · dt
+
+  @rq-0047eebd
+  Scenario: A Total-sourced kick is dispatched to integrator.execute unchanged
+    Given an integrator whose plan is [KickHalf { dt, source: Total, .. }]
+    When run_step walks the plan
+    Then integrator.execute receives that sub-step
+
+  # --- Plan-declared thermostat points ---
+
+  @rq-2eac2f62
+  Scenario: ThermostatHalf sub-steps dispatch the thermostat at the marker positions
+    Given a recording thermostat and an integrator whose plan is
+      [ThermostatHalf { phase: Pre, .. }, Drift { .. }, ThermostatHalf { phase: Post, .. }]
+    When the runner executes one timestep
+    Then the thermostat records exactly one apply_pre and one apply_post
+    And the apply_pre precedes the Drift and the apply_post follows it
+
+  @rq-8c0c385b
+  Scenario: A marker-bearing plan suppresses the runner's default thermostat wrapping
+    Given a recording thermostat and an integrator whose plan contains one ThermostatHalf { phase: Post, .. } and no Pre marker
+    When the runner executes one timestep
+    Then the thermostat records zero apply_pre calls and exactly one apply_post call
+
+  @rq-177b7289
+  Scenario: A marker-free plan keeps the default wrapping topology
+    Given a recording thermostat and an integrator whose plan contains no ThermostatHalf
+    When the runner executes one timestep
+    Then the thermostat records exactly one apply_pre before the plan walk and one apply_post after it
+
+  @rq-22755bc1
+  Scenario: ThermostatHalf is a no-op when no thermostat is configured
+    Given no thermostat slot and an integrator whose plan contains ThermostatHalf sub-steps
+    When run_step walks the plan with thermostat = None
+    Then the walk completes with Ok(())
+    And no thermostat method is invoked
+
+  @rq-72bb7b90
+  Scenario: has_thermostat_points reflects the plan contents
+    Given a plan with no ThermostatHalf sub-steps
+    Then plan.has_thermostat_points() is false
+    Given a plan containing one ThermostatHalf sub-step
+    Then plan.has_thermostat_points() is true
 
 ```

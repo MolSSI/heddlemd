@@ -151,12 +151,20 @@ impl Integrator for VelocityVerletState {
     fn plan(&self, dt: Real) -> StepPlan {
         StepPlan {
             steps: vec![
-                SubStep::KickDrift { dt, label: "vv_kick_drift" },
+                SubStep::KickDrift {
+                    dt,
+                    label: "vv_kick_drift",
+                    source: crate::integrator::KickSource::Total,
+                },
                 SubStep::ForceEval {
                     class: None,
                     level: Some(crate::forces::AggregateLevel::ForcesOnly),
                 },
-                SubStep::KickHalf { dt, label: "vv_kick" },
+                SubStep::KickHalf {
+                    dt,
+                    label: "vv_kick",
+                    source: crate::integrator::KickSource::Total,
+                },
             ],
         }
     }
@@ -295,12 +303,16 @@ crate::gpu_kernels! {
     kernels: [
         vv_kick_drift,
         vv_kick,
+        class_kick_half,
+        class_kick_drift,
         #[cfg(not(feature = "f64"))] vv_kick_drift_lossless,
         #[cfg(not(feature = "f64"))] vv_kick_lossless,
     ],
     stages: {
         VV_KICK_DRIFT          = "vv_kick_drift",
         VV_KICK                = "vv_kick",
+        CLASS_KICK_HALF        = "class_kick_half",
+        CLASS_KICK_DRIFT       = "class_kick_drift",
         VV_KICK_DRIFT_LOSSLESS = "vv_kick_drift_lossless",
         VV_KICK_LOSSLESS       = "vv_kick_lossless",
     },

@@ -341,7 +341,7 @@ impl Integrator for MtkNptIntegrator {
                 SubStep::Custom { dt, label: "cell_chain_pre" },
                 SubStep::Custom { dt, label: "particle_chain_pre" },
                 SubStep::Custom { dt, label: "baro_kick_pre" },
-                SubStep::KickHalf { dt, label: "vel_kick_pre" },
+                SubStep::KickHalf { dt, label: "vel_kick_pre", source: crate::integrator::KickSource::Total },
                 SubStep::Drift { dt, label: "drift_box" },
                 SubStep::ForceEval {
                     class: None,
@@ -349,7 +349,7 @@ impl Integrator for MtkNptIntegrator {
                 },
                 SubStep::Custom { dt, label: "ke_reduce_post" },
                 SubStep::Custom { dt, label: "vir_reduce_post" },
-                SubStep::KickHalf { dt, label: "vel_kick_post" },
+                SubStep::KickHalf { dt, label: "vel_kick_post", source: crate::integrator::KickSource::Total },
                 SubStep::Custom { dt, label: "ke_reduce_post_kick" },
                 SubStep::Custom { dt, label: "baro_kick_post" },
                 SubStep::Custom { dt, label: "particle_chain_post" },

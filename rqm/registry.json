@@ -19,6 +19,18 @@
     "title": "validate_against enforces IncompatibleThermostat from the builder predicate",
     "type": "scenario"
   },
+  "rq-0047eebd": {
+    "decl": "Scenario: A Total-sourced kick is dispatched to integrator.execute unchanged",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A Total-sourced kick is dispatched to integrator.execute unchanged",
+    "type": "scenario"
+  },
   "rq-0051b248": {
     "decl": "Scenario: Reject negative dt",
     "file": "io/config-schema",
@@ -1490,6 +1502,19 @@
     ],
     "title": "minimum_image handles many-period displacements (orthorhombic)",
     "type": "scenario"
+  },
+  "rq-0af322d7": {
+    "decl": "## Plan shape",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Plan shape",
+    "type": "section"
   },
   "rq-0b04b35c": {
     "decl": "## Gherkin Scenarios",
@@ -3270,6 +3295,18 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-177b7289": {
+    "decl": "Scenario: A marker-free plan keeps the default wrapping topology",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A marker-free plan keeps the default wrapping topology",
+    "type": "scenario"
+  },
   "rq-178eb1ae": {
     "decl": "Scenario: apply_position_projection_only mutates positions but not velocities or virials",
     "file": "integration/constraint-framework",
@@ -3544,6 +3581,18 @@
     "refs": [],
     "title": "Shared `nhc_chain_sub_step` host-side helper",
     "type": "section"
+  },
+  "rq-19504e09": {
+    "decl": "Scenario: Fast-only system matches velocity Verlet at the inner timestep",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Fast-only system matches velocity Verlet at the inner timestep",
+    "type": "scenario"
   },
   "rq-1979ae5a": {
     "decl": "## Device-resident lattice mirror",
@@ -4006,6 +4055,13 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-1c2c92b7": {
+    "decl": "- `RespaBuilder` — implements `IntegratorBuilder` with",
+    "file": "integration/respa",
+    "refs": [],
+    "title": "RespaBuilder",
+    "type": "api-item"
   },
   "rq-1c729f15": {
     "decl": "Scenario: Langevin runs through the runner with N=0",
@@ -4597,6 +4653,18 @@
     "title": "`mtk_velocity_half_kick`",
     "type": "section"
   },
+  "rq-204ec51c": {
+    "decl": "Scenario: Plan is the unrolled inner loop",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Plan is the unrolled inner loop",
+    "type": "scenario"
+  },
   "rq-20530653": {
     "decl": "## Reproducibility",
     "file": "forces/spme",
@@ -4947,6 +5015,18 @@
     "refs": [],
     "title": "Schema",
     "type": "section"
+  },
+  "rq-22755bc1": {
+    "decl": "Scenario: ThermostatHalf is a no-op when no thermostat is configured",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ThermostatHalf is a no-op when no thermostat is configured",
+    "type": "scenario"
   },
   "rq-22a1660e": {
     "decl": "### Source Fragment",
@@ -5629,9 +5709,14 @@
     "type": "scenario"
   },
   "rq-277dbeb2": {
-    "decl": "- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>`",
+    "decl": "- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, thermostat: Option<&mut dyn Thermostat>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>`",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "run_step",
     "type": "api-item"
   },
@@ -6644,6 +6729,18 @@
     "refs": [],
     "title": "ignored.",
     "type": "file"
+  },
+  "rq-2eac2f62": {
+    "decl": "Scenario: ThermostatHalf sub-steps dispatch the thermostat at the marker positions",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ThermostatHalf sub-steps dispatch the thermostat at the marker positions",
+    "type": "scenario"
   },
   "rq-2ebf81fd": {
     "decl": "Scenario: Timings path equal to init path is rejected",
@@ -8303,6 +8400,14 @@
     "title": "Total momentum after generation is zero (within f32 round-off)",
     "type": "scenario"
   },
+  "rq-3c582d1d": {
+    "decl": "## Determinism",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-3c62b49b": {
     "decl": "Scenario: graph_batch_size = 1 is valid and runs every step under graph mode",
     "file": "cuda-graphs",
@@ -8759,6 +8864,13 @@
     "title": "Constraint-Type Validation",
     "type": "section"
   },
+  "rq-406da2fc": {
+    "decl": "- `kind = \"respa\"` together with a `[constraints]` section is rejected",
+    "file": "integration/respa",
+    "refs": [],
+    "title": "kind",
+    "type": "api-item"
+  },
   "rq-408e4dc1": {
     "decl": "Scenario: SI-mode c-rescale barostat params are converted to atomic units",
     "file": "io/unit-system",
@@ -9141,6 +9253,13 @@
     "title": "Diagnostic log columns",
     "type": "section"
   },
+  "rq-441de6c1": {
+    "decl": "- `kind = \"respa\"` together with a `[barostat]` section is rejected at",
+    "file": "integration/respa",
+    "refs": [],
+    "title": "kind",
+    "type": "api-item"
+  },
   "rq-44385733": {
     "decl": "Scenario: ForceField carries no per-excluded-pair state",
     "file": "forces/jit-composed-pair-force",
@@ -9499,6 +9618,14 @@
     "title": "A bonded-only ForceField step launches no neighbor-list kernels",
     "type": "scenario"
   },
+  "rq-4755aa0a": {
+    "decl": "## Algorithm",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-475e403e": {
     "decl": "Scenario: A binding that pushes every argument in schema order is accepted",
     "file": "forces/jit-composed-pair-force",
@@ -9594,6 +9721,18 @@
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "r=0 produces zero force, not NaN",
+    "type": "scenario"
+  },
+  "rq-482921eb": {
+    "decl": "Scenario: post_force_substep_index selects the trailing outer kick",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "post_force_substep_index selects the trailing outer kick",
     "type": "scenario"
   },
   "rq-483fc240": {
@@ -10021,6 +10160,18 @@
     ],
     "title": "NoseHooverChainBuilder",
     "type": "api-item"
+  },
+  "rq-4bf89376": {
+    "decl": "Scenario: Reject RESPA with a barostat",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject RESPA with a barostat",
+    "type": "scenario"
   },
   "rq-4c0ddae3": {
     "decl": "Scenario: Two graph-mode runs are byte-identical",
@@ -11219,6 +11370,18 @@
     "title": "Output File Format",
     "type": "section"
   },
+  "rq-564d914c": {
+    "decl": "# Feature: RESPA Multiple-Timestep Integrator",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "src/integrator/respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: RESPA Multiple-Timestep Integrator",
+    "type": "file"
+  },
   "rq-56545622": {
     "decl": "## Out of Scope",
     "file": "integration/mc-barostat",
@@ -11976,9 +12139,26 @@
   "rq-5c607daa": {
     "decl": "- `PostForceBindContext<'a>` — context passed to every active",
     "file": "integration/jit-composed-post-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PostForceBindContext",
     "type": "api-item"
+  },
+  "rq-5c63aa07": {
+    "decl": "Scenario: Plan shape is a pure function of dt",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Plan shape is a pure function of dt",
+    "type": "scenario"
   },
   "rq-5c716d48": {
     "decl": "Scenario: write_timings_file with an empty report writes only the header",
@@ -12307,6 +12487,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-5edc2d8f": {
+    "decl": "Scenario: A Class-sourced KickDrift kicks with dt/2 and drifts with dt",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A Class-sourced KickDrift kicks with dt/2 and drifts with dt",
+    "type": "scenario"
   },
   "rq-5f067d09": {
     "decl": "Scenario: Sparse-only neighbour list is enumerable",
@@ -13021,6 +13213,25 @@
     "title": "mtk-npt + [thermostat] is rejected",
     "type": "scenario"
   },
+  "rq-64893fbb": {
+    "decl": "Scenario: RESPA with N = 0 completes a step",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "RESPA with N = 0 completes a step",
+    "type": "scenario"
+  },
+  "rq-64a7b057": {
+    "decl": "- `kind = \"respa\"` together with `[integrator].lossless = true` is",
+    "file": "integration/respa",
+    "refs": [],
+    "title": "kind",
+    "type": "api-item"
+  },
   "rq-64c051d4": {
     "decl": "Scenario: rescale_positions on empty state is a no-op",
     "file": "integration/berendsen-barostat",
@@ -13545,6 +13756,18 @@
     ],
     "title": "Reject an unknown minimization algorithm kind",
     "type": "scenario"
+  },
+  "rq-6922b0be": {
+    "decl": "- `RespaIntegrator` — implements the `Integrator` trait declared in",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "src/integrator/respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "RespaIntegrator",
+    "type": "api-item"
   },
   "rq-693544f8": {
     "decl": "## Composed-Kernel Structure",
@@ -14768,6 +14991,18 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Generation tick with unchanged n_cells_total updates the cache without forcing rebuild",
+    "type": "scenario"
+  },
+  "rq-72bb7b90": {
+    "decl": "Scenario: has_thermostat_points reflects the plan contents",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "has_thermostat_points reflects the plan contents",
     "type": "scenario"
   },
   "rq-72c57874": {
@@ -16481,6 +16716,18 @@
     "title": "`[[constraint_types]]` (optional array of tables)",
     "type": "section"
   },
+  "rq-7e9e52c4": {
+    "decl": "Scenario: Reject RESPA with a constraints section",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject RESPA with a constraints section",
+    "type": "scenario"
+  },
   "rq-7eb22aad": {
     "decl": "### Synthetic stages",
     "file": "performance-analysis",
@@ -17166,6 +17413,18 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-85102698": {
+    "decl": "- `class_kick_half(buffers: &mut ParticleBuffers, class_forces: ClassForceViews<'_>, dt: Real) -> Result<(), GpuError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "class_kick_half",
+    "type": "api-item"
+  },
   "rq-85192a05": {
     "decl": "Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "file": "forces/lj-pair-force",
@@ -17210,6 +17469,18 @@
       }
     ],
     "title": ".minlog rows include the final convergence iteration",
+    "type": "scenario"
+  },
+  "rq-860c8ff9": {
+    "decl": "Scenario: NVE energy is conserved to the same order as velocity Verlet",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NVE energy is conserved to the same order as velocity Verlet",
     "type": "scenario"
   },
   "rq-8626ec3c": {
@@ -17996,6 +18267,18 @@
     "title": "minimum_image of the zero displacement is zero",
     "type": "scenario"
   },
+  "rq-8c0c385b": {
+    "decl": "Scenario: A marker-bearing plan suppresses the runner's default thermostat wrapping",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A marker-bearing plan suppresses the runner's default thermostat wrapping",
+    "type": "scenario"
+  },
   "rq-8c1de56e": {
     "decl": "- `run_analyses(config_path: &Path) -> Result<AnalyzeSummary, AnalyzeError>`",
     "file": "analysis/framework",
@@ -18405,6 +18688,18 @@
     ],
     "title": "apply_post on empty state is a no-op",
     "type": "scenario"
+  },
+  "rq-8fe78f4c": {
+    "decl": "- `KickSource` — selects the force a `KickHalf` / `KickDrift`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "KickSource",
+    "type": "api-item"
   },
   "rq-9004fd7a": {
     "decl": "Scenario: LennardJonesState reports its max cutoff to the framework",
@@ -19847,6 +20142,14 @@
     "title": "apply_post on empty NHC state is a no-op",
     "type": "scenario"
   },
+  "rq-9b71abcb": {
+    "decl": "## Neighbor-list interaction",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [],
+    "title": "Neighbor-list interaction",
+    "type": "section"
+  },
   "rq-9b85fa6c": {
     "decl": "- `write_timings_file(path: &Path, report: &TimingsReport) -> Result<(), TimingsWriterError>`",
     "file": "performance-analysis",
@@ -20428,6 +20731,14 @@
     "title": "Lossless mode selects the lossless integrator kernels",
     "type": "scenario"
   },
+  "rq-9ebb8531": {
+    "decl": "## Feature API",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-9ebdaea4": {
     "decl": "- `PostForceFragmentCompileFailed { log: String }` — nvrtc",
     "file": "integration/jit-composed-post-force",
@@ -20578,6 +20889,19 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-9f8480ae": {
+    "decl": "## Parameters",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Parameters",
+    "type": "section"
+  },
   "rq-9f947525": {
     "decl": "- `compute_block_bbox(tile_sorted_posq, tile_atom_count,",
     "file": "forces/packed-neighbour-pair-force",
@@ -20611,6 +20935,10 @@
     "refs": [
       {
         "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
         "kind": "code"
       }
     ],
@@ -22003,6 +22331,13 @@
     "title": "Reject non-blank content after the last data row",
     "type": "scenario"
   },
+  "rq-ab6c5844": {
+    "decl": "- `ThermostatPhase` — which thermostat half a `ThermostatHalf`",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "ThermostatPhase",
+    "type": "api-item"
+  },
   "rq-ab74a666": {
     "decl": "Scenario: Reject grid dimension below 2*spline_order along b",
     "file": "forces/spme",
@@ -22035,6 +22370,14 @@
     "refs": [],
     "title": "CPU-reference tolerance constant tightens in the f64 build",
     "type": "scenario"
+  },
+  "rq-abb4cdfe": {
+    "decl": "### Config validation",
+    "file": "integration/respa",
+    "level": 3,
+    "refs": [],
+    "title": "Config validation",
+    "type": "section"
   },
   "rq-abcae430": {
     "decl": "Scenario: Construct with particle_count = 0",
@@ -22283,6 +22626,10 @@
     "decl": "Scenario: Equilibrium kinetic energy approaches ((3N − n_constraints) / 2) · k_B · T",
     "file": "integration/langevin-baoab",
     "refs": [
+      {
+        "file": "src/integrator/langevin_baoab.rs",
+        "kind": "code"
+      },
       {
         "file": "tests/langevin.rs",
         "kind": "code"
@@ -22665,6 +23012,18 @@
     "title": "Composer emits an exclusion-scaled evaluator",
     "type": "scenario"
   },
+  "rq-b0a520ac": {
+    "decl": "Scenario: Plan contains no ThermostatHalf markers",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Plan contains no ThermostatHalf markers",
+    "type": "scenario"
+  },
   "rq-b0b4c220": {
     "decl": "Scenario: rescale_isotropic rejects zero factor",
     "file": "integration/berendsen-barostat",
@@ -22792,6 +23151,18 @@
       }
     ],
     "title": "Particles evolve independently with their own forces",
+    "type": "scenario"
+  },
+  "rq-b141648c": {
+    "decl": "Scenario: Registry builds a RESPA integrator",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Registry builds a RESPA integrator",
     "type": "scenario"
   },
   "rq-b14ac769": {
@@ -24180,6 +24551,18 @@
     "title": "Feature: Packed-Neighbour Pair-Force Architecture",
     "type": "file"
   },
+  "rq-bcec000b": {
+    "decl": "Scenario: Slow-only system applies pure outer impulses",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Slow-only system applies pure outer impulses",
+    "type": "scenario"
+  },
   "rq-bcf7e0eb": {
     "decl": "- `lint_analyses(config_path: &Path) -> LintReport`",
     "file": "analysis/framework",
@@ -24922,6 +25305,18 @@
     "title": "Different seeds yield different post-call velocities",
     "type": "scenario"
   },
+  "rq-c3746bb2": {
+    "decl": "Scenario: Thermostat couples once per outer step",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Thermostat couples once per outer step",
+    "type": "scenario"
+  },
   "rq-c38c8f3b": {
     "decl": "### Functions",
     "file": "build-pipeline",
@@ -25645,6 +26040,18 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-c8835814": {
+    "decl": "Scenario: Two identical RESPA runs are byte-identical",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two identical RESPA runs are byte-identical",
+    "type": "scenario"
+  },
   "rq-c8848b7f": {
     "decl": "### Functions and methods",
     "file": "integration/framework",
@@ -26031,6 +26438,26 @@
     "title": "pub",
     "type": "api-item"
   },
+  "rq-ca983738": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
+    "type": "section"
+  },
+  "rq-cac5cc99": {
+    "decl": "Scenario: A Class-sourced KickHalf reads the class accumulator, not the combined force",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A Class-sourced KickHalf reads the class accumulator, not the combined force",
+    "type": "scenario"
+  },
   "rq-cadfb824": {
     "decl": "- `mtk_velocity_half_kick(buffers: &mut ParticleBuffers, exp_minus_alpha: f32, phi_v_dt_half: f32) -> Result<(), GpuError>`",
     "file": "integration/mtk-npt",
@@ -26071,6 +26498,27 @@
     "refs": [],
     "title": "Barostat",
     "type": "api-item"
+  },
+  "rq-cb480c95": {
+    "decl": "## Compatibility",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/respa.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Compatibility",
+    "type": "section"
   },
   "rq-cb52dec0": {
     "decl": "Scenario: Builder validate_params rejects an out-of-domain field",
@@ -27150,6 +27598,19 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-d46f59c6": {
+    "decl": "## Post-force composed kernel",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Post-force composed kernel",
+    "type": "section"
+  },
   "rq-d4720f04": {
     "decl": "Scenario: A combined pair whose type lacks sigma/epsilon is rejected",
     "file": "io/config-schema",
@@ -27418,6 +27879,18 @@
     "title": "C-rescale barostat missing temperature is rejected",
     "type": "scenario"
   },
+  "rq-d62c351e": {
+    "decl": "Scenario: Reject n_inner = 0",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject n_inner = 0",
+    "type": "scenario"
+  },
   "rq-d638d799": {
     "decl": "Scenario: No set_jit_composed_post_force_active trait method exists",
     "file": "cuda-graphs",
@@ -27624,6 +28097,14 @@
     ],
     "title": "BondedPotential",
     "type": "api-item"
+  },
+  "rq-d7e882ba": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/respa",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-d7e933cb": {
     "decl": "Scenario: FragmentCompileFailed surfaces the dihedral slot labels of every contributing fragment",
@@ -27868,6 +28349,18 @@
     ],
     "title": "ShakeConstraintsState",
     "type": "api-item"
+  },
+  "rq-d9a51e75": {
+    "decl": "Scenario: Accept n_inner = 1",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Accept n_inner = 1",
+    "type": "scenario"
   },
   "rq-d9a98e51": {
     "decl": "Scenario: Pre-flight refuses to overwrite existing trajectory",
@@ -28368,6 +28861,14 @@
       }
     ],
     "title": "Integration with the Runner",
+    "type": "section"
+  },
+  "rq-dd36c79b": {
+    "decl": "### Types",
+    "file": "integration/respa",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
     "type": "section"
   },
   "rq-dd41209b": {
@@ -29103,6 +29604,18 @@
     "title": "Parameters",
     "type": "section"
   },
+  "rq-e3317d5a": {
+    "decl": "- `class_kick_drift(buffers: &mut ParticleBuffers, class_forces: ClassForceViews<'_>, dt: Real) -> Result<(), GpuError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "class_kick_drift",
+    "type": "api-item"
+  },
   "rq-e35fa835": {
     "decl": "- `capture_phase_graph(setup: &mut SimulationSetup, phase: &Phase,",
     "file": "cuda-graphs",
@@ -29750,6 +30263,10 @@
       {
         "file": "src/forces/spme.rs",
         "kind": "code"
+      },
+      {
+        "file": "src/integrator/respa.rs",
+        "kind": "code"
       }
     ],
     "title": "PotentialBuilder",
@@ -30310,6 +30827,18 @@
       }
     ],
     "title": "Morse bond_type rejects non-positive de",
+    "type": "scenario"
+  },
+  "rq-ecd52ccb": {
+    "decl": "Scenario: Reject RESPA with lossless mode",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject RESPA with lossless mode",
     "type": "scenario"
   },
   "rq-ece2a1ec": {
@@ -31780,6 +32309,18 @@
     ],
     "title": "SimulationBox",
     "type": "api-item"
+  },
+  "rq-f746a29f": {
+    "decl": "Scenario: RESPA with no slow-class slots leaves outer kicks as exact no-ops",
+    "file": "integration/respa",
+    "refs": [
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "RESPA with no slow-class slots leaves outer kicks as exact no-ops",
+    "type": "scenario"
   },
   "rq-f7521c63": {
     "decl": "### CUDA Kernels",

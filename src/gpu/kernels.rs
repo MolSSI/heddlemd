@@ -68,6 +68,96 @@ pub fn vv_kick_drift(
     Ok(())
 }
 
+/// The three force-component buffers of one class accumulator
+/// (`ForceField`'s `fast_total_forces_*` or `slow_total_forces_*`),
+/// bundled for the class-sourced kick launch helpers. The runner
+/// extracts one of these per `KickSource::Class` sub-step.
+#[derive(Clone, Copy)]
+pub struct ClassForceViews<'a> {
+    pub force_x: &'a CudaSlice<Real>,
+    pub force_y: &'a CudaSlice<Real>,
+    pub force_z: &'a CudaSlice<Real>,
+}
+
+/// Class-sourced velocity half-kick: `v ← v + (F_c/m) · dt/2` with
+/// `F_c` the supplied class accumulator. One thread per particle; no
+/// reductions, no atomics.
+// rq-85102698
+pub fn class_kick_half(
+    buffers: &mut ParticleBuffers,
+    class_forces: ClassForceViews<'_>,
+    dt: Real,
+) -> Result<(), GpuError> {
+    let n = buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = buffers.kernels.integrate.class_kick_half.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.velocities_x,
+                &mut buffers.velocities_y,
+                &mut buffers.velocities_z,
+                class_forces.force_x,
+                class_forces.force_y,
+                class_forces.force_z,
+                &buffers.masses,
+                dt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Fused class-sourced kick + drift, matching the `KickDrift`
+/// convention: `v ← v + (F_c/m) · dt/2` then `x ← x + v · dt` with the
+/// same wrapping and image-flag updates as `vv_kick_drift`.
+// rq-e3317d5a
+pub fn class_kick_drift(
+    buffers: &mut ParticleBuffers,
+    class_forces: ClassForceViews<'_>,
+    sim_box: &SimulationBox,
+    dt: Real,
+) -> Result<(), GpuError> {
+    let n = buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = buffers.kernels.integrate.class_kick_drift.clone();
+    let cfg = launch_config(n_u32);
+    let lattice = sim_box.lattice_device();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.posq,
+                &mut buffers.images_x,
+                &mut buffers.images_y,
+                &mut buffers.images_z,
+                &mut buffers.velocities_x,
+                &mut buffers.velocities_y,
+                &mut buffers.velocities_z,
+                class_forces.force_x,
+                class_forces.force_y,
+                class_forces.force_z,
+                &buffers.masses,
+                lattice,
+                dt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-f2e3fa58
 pub fn vv_kick(buffers: &mut ParticleBuffers, dt: Real) -> Result<(), GpuError> {
     let n = buffers.particle_count();

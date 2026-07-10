@@ -575,7 +575,7 @@ struct RecordingIntegrator {
 impl Integrator for RecordingIntegrator {
     fn plan(&self, dt: Real) -> heddle_md::integrator::StepPlan {
         heddle_md::integrator::StepPlan {
-            steps: vec![heddle_md::integrator::SubStep::KickDrift { dt, label: "rec" }],
+            steps: vec![heddle_md::integrator::SubStep::KickDrift { dt, label: "rec", source: heddle_md::integrator::KickSource::Total }],
         }
     }
 
@@ -685,6 +685,7 @@ impl Integrator for PlanStub {
             SubStep::Drift { .. } => "exec_drift",
             SubStep::KickDrift { .. } => "exec_kick_drift",
             SubStep::ForceEval { .. } => "exec_force_eval",
+            SubStep::ThermostatHalf { .. } => "exec_thermostat_half",
             SubStep::Custom { .. } => "exec_custom",
         });
         if matches!(substep, SubStep::ForceEval { .. }) {
@@ -807,13 +808,13 @@ fn plan_with_multiple_force_evals_dispatches_each() {
     let mut stub = PlanStub {
         plan: StepPlan {
             steps: vec![
-                SubStep::KickHalf { dt: 0.1, label: "k1" },
+                SubStep::KickHalf { dt: 0.1, label: "k1", source: heddle_md::integrator::KickSource::Total },
                 SubStep::Drift { dt: 0.1, label: "d1" },
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
-                SubStep::KickHalf { dt: 0.1, label: "k2" },
+                SubStep::KickHalf { dt: 0.1, label: "k2", source: heddle_md::integrator::KickSource::Total },
                 SubStep::Drift { dt: 0.1, label: "d2" },
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
-                SubStep::KickHalf { dt: 0.1, label: "k3" },
+                SubStep::KickHalf { dt: 0.1, label: "k3", source: heddle_md::integrator::KickSource::Total },
             ],
         },
         log: CallLog { events: log.events.clone() },
@@ -876,7 +877,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
             steps: vec![
                 SubStep::Drift { dt: 0.1, label: "d" },
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
-                SubStep::KickHalf { dt: 0.1, label: "k" },
+                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
             ],
         },
         log: CallLog { events: log.events.clone() },
@@ -891,6 +892,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
+        None,
         0.1,
         &mut timings,
         RunStepOptions {
@@ -913,12 +915,12 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
     let mut stub = PlanStub {
         plan: StepPlan {
             steps: vec![
-                SubStep::KickHalf { dt: 0.1, label: "B" },
+                SubStep::KickHalf { dt: 0.1, label: "B", source: heddle_md::integrator::KickSource::Total },
                 SubStep::Drift { dt: 0.1, label: "A_pre" },
                 SubStep::Custom { dt: 0.1, label: "O" },
                 SubStep::Drift { dt: 0.1, label: "A_post" },
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
-                SubStep::KickHalf { dt: 0.1, label: "B" },
+                SubStep::KickHalf { dt: 0.1, label: "B", source: heddle_md::integrator::KickSource::Total },
             ],
         },
         log: CallLog { events: stub_log.events.clone() },
@@ -933,6 +935,7 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
+        None,
         0.1,
         &mut timings,
         RunStepOptions {
@@ -964,7 +967,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
     let mut stub = PlanStub {
         plan: StepPlan {
             steps: vec![
-                SubStep::KickHalf { dt: 0.1, label: "k" },
+                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::Custom { dt: 0.1, label: "post" },
             ],
@@ -981,6 +984,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
+        None,
         0.1,
         &mut timings,
         RunStepOptions {
@@ -1016,6 +1020,7 @@ fn custom_substep_alone_fires_no_constraint_hooks() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
+        None,
         0.1,
         &mut timings,
         RunStepOptions {
@@ -1038,9 +1043,9 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
     let mut stub = PlanStub {
         plan: StepPlan {
             steps: vec![
-                SubStep::KickDrift { dt: 0.1, label: "kd" },
+                SubStep::KickDrift { dt: 0.1, label: "kd", source: heddle_md::integrator::KickSource::Total },
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
-                SubStep::KickHalf { dt: 0.1, label: "k" },
+                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
             ],
         },
         log: CallLog { events: stub_log.events.clone() },
@@ -1055,6 +1060,7 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
+        None,
         0.1,
         &mut timings,
         RunStepOptions {
@@ -1467,4 +1473,233 @@ fn mtk_npt_plan_requests_forces_and_scalars() {
         })
         .expect("MTK-NPT plan must contain a ForceEval substep");
     assert_eq!(force_eval_level, Some(AggregateLevel::ForcesAndScalars));
+}
+
+// =============================================================================
+// Class-sourced kicks and plan-declared thermostat points
+// (rqm/integration/framework.md, KickSource / ThermostatHalf).
+// =============================================================================
+
+use heddle_md::integrator::{KickSource, ThermostatPhase};
+
+fn fill_class_forces(
+    gpu: &GpuContext,
+    ff: &mut ForceField,
+    fast: (Real, Real, Real),
+    slow: (Real, Real, Real),
+    n: usize,
+) {
+    gpu.device.htod_sync_copy_into(&vec![fast.0; n], &mut ff.fast_total_forces_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vec![fast.1; n], &mut ff.fast_total_forces_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vec![fast.2; n], &mut ff.fast_total_forces_z).unwrap();
+    gpu.device.htod_sync_copy_into(&vec![slow.0; n], &mut ff.slow_total_forces_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vec![slow.1; n], &mut ff.slow_total_forces_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vec![slow.2; n], &mut ff.slow_total_forces_z).unwrap();
+}
+
+// rq-cac5cc99
+#[test]
+fn class_sourced_kick_half_reads_class_accumulator_not_combined() {
+    let gpu = init_device().unwrap();
+    let state = small_state(1);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_10(&gpu);
+    let mut ff = empty_force_field(&gpu, 1);
+    fill_class_forces(&gpu, &mut ff, (1.0, 0.0, 0.0), (2.0, 0.0, 0.0), 1);
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![SubStep::KickHalf {
+                dt: 0.5,
+                label: "slow_kick",
+                source: KickSource::Class(heddle_md::forces::ForceClass::Slow),
+            }],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    let mut timings = Timings::new(&gpu).unwrap();
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        None,
+        None,
+        0.5,
+        &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    // v_x = (F_slow / m) * dt/2 = 2.0 * 0.25 = 0.5 (not 1.0 * 0.25).
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    assert_eq!(vx, vec![0.5 as Real]);
+    // The runner dispatched the kick; the integrator's execute was
+    // never consulted.
+    assert!(log.events.lock().unwrap().is_empty());
+}
+
+// rq-5edc2d8f
+#[test]
+fn class_sourced_kick_drift_kicks_half_dt_and_drifts_dt() {
+    let gpu = init_device().unwrap();
+    let state = small_state(1); // at rest at x = 0, m = 1
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_10(&gpu);
+    let mut ff = empty_force_field(&gpu, 1);
+    fill_class_forces(&gpu, &mut ff, (4.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1);
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![SubStep::KickDrift {
+                dt: 0.5,
+                label: "fast_kick_drift",
+                source: KickSource::Class(heddle_md::forces::ForceClass::Fast),
+            }],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    let mut timings = Timings::new(&gpu).unwrap();
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        None,
+        None,
+        0.5,
+        &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    // v = (4/1) * 0.5/2 = 1.0; x = 0 + v * 0.5 = 0.5.
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    assert_eq!(vx, vec![1.0 as Real]);
+    let posq = gpu.device.dtoh_sync_copy(&buffers.posq).unwrap();
+    assert_eq!(posq[0].x, 0.5 as Real);
+    assert!(log.events.lock().unwrap().is_empty());
+}
+
+// rq-0047eebd
+#[test]
+fn total_sourced_kick_is_dispatched_to_execute() {
+    let gpu = init_device().unwrap();
+    let state = small_state(1);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_10(&gpu);
+    let mut ff = empty_force_field(&gpu, 1);
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![SubStep::KickHalf {
+                dt: 0.5,
+                label: "k",
+                source: KickSource::Total,
+            }],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    let mut timings = Timings::new(&gpu).unwrap();
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        None,
+        None,
+        0.5,
+        &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(log.events.lock().unwrap().clone(), vec!["exec_kick_half"]);
+}
+
+// rq-2eac2f62
+#[test]
+fn thermostat_half_markers_dispatch_at_marker_positions() {
+    let gpu = init_device().unwrap();
+    let state = small_state(1);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_10(&gpu);
+    let mut ff = empty_force_field(&gpu, 1);
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::ThermostatHalf { dt: 0.5, phase: ThermostatPhase::Pre },
+                SubStep::Drift { dt: 0.5, label: "d" },
+                SubStep::ThermostatHalf { dt: 0.5, phase: ThermostatPhase::Post },
+            ],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    let mut therm = RecordingThermostat { log: CallLog { events: log.events.clone() } };
+    let mut timings = Timings::new(&gpu).unwrap();
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        None,
+        Some(&mut therm),
+        0.5,
+        &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(
+        log.events.lock().unwrap().clone(),
+        vec!["apply_pre", "exec_drift", "apply_post"]
+    );
+}
+
+// rq-22755bc1
+#[test]
+fn thermostat_half_is_noop_without_thermostat() {
+    let gpu = init_device().unwrap();
+    let state = small_state(1);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_10(&gpu);
+    let mut ff = empty_force_field(&gpu, 1);
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::ThermostatHalf { dt: 0.5, phase: ThermostatPhase::Pre },
+                SubStep::Drift { dt: 0.5, label: "d" },
+                SubStep::ThermostatHalf { dt: 0.5, phase: ThermostatPhase::Post },
+            ],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    let mut timings = Timings::new(&gpu).unwrap();
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        None,
+        None,
+        0.5,
+        &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(log.events.lock().unwrap().clone(), vec!["exec_drift"]);
+}
+
+// rq-72bb7b90
+#[test]
+fn has_thermostat_points_reflects_plan_contents() {
+    let no_markers = StepPlan {
+        steps: vec![SubStep::Drift { dt: 0.1, label: "d" }],
+    };
+    assert!(!no_markers.has_thermostat_points());
+    let with_marker = StepPlan {
+        steps: vec![
+            SubStep::Drift { dt: 0.1, label: "d" },
+            SubStep::ThermostatHalf { dt: 0.1, phase: ThermostatPhase::Post },
+        ],
+    };
+    assert!(with_marker.has_thermostat_points());
 }

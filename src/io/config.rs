@@ -1865,6 +1865,19 @@ impl Config {
                             phase: md.name.clone(),
                         });
                     }
+                    // rq-cb480c95 — integrators that cannot be
+                    // combined with any external barostat (RESPA).
+                    if md.barostat.is_some()
+                        && !integ_builder.supports_barostat(&md.integrator.params)
+                    {
+                        return Err(ConfigError::InvalidValue {
+                            field: "barostat.kind".to_string(),
+                            reason: format!(
+                                "integrator kind `{}` cannot be combined with a barostat",
+                                md.integrator.kind
+                            ),
+                        });
+                    }
                 }
                 PhaseKind::Minimization(min) => {
                     let mb = registries.minimizers.lookup(&min.algorithm.kind).ok_or_else(

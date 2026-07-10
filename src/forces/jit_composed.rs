@@ -288,6 +288,10 @@ pub struct PerParticleFragment {
 pub struct PostForceBindContext<'a> {
     pub buffers: &'a ParticleBuffers,
     pub sim_box: &'a SimulationBox,
+    /// Fragments that consume class accumulators (RESPA's trailing
+    /// outer kick) bind them via `force_field.class_forces(..)`.
+    /// rq-5c607daa
+    pub force_field: &'a super::ForceField,
     pub dt: crate::precision::Real,
 }
 

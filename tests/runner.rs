@@ -1010,10 +1010,12 @@ cutoff = 1.0e-9
 
     let summary = run_simulation_with_registries(&cfg_path, &registries).unwrap();
     assert_eq!(summary.total_n_steps, 3);
-    // The stub's plan() runs once per timestep (3 calls). If the runner
-    // had silently used the built-in velocity-verlet builder instead,
-    // this counter would have stayed at zero.
-    assert_eq!(plan_calls.load(Ordering::SeqCst), 3);
+    // The stub's plan() runs once per timestep (3 calls) plus once as
+    // the runner's per-phase shape probe (thermostat topology / graph
+    // eligibility). If the runner had silently used the built-in
+    // velocity-verlet builder instead, this counter would have stayed
+    // at zero.
+    assert_eq!(plan_calls.load(Ordering::SeqCst), 4);
 }
 
 // rq-0069339b

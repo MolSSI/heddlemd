@@ -23,6 +23,7 @@ pub mod mc_barostat;
 pub mod mtk_npt;
 pub mod nose_hoover_chain;
 pub mod philox;
+pub mod respa;
 pub mod settle;
 pub mod shake;
 pub mod velocity_verlet;
@@ -40,6 +41,7 @@ pub use nose_hoover_chain::{
     NoseHooverChainBuilder, NoseHooverChainThermostat, nhc_chain_sub_step,
 };
 pub use philox::{philox_4x32_10, philox_normal};
+pub use respa::{RespaBuilder, RespaIntegrator};
 pub use settle::{SettleBuilder, SettleConstraintsState, SettleError};
 pub use shake::{ShakeBuilder, ShakeConstraintsState, ShakeError};
 pub use velocity_verlet::{VelocityVerletBuilder, VelocityVerletState};
@@ -72,6 +74,14 @@ pub enum StepError {
     ForceField(#[from] ForceFieldError),
     #[error("{0}")]
     Constraint(#[from] ConstraintError),
+    /// A runner-dispatched class-sourced kick launch failed.
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
+    /// A plan-declared `ThermostatHalf` dispatch failed.
+    #[error("{0}")]
+    Thermostat(#[from] ThermostatError),
+    #[error("{0}")]
+    Timings(#[from] crate::timings::TimingsError),
     // rq-0e26dde0
     /// Returned by `IntegratorStepWithConstraintExt::step_with_constraint`
     /// when the integrator's `check_accepts_constraints_now()`
@@ -126,19 +136,51 @@ pub enum BarostatError {
 // --- Integrator trait, builder, registry ------------------------------
 
 // rq-dbbffa7d
+/// Selects the force a `KickHalf` / `KickDrift` consumes, and thereby
+/// its dispatcher: `Total` kicks read the combined
+/// `ParticleBuffers.forces_*` and are executed by the integrator;
+/// `Class` kicks read one class accumulator and are dispatched by the
+/// runner (only the runner holds the `ForceField`), via the
+/// framework-owned `class_kick_half` / `class_kick_drift` kernels.
+/// Class-sourced kicks are the impulse-splitting form used by RESPA
+/// (`rqm/integration/respa.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KickSource {
+    Total,
+    Class(crate::forces::ForceClass),
+}
+
+// rq-dbbffa7d
+/// Which thermostat half a `SubStep::ThermostatHalf` dispatches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThermostatPhase {
+    Pre,
+    Post,
+}
+
+// rq-dbbffa7d
 /// One piece of an integrator's per-timestep work, described in the
 /// `StepPlan` returned by [`Integrator::plan`].
 #[derive(Debug, Clone, Copy)]
 pub enum SubStep {
     /// Velocity half-kick: `v ← v + (F/m) · dt/2` (or the integrator's
-    /// equivalent). No position update.
-    KickHalf { dt: Real, label: &'static str },
+    /// equivalent). No position update. `source` selects the consumed
+    /// force and the dispatcher (see [`KickSource`]).
+    KickHalf { dt: Real, label: &'static str, source: KickSource },
     /// Position drift: `x ← x + v · dt` (or the integrator's
     /// equivalent). No velocity update.
     Drift { dt: Real, label: &'static str },
     /// Fused KickHalf + Drift in a single kernel launch
-    /// (e.g. `vv_kick_drift`).
-    KickDrift { dt: Real, label: &'static str },
+    /// (e.g. `vv_kick_drift`): the kick part uses `dt/2`, the drift
+    /// part `dt`. `source` as on `KickHalf`.
+    KickDrift { dt: Real, label: &'static str, source: KickSource },
+    /// Dispatch the configured thermostat's pre- or post-half here
+    /// with the given `dt`. Dispatched by the runner, not by
+    /// `execute()`; a no-op when the run has no thermostat. A plan
+    /// containing any `ThermostatHalf` owns its thermostat placement:
+    /// the runner's default apply_pre/apply_post wrapping is
+    /// suppressed for that plan.
+    ThermostatHalf { dt: Real, phase: ThermostatPhase },
     /// Force-pipeline evaluation. Dispatched by the runner, not by
     /// the integrator's `execute()`. `class` selects which force
     /// class(es) to re-evaluate:
@@ -181,6 +223,7 @@ impl SubStep {
             SubStep::KickHalf { .. } => "KickHalf",
             SubStep::Drift { .. } => "Drift",
             SubStep::KickDrift { .. } => "KickDrift",
+            SubStep::ThermostatHalf { .. } => "ThermostatHalf",
             SubStep::ForceEval { .. } => "ForceEval",
             SubStep::Custom { .. } => "Custom",
         }
@@ -209,6 +252,18 @@ pub struct StepPlan {
 impl StepPlan {
     pub fn empty() -> Self {
         StepPlan { steps: Vec::new() }
+    }
+
+    // rq-9fbba3be
+    /// `true` iff any sub-step is a `ThermostatHalf`. The runner
+    /// consults this to choose the thermostat topology (marker-bearing
+    /// plans own their thermostat placement and receive no default
+    /// apply_pre/apply_post wrapping) and to exclude marker-bearing
+    /// plans from CUDA-graph capture.
+    pub fn has_thermostat_points(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s, SubStep::ThermostatHalf { .. }))
     }
 }
 
@@ -347,6 +402,7 @@ pub fn run_step(
     sim_box: &mut SimulationBox,
     force_field: &mut ForceField,
     mut constraint: Option<&mut dyn Constraint>,
+    mut thermostat: Option<&mut dyn Thermostat>,
     dt: Real,
     timings: &mut Timings,
     opts: RunStepOptions,
@@ -391,6 +447,42 @@ pub fn run_step(
                     force_field.step_class_no_neighbor_check(
                         *c, buffers, sim_box, timings, resolved,
                     )?;
+                }
+            }
+            // rq-277dbeb2 — class-sourced kicks are runner-dispatched:
+            // only the runner holds the ForceField and its per-class
+            // accumulators.
+            SubStep::KickHalf {
+                dt: sub_dt,
+                source: KickSource::Class(c),
+                ..
+            } => {
+                timings.kernel_start(crate::timings::KernelStage::CLASS_KICK_HALF)?;
+                crate::gpu::class_kick_half(buffers, force_field.class_forces(*c), *sub_dt)?;
+                timings.kernel_stop(crate::timings::KernelStage::CLASS_KICK_HALF)?;
+            }
+            SubStep::KickDrift {
+                dt: sub_dt,
+                source: KickSource::Class(c),
+                ..
+            } => {
+                timings.kernel_start(crate::timings::KernelStage::CLASS_KICK_DRIFT)?;
+                crate::gpu::class_kick_drift(
+                    buffers,
+                    force_field.class_forces(*c),
+                    sim_box,
+                    *sub_dt,
+                )?;
+                timings.kernel_stop(crate::timings::KernelStage::CLASS_KICK_DRIFT)?;
+            }
+            // rq-277dbeb2 — plan-declared thermostat point; a no-op
+            // when the run has no thermostat.
+            SubStep::ThermostatHalf { dt: sub_dt, phase } => {
+                if let Some(t) = thermostat.as_mut() {
+                    match phase {
+                        ThermostatPhase::Pre => t.apply_pre(buffers, *sub_dt, timings)?,
+                        ThermostatPhase::Post => t.apply_post(buffers, *sub_dt, timings)?,
+                    }
                 }
             }
             other => {
@@ -483,6 +575,7 @@ impl IntegratorStepExt for dyn Integrator + '_ {
             sim_box,
             force_field,
             None,
+            None,
             dt,
             timings,
             RunStepOptions { runner_needs_scalars: true, ..Default::default() },
@@ -506,6 +599,7 @@ impl<T: Integrator> IntegratorStepExt for T {
             buffers,
             sim_box,
             force_field,
+            None,
             None,
             dt,
             timings,
@@ -580,6 +674,7 @@ impl IntegratorStepWithConstraintExt for dyn ConstraintCapableIntegrator + '_ {
             sim_box,
             force_field,
             Some(constraint),
+            None,
             dt,
             timings,
             RunStepOptions {
@@ -612,6 +707,7 @@ impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
             sim_box,
             force_field,
             Some(constraint),
+            None,
             dt,
             timings,
             RunStepOptions {
@@ -645,6 +741,15 @@ pub trait IntegratorBuilder:
     /// `false`.
     fn owns_barostat(&self, _params: &toml::Value) -> bool {
         false
+    }
+
+    /// `true` iff the integrator may be combined with an external
+    /// `[barostat]` slot. Default `true`; RESPA returns `false`
+    /// (RESPA-NPT splittings are a separate design — see
+    /// `rqm/integration/respa.md`). Distinct from `owns_barostat`,
+    /// which signals a *fused* barostat. rq-cb480c95
+    fn supports_barostat(&self, _params: &toml::Value) -> bool {
+        true
     }
 
     /// `true` iff the integrator drives the three `Constraint` slot
@@ -683,6 +788,7 @@ impl Builtins for dyn IntegratorBuilder {
             Box::new(VelocityVerletBuilder),
             Box::new(LangevinBaoabBuilder),
             Box::new(MtkNptBuilder),
+            Box::new(RespaBuilder),
         ]
     }
 }

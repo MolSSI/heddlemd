@@ -384,12 +384,17 @@ skipped entirely; the runner's loop reverts to its non-JIT shape.
 - `PostForceBindContext<'a>` — context passed to every active <!-- rq-5c607daa -->
   slot's `bind_post_force_per_particle_args(...)` call. Exposes
   references to per-step inputs (positions, velocities, etc. via
-  `ParticleBuffers`; lattice via `SimulationBox`; `dt`).
+  `ParticleBuffers`; lattice via `SimulationBox`; `dt`; the
+  `ForceField`, through which a fragment binds class accumulator
+  buffers — the RESPA fragment binds
+  `force_field.class_forces(ForceClass::Slow)` for its trailing
+  outer kick, see `respa.md`).
 
   ```rust
   pub struct PostForceBindContext<'a> {
       pub buffers: &'a ParticleBuffers,
       pub sim_box: &'a SimulationBox,
+      pub force_field: &'a ForceField,
       pub dt: Real,
   }
   ```
