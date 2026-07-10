@@ -110,7 +110,11 @@ loop step in 1..=n_steps:
     }
     let install_hooks = constraint.is_some()
         && integrator_builder.supports_constraints(&integrator_slot.params)
-    let post_force_sub_idx = plan.last_post_force_substep_index()
+    /* Some only when the integrator is in the composed set — a
+       non-participating integrator's trailing kick is never
+       skipped (jit-composed-post-force.md, suffix selection). */
+    let post_force_sub_idx = integrator_in_composed_set
+        .then(|| plan.last_post_force_substep_index())
     for (i, sub) in plan.steps.iter().enumerate():
         let is_drift = matches!(sub, SubStep::Drift{..} | SubStep::KickDrift{..})
         if install_hooks && is_drift {
@@ -133,9 +137,10 @@ loop step in 1..=n_steps:
                 class_kick_half(buffers, force_field.class_forces(c), sub_dt)
             SubStep::KickDrift { dt: sub_dt, source: Class(c), .. } =>
                 class_kick_drift(buffers, force_field.class_forces(c), sub_dt)
-            other if Some(i) == post_force_sub_idx
-                    && post_force_composed_kernel.is_some() =>
-                /* skip — composed kernel handles this SubStep */
+            other if Some(i) == post_force_sub_idx =>
+                /* skip — the composed kernel performs this SubStep;
+                   post_force_sub_idx is Some only when the composed
+                   kernel exists and includes the integrator */
             other =>
                 integrator.execute(other, buffers, sim_box, timings)
         if install_hooks && is_drift {
@@ -944,10 +949,6 @@ successfully.
   The runner's `StepError` carries additional variants for the
   JIT-composed post-force per-particle kernel mechanism (see
   `jit-composed-post-force.md`):
-  - `MissingPostForcePerParticleFragment { label: &'static str }`
-    — a slot in the runner's active configuration returned `None`
-    from `post_force_per_particle()` when its corresponding
-    configuration is present. Reported from runner construction.
   - `PostForceFragmentCompileFailed { log: String }` — nvrtc
     rejected the composed post-force-per-particle kernel source.
   - `PostForceFragmentLoadFailed(GpuError)` — `load_ptx` rejected
@@ -1115,10 +1116,12 @@ successfully.
     to the JIT-composed post-force per-particle kernel (see
     `jit-composed-post-force.md`). Returns `Some(self)` from an
     integrator that implements `PostForcePerParticle`, `None` (the
-    default) otherwise. Every built-in integrator participates; a
-    built-in returning `None` is the
-    `StepError::MissingPostForcePerParticleFragment` rejection at
-    runner construction.
+    default) otherwise. Participation is optional: a
+    non-participating integrator's trailing kick executes in the
+    plan walk (`skip_substep_index` is derived from participation,
+    so the kick is never silently skipped), at the cost of the
+    fused launch. Every built-in integrator participates; that
+    guarantee is enforced by a registry lint test.
 
 - `PostForcePerParticle` — capability trait carrying both an <!-- inline --> <!-- rq-4187d20f -->
   integrator / thermostat / barostat slot's post-force fragment and

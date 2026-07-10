@@ -109,13 +109,16 @@ pub enum RunnerError {
         final_force: f64,
         final_step: f64,
     },
+    /// A fragment-bearing thermostat is suffix-excluded from the
+    /// composed post-force kernel by a per-step barostat without a
+    /// fragment; the thermostat's post-force update has no eager
+    /// fallback (rq-09306735).
     #[error(
-        "built-in {kind} slot `{label}` did not expose a post-force per-particle source fragment"
+        "the thermostat exposes a post-force fragment but the per-step barostat does \
+         not; the thermostat's post-force update cannot be ordered correctly — \
+         implement a post-force fragment on the barostat"
     )]
-    MissingPostForcePerParticleFragment {
-        kind: &'static str,
-        label: &'static str,
-    },
+    PostForceTopologyUnsatisfiable,
     #[error("JIT-composed post-force per-particle kernel failed to compile: {log}")]
     PostForceFragmentCompileFailed { log: String },
     #[error("JIT-composed post-force per-particle kernel failed to load: {0}")]
@@ -1345,12 +1348,17 @@ pub(crate) fn run_md_phase_inner(
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
 
-    // rq-8ac9773d — JIT-composed post-force per-particle kernel setup
-    // runs once per phase, before the CUDA-graph eligibility check.
-    // Both the graph-capture path and the per-step launch path
-    // dispatch the same composed kernel. Built-in slots always
-    // expose a post-force fragment; a slot returning `None` raises
-    // `MissingPostForcePerParticleFragment` before either path runs.
+    // rq-8ac9773d rq-09306735 — JIT-composed post-force per-particle
+    // kernel setup runs once per phase, before the CUDA-graph
+    // eligibility check. Participation is optional per slot; the
+    // composed set is the maximal *suffix* of the eager order
+    // [integrator, thermostat, per-step barostat] in which every
+    // configured slot participates. Slots outside the suffix run
+    // their natural eager work (the integrator's trailing kick in
+    // the plan walk; the thermostat's / barostat's own launches in
+    // apply_post / apply), which the graph captures like any other
+    // launch — partial or absent composition does not affect graph
+    // eligibility.
     let mut composed_post_force: Option<crate::forces::JitComposedPostForcePerParticle> =
         None;
     let mut post_force_substep_index: Option<usize> = None;
@@ -1361,7 +1369,7 @@ pub(crate) fn run_md_phase_inner(
         let therm_active = thermostat.is_some();
         // Only a per-step barostat contributes a post-force per-particle
         // fragment; a periodic (Monte-Carlo) barostat does no per-step
-        // work and is exempt from the fragment requirement.
+        // work and is absent from the composed ordering.
         let baro_active = barostat_couples_per_step(&barostat);
         let therm_frag = thermostat
             .as_ref()
@@ -1371,63 +1379,104 @@ pub(crate) fn run_md_phase_inner(
             .as_ref()
             .and_then(|b| b.post_force_per_particle())
             .map(|p| p.post_force_per_particle_fragment());
-        if int_frag.is_none() {
+        // Suffix-closed subset selection: a slot may compose only if
+        // every configured slot AFTER it in the eager order also
+        // composes (the composed launch runs last, so an eager slot
+        // after a composed one would invert the operation order).
+        let include_baro = baro_active && baro_frag.is_some();
+        let include_therm =
+            therm_active && therm_frag.is_some() && (!baro_active || include_baro);
+        // A fragment-bearing thermostat suffix-excluded by a
+        // fragment-less per-step barostat has no eager fallback: its
+        // apply_post only prepares the device factor and relies on a
+        // composed multiply. That topology cannot be ordered
+        // correctly, so it is rejected rather than silently dropping
+        // the thermostat's post-force update.
+        // rq-5e904c5d
+        if therm_active && therm_frag.is_some() && !include_therm {
             return Err((
-                RunnerError::MissingPostForcePerParticleFragment {
-                    kind: "integrator",
-                    label: "<integrator>",
-                },
+                RunnerError::PostForceTopologyUnsatisfiable,
                 ExitPhase::Setup,
             ));
         }
-        if therm_active && therm_frag.is_none() {
-            return Err((
-                RunnerError::MissingPostForcePerParticleFragment {
-                    kind: "thermostat",
-                    label: "<thermostat>",
-                },
-                ExitPhase::Setup,
-            ));
-        }
-        if baro_active && baro_frag.is_none() {
-            return Err((
-                RunnerError::MissingPostForcePerParticleFragment {
-                    kind: "barostat",
-                    label: "<barostat>",
-                },
-                ExitPhase::Setup,
-            ));
+        let include_int = int_frag.is_some()
+            && (!therm_active || include_therm)
+            && (!baro_active || include_baro);
+        // One explanatory stderr line when a configured slot is
+        // excluded, so an unexpected loss of fusion is diagnosable.
+        {
+            let mut excluded: Vec<&str> = Vec::new();
+            if !include_int {
+                excluded.push("integrator");
+            }
+            if therm_active && !include_therm {
+                excluded.push("thermostat");
+            }
+            if baro_active && !include_baro {
+                excluded.push("barostat");
+            }
+            if !excluded.is_empty() {
+                let mut covered: Vec<&str> = Vec::new();
+                if include_int {
+                    covered.push("integrator");
+                }
+                if include_therm {
+                    covered.push("thermostat");
+                }
+                if include_baro {
+                    covered.push("barostat");
+                }
+                eprintln!(
+                    "note: phase `{}`: [{}] outside the composed post-force kernel \
+                     (no fragment, or ordering excludes it); composed coverage: [{}]. \
+                     Excluded slots run standalone launches.",
+                    phase.name,
+                    excluded.join(", "),
+                    covered.join(", "),
+                );
+            }
         }
         let mut fragments: Vec<crate::forces::PerParticleFragment> = Vec::new();
-        fragments.push(int_frag.unwrap());
-        if let Some(f) = therm_frag {
-            fragments.push(f);
+        if include_int {
+            fragments.push(int_frag.expect("include_int implies fragment"));
         }
-        if let Some(f) = baro_frag {
-            fragments.push(f);
+        if include_therm {
+            fragments.push(therm_frag.expect("include_therm implies fragment"));
         }
-        match crate::forces::JitComposedPostForcePerParticle::compile_and_load(
-            &setup.gpu.device,
-            &fragments,
-        ) {
-            Ok(k) => {
-                composed_post_force = Some(k);
-                post_force_substep_index =
-                    integrator.post_force_substep_index(phase.dt as Real);
-            }
-            Err(e) => {
-                return Err((
-                    match e {
-                        crate::forces::ForceFieldError::FragmentCompileFailed { log } => {
-                            RunnerError::PostForceFragmentCompileFailed { log }
-                        }
-                        crate::forces::ForceFieldError::FragmentLoadFailed(g) => {
-                            RunnerError::PostForceFragmentLoadFailed(g)
-                        }
-                        other => RunnerError::ForceField(other),
-                    },
-                    ExitPhase::Setup,
-                ));
+        if include_baro {
+            fragments.push(baro_frag.expect("include_baro implies fragment"));
+        }
+        if !fragments.is_empty() {
+            match crate::forces::JitComposedPostForcePerParticle::compile_and_load(
+                &setup.gpu.device,
+                &fragments,
+            ) {
+                Ok(k) => {
+                    composed_post_force = Some(k);
+                    // rq-09306735 — the trailing-kick skip is derived
+                    // from participation: Some iff the integrator is in
+                    // the composed set, so a non-participating
+                    // integrator's kick is never silently skipped.
+                    post_force_substep_index = if include_int {
+                        integrator.post_force_substep_index(phase.dt as Real)
+                    } else {
+                        None
+                    };
+                }
+                Err(e) => {
+                    return Err((
+                        match e {
+                            crate::forces::ForceFieldError::FragmentCompileFailed { log } => {
+                                RunnerError::PostForceFragmentCompileFailed { log }
+                            }
+                            crate::forces::ForceFieldError::FragmentLoadFailed(g) => {
+                                RunnerError::PostForceFragmentLoadFailed(g)
+                            }
+                            other => RunnerError::ForceField(other),
+                        },
+                        ExitPhase::Setup,
+                    ));
+                }
             }
         }
     }
@@ -2272,15 +2321,30 @@ fn launch_composed_post_force(
         force_field,
         dt,
     };
-    integrator
-        .post_force_per_particle()
-        .expect("composed post-force kernel implies the integrator participates")
-        .bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+    // rq-09306735 — bind exactly the slots whose fragments were
+    // compiled into this kernel (the suffix-closed composed set,
+    // recorded in `fragment_labels`). A participating slot excluded
+    // from the composed set by the suffix rule runs eagerly and must
+    // not push arguments here.
+    let covers = |p: &dyn crate::integrator::PostForcePerParticle| {
+        composed
+            .fragment_labels
+            .contains(&p.post_force_per_particle_fragment().label)
+    };
+    if let Some(p) = integrator.post_force_per_particle() {
+        if covers(p) {
+            p.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+        }
+    }
     if let Some(t) = thermostat.as_ref().and_then(|t| t.post_force_per_particle()) {
-        t.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+        if covers(t) {
+            t.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+        }
     }
     if let Some(b) = barostat.as_ref().and_then(|b| b.post_force_per_particle()) {
-        b.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+        if covers(b) {
+            b.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+        }
     }
     let n_particles = buffers.particle_count() as u32;
     builder.push_scalar::<u32>(n_particles);
@@ -2687,10 +2751,6 @@ fn run_per_step_range(
                     crate::integrator::StepError::IntegratorRejectsConstraint { reason } => {
                         unreachable!("run_step returned IntegratorRejectsConstraint ({reason})")
                     }
-                    crate::integrator::StepError::MissingPostForcePerParticleFragment {
-                        kind,
-                        label,
-                    } => RunnerError::MissingPostForcePerParticleFragment { kind, label },
                     crate::integrator::StepError::PostForceFragmentCompileFailed { log } => {
                         RunnerError::PostForceFragmentCompileFailed { log }
                     }

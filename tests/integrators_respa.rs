@@ -626,28 +626,9 @@ impl Thermostat for CountingThermostat {
         self.post.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
-    fn post_force_per_particle(
-        &self,
-    ) -> Option<&dyn heddle_md::integrator::PostForcePerParticle> {
-        Some(self)
-    }
-}
-
-impl heddle_md::integrator::PostForcePerParticle for CountingThermostat {
-    fn post_force_per_particle_fragment(&self) -> heddle_md::forces::PerParticleFragment {
-        heddle_md::forces::PerParticleFragment {
-            label: "counting_thermostat",
-            helper_source: String::new(),
-            entry_point_args: String::new(),
-            per_thread_body: String::new(),
-        }
-    }
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &heddle_md::forces::PostForceBindContext<'_>,
-        _builder: &mut heddle_md::forces::ForceLaunchBuilder,
-    ) {
-    }
+    // No post-force fragment: this thermostat is self-contained in
+    // apply_pre/apply_post and exercises the eager fallback
+    // (rq-09306735) — the runner excludes it from the composed set.
 }
 
 #[derive(Debug, Clone)]
@@ -708,28 +689,9 @@ impl Integrator for MarkerStubIntegrator {
     ) -> Result<(), IntegratorError> {
         Ok(())
     }
-    fn post_force_per_particle(
-        &self,
-    ) -> Option<&dyn heddle_md::integrator::PostForcePerParticle> {
-        Some(self)
-    }
-}
-
-impl heddle_md::integrator::PostForcePerParticle for MarkerStubIntegrator {
-    fn post_force_per_particle_fragment(&self) -> heddle_md::forces::PerParticleFragment {
-        heddle_md::forces::PerParticleFragment {
-            label: "marker_stub",
-            helper_source: String::new(),
-            entry_point_args: String::new(),
-            per_thread_body: String::new(),
-        }
-    }
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &heddle_md::forces::PostForceBindContext<'_>,
-        _builder: &mut heddle_md::forces::ForceLaunchBuilder,
-    ) {
-    }
+    // No post-force fragment: exercises the eager fallback — the
+    // plan walk executes every sub-step and no composed kernel is
+    // built for this integrator (rq-09306735).
 }
 
 #[derive(Debug, Clone)]

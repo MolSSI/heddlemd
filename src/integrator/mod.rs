@@ -90,14 +90,6 @@ pub enum StepError {
     /// `reason` is the integrator's verbatim message.
     #[error("integrator rejected constraint hook installation: {reason}")]
     IntegratorRejectsConstraint { reason: &'static str },
-    #[error(
-        "built-in {kind} slot `{label}` did not expose a post-force per-particle \
-         source fragment via post_force_per_particle_fragment"
-    )]
-    MissingPostForcePerParticleFragment {
-        kind: &'static str,
-        label: &'static str,
-    },
     #[error("JIT-composed post-force per-particle kernel failed to compile: {log}")]
     PostForceFragmentCompileFailed { log: String },
     #[error("JIT-composed post-force per-particle kernel failed to load: {0}")]
@@ -319,11 +311,13 @@ pub trait Integrator: std::fmt::Debug + Send {
     /// Declare whether this integrator contributes a per-thread update
     /// to the JIT-composed post-force per-particle kernel. Returns
     /// `Some(self)` from an integrator that implements
-    /// `PostForcePerParticle`, `None` (the default) otherwise. Every
-    /// built-in integrator participates; a built-in returning `None` is
-    /// the `StepError::MissingPostForcePerParticleFragment` rejection at
-    /// runner construction. See
-    /// `rqm/integration/jit-composed-post-force.md`.
+    /// `PostForcePerParticle`, `None` (the default) otherwise.
+    /// Participation is optional: a non-participating integrator's
+    /// trailing kick executes in the plan walk (the runner derives
+    /// the skip index from participation, so the kick is never
+    /// silently lost). Every built-in integrator participates —
+    /// enforced by a registry lint test. See
+    /// `rqm/integration/jit-composed-post-force.md` (rq-09306735).
     fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
         None
     }

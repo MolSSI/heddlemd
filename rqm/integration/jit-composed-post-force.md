@@ -53,21 +53,64 @@ Three trait families participate:
   `BarostatRegistry::with_builtins()` exposes a non-empty
   post-force fragment.
 
-When at least one of the three slot families is active and
-configured, the composed kernel is built and the runner dispatches
-it once per step. When all three families are absent (e.g. a
-minimisation phase with no integrator step plan), the composer is
-not invoked and no composed-kernel launch fires.
+Participation is optional per slot: a slot that returns `None`
+from `post_force_per_particle()` runs its post-force work through
+its natural eager path instead (the integrator's trailing kick
+executes in the plan walk; a thermostat performs its own velocity
+update inside `apply_post`; a per-step barostat performs its own
+rescale inside `apply`). Every kind in the built-in registries
+participates — that guarantee is enforced by a registry lint test,
+not by a runtime rejection.
 
-A slot that returns `None` from its post-force fragment method
-when its corresponding configuration is present is rejected at
-runner construction with
-`StepError::MissingPostForcePerParticleFragment { label }`. Custom
-user-registered slots that participate in the post-force phase
-must expose a fragment or be replaced. Slots that genuinely do no
-post-force per-particle work (a hypothetical pre-force-only
-thermostat) return `None`, and the framework accepts that — the
-composed kernel simply omits the corresponding section.
+### Suffix-closed subset selection <!-- rq-09306735 -->
+
+The eager execution order of post-force work is
+
+```text
+integrator trailing kick (plan walk)
+    → thermostat (apply_post)
+    → per-step barostat (apply)
+    → composed-kernel launch
+```
+
+Because the composed launch is last, a slot excluded from the
+composed kernel runs *before* every composed fragment. The composed
+set must therefore be a **suffix** of the configured order
+`[integrator, thermostat, barostat]` (unconfigured slots and
+periodic barostats are absent from the order):
+
+- all three participate → full fusion (`{I, T, B}`);
+- the integrator does not participate → its kick runs in the plan
+  walk and `{T, B}` compose after it;
+- the thermostat does not participate → the integrator is also
+  excluded (its composed kick would otherwise run *after* the
+  thermostat's eager update, inverting the Trotter order) and at
+  most `{B}` composes;
+- no slot participates, or the maximal suffix is empty → no
+  composed kernel is built and the plan walk executes every
+  sub-step (the same shape as a phase with no post-force work).
+
+`skip_substep_index` (see `framework.md`, `RunStepOptions`) is set
+to the plan's trailing-kick index **iff the integrator is in the
+composed set**; a non-participating integrator's kick is never
+skipped. This derivation makes a silently lost kick
+unrepresentable.
+
+One topology has no valid execution order and is rejected at phase
+setup with `RunnerError::PostForceTopologyUnsatisfiable`: a
+**fragment-bearing thermostat** suffix-excluded by a per-step
+barostat **without** a fragment. Such a thermostat's `apply_post`
+only prepares its device-resident factor and relies on a composed
+multiply, so it has no eager fallback — dropping it would silently
+lose the thermostat's post-force update. The fix is to implement a
+post-force fragment on the barostat. (The analogous integrator case
+is harmless: a fragment-bearing integrator excluded by the suffix
+rule falls back to executing its trailing kick in the plan walk.)
+
+When a configured slot is excluded from the composed set, the
+runner prints one explanatory line to stderr at phase setup naming
+the slot and the resulting composed coverage, so an unexpected
+loss of fusion is diagnosable.
 
 ## Source-Fragment Contract <!-- rq-ce72fe43 -->
 
@@ -204,12 +247,14 @@ uses to assemble integrator + thermostat + barostat slots)
 performs the following at construction:
 
 1. Collect the active integrator's, thermostat's (if any), and
-   barostat's (if any) post-force per-particle fragments by calling
-   each slot's `post_force_per_particle()` accessor and, for each
-   `Some(p)`, reading `p.post_force_per_particle_fragment()`. Reject
-   construction with
-   `StepError::MissingPostForcePerParticleFragment { label }` if any
-   built-in slot returns `None`.
+   per-step barostat's (if any) post-force per-particle fragments by
+   calling each slot's `post_force_per_particle()` accessor and, for
+   each `Some(p)`, reading `p.post_force_per_particle_fragment()`.
+   Select the maximal participating suffix of
+   `[integrator, thermostat, barostat]` (see *Slot Participation*);
+   fragments outside the suffix are discarded and their slots run
+   eagerly. An empty suffix skips steps 2–4 entirely (no composed
+   kernel for the phase).
 
 2. Build the composed-kernel source by concatenating:
    1. The integration-shape preamble — the precision shims, PBC
@@ -350,13 +395,19 @@ loop step in 1..=n_steps:
         match sub:
             SubStep::ForceEval{..} => force_field.step(...)
             SubStep::KickHalf{..} | SubStep::KickDrift{..}
-                if this is the post-force SubStep:
+                if integrator is in the composed set
+                   and this is the post-force SubStep:
                     /* skipped — composed kernel handles it */
             other => integrator.execute(other, ...)
     /* Post-force composed-kernel dispatch */
-    if let Some(t) = thermostat { t.apply_post(...) }  /* scalar prep */
-    if let Some(b) = barostat   { b.apply(...) }       /* scalar prep + box mutation */
-    launch_post_force_composed_kernel(buffers, integrator, thermostat, barostat)
+    if let Some(t) = thermostat { t.apply_post(...) }
+        /* scalar prep when composed; the full velocity update
+           when the thermostat is not in the composed set */
+    if let Some(b) = barostat   { b.apply(...) }
+        /* scalar prep + box mutation when composed; the full
+           rescale when the barostat is not in the composed set */
+    if composed set is non-empty:
+        launch_post_force_composed_kernel(buffers, /* composed suffix */)
     /* output cadence */
 ```
 
@@ -418,10 +469,10 @@ skipped entirely; the runner's loop reverts to its non-JIT shape.
 
 `StepError` carries variants for the J3 mechanism:
 
-- `MissingPostForcePerParticleFragment { label: &'static str }` — <!-- rq-88b188d3 -->
-  a built-in slot in the runner's active configuration returned
-  `None` from `post_force_per_particle()`. Reported from runner
-  construction.
+- `RunnerError::PostForceTopologyUnsatisfiable` — a <!-- rq-37072376 -->
+  fragment-bearing thermostat is suffix-excluded by a per-step
+  barostat without a fragment (see *Suffix-closed subset
+  selection*). Reported from phase setup.
 
 - `PostForceFragmentCompileFailed { log: String }` — nvrtc <!-- rq-9ebdaea4 -->
   rejected the composed source.
@@ -553,12 +604,45 @@ Feature: JIT-composed post-force per-particle kernel
     And the composed kernel is loaded successfully
 
   @rq-dcd0d421
-  Scenario: Construction is rejected when a built-in slot does not participate
-    Given a SimulationSetup with a custom integrator whose
+  Scenario: A non-participating integrator's trailing kick executes in the plan walk
+    Given a custom integrator whose post_force_per_particle() returns None
+    And whose plan ends in a KickHalf
+    And a configured built-in thermostat
+    When the runner runs one timestep
+    Then the run completes with Ok
+    And the trailing KickHalf is dispatched (not skipped)
+    And the composed kernel covers only the thermostat
+
+  @rq-79b8a246
+  Scenario: A non-participating thermostat forces the integrator out of the composed set
+    Given velocity-Verlet (participating) and a custom thermostat whose
       post_force_per_particle() returns None
-    When the runner is constructed
-    Then it returns Err(StepError::MissingPostForcePerParticleFragment
-      { label: <slot's label> })
+    When the runner runs one timestep
+    Then no composed kernel is launched
+    And the plan walk executes the trailing KickHalf
+    And the thermostat's apply_post performs its own velocity update after the walk
+
+  @rq-7bd422a5
+  Scenario: A fully participating configuration keeps full fusion
+    Given VelocityVerlet + CSVR active (both participating)
+    When the runner runs one timestep
+    Then the composed kernel covers the integrator and the thermostat
+    And the trailing KickHalf is skipped from the plan walk
+
+  @rq-609dc377
+  Scenario: Every built-in slot kind exposes a post-force fragment
+    Given the built-in integrator, thermostat, and barostat registries
+    When each kind is built with default-valid parameters
+    Then every built integrator returns Some from post_force_per_particle()
+    And every built thermostat returns Some
+    And every built per-step barostat returns Some
+
+  @rq-5e904c5d
+  Scenario: A fragment-bearing thermostat excluded by a fragment-less per-step barostat is rejected
+    Given a built-in thermostat (participating) and a custom per-step
+      barostat whose post_force_per_particle() returns None
+    When the runner enters the phase
+    Then phase setup fails with RunnerError::PostForceTopologyUnsatisfiable
 
   @rq-8a7ef593
   Scenario: Composed kernel is not compiled when no integrator is active

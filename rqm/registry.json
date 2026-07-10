@@ -1287,6 +1287,27 @@
     "title": "Per-step loop does not compute scalars on a trajectory-only step",
     "type": "scenario"
   },
+  "rq-09306735": {
+    "decl": "### Suffix-closed subset selection",
+    "file": "integration/jit-composed-post-force",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/integrators_respa.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Suffix-closed subset selection",
+    "type": "section"
+  },
   "rq-098fabd1": {
     "decl": "Scenario: compute_total_virial matches the host-side sum on small N",
     "file": "integration/berendsen-barostat",
@@ -7649,6 +7670,13 @@
     "title": "File with image:I:3 parses three integer columns per row",
     "type": "scenario"
   },
+  "rq-37072376": {
+    "decl": "- `RunnerError::PostForceTopologyUnsatisfiable` — a",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "RunnerError",
+    "type": "api-item"
+  },
   "rq-370bf3a8": {
     "decl": "- `apply_post(buffers, dt, timings)` — runs the right",
     "file": "integration/nose-hoover-chain",
@@ -8571,10 +8599,15 @@
     "type": "section"
   },
   "rq-3d84a5b8": {
-    "decl": "Scenario: Built-in slot returning None is rejected at phase setup",
+    "decl": "Scenario: A non-participating slot does not affect graph eligibility",
     "file": "cuda-graphs",
-    "refs": [],
-    "title": "Built-in slot returning None is rejected at phase setup",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A non-participating slot does not affect graph eligibility",
     "type": "scenario"
   },
   "rq-3db027c2": {
@@ -12473,6 +12506,22 @@
     "title": "reduce on zero particles is a no-op",
     "type": "scenario"
   },
+  "rq-5e904c5d": {
+    "decl": "Scenario: A fragment-bearing thermostat excluded by a fragment-less per-step barostat is rejected",
+    "file": "integration/jit-composed-post-force",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fragment-bearing thermostat excluded by a fragment-less per-step barostat is rejected",
+    "type": "scenario"
+  },
   "rq-5ec02591": {
     "decl": "- `spme_recip_apply_influence(spme_state) -> Result<(), GpuError>`",
     "file": "forces/spme",
@@ -12755,6 +12804,18 @@
     "file": "forces/spme",
     "refs": [],
     "title": "One particle's contribution at a single cell matches the fixed-point B-spline value",
+    "type": "scenario"
+  },
+  "rq-609dc377": {
+    "decl": "Scenario: Every built-in slot kind exposes a post-force fragment",
+    "file": "integration/jit-composed-post-force",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Every built-in slot kind exposes a post-force fragment",
     "type": "scenario"
   },
   "rq-60b19852": {
@@ -16073,6 +16134,18 @@
     "title": "ForceField",
     "type": "api-item"
   },
+  "rq-79b8a246": {
+    "decl": "Scenario: A non-participating thermostat forces the integrator out of the composed set",
+    "file": "integration/jit-composed-post-force",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A non-participating thermostat forces the integrator out of the composed set",
+    "type": "scenario"
+  },
   "rq-79c091e0": {
     "decl": "Scenario: ShakeConstraintsState::new with empty constraint list succeeds and is a no-op",
     "file": "integration/shake",
@@ -16355,6 +16428,18 @@
     ],
     "title": "Parameters",
     "type": "section"
+  },
+  "rq-7bd422a5": {
+    "decl": "Scenario: A fully participating configuration keeps full fusion",
+    "file": "integration/jit-composed-post-force",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fully participating configuration keeps full fusion",
+    "type": "scenario"
   },
   "rq-7bf70ee9": {
     "decl": "Scenario: n = 0 is rejected at config-load time",
@@ -17832,13 +17917,6 @@
     "refs": [],
     "title": "CUDA Real typedef matches the build precision",
     "type": "scenario"
-  },
-  "rq-88b188d3": {
-    "decl": "- `MissingPostForcePerParticleFragment { label: &'static str }` —",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "MissingPostForcePerParticleFragment",
-    "type": "api-item"
   },
   "rq-88b287d5": {
     "decl": "Scenario: pair_snapshot returns all packed and sparse pairs, deduplicated, as (min, max)",
@@ -28832,10 +28910,15 @@
     "type": "scenario"
   },
   "rq-dcd0d421": {
-    "decl": "Scenario: Construction is rejected when a built-in slot does not participate",
+    "decl": "Scenario: A non-participating integrator's trailing kick executes in the plan walk",
     "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "Construction is rejected when a built-in slot does not participate",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A non-participating integrator's trailing kick executes in the plan walk",
     "type": "scenario"
   },
   "rq-dceedbbb": {

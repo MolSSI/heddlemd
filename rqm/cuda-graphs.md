@@ -38,10 +38,13 @@ hold:
   JIT-composed post-force per-particle kernel is part of the
   captured sequence and the per-step loop alike; such a slot that
   does not expose a fragment cannot participate. Every in-tree
-  integrator, thermostat, and per-step barostat satisfies this.
-  User-registered slots that return `None` raise
-  `StepError::MissingPostForcePerParticleFragment` at phase setup
-  before either graph capture or per-step launch is attempted. A
+  integrator, thermostat, and per-step barostat satisfies this
+  (enforced by a registry lint test). User-registered slots that
+  return `None` are excluded from the composed kernel via the
+  suffix-selection rule in `integration/jit-composed-post-force.md`
+  and run their post-force work as standalone launches — which are
+  captured into the graph like any other launch, so partial or
+  absent composition does not affect graph eligibility. A
   *periodic* barostat (`EveryNSteps`, the Monte-Carlo barostat) does
   no per-step work and is exempt: it contributes no post-force
   fragment, and its move runs on the host at batch boundaries (see
@@ -241,13 +244,13 @@ sequence:
 1. The runner gathers the active integrator's, thermostat's (if
    any), and barostat's (if any) post-force per-particle fragments,
    JIT-compiles the composed kernel via
-   `JitComposedPostForcePerParticle::compile_and_load`, and binds
-   the resulting `CudaFunction` handle to phase-local state. A
-   built-in slot returning `None` from
-   `post_force_per_particle()` raises
-   `StepError::MissingPostForcePerParticleFragment` and fails
-   phase setup; this is a programmer error rather than a runtime
-   fallback.
+   `JitComposedPostForcePerParticle::compile_and_load` over the
+   maximal participating suffix of the configured slots (see
+   `integration/jit-composed-post-force.md`, *Suffix-closed subset
+   selection*), and binds the resulting `CudaFunction` handle to
+   phase-local state. Slots outside the suffix run their post-force
+   work as standalone captured launches; an empty suffix means no
+   composed kernel for the phase.
 2. The runner calls `nl.pre_step(sim_box, buffers, timings)` once.
    `pre_step` downloads the single-word
    `neighbor_status` and rebuilds the neighbor list when the flag
@@ -1044,14 +1047,14 @@ Feature: CUDA graph capture and replay
       (used by MTK pre-force vel_kick_pre)
 
   @rq-3d84a5b8
-  Scenario: Built-in slot returning None is rejected at phase setup
+  Scenario: A non-participating slot does not affect graph eligibility
     Given an MD phase configured with a user-registered integrator
       whose post_force_per_particle returns None
+    And whose builder reports graph_compatible = true
     When the runner enters the phase
-    Then phase setup returns Err(StepError::MissingPostForcePerParticleFragment
-      { kind: "integrator", label: <slot's label> })
-    And no graph capture is attempted
-    And no per-step launch loop is entered
+    Then phase setup succeeds
+    And the phase remains eligible for graph capture
+    And the integrator's trailing kick is captured as a standalone launch
 
   @rq-0bc3a66e
   Scenario: Graph mode and per-step mode use the same composed kernel
