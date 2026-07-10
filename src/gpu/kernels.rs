@@ -6,13 +6,14 @@ use cudarc::driver::{
 
 #[cfg(not(feature = "f64"))]
 use crate::gpu::LosslessBuffers;
+use crate::gpu::kernel_macros::gpu_launch;
 use crate::gpu::{GpuError, Kernels, ParticleBuffers, htod_or_empty};
 use crate::forces::lj::ResolvedLjPair;
 use crate::io::config::{CombiningRule, LennardJonesConfig, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
 use crate::precision::{Real, Real4};
 
-const BLOCK_SIZE: u32 = 256;
+pub(crate) const BLOCK_SIZE: u32 = 256;
 
 /// Warps per block in the fused pair-force warp-per-particle topology.
 /// Must match the `PAIR_FORCE_WARPS_PER_BLOCK` constant in
@@ -20,7 +21,7 @@ const BLOCK_SIZE: u32 = 256;
 pub const PAIR_FORCE_WARPS_PER_BLOCK: u32 = 8;
 pub const PAIR_FORCE_BLOCK_SIZE: u32 = 256;
 
-fn launch_config(n: u32) -> LaunchConfig {
+pub(crate) fn launch_config(n: u32) -> LaunchConfig {
     let grid = n.div_ceil(BLOCK_SIZE);
     LaunchConfig {
         grid_dim: (grid, 1, 1),
@@ -35,37 +36,25 @@ pub fn vv_kick_drift(
     sim_box: &SimulationBox,
     dt: Real,
 ) -> Result<(), GpuError> {
-    let n = buffers.particle_count();
-    if n == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: buffers.kernels.integrate.vv_kick_drift,
+        grid: per_element(buffers.particle_count()),
+        args: (
+            &mut buffers.posq,
+            &mut buffers.images_x,
+            &mut buffers.images_y,
+            &mut buffers.images_z,
+            &mut buffers.velocities_x,
+            &mut buffers.velocities_y,
+            &mut buffers.velocities_z,
+            &buffers.forces_x,
+            &buffers.forces_y,
+            &buffers.forces_z,
+            &buffers.masses,
+            sim_box.lattice_device(),
+            dt,
+        ),
     }
-    let n_u32 = n as u32;
-    let func = buffers.kernels.integrate.vv_kick_drift.clone();
-    let cfg = launch_config(n_u32);
-    let lattice = sim_box.lattice_device();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut buffers.posq,
-                &mut buffers.images_x,
-                &mut buffers.images_y,
-                &mut buffers.images_z,
-                &mut buffers.velocities_x,
-                &mut buffers.velocities_y,
-                &mut buffers.velocities_z,
-                &buffers.forces_x,
-                &buffers.forces_y,
-                &buffers.forces_z,
-                &buffers.masses,
-                lattice,
-                dt,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 /// The three force-component buffers of one class accumulator
@@ -88,31 +77,20 @@ pub fn class_kick_half(
     class_forces: ClassForceViews<'_>,
     dt: Real,
 ) -> Result<(), GpuError> {
-    let n = buffers.particle_count();
-    if n == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: buffers.kernels.integrate.class_kick_half,
+        grid: per_element(buffers.particle_count()),
+        args: (
+            &mut buffers.velocities_x,
+            &mut buffers.velocities_y,
+            &mut buffers.velocities_z,
+            class_forces.force_x,
+            class_forces.force_y,
+            class_forces.force_z,
+            &buffers.masses,
+            dt,
+        ),
     }
-    let n_u32 = n as u32;
-    let func = buffers.kernels.integrate.class_kick_half.clone();
-    let cfg = launch_config(n_u32);
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut buffers.velocities_x,
-                &mut buffers.velocities_y,
-                &mut buffers.velocities_z,
-                class_forces.force_x,
-                class_forces.force_y,
-                class_forces.force_z,
-                &buffers.masses,
-                dt,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 /// Fused class-sourced kick + drift, matching the `KickDrift`
@@ -125,66 +103,43 @@ pub fn class_kick_drift(
     sim_box: &SimulationBox,
     dt: Real,
 ) -> Result<(), GpuError> {
-    let n = buffers.particle_count();
-    if n == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: buffers.kernels.integrate.class_kick_drift,
+        grid: per_element(buffers.particle_count()),
+        args: (
+            &mut buffers.posq,
+            &mut buffers.images_x,
+            &mut buffers.images_y,
+            &mut buffers.images_z,
+            &mut buffers.velocities_x,
+            &mut buffers.velocities_y,
+            &mut buffers.velocities_z,
+            class_forces.force_x,
+            class_forces.force_y,
+            class_forces.force_z,
+            &buffers.masses,
+            sim_box.lattice_device(),
+            dt,
+        ),
     }
-    let n_u32 = n as u32;
-    let func = buffers.kernels.integrate.class_kick_drift.clone();
-    let cfg = launch_config(n_u32);
-    let lattice = sim_box.lattice_device();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut buffers.posq,
-                &mut buffers.images_x,
-                &mut buffers.images_y,
-                &mut buffers.images_z,
-                &mut buffers.velocities_x,
-                &mut buffers.velocities_y,
-                &mut buffers.velocities_z,
-                class_forces.force_x,
-                class_forces.force_y,
-                class_forces.force_z,
-                &buffers.masses,
-                lattice,
-                dt,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 // rq-f2e3fa58
 pub fn vv_kick(buffers: &mut ParticleBuffers, dt: Real) -> Result<(), GpuError> {
-    let n = buffers.particle_count();
-    if n == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: buffers.kernels.integrate.vv_kick,
+        grid: per_element(buffers.particle_count()),
+        args: (
+            &mut buffers.velocities_x,
+            &mut buffers.velocities_y,
+            &mut buffers.velocities_z,
+            &buffers.forces_x,
+            &buffers.forces_y,
+            &buffers.forces_z,
+            &buffers.masses,
+            dt,
+        ),
     }
-    let n_u32 = n as u32;
-    let func = buffers.kernels.integrate.vv_kick.clone();
-    let cfg = launch_config(n_u32);
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut buffers.velocities_x,
-                &mut buffers.velocities_y,
-                &mut buffers.velocities_z,
-                &buffers.forces_x,
-                &buffers.forces_y,
-                &buffers.forces_z,
-                &buffers.masses,
-                dt,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 // rq-dafe0fcb
@@ -1332,17 +1287,11 @@ pub fn increment_u64_device(
     counter: &mut CudaSlice<u64>,
 ) -> Result<(), GpuError> {
     debug_assert_eq!(counter.len(), 1);
-    let func = buffers.kernels.nose_hoover.increment_u64.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (1, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(cfg, (&mut *counter,))
-            .map_err(GpuError::from)?;
+    gpu_launch! {
+        func: buffers.kernels.nose_hoover.increment_u64,
+        grid: single_thread,
+        args: (&mut *counter,),
     }
-    Ok(())
 }
 
 // Launch helper for the per-particle virial-sum reduction used by the
@@ -1646,32 +1595,21 @@ pub fn mtk_velocity_half_kick(
     exp_minus_alpha: Real,
     phi_v_dt_half: Real,
 ) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
-    if n == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.mtk.mtk_velocity_half_kick,
+        grid: per_element(particle_buffers.particle_count()),
+        args: (
+            &mut particle_buffers.velocities_x,
+            &mut particle_buffers.velocities_y,
+            &mut particle_buffers.velocities_z,
+            &particle_buffers.forces_x,
+            &particle_buffers.forces_y,
+            &particle_buffers.forces_z,
+            &particle_buffers.masses,
+            exp_minus_alpha,
+            phi_v_dt_half,
+        ),
     }
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.mtk.mtk_velocity_half_kick.clone();
-    let cfg = launch_config(n_u32);
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut particle_buffers.velocities_x,
-                &mut particle_buffers.velocities_y,
-                &mut particle_buffers.velocities_z,
-                &particle_buffers.forces_x,
-                &particle_buffers.forces_y,
-                &particle_buffers.forces_z,
-                &particle_buffers.masses,
-                exp_minus_alpha,
-                phi_v_dt_half,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 // Launch helper for the MTK cell-coupled position drift. Block size
@@ -1683,29 +1621,18 @@ pub fn mtk_position_drift(
     exp_b_dt: Real,
     phi_x_dt: Real,
 ) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
-    if n == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.mtk.mtk_position_drift,
+        grid: per_element(particle_buffers.particle_count()),
+        args: (
+            &mut particle_buffers.posq,
+            &particle_buffers.velocities_x,
+            &particle_buffers.velocities_y,
+            &particle_buffers.velocities_z,
+            exp_b_dt,
+            phi_x_dt,
+        ),
     }
-    let n_u32 = n as u32;
-    let func = particle_buffers.kernels.mtk.mtk_position_drift.clone();
-    let cfg = launch_config(n_u32);
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut particle_buffers.posq,
-                &particle_buffers.velocities_x,
-                &particle_buffers.velocities_y,
-                &particle_buffers.velocities_z,
-                exp_b_dt,
-                phi_x_dt,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 // rq-c0f98145
@@ -1724,10 +1651,6 @@ pub fn combine_class_totals(
     slow_total_virials: &CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
-    if n == 0 {
-        return Ok(());
-    }
-    let n_u32 = n as u32;
     debug_assert_eq!(fast_total_forces_x.len(), n);
     debug_assert_eq!(fast_total_forces_y.len(), n);
     debug_assert_eq!(fast_total_forces_z.len(), n);
@@ -1739,34 +1662,27 @@ pub fn combine_class_totals(
     debug_assert_eq!(slow_total_potential_energies.len(), n);
     debug_assert_eq!(slow_total_virials.len(), n);
 
-    let func = particle_buffers.kernels.forces.combine_class_totals.clone();
-    let cfg = launch_config(n_u32);
-
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                fast_total_forces_x,
-                fast_total_forces_y,
-                fast_total_forces_z,
-                fast_total_potential_energies,
-                fast_total_virials,
-                slow_total_forces_x,
-                slow_total_forces_y,
-                slow_total_forces_z,
-                slow_total_potential_energies,
-                slow_total_virials,
-                &mut particle_buffers.forces_x,
-                &mut particle_buffers.forces_y,
-                &mut particle_buffers.forces_z,
-                &mut particle_buffers.potential_energies,
-                &mut particle_buffers.virials,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
+    gpu_launch! {
+        func: particle_buffers.kernels.forces.combine_class_totals,
+        grid: per_element(n),
+        args: (
+            fast_total_forces_x,
+            fast_total_forces_y,
+            fast_total_forces_z,
+            fast_total_potential_energies,
+            fast_total_virials,
+            slow_total_forces_x,
+            slow_total_forces_y,
+            slow_total_forces_z,
+            slow_total_potential_energies,
+            slow_total_virials,
+            &mut particle_buffers.forces_x,
+            &mut particle_buffers.forces_y,
+            &mut particle_buffers.forces_z,
+            &mut particle_buffers.potential_energies,
+            &mut particle_buffers.virials,
+        ),
     }
-    Ok(())
 }
 
 // rq-884b5cd6
@@ -2240,27 +2156,18 @@ pub fn set_neighbor_status_bits(
     single_pairs_high_water_mark: u32,
     neighbor_status: &mut CudaSlice<u32>,
 ) -> Result<(), GpuError> {
-    let cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (1, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    let func = kernels.neighbor.set_neighbor_status_bits.clone();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                interaction_count,
-                tiles_capacity,
-                single_pairs_capacity,
-                tiles_high_water_mark,
-                single_pairs_high_water_mark,
-                &mut *neighbor_status,
-            ),
-        )
-        .map_err(GpuError::from)?;
+    gpu_launch! {
+        func: kernels.neighbor.set_neighbor_status_bits,
+        grid: single_thread,
+        args: (
+            interaction_count,
+            tiles_capacity,
+            single_pairs_capacity,
+            tiles_high_water_mark,
+            single_pairs_high_water_mark,
+            &mut *neighbor_status,
+        ),
     }
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2555,29 +2462,19 @@ pub fn shake_snapshot(
     snapshot_z: &mut CudaSlice<Real>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
-    if n_groups == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.shake.shake_snapshot,
+        grid: per_element(n_groups),
+        args: (
+            &particle_buffers.posq,
+            group_atoms,
+            group_atom_offset,
+            group_atom_count,
+            snapshot_x,
+            snapshot_y,
+            snapshot_z,
+        ),
     }
-    let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.shake.shake_snapshot.clone();
-    let cfg = launch_config(n_u32);
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.posq,
-                group_atoms,
-                group_atom_offset,
-                group_atom_count,
-                snapshot_x,
-                snapshot_y,
-                snapshot_z,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2661,29 +2558,15 @@ pub fn constraint_virial_scatter(
     group_atoms: &CudaSlice<u32>,
     n_atom_slots: usize,
 ) -> Result<(), GpuError> {
-    if n_atom_slots == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.shake.constraint_virial_scatter,
+        grid: per_element(n_atom_slots),
+        args: (
+            constraint_virial,
+            group_atoms,
+            &mut particle_buffers.virials,
+        ),
     }
-    let n_atom_slots_u32 = n_atom_slots as u32;
-    let func = particle_buffers
-        .kernels
-        .shake
-        .constraint_virial_scatter
-        .clone();
-    let cfg = launch_config(n_atom_slots_u32);
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                constraint_virial,
-                group_atoms,
-                &mut particle_buffers.virials,
-                n_atom_slots_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2701,38 +2584,23 @@ pub fn shake_positions_no_velocity(
     sim_box: &SimulationBox,
     n_groups: usize,
 ) -> Result<(), GpuError> {
-    if n_groups == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.shake.shake_positions_no_velocity,
+        grid: per_element(n_groups),
+        args: (
+            &mut particle_buffers.posq,
+            group_atoms,
+            group_atom_offset,
+            group_atom_count,
+            group_constraint_offset,
+            group_constraint_count,
+            group_constraints_local_i,
+            group_constraints_local_j,
+            group_constraints_r2,
+            atom_mass,
+            sim_box.lattice_device(),
+        ),
     }
-    let n_u32 = n_groups as u32;
-    let func = particle_buffers
-        .kernels
-        .shake
-        .shake_positions_no_velocity
-        .clone();
-    let cfg = launch_config(n_u32);
-    let lattice = sim_box.lattice_device();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut particle_buffers.posq,
-                group_atoms,
-                group_atom_offset,
-                group_atom_count,
-                group_constraint_offset,
-                group_constraint_count,
-                group_constraints_local_i,
-                group_constraints_local_j,
-                group_constraints_r2,
-                atom_mass,
-                lattice,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2813,29 +2681,19 @@ pub fn settle_snapshot(
     snapshot_z: &mut CudaSlice<Real>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
-    if n_groups == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.settle.settle_snapshot,
+        grid: per_element(n_groups),
+        args: (
+            &particle_buffers.posq,
+            group_atoms,
+            group_atom_offset,
+            group_atom_count,
+            snapshot_x,
+            snapshot_y,
+            snapshot_z,
+        ),
     }
-    let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle.settle_snapshot.clone();
-    let cfg = launch_config(n_u32);
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.posq,
-                group_atoms,
-                group_atom_offset,
-                group_atom_count,
-                snapshot_x,
-                snapshot_y,
-                snapshot_z,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 // rq-709c8eb5 — SETTLE position reset. One thread per water group; no
@@ -2858,41 +2716,30 @@ pub fn settle_positions(
     constraint_virial: &mut CudaSlice<Real>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
-    if n_groups == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.settle.settle_positions,
+        grid: per_element(n_groups),
+        args: (
+            &mut particle_buffers.posq,
+            &mut particle_buffers.velocities_x,
+            &mut particle_buffers.velocities_y,
+            &mut particle_buffers.velocities_z,
+            snapshot_x,
+            snapshot_y,
+            snapshot_z,
+            group_atoms,
+            group_atom_offset,
+            group_atom_count,
+            group_ra,
+            group_rb,
+            group_rc,
+            group_m_o,
+            group_m_h,
+            sim_box.lattice_device(),
+            dt,
+            &mut *constraint_virial,
+        ),
     }
-    let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle.settle_positions.clone();
-    let cfg = launch_config(n_u32);
-    let lattice = sim_box.lattice_device();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut particle_buffers.posq,
-                &mut particle_buffers.velocities_x,
-                &mut particle_buffers.velocities_y,
-                &mut particle_buffers.velocities_z,
-                snapshot_x,
-                snapshot_y,
-                snapshot_z,
-                group_atoms,
-                group_atom_offset,
-                group_atom_count,
-                group_ra,
-                group_rb,
-                group_rc,
-                group_m_o,
-                group_m_h,
-                lattice,
-                dt,
-                &mut *constraint_virial,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 // rq-709c8eb5 — SETTLE velocity reset. One thread per water group.
@@ -2908,35 +2755,24 @@ pub fn settle_velocities(
     constraint_virial: &mut CudaSlice<Real>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
-    if n_groups == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.settle.settle_velocities,
+        grid: per_element(n_groups),
+        args: (
+            &particle_buffers.posq,
+            &mut particle_buffers.velocities_x,
+            &mut particle_buffers.velocities_y,
+            &mut particle_buffers.velocities_z,
+            group_atoms,
+            group_atom_offset,
+            group_atom_count,
+            group_m_o,
+            group_m_h,
+            sim_box.lattice_device(),
+            dt,
+            &mut *constraint_virial,
+        ),
     }
-    let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle.settle_velocities.clone();
-    let cfg = launch_config(n_u32);
-    let lattice = sim_box.lattice_device();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.posq,
-                &mut particle_buffers.velocities_x,
-                &mut particle_buffers.velocities_y,
-                &mut particle_buffers.velocities_z,
-                group_atoms,
-                group_atom_offset,
-                group_atom_count,
-                group_m_o,
-                group_m_h,
-                lattice,
-                dt,
-                &mut *constraint_virial,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 // rq-709c8eb5 — scatter per-atom-of-group constraint virial into the
@@ -2947,29 +2783,15 @@ pub fn settle_virial_scatter(
     group_atoms: &CudaSlice<u32>,
     n_atom_slots: usize,
 ) -> Result<(), GpuError> {
-    if n_atom_slots == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.settle.settle_virial_scatter,
+        grid: per_element(n_atom_slots),
+        args: (
+            constraint_virial,
+            group_atoms,
+            &mut particle_buffers.virials,
+        ),
     }
-    let n_atom_slots_u32 = n_atom_slots as u32;
-    let func = particle_buffers
-        .kernels
-        .settle
-        .settle_virial_scatter
-        .clone();
-    let cfg = launch_config(n_atom_slots_u32);
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                constraint_virial,
-                group_atoms,
-                &mut particle_buffers.virials,
-                n_atom_slots_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }
 
 // rq-709c8eb5 — position-only SETTLE reset for the minimizer. One thread
@@ -2987,35 +2809,20 @@ pub fn settle_positions_no_velocity(
     sim_box: &SimulationBox,
     n_groups: usize,
 ) -> Result<(), GpuError> {
-    if n_groups == 0 {
-        return Ok(());
+    gpu_launch! {
+        func: particle_buffers.kernels.settle.settle_positions_no_velocity,
+        grid: per_element(n_groups),
+        args: (
+            &mut particle_buffers.posq,
+            group_atoms,
+            group_atom_offset,
+            group_atom_count,
+            group_ra,
+            group_rb,
+            group_rc,
+            group_m_o,
+            group_m_h,
+            sim_box.lattice_device(),
+        ),
     }
-    let n_u32 = n_groups as u32;
-    let func = particle_buffers
-        .kernels
-        .settle
-        .settle_positions_no_velocity
-        .clone();
-    let cfg = launch_config(n_u32);
-    let lattice = sim_box.lattice_device();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &mut particle_buffers.posq,
-                group_atoms,
-                group_atom_offset,
-                group_atom_count,
-                group_ra,
-                group_rb,
-                group_rc,
-                group_m_o,
-                group_m_h,
-                lattice,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
 }

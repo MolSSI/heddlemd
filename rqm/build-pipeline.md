@@ -219,6 +219,73 @@ per-subsystem nested handle to every kernel function.
   `device.rs`, over the central subsystem manifest. Expands it into the
   `Kernels` struct, `Kernels::load`, and `KernelStage::ORDER`.
 
+- `gpu_launch!` — crate-internal declarative `macro_rules!` macro (no
+  external dependency) used inside the body of a launch wrapper in
+  `src/gpu/kernels.rs`. It expands the repeated launch scaffolding — the
+  empty-input guard, the kernel-handle clone, the launch configuration,
+  the `unsafe` launch, and the `GpuError` mapping — so a wrapper's body
+  is one declaration instead of ten hand-written lines. The wrapper's
+  `pub fn` signature and doc comment are written by hand around it; the
+  macro produces only the body. It is invoked only within `kernels.rs`
+  (unlike `gpu_kernels!`, which per-subsystem files invoke), so it is
+  not `#[macro_export]`ed.
+
+  ```rust
+  pub fn vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError> {
+      gpu_launch! {
+          func: buffers.kernels.integrate.vv_kick,
+          grid: per_element(buffers.particle_count()),
+          args: (
+              &mut buffers.velocities_x, &mut buffers.velocities_y, &mut buffers.velocities_z,
+              &buffers.forces_x, &buffers.forces_y, &buffers.forces_z,
+              &buffers.masses, dt,
+              // the element count is appended by the macro as the final kernel argument
+          ),
+      }
+  }
+  ```
+
+  The three clauses:
+  - `func:` — an expression naming the kernel handle
+    (`buffers.kernels.<subsystem>.<kernel>`). The macro clones it (a
+    `CudaFunction` is cheap to clone) so the launch holds no borrow of
+    the kernel struct while particle buffers are borrowed mutably.
+  - `grid:` — one of three strategies, which fixes the empty guard, the
+    launch configuration, and whether the element count is appended:
+    - `per_element(<size>)` — one thread per element: if `<size> == 0`
+      the wrapper returns `Ok(())` without launching; otherwise the
+      config is block 256, grid `ceil(size / 256)` (via `launch_config`),
+      and the macro appends `size as u32` as the final kernel argument.
+    - `single_block(<size>)` — one block of 256 threads (grid 1): same
+      empty guard and appended trailing count as `per_element`.
+    - `single_thread` — grid 1, block 1: no empty guard (the kernel
+      always launches one thread) and no appended count.
+  - `args:` — the kernel-argument tuple in parameter order, up to but
+    **not** including the trailing element count (device-buffer refs,
+    slot buffers, `sim_box.lattice_device()`, host scalars). For
+    `per_element` / `single_block` the macro computes the count from
+    `<size>` and appends it as the final argument; this is what lets the
+    tuple hold `&mut buffers.*` borrows without a conflicting immutable
+    borrow to read the count inline. For `single_thread` the tuple is
+    the complete argument list (the kernel takes no element count).
+
+  The macro emits `unsafe { func.launch(cfg, (args…, count)).map_err(GpuError::from)?; }`
+  followed by `Ok(())`, and emits no timing calls — kernel timing is
+  bracketed externally by the runner and CUDA-graph capture (see
+  `performance-analysis.md`), never inside a launch wrapper. Wrappers
+  whose kernel takes the element count in a non-final position, or takes
+  a count other than the grid size, do not fit and are hand-written.
+
+  Launch wrappers whose body is a single kernel launch over a
+  per-element, single-block, or single-thread grid, returning
+  `Result<(), GpuError>`, are written with `gpu_launch!`. Wrappers that
+  do not fit this shape are hand-written: multi-launch sequences (the
+  SPME atom-sort orchestrator, the block-total prefix scan, the CSVR
+  single-vs-two-pass reducer, and kernels paired with a trailing
+  counter increment), custom or warp-level grids, kernels needing
+  dynamic shared memory (SHAKE/RATTLE), and the reduction wrappers that
+  block on a device-to-host copy and return `Result<f32>`.
+
 ## Fill Kernel <!-- rq-599b2eb4 -->
 
 `kernels/fill.cu` contains a CUDA kernel that writes a constant value to
@@ -269,6 +336,8 @@ src/
     mod.rs                # re-exports gpu submodules
     device.rs             # init_device(), GpuContext, Kernels, GpuError
     fill.rs               # FillKernels (smoke-test kernel handle)
+    kernels.rs            # host-side launch wrappers (gpu_launch! bodies + hand-written bespoke ones)
+    kernel_macros.rs      # gpu_kernels!, define_kernels!, gpu_launch! macros
     barostat_kernels.rs   # BarostatKernels (shared by Berendsen + c-rescale)
 tests/
   smoke_gpu.rs            # integration test for fill kernel
@@ -281,7 +350,13 @@ expanded by a `gpu_kernels!` invocation in that file. `src/gpu/device.rs`
 carries `init_device`, `GpuContext`, `GpuError`, and the single
 `define_kernels!` manifest from which the `Kernels` struct,
 `Kernels::load`, and `KernelStage::ORDER` are generated — it names no
-individual kernel.
+individual kernel. `src/gpu/kernels.rs` holds the host-side launch
+wrappers that dispatch each kernel through those handles; wrappers with
+the common single-launch shape use `gpu_launch!` for their body, and
+the bespoke ones (multi-launch, custom grids, dynamic shared memory,
+scalar-returning reductions) are hand-written. The `gpu_kernels!`,
+`define_kernels!`, and `gpu_launch!` macros are defined in
+`src/gpu/kernel_macros.rs`.
 
 ## Dependencies <!-- rq-93367a8f -->
 
@@ -390,6 +465,46 @@ Feature: CUDA build pipeline and smoke test kernel
       the shared kinetic-energy reduction kernel
     And the same `kinetic_energy_reduce` handle is used by the CSVR
       thermostat launch wrapper
+
+  # --- Launch-wrapper macro (gpu_launch!) ---
+
+  @rq-8bccc91c
+  Scenario: A per_element gpu_launch! wrapper is a no-op on empty input
+    Given a GpuContext obtained from init_device()
+    And a ParticleBuffers with particle_count() == 0
+    When a wrapper whose body is gpu_launch! with grid: per_element(particle_count()) is called
+    Then it returns Ok(())
+    And it launches no kernel and mutates no buffer
+
+  @rq-40f78e04
+  Scenario: A per_element gpu_launch! wrapper processes every element for a non-block-aligned size
+    Given a GpuContext obtained from init_device()
+    And a ParticleBuffers with particle_count() == 1000 (not a multiple of 256)
+    When a per_element gpu_launch! wrapper runs a kernel with an observable per-element effect
+    Then all 1000 elements are processed, including the last
+      (the grid is ceil(1000 / 256) blocks of 256 threads)
+
+  @rq-1474f94e
+  Scenario: A single_thread gpu_launch! wrapper launches one thread with no empty guard
+    Given a GpuContext obtained from init_device()
+    And a wrapper whose body is gpu_launch! with grid: single_thread and a device-resident output
+    When the wrapper is called
+    Then the kernel launches with grid (1,1,1) and block (1,1,1)
+    And its device-resident output reflects the launch (no size-based early return occurs)
+
+  @rq-e61e9b5f
+  Scenario: A single_block gpu_launch! wrapper guards on empty and launches one block otherwise
+    Given a GpuContext obtained from init_device()
+    When a single_block gpu_launch! wrapper is called with size == 0
+    Then it returns Ok(()) without launching
+    When it is called with size > 0
+    Then the kernel launches with grid (1,1,1) and block (256,1,1)
+
+  @rq-ece77047
+  Scenario: gpu_launch! wrappers emit no timing calls
+    Given the source of any gpu_launch!-bodied wrapper in src/gpu/kernels.rs
+    Then its body contains no Timings, kernel_start, or kernel_stop call
+      (kernel timing is bracketed externally by the runner and CUDA-graph capture)
 
   # --- Fill kernel correctness ---
 

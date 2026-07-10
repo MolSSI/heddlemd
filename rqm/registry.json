@@ -2995,6 +2995,18 @@
     "title": "interacting_atoms entries contain only real neighbours",
     "type": "scenario"
   },
+  "rq-1474f94e": {
+    "decl": "Scenario: A single_thread gpu_launch! wrapper launches one thread with no empty guard",
+    "file": "build-pipeline",
+    "refs": [
+      {
+        "file": "tests/gpu_launch_macro.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A single_thread gpu_launch! wrapper launches one thread with no empty guard",
+    "type": "scenario"
+  },
   "rq-147f5ea6": {
     "decl": "# Atom indices are 0-based and refer to entries in the init file.",
     "file": "forces/topology",
@@ -9033,6 +9045,18 @@
       }
     ],
     "title": "Empty [bonds], [angles], and [exclusions] sections are valid",
+    "type": "scenario"
+  },
+  "rq-40f78e04": {
+    "decl": "Scenario: A per_element gpu_launch! wrapper processes every element for a non-block-aligned size",
+    "file": "build-pipeline",
+    "refs": [
+      {
+        "file": "tests/gpu_launch_macro.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A per_element gpu_launch! wrapper processes every element for a non-block-aligned size",
     "type": "scenario"
   },
   "rq-40f9d35a": {
@@ -18412,6 +18436,18 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "Captured graph contains exactly one composed post-force launch per step",
+    "type": "scenario"
+  },
+  "rq-8bccc91c": {
+    "decl": "Scenario: A per_element gpu_launch! wrapper is a no-op on empty input",
+    "file": "build-pipeline",
+    "refs": [
+      {
+        "file": "tests/gpu_launch_macro.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A per_element gpu_launch! wrapper is a no-op on empty input",
     "type": "scenario"
   },
   "rq-8bf40375": {
@@ -30286,6 +30322,18 @@
     "title": "Compressed angle produces a torque that opens the angle",
     "type": "scenario"
   },
+  "rq-e61e9b5f": {
+    "decl": "Scenario: A single_block gpu_launch! wrapper guards on empty and launches one block otherwise",
+    "file": "build-pipeline",
+    "refs": [
+      {
+        "file": "src/gpu/kernel_macros.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A single_block gpu_launch! wrapper guards on empty and launches one block otherwise",
+    "type": "scenario"
+  },
   "rq-e643b070": {
     "decl": "Scenario: neighbor_list cell-list mode rejects max_neighbors",
     "file": "io/config-schema",
@@ -31100,6 +31148,18 @@
     "refs": [],
     "title": "Parameter Binding and Launch",
     "type": "section"
+  },
+  "rq-ece77047": {
+    "decl": "Scenario: gpu_launch! wrappers emit no timing calls",
+    "file": "build-pipeline",
+    "refs": [
+      {
+        "file": "src/gpu/kernel_macros.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "gpu_launch! wrappers emit no timing calls",
+    "type": "scenario"
   },
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",

@@ -153,6 +153,98 @@ macro_rules! define_kernels {
     };
 }
 
+// rq-2093594f
+//
+// Expand the body of a single-launch kernel wrapper. Invoked inside the
+// body of a `pub fn` launch wrapper in `src/gpu/kernels.rs`; the
+// wrapper's signature and doc comment are hand-written around it, and
+// the macro emits only the launch body (empty guard, handle clone,
+// launch configuration, `unsafe` launch, `GpuError` mapping, `Ok(())`).
+// Crate-internal: re-exported with `pub(crate) use` below rather than
+// `#[macro_export]`, since it is invoked only within `kernels.rs`.
+//
+// Three grid strategies fix both the empty guard and the launch config:
+//
+//   grid: per_element(<size>)  — one thread per element. Returns `Ok(())`
+//     without launching when `<size> == 0`; else block 256, grid
+//     `ceil(size / 256)`. The macro computes the element count and passes
+//     it as the FINAL kernel argument, so `args` lists every argument
+//     before it. (Computing the count before the argument tuple is also
+//     what lets the tuple hold `&mut buffers.*` borrows without a
+//     conflicting immutable borrow for the count.)
+//
+//   grid: single_block(<size>) — one block of `BLOCK_SIZE` threads
+//     (grid 1). Empty-guard and trailing-count behaviour as per_element.
+//
+//   grid: single_thread — grid (1,1,1), block (1,1,1). No empty guard,
+//     no trailing count; `args` lists every argument explicitly.
+//
+// The macro emits no timing calls: kernel timing is bracketed externally
+// by the runner and CUDA-graph capture. See `rqm/build-pipeline.md`.
+macro_rules! gpu_launch {
+    (
+        func: $func:expr,
+        grid: per_element($size:expr),
+        args: ( $( $arg:expr ),* $(,)? ) $(,)?
+    ) => {{
+        let __n = $size;
+        if __n == 0 {
+            return ::std::result::Result::Ok(());
+        }
+        let __n_u32 = __n as u32;
+        let __func = ($func).clone();
+        let __cfg = $crate::gpu::kernels::launch_config(__n_u32);
+        unsafe {
+            __func
+                .launch(__cfg, ( $( $arg, )* __n_u32 ))
+                .map_err($crate::gpu::GpuError::from)?;
+        }
+        ::std::result::Result::Ok(())
+    }};
+    (
+        func: $func:expr,
+        grid: single_block($size:expr),
+        args: ( $( $arg:expr ),* $(,)? ) $(,)?
+    ) => {{
+        let __n = $size;
+        if __n == 0 {
+            return ::std::result::Result::Ok(());
+        }
+        let __n_u32 = __n as u32;
+        let __func = ($func).clone();
+        let __cfg = ::cudarc::driver::LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: ($crate::gpu::kernels::BLOCK_SIZE, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            __func
+                .launch(__cfg, ( $( $arg, )* __n_u32 ))
+                .map_err($crate::gpu::GpuError::from)?;
+        }
+        ::std::result::Result::Ok(())
+    }};
+    (
+        func: $func:expr,
+        grid: single_thread,
+        args: ( $( $arg:expr ),* $(,)? ) $(,)?
+    ) => {{
+        let __func = ($func).clone();
+        let __cfg = ::cudarc::driver::LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: (1, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            __func
+                .launch(__cfg, ( $( $arg, )* ))
+                .map_err($crate::gpu::GpuError::from)?;
+        }
+        ::std::result::Result::Ok(())
+    }};
+}
+pub(crate) use gpu_launch;
+
 #[cfg(test)]
 mod tests {
     use crate::gpu::SubsystemKernels;
@@ -212,6 +304,92 @@ mod tests {
                 seen.insert(stage.name()),
                 "duplicate stage in ORDER: {}",
                 stage.name()
+            );
+        }
+    }
+
+    // --- gpu_launch! macro ---
+    //
+    // The per_element and single_thread grid strategies are exercised
+    // end-to-end through the public launch wrappers in
+    // `tests/gpu_launch_macro.rs`. The single_block strategy has no
+    // production launch wrapper (every device-resident single-block
+    // reducer takes a non-count trailing argument and so is hand-written),
+    // so it is exercised here directly against the always-loaded `fill`
+    // kernel.
+    // `gpu_launch!` is in textual macro scope here (defined earlier in
+    // this module), so it needs no `use`.
+    use crate::gpu::{GpuContext, GpuError, init_device};
+    use crate::precision::Real;
+    // `gpu_launch!` expands to `__func.launch(...)`; the `LaunchAsync`
+    // trait that provides `launch` must be in scope at the call site.
+    use cudarc::driver::{CudaSlice, LaunchAsync};
+
+    // A single_block-strategy launch of `fill`: grid (1,1,1), block
+    // (BLOCK_SIZE,1,1). The element count is appended by the macro, so
+    // `args` lists only the output buffer and the fill value.
+    fn fill_single_block(
+        ctx: &GpuContext,
+        out: &mut CudaSlice<Real>,
+        value: Real,
+        size: u32,
+    ) -> Result<(), GpuError> {
+        gpu_launch! {
+            func: ctx.kernels.fill.fill,
+            grid: single_block(size),
+            args: (&mut *out, value),
+        }
+    }
+
+    // rq-e61e9b5f
+    #[test]
+    fn single_block_guards_on_empty_and_launches_one_block() {
+        let ctx = init_device().expect("init_device");
+        let zero = 0.0 as Real;
+
+        // size == 0: the empty guard returns Ok(()) without launching, so
+        // the buffer is left untouched.
+        let mut buf = ctx.device.alloc_zeros::<Real>(4).expect("alloc");
+        fill_single_block(&ctx, &mut buf, 9.0, 0).expect("empty single_block must be Ok(())");
+        let mut host = vec![zero; 4];
+        ctx.device
+            .dtoh_sync_copy_into(&buf, &mut host)
+            .expect("download");
+        assert_eq!(host, vec![zero; 4], "size 0 must launch nothing");
+
+        // size > BLOCK_SIZE: a single block of BLOCK_SIZE threads runs, so
+        // only the first BLOCK_SIZE elements are written even though the
+        // count (300) is larger. Elements in [BLOCK_SIZE, 300) staying zero
+        // prove the grid is exactly one block, not ceil(300 / BLOCK_SIZE).
+        let block = crate::gpu::kernels::BLOCK_SIZE as usize;
+        let n = block + 44; // 300: past one block, below two
+        let fill_value = 7.0 as Real;
+        let mut buf = ctx.device.alloc_zeros::<Real>(n).expect("alloc");
+        fill_single_block(&ctx, &mut buf, fill_value, n as u32).expect("single_block launch");
+        let mut host = vec![zero; n];
+        ctx.device
+            .dtoh_sync_copy_into(&buf, &mut host)
+            .expect("download");
+        for (i, &v) in host.iter().enumerate() {
+            if i < block {
+                assert_eq!(v, fill_value, "element {i} within the one block must be filled");
+            } else {
+                assert_eq!(v, zero, "element {i} beyond one block must be untouched");
+            }
+        }
+    }
+
+    // rq-ece77047 — kernel timing is bracketed externally by the runner and
+    // CUDA-graph capture, never inside a launch wrapper. The gpu_launch!
+    // macro emits no timing calls; this guards against a wrapper in
+    // `kernels.rs` reintroducing timing.
+    #[test]
+    fn launch_wrappers_emit_no_timing_calls() {
+        let src = include_str!("kernels.rs");
+        for token in ["kernel_start", "kernel_stop", "Timings"] {
+            assert!(
+                !src.contains(token),
+                "src/gpu/kernels.rs must contain no `{token}` call: kernel timing is external"
             );
         }
     }
