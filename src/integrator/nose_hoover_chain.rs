@@ -186,12 +186,6 @@ pub struct NoseHooverChainThermostat {
     pub p_xi: Vec<f64>,
     yoshida: &'static [f64],
     ke_scratch: CudaSlice<Real>,
-    /// Single-element device buffer holding the cumulative rescale
-    /// factor produced by `apply_post`'s host-side Yoshida × n_resp
-    /// integration. The JIT-composed post-force per-particle kernel
-    /// reads `factor_device[0]` in NHC's fragment body and multiplies
-    /// velocities by it.
-    factor_device: CudaSlice<Real>,
     most_recent_ke: f64,
 }
 
@@ -230,7 +224,6 @@ impl NoseHooverChainThermostat {
             }
         }
         let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
-        let factor_device = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(NoseHooverChainThermostat {
             temperature,
             tau,
@@ -244,7 +237,6 @@ impl NoseHooverChainThermostat {
             p_xi: vec![0.0_f64; m],
             yoshida: yoshida_weights(yoshida_order),
             ke_scratch,
-            factor_device,
             most_recent_ke: 0.0,
         })
     }
@@ -253,11 +245,8 @@ impl NoseHooverChainThermostat {
     /// per-iteration rescale factors into a single cumulative
     /// scalar. The cumulative factor is returned alongside the
     /// updated kinetic energy. No `rescale_velocities` launches
-    /// happen inside this function; the caller is responsible for
-    /// applying the cumulative factor (via `rescale_velocities` on
-    /// the pre-force path, or by writing to `factor_device` for
-    /// the JIT-composed post-force per-particle kernel on the
-    /// post-force path).
+    /// happen inside this function; both `apply_pre` and `apply_post`
+    /// apply the returned cumulative factor via `rescale_velocities`.
     fn thermostat_half_step_cumulative(
         &mut self,
         dt: Real,
@@ -292,33 +281,6 @@ impl NoseHooverChainThermostat {
         (cumulative, k)
     }
 }
-
-impl crate::integrator::PostForcePerParticle for NoseHooverChainThermostat {
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> crate::forces::PerParticleFragment {
-        crate::forces::PerParticleFragment {
-            label: "nose_hoover_chain",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *nhc_factor_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real nhc_factor = nhc_factor_device[0];\n\
-                 \x20       velocities_x[i] *= nhc_factor;\n\
-                 \x20       velocities_y[i] *= nhc_factor;\n\
-                 \x20       velocities_z[i] *= nhc_factor;",
-            ),
-        }
-    }
-
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.factor_device);
-    }}
 
 impl Thermostat for NoseHooverChainThermostat {
     // rq-2fe47a86 rq-a9c46f51
@@ -358,20 +320,19 @@ impl Thermostat for NoseHooverChainThermostat {
         let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let (cumulative, k_final) = self.thermostat_half_step_cumulative(dt, k);
-        // Write the cumulative rescale factor to `factor_device`; the
-        // JIT-composed post-force per-particle kernel reads it.
-        buffers
-            .device
-            .htod_sync_copy_into(&[cumulative as Real], &mut self.factor_device)
-            .map_err(GpuError::from)?;
+        // Trailing coupling half. `k` is reduced from the full-step
+        // (post-trailing-kick) velocities — a fusion barrier — so NHC
+        // applies its cumulative rescale as its own launch here rather
+        // than through a composed fragment. rq-a9c46f51 — inert when
+        // g_dof == 0: no rescale launch.
+        if self.g_dof != 0 {
+            timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
+            rescale_velocities(buffers, cumulative as Real)?;
+            timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
+        }
         self.most_recent_ke = k_final;
         Ok(())
     }
-
-    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
-        Some(self)
-    }
-
 
     // rq-8a571737
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {

@@ -59,12 +59,12 @@ The compute of `λ²` and `λ` runs entirely device-side as part of
 step 2's kernel (see *Per-Step Kernel Sequence* below). The host
 never downloads `K_old`.
 
-3. Apply the rescale via the JIT-composed post-force per-particle
-   kernel: `v_i ← λ · v_i` for every particle `i` and axis.
-   `apply_post` itself does not launch a per-particle rescale;
-   Berendsen's source fragment carries the
-   `v *= berendsen_factor_device[0]` body that the composed kernel
-   inlines per thread.
+3. Apply the rescale as a standalone `rescale_velocities` kernel
+   launched from `apply_post`: `v_i ← λ · v_i` for every particle `i`
+   and axis. Berendsen contributes no composed post-force fragment —
+   its kinetic-energy reduction reads the full-step (post-trailing-kick)
+   velocities, a fusion barrier that keeps the rescale out of the
+   composed kernel (`framework.md`, `jit-composed-post-force.md`).
 
 4. Update the running
    `cumulative_injection += K_old · (λ² − 1)`. The accumulator
@@ -83,23 +83,27 @@ resumes.
 
 `apply_pre` is the trait default (no-op): Berendsen is a post-only
 weak-coupling formula and never modifies velocities before the
-integrator runs.
+integrator runs. `apply_post` runs only on coupling steps (every
+`coupling_interval` steps, `io/config-schema.md`) and receives the
+effective timestep `coupling_interval · dt`; on the intervening steps
+Berendsen does nothing.
 
 ## Per-Step Kernel Sequence <!-- rq-dd953328 -->
 
-Per timestep the Berendsen thermostat's `apply_post` runs the
-following in fixed order:
+On a coupling step the Berendsen thermostat's `apply_post` runs the
+following in fixed order, as its own kernel launches, after the
+integrator's trailing kick:
 
 | Order | Step              | Kernel / call                                     | Operation                                                                     | Stage label                  |
 | ----- | ----------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------- |
-| 1     | KE reduce         | `compute_kinetic_energy_on_device`                | writes `ke_scratch` device buffer; no dtoh                                    | `KineticEnergyReduce`        |
+| 1     | KE reduce         | `compute_kinetic_energy_on_device`                | writes `ke_scratch` device buffer (full-step `K`); no dtoh                    | `KineticEnergyReduce`        |
 | 2     | Compute factor    | `berendsen_compute_factor`                        | reads `ke_scratch` + slot scalars; writes `factor_device` and accumulator delta | `BerendsenComputeFactor`     |
-| 3     | Velocity rescale  | composed post-force per-particle kernel           | `v ← λ · v` per particle                                                       | `JitComposedPostForce`       |
+| 3     | Velocity rescale  | `rescale_velocities`                              | `v ← λ · v` per particle                                                       | `BerendsenRescaleVelocities` |
 
-Steps 1 and 2 run inside `apply_post`. Step 3 runs from the
-JIT-composed post-force per-particle kernel via Berendsen's source
-fragment. `compute_kinetic_energy_on_device` is reused from
-`csvr.md`. `berendsen_compute_factor` is a single-thread device
+All three steps run inside `apply_post`. Berendsen contributes no
+composed post-force fragment; its per-particle rescale is the
+standalone `rescale_velocities` kernel.
+`compute_kinetic_energy_on_device` is reused from `csvr.md`. `berendsen_compute_factor` is a single-thread device
 kernel owned by this slot that takes `ke_scratch`, `kT_target`,
 `g_dof`, `dt / τ`, and the cumulative-injection accumulator
 pointer, and writes the rescale factor `λ` plus the injection
@@ -410,10 +414,10 @@ Feature: Berendsen weak-coupling thermostat
     Then the post-step velocities in the clamped case are all zero
 
   @rq-7d9f2da7
-  Scenario: Rescale is skipped when K_old = 0
+  Scenario: With K_old = 0 the rescale is an identity and injection stays zero
     Given a system with every velocity exactly zero (K_old = 0)
     When thermostat.apply_post(...) is called
-    Then no rescale_velocities launch occurs that invocation
+    Then the computed factor is 1, so the rescale leaves velocities zero
     And state.cumulative_injection equals 0.0
 
   # --- COM-momentum preservation ---

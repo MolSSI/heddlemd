@@ -83,6 +83,25 @@ The default registry exposes four thermostats:
 | `andersen`           | stochastic NVT via per-particle Maxwell-Boltzmann resampling| `andersen.md`         |
 | `berendsen`          | weak-coupling (equilibration only — not canonical)          | `berendsen.md`        |
 
+A thermostat couples on a fixed cadence — every `coupling_interval`
+steps (`io/config-schema.md`), where an interval of `1` couples every
+step. On a coupling step the thermostat reduces the **full-step**
+kinetic energy — the kinetic energy of the velocities *after* the
+integrator's trailing kick — and applies its velocity update from that
+reduction. This matches the symmetric-Trotter convention of
+established MD engines (LAMMPS `fix nvt`, OpenMM `NoseHooverIntegrator`,
+GROMACS `md-vv`), and preserves the time-reversal symmetry the
+integrator's lossless mode relies on (`docs/architecture.md`,
+*Precision policy*).
+
+Because the kinetic-energy reduction reads post-trailing-kick
+velocities, it is a **fusion barrier** between the trailing kick and the
+thermostat's rescale (`docs/architecture.md`, *Step orchestration and
+kernel fusion*): a thermostat never contributes a fragment to the
+JIT-composed post-force per-particle kernel. Its reduction and rescale
+run as their own kernel launches on coupling steps (see *Per-Step
+Interface*).
+
 ### Barostat slot <!-- rq-d898f1cd -->
 
 The default registry exposes three barostats:
@@ -111,6 +130,27 @@ no `ThermostatHalf` sub-steps is wrapped by the runner (`apply_pre`
 before the walk, `apply_post` after — the default topology every
 single-timestep integrator uses); a plan containing `ThermostatHalf`
 sub-steps owns its thermostat placement and receives no wrapping.
+
+A thermostat's `apply_pre` and `apply_post` fire only on **coupling
+steps** — steps where `step % coupling_interval == 0`
+(`io/config-schema.md`). On the intervening steps the thermostat is
+inert: neither half runs and velocities are untouched by it. On a
+coupling step both halves receive the **effective coupling timestep**
+`dt_couple = coupling_interval · dt`, so a thermostat's relaxation time
+`τ` keeps its physical meaning regardless of how often it couples.
+
+A coupling step also fixes how the post-force work executes. Because
+the thermostat's `apply_post` reduces the full-step kinetic energy — a
+reduction that must read the velocities *after* the integrator's
+trailing kick — the trailing kick and the thermostat rescale cannot
+share a launch. So on a coupling step the runner does **not** use the
+JIT-composed post-force per-particle kernel: the trailing kick, the
+kinetic-energy reduction, the thermostat rescale, and any barostat
+rescale run eagerly, as their own kernel launches, in the canonical
+order `integrator → thermostat → barostat`. On a non-coupling step the
+thermostat contributes nothing, and the composed kernel fuses the
+integrator's trailing kick with any barostat rescale exactly as it does
+for an un-thermostatted run (`jit-composed-post-force.md`).
 
 Constraint placement is fully plan-declared: the runner fires a
 constraint hook only where the plan carries a `SubStep::ConstraintPoint`
@@ -157,21 +197,31 @@ projection after it.
 loop step in 1..=n_steps:
     let plan = integrator.plan(dt)
     let plan_owns_thermostat = plan.has_thermostat_points()
-    if let Some(t) = thermostat, !plan_owns_thermostat {
-        t.apply_pre(buffers, dt, timings)
+    /* A coupling step: the thermostat acts this step. On it the
+       full-step KE reduction sits between the trailing kick and the
+       thermostat rescale, so the composed kernel is not used and the
+       post-force work runs eagerly. dt_couple scales the coupling to
+       the elapsed interval. */
+    let couples = thermostat.is_some() && !plan_owns_thermostat
+        && step % coupling_interval == 0
+    let dt_couple = coupling_interval * dt
+    if couples {
+        thermostat.apply_pre(buffers, dt_couple, timings)  /* leading half, on v(t) */
     }
-    /* Some only when the integrator is in the composed set — a
-       non-participating integrator's trailing kick is never
-       skipped (jit-composed-post-force.md, suffix selection). */
-    let post_force_sub_idx = integrator_in_composed_set
+    /* The composed kernel fuses the trailing kick only on non-coupling
+       steps; a coupling step (or a non-participating integrator) leaves
+       the trailing kick in the walk. */
+    let use_composed = post_force_composed_kernel.is_some()
+        && integrator_in_composed_set && !couples
+    let post_force_sub_idx = use_composed
         .then(|| plan.last_post_force_substep_index())
     /* Trailing post-force markers handled by the runner's tail, not
        the walk (composed kernel absorbs the trailing kick between
-       them). */
+       them). Only relevant when the composed kernel is used. */
     let defer_terminal_projection = constraint.is_some()
         && post_force_sub_idx.is_some()
         && plan.terminal_velocity_projection_dt().is_some()
-    let defer_terminal_barostat = barostat_couples_per_step
+    let defer_terminal_barostat = use_composed && barostat_couples_per_step
         && plan.terminal_barostat_point_dt().is_some()
     for (i, sub) in plan.steps.iter().enumerate():
         if Some(i) == post_force_sub_idx {
@@ -191,7 +241,7 @@ loop step in 1..=n_steps:
                 force_field.step_class(c, buffers, sim_box, timings,
                                        runner.resolve_level(level))
             SubStep::ThermostatHalf { dt: sub_dt, phase } =>
-                /* no-op when thermostat is None */
+                /* plan-owned placement; no-op when thermostat is None */
                 match phase:
                     Pre  => thermostat.apply_pre(buffers, sub_dt, timings)
                     Post => thermostat.apply_post(buffers, sub_dt, timings)
@@ -212,37 +262,54 @@ loop step in 1..=n_steps:
                 class_kick_drift(buffers, force_field.class_forces(c), sub_dt)
             other =>
                 integrator.execute(other, buffers, sim_box, timings)
-    if let Some(t) = thermostat, !plan_owns_thermostat {
-        t.apply_post(buffers, dt, timings)  /* scalar prep */
+    if couples {
+        /* full-step coupling: apply_post reduces the KE of the
+           post-trailing-kick velocities and applies the rescale as its
+           own kernel launch (no composed fragment) */
+        thermostat.apply_post(buffers, dt_couple, timings)
     }
-    if defer_terminal_barostat {
-        /* canonical terminal placement: scalar prep + box mutation;
-           per-particle rescale fused into the composed launch below */
-        barostat.apply(buffers, sim_box,
-                       plan.terminal_barostat_point_dt(), timings)
-    }
-    if let Some(k) = post_force_composed_kernel {
-        k.launch(buffers, integrator, thermostat.as_ref(), barostat.as_ref(),
-                 sim_box, dt, timings)
-    }
-    if defer_terminal_projection {
-        /* the displaced trailing velocity projection, using the
-           trailing AfterKick marker's own dt */
-        constraint.apply_after_kick(buffers, sim_box,
-                                    plan.terminal_velocity_projection_dt(), timings)
+    if use_composed {
+        if defer_terminal_barostat {
+            /* canonical terminal placement: scalar prep + box mutation;
+               per-particle rescale fused into the composed launch below */
+            barostat.apply(buffers, sim_box,
+                           plan.terminal_barostat_point_dt(), timings)
+        }
+        post_force_composed_kernel.launch(buffers, integrator, barostat.as_ref(),
+                                          sim_box, dt, timings)
+        if defer_terminal_projection {
+            /* the displaced trailing velocity projection, using the
+               trailing AfterKick marker's own dt */
+            constraint.apply_after_kick(buffers, sim_box,
+                                        plan.terminal_velocity_projection_dt(), timings)
+        }
+    } else if barostat_couples_per_step && plan.terminal_barostat_point_dt().is_some() {
+        /* coupling step (or non-participating integrator): the barostat's
+           scalar prep, box mutation, and per-particle rescale all run
+           eagerly, after the thermostat rescale, preserving the
+           integrator → thermostat → barostat order. A trailing velocity
+           projection then dispatches during the walk like any other
+           ConstraintPoint. */
+        barostat.apply(buffers, sim_box, plan.terminal_barostat_point_dt(), timings)
     }
     ...trajectory / log output...
 ```
 
 When the runner's JIT-composed post-force per-particle kernel
-(`jit-composed-post-force.md`) is active, the post-force
-`KickHalf` / `KickDrift` SubStep is skipped from the plan-walk
-loop and the composed kernel is launched after every slot's
-scalar-prep work. When the composed kernel is absent (no active
-integrator), the loop walks the plan in full and no composed
-launch fires; a trailing `AfterKick` projection then dispatches
-during the walk like any other `ConstraintPoint`, and a terminal
-`BarostatPoint` dispatches its full `apply` in the walk.
+(`jit-composed-post-force.md`) is used — a non-coupling step with a
+participating integrator — the post-force `KickHalf` / `KickDrift`
+SubStep is skipped from the plan-walk loop and the composed kernel is
+launched after every participating slot's scalar-prep work. The composed
+kernel is not used on a **coupling step** (the thermostat's full-step KE
+reduction sits between the trailing kick and the rescale) or when no
+integrator participates; in either case the loop walks the plan in full,
+the trailing kick runs eagerly, no composed launch fires, a trailing
+`AfterKick` projection dispatches during the walk like any other
+`ConstraintPoint`, and a terminal `BarostatPoint` dispatches its full
+`apply` in the walk. A coupling step therefore executes the identical
+eager sequence a fragmentless run would — this is what keeps the
+thermostat's coupling kinetic energy full-step regardless of whether an
+integrator or barostat fragment exists.
 
 The plan-walk portion of this loop — the inner per-sub-step dispatch,
 including the dispatch of `ConstraintPoint` markers to the constraint
@@ -831,8 +898,12 @@ successfully.
           timings: &mut Timings,
       ) -> Result<(), ThermostatError> { Ok(()) }
 
-      /// Apply the thermostat's post-step modification. Mutates
-      /// velocities; never touches positions, box, or forces.
+      /// Apply the thermostat's post-step modification: reduce the
+      /// full-step kinetic energy of the current (post-trailing-kick)
+      /// velocities and rescale from it. Mutates velocities; never
+      /// touches positions, box, or forces. Runs its own reduction and
+      /// rescale kernels — it contributes no composed post-force
+      /// fragment.
       fn apply_post(
           &mut self,
           buffers: &mut ParticleBuffers,
@@ -849,12 +920,19 @@ successfully.
   }
   ```
 
-  - `apply_pre` and `apply_post` each receive the same `dt` the
-    integrator received. Thermostats that internally split this into
-    half-steps do so themselves (NHC takes `dt/2` for each side of
-    its symmetric chain step; CSVR / Berendsen / Andersen use the
-    full `dt` in their relaxation formula and only act on the post
-    side).
+  - `apply_pre` and `apply_post` are called only on coupling steps, and
+    each receives the **effective coupling timestep** `dt_couple =
+    coupling_interval · dt` (not the bare integrator `dt`). Thermostats
+    that internally split this into half-steps do so themselves (NHC
+    takes `dt_couple/2` for each side of its symmetric chain step;
+    CSVR / Berendsen / Andersen use the full `dt_couple` in their
+    relaxation formula and only act on the post side).
+  - `apply_post` reduces the kinetic energy of the velocities as they
+    stand when it is called — after the integrator's trailing kick — so
+    the coupling always sees the full-step kinetic energy. It performs
+    that reduction and the subsequent rescale as its own kernel
+    launches; a thermostat is never part of the JIT-composed post-force
+    per-particle kernel (`jit-composed-post-force.md`).
   - The thermostat never reads or writes `sim_box`, `force_field`,
     or `buffers.forces_*` / `buffers.virials`.
   - `apply_pre` returns immediately when
@@ -1379,30 +1457,26 @@ successfully.
   - Default implementation returns `Ok(())` without launching any
     kernel. Thermostats that do not need pre-step coupling (CSVR,
     Andersen, Berendsen) accept the default.
+  - Called only on coupling steps, with `dt = coupling_interval · dt`.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
 
 - `Thermostat::apply_post(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>` <!-- rq-7a124d43 -->
   - Every concrete `Thermostat` must implement this method.
+  - Called only on coupling steps, after the integrator's trailing
+    kick, with `dt = coupling_interval · dt`.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
-  - When the thermostat exposes a post-force per-particle fragment
-    (see `jit-composed-post-force.md`), `apply_post` runs every
-    part of its post-force work EXCEPT the per-particle rescale
-    or resample. For CSVR that means the kinetic-energy reduction
-    and the sample-and-factor kernel run; the per-particle
-    rescale runs from the composed kernel. For NHC the chain
-    integration runs but the per-particle rescale does not. For
-    Andersen any Philox-counter bookkeeping runs but the
-    per-particle Maxwell-Boltzmann draw + assignment runs from
-    the composed kernel.
-
-- `Thermostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline --> <!-- rq-b14ac769 -->
-  - Declares the thermostat's per-thread rescale / resample
-    contribution to the composed post-force kernel. Returns
-    `Some(self)` from a thermostat implementing
-    `PostForcePerParticle`, `None` (the default) otherwise. Built-in
-    thermostats participate.
+  - Runs **every** part of the thermostat's post-force work as its own
+    kernel launches — the full-step kinetic-energy reduction, the
+    factor / chain computation, and the per-particle rescale or
+    resample. A thermostat exposes no `post_force_per_particle`
+    fragment: its reduction reads the post-trailing-kick velocities, a
+    fusion barrier that keeps the rescale out of the composed kernel
+    (`jit-composed-post-force.md`). For CSVR: kinetic-energy reduction,
+    sample-and-factor, and `rescale_velocities`. For NHC: chain
+    integration and `rescale_velocities`. For Andersen: the
+    `andersen_resample` kernel and its bracketing reductions.
 
 - `Barostat::apply(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, dt: f32, timings: &mut Timings) -> Result<(), BarostatError>` <!-- rq-1179e42f -->
   - Every concrete `Barostat` must implement this method.
@@ -1479,6 +1553,12 @@ invariant under the same conditions each slot individually guarantees:
 - Mid-run replacement of any slot. Each slot is fixed at construction
   and never replaced for the duration of a run.
 - Dynamic loading of slot implementations from shared libraries.
+- Barostat coupling timing. `coupling_interval` and the full-step
+  kinetic-energy policy govern the thermostat slot only. A per-step
+  barostat continues to sample its virial and kinetic energy in its own
+  `apply`, and periodic barostats keep their own move cadence; the
+  point at which a barostat samples kinetic energy for its pressure
+  estimate is unchanged.
 
 ---
 
@@ -1662,6 +1742,41 @@ Feature: Pluggable integration framework
     Then it returns Ok(())
     And velocities are bit-identical to the snapshot
     And no kernel launches are recorded for that call
+
+  @rq-aa624d38
+  Scenario: Thermostat couples on the full-step (post-trailing-kick) kinetic energy
+    Given a velocity-Verlet integrator and a CSVR thermostat with coupling_interval = 1
+    And a recording wrapper that captures the kinetic energy apply_post reduces
+    And a ParticleBuffers whose forces make the trailing kick change velocities
+    When the runner executes one timestep
+    Then the recorded kinetic energy equals the kinetic energy of the
+      velocities after the trailing kick
+    And it differs from the kinetic energy of the pre-trailing-kick
+      (half-step) velocities
+
+  @rq-6ec9d751
+  Scenario: Thermostat is inert on a non-coupling step
+    Given a velocity-Verlet integrator and a thermostat with coupling_interval = 4
+    When the runner executes step 1 (1 % 4 != 0)
+    Then neither apply_pre nor apply_post is called
+    And velocities are unchanged by any thermostat action
+    And the composed post-force per-particle kernel performs the trailing kick
+
+  @rq-76963898
+  Scenario: Thermostat couples on an interval-boundary step with the effective timestep
+    Given a velocity-Verlet integrator and a thermostat with coupling_interval = 4 and base dt
+    When the runner executes step 4 (4 % 4 == 0)
+    Then apply_pre and apply_post are both called
+    And each receives dt_couple = 4 * dt
+    And the composed post-force per-particle kernel is not launched
+    And the trailing kick runs in the plan walk before apply_post
+
+  @rq-f4d73396
+  Scenario: Default coupling interval couples every step
+    Given a thermostat with coupling_interval = 1 (the default)
+    When the runner executes any step
+    Then apply_pre and apply_post are called on that step
+    And each receives dt_couple = dt
 
   @rq-d3bd619e
   Scenario: Velocity-Verlet plan walk launches vv_kick_drift, force pipeline, and vv_kick

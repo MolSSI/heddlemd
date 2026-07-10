@@ -195,6 +195,13 @@ pub struct PhaseConfig {
     pub thermostat: Option<SlotConfig>,
     pub barostat: Option<SlotConfig>,
     pub output: OutputConfig,
+    // rq-ee10237d — kind-agnostic thermostat coupling cadence: the
+    // thermostat couples every `coupling_interval` steps (on steps where
+    // `step % coupling_interval == 0`), with the effective coupling
+    // timestep `coupling_interval * dt`. Peeled from `[phase.thermostat]`
+    // before the kind's builder validates its params; `1` (couple every
+    // step) when the section omits it or has no thermostat.
+    pub coupling_interval: u32,
 }
 
 /// Parsed `[[minimization]]` entry. Energy-minimization phases run
@@ -1122,6 +1129,11 @@ pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
         }
     };
     let mut config = build_config(raw_config, path, base_dir, units, lennard_jones);
+    // rq-ee10237d — peel the kind-agnostic `coupling_interval` off each
+    // `[phase.thermostat]` before the kind's builder (which uses
+    // `deny_unknown_fields`) ever sees the params, and before
+    // `convert_all_slot_params` runs its per-kind unit conversion.
+    extract_coupling_intervals(&mut config)?;
     // Open-shaped slot params are converted to atomic units by the owning
     // builder's `convert_params`. The built-in registries supply those
     // builders; an unknown kind is left untouched and rejected later by
@@ -1132,6 +1144,48 @@ pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
 }
 
 // rq-0f6b7b7a — drive each open-shaped slot's unit conversion through the
+// rq-ee10237d — remove the kind-agnostic `coupling_interval` from each MD
+// phase's `[phase.thermostat]` params table and record it on the phase, so
+// the thermostat's kind-specific builder never sees the field (its params
+// struct is `deny_unknown_fields`) and so the value is validated once, in
+// one place. A phase with no thermostat, or a thermostat section that omits
+// the field, keeps the default of `1` (couple every step).
+fn extract_coupling_intervals(config: &mut Config) -> Result<(), ConfigError> {
+    for phase in &mut config.phases {
+        if let PhaseKind::Md(md) = phase {
+            if let Some(t) = md.thermostat.as_mut() {
+                md.coupling_interval = take_coupling_interval(&mut t.params)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+// rq-ee10237d rq-10b0c99c — extract and validate `coupling_interval` from a
+// thermostat slot's params table, removing it. Must be a positive integer;
+// `0`, negatives, non-integers, and values exceeding `u32` are rejected.
+fn take_coupling_interval(params: &mut toml::Value) -> Result<u32, ConfigError> {
+    let Some(table) = params.as_table_mut() else {
+        return Ok(1);
+    };
+    let Some(value) = table.remove("coupling_interval") else {
+        return Ok(1);
+    };
+    let n = value.as_integer().ok_or_else(|| {
+        invalid(
+            "thermostat.coupling_interval",
+            "value must be an integer >= 1",
+        )
+    })?;
+    if n < 1 || n > i64::from(u32::MAX) {
+        return Err(invalid(
+            "thermostat.coupling_interval",
+            format!("value must be >= 1, got {n}"),
+        ));
+    }
+    Ok(n as u32)
+}
+
 // builder that owns its kind's schema (see `KindedBuilder::convert_params`).
 fn convert_all_slot_params(config: &mut Config) -> Result<(), ConfigError> {
     use crate::registry::{KindedBuilder, Registry};
@@ -1624,6 +1678,10 @@ fn build_config(
                     thermostat,
                     barostat,
                     output,
+                    // rq-ee10237d — default; `extract_coupling_intervals`
+                    // overwrites it from the peeled `[phase.thermostat]`
+                    // field before the builders see the params.
+                    coupling_interval: 1,
                 })
             }
             SpannedEntry::Min(spanned) => {

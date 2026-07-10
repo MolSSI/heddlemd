@@ -995,6 +995,10 @@ impl Registry<dyn IntegratorBuilder> {
 
 // rq-5d9ed248
 pub trait Thermostat: std::fmt::Debug + Send {
+    /// Pre-step (leading) coupling half. Called only on coupling steps,
+    /// with `dt` already scaled to the effective coupling timestep
+    /// `coupling_interval * base_dt`. Default: no-op (post-only
+    /// thermostats leave it unimplemented).
     // rq-2fe47a86
     fn apply_pre(
         &mut self,
@@ -1005,6 +1009,14 @@ pub trait Thermostat: std::fmt::Debug + Send {
         Ok(())
     }
 
+    /// Post-step (trailing) coupling. Called only on coupling steps,
+    /// after the integrator's trailing kick, with `dt` the effective
+    /// coupling timestep. Reduces the full-step kinetic energy of the
+    /// current (post-trailing-kick) velocities and applies its velocity
+    /// rescale / resample as its own kernel launches — a thermostat
+    /// contributes no fragment to the JIT-composed post-force kernel
+    /// (the reduction is a fusion barrier; see
+    /// `rqm/integration/jit-composed-post-force.md`).
     // rq-7a124d43
     fn apply_post(
         &mut self,
@@ -1037,17 +1049,6 @@ pub trait Thermostat: std::fmt::Debug + Send {
     ) -> Vec<f64> {
         Vec::new()
     }
-
-    /// Declare whether this thermostat contributes a per-thread rescale
-    /// / resample to the JIT-composed post-force per-particle kernel.
-    /// Returns `Some(self)` from a thermostat that implements
-    /// `PostForcePerParticle`, `None` (the default) otherwise. Built-in
-    /// thermostats participate. See
-    /// `rqm/integration/jit-composed-post-force.md`.
-    fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
-        None
-    }
-
 }
 
 // rq-29e08cb5
@@ -1137,6 +1138,22 @@ pub trait Barostat: std::fmt::Debug + Send {
         _buffers: &mut ParticleBuffers,
         _sim_box: &mut SimulationBox,
         _dt: Real,
+        _timings: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
+
+    // rq-b85a38d6 — apply the barostat's per-particle rescale as a
+    // standalone launch, for steps where the composed post-force kernel
+    // is bypassed (coupling steps: a thermostat's full-step KE reduction
+    // is a fusion barrier, so the whole post-force region runs eagerly).
+    // Runs from the device factor(s) the immediately preceding `apply`
+    // produced, in canonical order after the thermostat rescale. Default
+    // no-op; a per-step barostat that contributes a composed fragment
+    // overrides it to launch the same rescale standalone.
+    fn apply_post_force_rescale_eager(
+        &self,
+        _buffers: &mut ParticleBuffers,
         _timings: &mut Timings,
     ) -> Result<(), BarostatError> {
         Ok(())

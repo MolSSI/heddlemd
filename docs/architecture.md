@@ -198,6 +198,50 @@ depends on the system dynamics and density. A typical starting point is
   Steps 1-2 and 4 are trivially parallel (one thread per particle). Step 3
   is the full force pipeline described above.
 
+## Step orchestration and kernel fusion
+
+A timestep is more than the integrator: on any given step it may also
+carry thermostat coupling, barostat scaling, and constraint projection.
+These interleave with the integrator's kicks and drifts at method-specific
+points, and several of them reduce to per-particle velocity or position
+updates that can share a single kernel launch. HeddleMD fuses those updates
+— most visibly through the JIT-composed post-force per-particle kernel — to
+cut launch count and enable CUDA-graph capture (see `rqm/integration/`).
+
+The governing principle for all such fusion is:
+
+> **Fusion is a semantics-preserving optimization over one canonical
+> schedule. It is never a second execution model with its own ordering
+> rules.**
+
+That is: a timestep has exactly one authoritative definition — an ordered
+schedule of operations (kicks, drifts, force evaluations, reductions,
+scalar preparations, projections, box mutations), each declaring the state
+it reads and writes. That schedule *is* the physics. Fusion is a pass over
+it that coalesces adjacent per-particle pointwise operations into one
+launch, and it may never reorder an operation across a data dependency or
+change which state an operation observes. A fused execution and an unfused
+execution of the same schedule must therefore produce identical results
+(modulo floating-point summation order, which the reproducibility strategy
+already governs).
+
+A direct corollary, and the reason this is stated as an invariant:
+**global reductions are fusion barriers.** A quantity summed over all
+particles (kinetic energy, virial) cannot be produced inside a pointwise
+per-particle kernel without the atomic or inter-warp accumulation the
+reproducibility strategy forbids — it requires a separate deterministic
+reduction pass. So any operation that consumes such a reduction must sit
+after it in the schedule, and fusion cannot merge the operation that
+*produces* the reduced quantity's inputs with the one that *consumes* the
+reduced result. Where those two would otherwise fuse, the reduction splits
+them; the schedule, not the fuser, decides which state the consumer sees.
+
+When a fusion mechanism instead carries its own ordering rules — deciding
+placement or which state an operation observes — it has become a second,
+competing definition of the timestep, and the two must be reconciled by
+special cases. Eliminating that class of special case is the standard this
+principle sets.
+
 ## Rust / CUDA boundary
 
 The host code is written in Rust. CUDA kernels are written in CUDA C and

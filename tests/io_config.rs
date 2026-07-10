@@ -4914,3 +4914,65 @@ r_switch = 9.0e-10
         other => panic!("unexpected: {other:?}"),
     }
 }
+
+// --- Thermostat coupling_interval ---
+
+// rq-732daa1b — the kind-agnostic coupling_interval defaults to 1 when a
+// thermostat section omits it.
+#[test]
+fn thermostat_coupling_interval_defaults_to_one() {
+    let dir = tmp_path("coupling_default");
+    let body = minimal_config()
+        + "\n[phase.thermostat]\nkind = \"csvr\"\ntemperature = 300.0\ntau = 1.0e-13\nseed = 42\n";
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.phases[0].as_md().unwrap().coupling_interval, 1);
+    // The peeled field is not left in the thermostat's params.
+    let t = cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap();
+    assert!(t.params.get("coupling_interval").is_none());
+}
+
+// rq-908e8418 — coupling_interval accepts a value greater than 1.
+#[test]
+fn thermostat_coupling_interval_accepts_value_above_one() {
+    let dir = tmp_path("coupling_ten");
+    let body = minimal_config()
+        + "\n[phase.thermostat]\nkind = \"csvr\"\ntemperature = 300.0\ntau = 1.0e-13\nseed = 42\ncoupling_interval = 10\n";
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.phases[0].as_md().unwrap().coupling_interval, 10);
+}
+
+// rq-10b0c99c — coupling_interval = 0 is rejected.
+#[test]
+fn thermostat_coupling_interval_zero_is_rejected() {
+    let dir = tmp_path("coupling_zero");
+    let body = minimal_config()
+        + "\n[phase.thermostat]\nkind = \"csvr\"\ntemperature = 300.0\ntau = 1.0e-13\nseed = 42\ncoupling_interval = 0\n";
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "thermostat.coupling_interval");
+        }
+        other => panic!("expected InvalidValue for coupling_interval, got {other:?}"),
+    }
+}
+
+// rq-4c5a5c07 — coupling_interval is accepted for every thermostat kind.
+#[test]
+fn thermostat_coupling_interval_accepted_for_every_kind() {
+    let sections: &[&str] = &[
+        "kind = \"nose-hoover-chain\"\ntemperature = 300.0\ntau = 1.0e-13\ncoupling_interval = 5\n",
+        "kind = \"csvr\"\ntemperature = 300.0\ntau = 1.0e-13\nseed = 42\ncoupling_interval = 5\n",
+        "kind = \"andersen\"\ntemperature = 300.0\ncollision_rate = 1.0e12\nseed = 42\ncoupling_interval = 5\n",
+        "kind = \"berendsen\"\ntemperature = 300.0\ntau = 1.0e-13\ncoupling_interval = 5\n",
+    ];
+    for (i, section) in sections.iter().enumerate() {
+        let dir = tmp_path(&format!("coupling_kind_{i}"));
+        let body = minimal_config() + "\n[phase.thermostat]\n" + section;
+        let path = write_config(&dir, &body);
+        let cfg = load_config(&path)
+            .unwrap_or_else(|e| panic!("kind section {i} failed to load: {e:?}"));
+        assert_eq!(cfg.phases[0].as_md().unwrap().coupling_interval, 5);
+    }
+}

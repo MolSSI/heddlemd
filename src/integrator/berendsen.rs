@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, berendsen_compute_factor,
-    compute_kinetic_energy_on_device,
+    compute_kinetic_energy_on_device, rescale_velocities_device_factor,
 };
 use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
@@ -113,33 +113,6 @@ impl BerendsenThermostat {
     }
 }
 
-impl crate::integrator::PostForcePerParticle for BerendsenThermostat {
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> crate::forces::PerParticleFragment {
-        crate::forces::PerParticleFragment {
-            label: "berendsen",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *berendsen_factor_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real berendsen_factor = berendsen_factor_device[0];\n\
-                 \x20       velocities_x[i] *= berendsen_factor;\n\
-                 \x20       velocities_y[i] *= berendsen_factor;\n\
-                 \x20       velocities_z[i] *= berendsen_factor;",
-            ),
-        }
-    }
-
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.factor_device);
-    }}
-
 impl Thermostat for BerendsenThermostat {
     // rq-7a124d43
     fn apply_post(
@@ -171,8 +144,14 @@ impl Thermostat for BerendsenThermostat {
             dt_over_tau,
         )?;
         timings.kernel_stop(KernelStage::BERENDSEN_COMPUTE_FACTOR)?;
-        // The composed post-force per-particle kernel applies the
-        // rescale via this slot's source fragment.
+
+        // Per-particle rescale `v ← λ · v`, reading `factor_device` on
+        // the device. The full-step kinetic-energy reduction above is a
+        // fusion barrier, so Berendsen applies the rescale as its own
+        // launch rather than a composed fragment.
+        timings.kernel_start(KernelStage::BERENDSEN_RESCALE_VELOCITIES)?;
+        rescale_velocities_device_factor(buffers, &self.factor_device)?;
+        timings.kernel_stop(KernelStage::BERENDSEN_RESCALE_VELOCITIES)?;
         Ok(())
     }
 
@@ -182,10 +161,6 @@ impl Thermostat for BerendsenThermostat {
     ) -> Result<(), ThermostatError> {
         BerendsenThermostat::flush_pending_injection(self, device)
             .map_err(ThermostatError::from)
-    }
-
-    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
-        Some(self)
     }
 
 

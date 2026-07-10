@@ -877,14 +877,6 @@
     "title": "Top-level units field defaults to SI when absent",
     "type": "scenario"
   },
-  "rq-062d4d53": {
-    "decl": "## Post-Force Per-Particle Fragment",
-    "file": "integration/csvr",
-    "level": 2,
-    "refs": [],
-    "title": "Post-Force Per-Particle Fragment",
-    "type": "section"
-  },
   "rq-062ea284": {
     "decl": "## Algorithm",
     "file": "integration/csvr",
@@ -2407,6 +2399,22 @@
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
     "title": "step() with one angle slot launches the angle composed kernel once and the reduction once",
+    "type": "scenario"
+  },
+  "rq-10b0c99c": {
+    "decl": "Scenario: [thermostat] coupling_interval = 0 is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "[thermostat] coupling_interval = 0 is rejected",
     "type": "scenario"
   },
   "rq-10cc8ddf": {
@@ -7746,13 +7754,6 @@
     "title": "File with image:I:3 parses three integer columns per row",
     "type": "scenario"
   },
-  "rq-37072376": {
-    "decl": "- `RunnerError::PostForceTopologyUnsatisfiable` — a",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "RunnerError",
-    "type": "api-item"
-  },
   "rq-370bf3a8": {
     "decl": "- `apply_post(buffers, dt, timings)` — runs the right",
     "file": "integration/nose-hoover-chain",
@@ -10025,6 +10026,18 @@
     "title": "Helper Functions in the JIT-Composed Source",
     "type": "section"
   },
+  "rq-49f6bbfb": {
+    "decl": "Scenario: A thermostat coupling every step also runs on the per-step path",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A thermostat coupling every step also runs on the per-step path",
+    "type": "scenario"
+  },
   "rq-49fe5f2e": {
     "decl": "## Per-Group Storage",
     "file": "integration/settle",
@@ -10332,6 +10345,18 @@
     "refs": [],
     "title": "Top level",
     "type": "section"
+  },
+  "rq-4c5a5c07": {
+    "decl": "Scenario: [thermostat] coupling_interval is accepted for every kind",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "[thermostat] coupling_interval is accepted for every kind",
+    "type": "scenario"
   },
   "rq-4c88ee0e": {
     "decl": "### Source Fragment",
@@ -12583,19 +12608,15 @@
     "type": "scenario"
   },
   "rq-5e904c5d": {
-    "decl": "Scenario: A fragment-bearing thermostat excluded by a fragment-less per-step barostat is rejected",
+    "decl": "Scenario: A fragment-less per-step barostat with a thermostat has a valid execution order",
     "file": "integration/jit-composed-post-force",
     "refs": [
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
-      },
       {
         "file": "tests/post_force_composition.rs",
         "kind": "code"
       }
     ],
-    "title": "A fragment-bearing thermostat excluded by a fragment-less per-step barostat is rejected",
+    "title": "A fragment-less per-step barostat with a thermostat has a valid execution order",
     "type": "scenario"
   },
   "rq-5ec02591": {
@@ -12883,7 +12904,7 @@
     "type": "scenario"
   },
   "rq-609dc377": {
-    "decl": "Scenario: Every built-in slot kind exposes a post-force fragment",
+    "decl": "Scenario: Every built-in fusible slot kind exposes a post-force fragment",
     "file": "integration/jit-composed-post-force",
     "refs": [
       {
@@ -12891,7 +12912,7 @@
         "kind": "code"
       }
     ],
-    "title": "Every built-in slot kind exposes a post-force fragment",
+    "title": "Every built-in fusible slot kind exposes a post-force fragment",
     "type": "scenario"
   },
   "rq-60b19852": {
@@ -14786,6 +14807,18 @@
     "title": "`Time`",
     "type": "section"
   },
+  "rq-6ec9d751": {
+    "decl": "Scenario: Thermostat is inert on a non-coupling step",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Thermostat is inert on a non-coupling step",
+    "type": "scenario"
+  },
   "rq-6eca8f0e": {
     "decl": "Scenario: Cell-list forces match all-pairs forces on a multi-molecule intramolecular-exclusion system",
     "file": "forces/neighbor-list",
@@ -15233,6 +15266,18 @@
     "title": "Construct with particle_count = 1 (N_f = 1)",
     "type": "scenario"
   },
+  "rq-732daa1b": {
+    "decl": "Scenario: [thermostat] coupling_interval defaults to 1 when omitted",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "[thermostat] coupling_interval defaults to 1 when omitted",
+    "type": "scenario"
+  },
   "rq-73497463": {
     "decl": "## Reproducibility",
     "file": "integration/settle",
@@ -15324,6 +15369,14 @@
     ],
     "title": "Amortized type-index loads preserve per-particle forces bit-for-bit",
     "type": "scenario"
+  },
+  "rq-73e738ee": {
+    "decl": "### Composed-Kernel Use and Coupling Steps",
+    "file": "integration/jit-composed-post-force",
+    "level": 3,
+    "refs": [],
+    "title": "Composed-Kernel Use and Coupling Steps",
+    "type": "section"
   },
   "rq-73efd4be": {
     "decl": "Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs",
@@ -15784,6 +15837,18 @@
     ],
     "title": "Capture Lifecycle",
     "type": "section"
+  },
+  "rq-76963898": {
+    "decl": "Scenario: Thermostat couples on an interval-boundary step with the effective timestep",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Thermostat couples on an interval-boundary step with the effective timestep",
+    "type": "scenario"
   },
   "rq-76abf8d7": {
     "decl": "Scenario: settle_positions restores exact rigidity in a single evaluation",
@@ -16255,7 +16320,7 @@
     "type": "api-item"
   },
   "rq-79b8a246": {
-    "decl": "Scenario: A non-participating thermostat forces the integrator out of the composed set",
+    "decl": "Scenario: A thermostat never participates in the composed set",
     "file": "integration/jit-composed-post-force",
     "refs": [
       {
@@ -16263,7 +16328,7 @@
         "kind": "code"
       }
     ],
-    "title": "A non-participating thermostat forces the integrator out of the composed set",
+    "title": "A thermostat never participates in the composed set",
     "type": "scenario"
   },
   "rq-79c091e0": {
@@ -16350,6 +16415,10 @@
       },
       {
         "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
         "kind": "code"
       }
     ],
@@ -16550,7 +16619,7 @@
     "type": "section"
   },
   "rq-7bd422a5": {
-    "decl": "Scenario: A fully participating configuration keeps full fusion",
+    "decl": "Scenario: A non-coupling step keeps kick fusion; a coupling step does not",
     "file": "integration/jit-composed-post-force",
     "refs": [
       {
@@ -16558,7 +16627,7 @@
         "kind": "code"
       }
     ],
-    "title": "A fully participating configuration keeps full fusion",
+    "title": "A non-coupling step keeps kick fusion; a coupling step does not",
     "type": "scenario"
   },
   "rq-7bf70ee9": {
@@ -16771,7 +16840,7 @@
     "type": "api-item"
   },
   "rq-7d9f2da7": {
-    "decl": "Scenario: Rescale is skipped when K_old = 0",
+    "decl": "Scenario: With K_old = 0 the rescale is an identity and injection stays zero",
     "file": "integration/berendsen",
     "refs": [
       {
@@ -16779,7 +16848,7 @@
         "kind": "code"
       }
     ],
-    "title": "Rescale is skipped when K_old = 0",
+    "title": "With K_old = 0 the rescale is an identity and injection stays zero",
     "type": "scenario"
   },
   "rq-7da27d04": {
@@ -17792,7 +17861,7 @@
     "type": "scenario"
   },
   "rq-86dea9a1": {
-    "decl": "Scenario: Thermostat's apply_post runs the scalar prep but not the rescale",
+    "decl": "Scenario: Thermostat's apply_post runs the reduction and the rescale",
     "file": "integration/jit-composed-post-force",
     "refs": [
       {
@@ -17800,7 +17869,7 @@
         "kind": "code"
       }
     ],
-    "title": "Thermostat's apply_post runs the scalar prep but not the rescale",
+    "title": "Thermostat's apply_post runs the reduction and the rescale",
     "type": "scenario"
   },
   "rq-86f01d20": {
@@ -18459,10 +18528,10 @@
     "type": "section"
   },
   "rq-8bfffd42": {
-    "decl": "Scenario: One step launches the composed kernel exactly once",
+    "decl": "Scenario: A non-coupling step launches the composed kernel exactly once",
     "file": "integration/jit-composed-post-force",
     "refs": [],
-    "title": "One step launches the composed kernel exactly once",
+    "title": "A non-coupling step launches the composed kernel exactly once",
     "type": "scenario"
   },
   "rq-8c045718": {
@@ -18991,6 +19060,18 @@
       }
     ],
     "title": "Dispatch loop calls all three constraint hooks in marker order",
+    "type": "scenario"
+  },
+  "rq-908e8418": {
+    "decl": "Scenario: [thermostat] coupling_interval accepts a value greater than 1",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "[thermostat] coupling_interval accepts a value greater than 1",
     "type": "scenario"
   },
   "rq-909e5bb4": {
@@ -20258,10 +20339,10 @@
     "type": "api-item"
   },
   "rq-9a8a7dfa": {
-    "decl": "Scenario: Composed kernel is compiled with thermostat + barostat fragments",
+    "decl": "Scenario: Composed kernel is compiled with the barostat fragment",
     "file": "integration/jit-composed-post-force",
     "refs": [],
-    "title": "Composed kernel is compiled with thermostat + barostat fragments",
+    "title": "Composed kernel is compiled with the barostat fragment",
     "type": "scenario"
   },
   "rq-9a9523d9": {
@@ -20506,7 +20587,7 @@
     "type": "scenario"
   },
   "rq-9c5226e5": {
-    "decl": "Scenario: Integrator kick runs before thermostat rescale (canonical order)",
+    "decl": "Scenario: Integrator kick runs before thermostat rescale (canonical order, eager coupling step)",
     "file": "integration/jit-composed-post-force",
     "refs": [
       {
@@ -20522,7 +20603,7 @@
         "kind": "code"
       }
     ],
-    "title": "Integrator kick runs before thermostat rescale (canonical order)",
+    "title": "Integrator kick runs before thermostat rescale (canonical order, eager coupling step)",
     "type": "scenario"
   },
   "rq-9c80a966": {
@@ -21260,7 +21341,7 @@
     "type": "section"
   },
   "rq-a060db3f": {
-    "decl": "### Source Fragment",
+    "decl": "### Resample Kernel",
     "file": "integration/andersen",
     "level": 3,
     "refs": [
@@ -21269,7 +21350,7 @@
         "kind": "code"
       }
     ],
-    "title": "Source Fragment",
+    "title": "Resample Kernel",
     "type": "section"
   },
   "rq-a097b162": {
@@ -21844,10 +21925,10 @@
     "type": "scenario"
   },
   "rq-a57fd4d5": {
-    "decl": "Scenario: csvr_rescale_velocities standalone kernel does not exist",
+    "decl": "Scenario: A thermostat's rescale runs as a standalone kernel",
     "file": "integration/jit-composed-post-force",
     "refs": [],
-    "title": "csvr_rescale_velocities standalone kernel does not exist",
+    "title": "A thermostat's rescale runs as a standalone kernel",
     "type": "scenario"
   },
   "rq-a587753e": {
@@ -22469,6 +22550,18 @@
     "title": "Two independent runs of apply_after_drift produce byte-identical state",
     "type": "scenario"
   },
+  "rq-aa624d38": {
+    "decl": "Scenario: Thermostat couples on the full-step (post-trailing-kick) kinetic energy",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Thermostat couples on the full-step (post-trailing-kick) kinetic energy",
+    "type": "scenario"
+  },
   "rq-aa68f468": {
     "decl": "- `Integrator::plan(&self, dt: f32) -> StepPlan`",
     "file": "integration/framework",
@@ -22962,10 +23055,10 @@
     "type": "scenario"
   },
   "rq-ae74d89b": {
-    "decl": "Scenario: Barostat rescale runs after integrator + thermostat (canonical order)",
+    "decl": "Scenario: Barostat rescale runs after integrator and thermostat (canonical order)",
     "file": "integration/jit-composed-post-force",
     "refs": [],
-    "title": "Barostat rescale runs after integrator + thermostat (canonical order)",
+    "title": "Barostat rescale runs after integrator and thermostat (canonical order)",
     "type": "scenario"
   },
   "rq-ae7f8045": {
@@ -23404,13 +23497,6 @@
     "title": "Registry builds a RESPA integrator",
     "type": "scenario"
   },
-  "rq-b14ac769": {
-    "decl": "- `Thermostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline -->",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Thermostat",
-    "type": "api-item"
-  },
   "rq-b154f270": {
     "decl": "Scenario: NHC apply_post writes a single cumulative factor to factor_device",
     "file": "cuda-graphs",
@@ -23493,7 +23579,7 @@
     "type": "section"
   },
   "rq-b1e87ce4": {
-    "decl": "Scenario: cumulative_injection records K_new − K_old per invocation",
+    "decl": "Scenario: cumulative_injection is not tracked (legacy field stays zero)",
     "file": "integration/andersen",
     "refs": [
       {
@@ -23501,7 +23587,7 @@
         "kind": "code"
       }
     ],
-    "title": "cumulative_injection records K_new − K_old per invocation",
+    "title": "cumulative_injection is not tracked (legacy field stays zero)",
     "type": "scenario"
   },
   "rq-b1f33ea4": {
@@ -24327,7 +24413,28 @@
     "decl": "## Slot Participation",
     "file": "integration/jit-composed-post-force",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slot Participation",
     "type": "section"
   },
@@ -27214,7 +27321,7 @@
     "type": "scenario"
   },
   "rq-cef43ff0": {
-    "decl": "Scenario: apply_post launches all expected kernels",
+    "decl": "Scenario: apply_post launches the resample kernel",
     "file": "integration/andersen",
     "refs": [
       {
@@ -27222,7 +27329,7 @@
         "kind": "code"
       }
     ],
-    "title": "apply_post launches all expected kernels",
+    "title": "apply_post launches the resample kernel",
     "type": "scenario"
   },
   "rq-cf183b79": {
@@ -28228,10 +28335,10 @@
     "type": "section"
   },
   "rq-d6d4f598": {
-    "decl": "Scenario: Composed-kernel output matches the legacy launch sequence within f32 round-off",
+    "decl": "Scenario: Composed-kernel output matches the separate launch sequence within f32 round-off",
     "file": "integration/jit-composed-post-force",
     "refs": [],
-    "title": "Composed-kernel output matches the legacy launch sequence within f32 round-off",
+    "title": "Composed-kernel output matches the separate launch sequence within f32 round-off",
     "type": "scenario"
   },
   "rq-d6e10419": {
@@ -29114,6 +29221,18 @@
     "title": "A non-participating integrator's trailing kick executes in the plan walk",
     "type": "scenario"
   },
+  "rq-dce6f4cf": {
+    "decl": "Scenario: A thermostatted phase is graph-ineligible and runs on the per-step path",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A thermostatted phase is graph-ineligible and runs on the per-step path",
+    "type": "scenario"
+  },
   "rq-dceedbbb": {
     "decl": "Scenario: Force computed from analytical -dU/dφ via central differences",
     "file": "forces/periodic-dihedral",
@@ -29204,7 +29323,12 @@
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/berendsen",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_berendsen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
@@ -31327,7 +31451,16 @@
     "decl": "#### `[phase.thermostat]` (optional)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[phase.thermostat]` (optional)",
     "type": "section"
   },
@@ -32278,7 +32411,12 @@
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/nose-hoover-chain",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_nhc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
@@ -32331,6 +32469,18 @@
       }
     ],
     "title": "ConstraintRegistry::with_builtins registers the settle builder",
+    "type": "scenario"
+  },
+  "rq-f4d73396": {
+    "decl": "Scenario: Default coupling interval couples every step",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Default coupling interval couples every step",
     "type": "scenario"
   },
   "rq-f4ebf12a": {

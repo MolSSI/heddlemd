@@ -240,10 +240,9 @@ fn csvr_apply_post_launches_expected_kernels() {
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
     // The stochastic sample + factor kernel is now instrumented. rq-5f59fa80
     assert_eq!(count_for(KernelStage::CSVR_SAMPLE_AND_FACTOR), 1);
-    // The per-particle velocity rescale is dispatched by the
-    // JIT-composed post-force per-particle kernel; the standalone
-    // `CSVR_RESCALE_VELOCITIES` stage is not recorded.
-    assert_eq!(count_for(KernelStage::CSVR_RESCALE_VELOCITIES), 0);
+    // The per-particle velocity rescale runs as a standalone launch in
+    // apply_post (a thermostat contributes no composed fragment). rq-5f59fa80
+    assert_eq!(count_for(KernelStage::CSVR_RESCALE_VELOCITIES), 1);
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
 }
@@ -410,17 +409,14 @@ fn csvr_cumulative_injection_tracks_kinetic_energy_changes() {
     let state = atomic_state(n);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    use heddle_md::gpu::rescale_velocities_device_factor;
     let mut therm = unbox_csvr(build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1)));
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let k_before = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
+    // apply_post reduces the full-step KE, computes the factor, and
+    // applies the per-particle rescale as its own launch.
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
-    // The composed post-force per-particle kernel applies the rescale
-    // in production. Tests that bypass the composed kernel dispatch
-    // the standalone equivalent against `factor_device`.
-    rescale_velocities_device_factor(&mut buffers, &therm.factor_device).unwrap();
     // Device-side `(k_new - k_old)` accumulator is updated by
     // `apply_post`. Drain it into `therm.cumulative_injection` before
     // reading; the runner does the same before each log row.
@@ -467,15 +463,14 @@ fn csvr_different_seeds_produce_different_trajectories() {
     let state = atomic_state(8);
 
     fn run_once(gpu: &GpuContext, state: &ParticleState, seed: u64) -> Vec<Real> {
-        use heddle_md::gpu::rescale_velocities_device_factor;
         let n = state.particle_count();
         let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
         let mut timings = Timings::new(gpu).unwrap();
         let mut therm = unbox_csvr(build_csvr(gpu, n, &csvr_kind(300.0, 1.0e-13, seed)));
         let dt = (1.0e-15 / TIME_F) as Real;
         for _ in 0..3 {
+            // apply_post reduces KE, computes the factor, and rescales.
             therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
-            rescale_velocities_device_factor(&mut buffers, &therm.factor_device).unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
     }

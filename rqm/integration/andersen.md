@@ -46,67 +46,62 @@ the post-step velocities. For each invocation with timestep `dt`:
    `cumulative_injection += K_new − K_old`. Used by the
    `andersen_conserved` log column.
 
-The per-particle resampling runs as part of the JIT-composed
-post-force per-particle kernel
-(`heddle_jit_composed_post_force_per_particle`); the standalone
-`andersen_resample` kernel is not declared. The Andersen slot's
-`post_force_per_particle_fragment()` carries the per-thread body
-that performs the Bernoulli draw, conditional Maxwell-Boltzmann
-draw, and velocity write. The two surrounding kinetic-energy
-reductions each launch the shared `kinetic_energy_reduce` kernel
-from inside `apply_post`.
+The per-particle resampling runs as the standalone
+`andersen_resample` kernel launched from `apply_post`. Like every
+thermostat, Andersen contributes no fragment to the JIT-composed
+post-force per-particle kernel (`framework.md`,
+`jit-composed-post-force.md`): a thermostat couples on a cadence, on
+coupling steps only, and on those steps the composed kernel is
+bypassed, so all of the thermostat's work — including a resample that
+has no reduction dependency of its own — runs as its own launches. The
+two surrounding kinetic-energy reductions (for the conserved-quantity
+accounting) each launch the shared `kinetic_energy_reduce` kernel from
+inside `apply_post`.
 
 The collision probability is clamped to `[0, 1]` so any
-`collision_rate · dt ≥ 1` reduces to "always resample" (massive
+`collision_rate · dt_couple ≥ 1` reduces to "always resample" (massive
 Andersen). This is mathematically valid; the canonical-distribution
 guarantee holds.
 
 `apply_pre` is the trait default (no-op): Andersen has a single
-per-step resample, applied after the integrator runs.
+resample, applied after the integrator runs. `apply_post` runs only on
+coupling steps (every `coupling_interval` steps, `io/config-schema.md`)
+and its collision probability uses the effective timestep
+`dt_couple = coupling_interval · dt`, so resampling less often raises
+the per-attempt collision probability correspondingly.
 
 ## Per-Step Kernel Sequence <!-- rq-7843f188 -->
 
-Per timestep the Andersen thermostat's `apply_post` runs the
-following in fixed order:
+On a coupling step the Andersen thermostat's `apply_post` runs the
+following in fixed order, all as its own kernel launches:
 
 | Order | Step      | Kernel / call           | Operation                                            | Stage label           |
 | ----- | --------- | ----------------------- | ---------------------------------------------------- | --------------------- |
 | 1     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_old`                            | `KineticEnergyReduce` |
-| 2     | Resample  | composed post-force per-particle kernel | per-particle Bernoulli + Maxwell-Boltzmann draw      | `JitComposedPostForce` |
+| 2     | Resample  | `andersen_resample`     | per-particle Bernoulli + Maxwell-Boltzmann draw      | `AndersenResample`    |
 | 3     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_new`                            | `KineticEnergyReduce` |
 
-Steps 1 and 3 run inside `apply_post`. Step 2 runs from the
-JIT-composed post-force per-particle kernel via Andersen's source
-fragment. `kinetic_energy_reduce` is reused from
-`nose-hoover-chain.md`. The integrator's own kernels
+All three steps run inside `apply_post`. `kinetic_energy_reduce` is
+reused from `nose-hoover-chain.md`. The integrator's own kernels
 (`vv_kick_drift`, the force pipeline) are launched separately by
 `integrator.step()` and are not part of this slot's per-step
 sequence.
 
-### Source Fragment <!-- rq-a060db3f -->
+### Resample Kernel <!-- rq-a060db3f -->
 
-Andersen's fragment differs from the simpler velocity-rescale
-fragments in that it performs a per-particle Philox draw rather
-than reading a slot-scalar. The fragment exposes the following
-contributions to the composed kernel:
+`andersen_resample` is a per-particle kernel (block 256, grid
+`ceil(n/256)`) owned by this slot. Each thread:
 
-- `helper_source` declares a slot-prefixed `__device__` Philox
-  draw routine (`andersen_philox_draw_u32`,
-  `andersen_philox_draw_gaussian`) that mirrors the standalone
-  Andersen draw logic.
-- `entry_point_args` declares `unsigned long long
-  *andersen_draw_counter_device`, `unsigned long long
-  andersen_seed`, `Real andersen_p_collision`, `Real andersen_kT`.
-- `per_thread_body` performs a Bernoulli draw against
-  `andersen_p_collision`; if the particle is selected, draws three
-  Gaussian samples scaled by `sqrt(andersen_kT / masses[i])`, and
-  writes the new velocity components. The fragment increments the
-  device draw counter exactly once per kernel launch (via a single
-  thread in the first block).
+- performs a Bernoulli draw against the clamped collision probability
+  `p_collision`; if the particle is selected, draws three Gaussian
+  samples scaled by `sqrt(kT / masses[i])` and writes the new velocity
+  components, using a slot-prefixed `__device__` Philox routine;
+- the kernel increments the device draw counter exactly once per launch
+  (via a single thread in the first block), so repeated launches
+  consume disjoint, reproducible Philox streams.
 
-The bind method pushes the slot's `draw_counter_device` buffer,
-`seed`, `p_collision` (clamped to `[0, 1]`), and `kT` onto the
-launch builder in that order.
+Its arguments are the slot's `draw_counter_device` buffer, `seed`,
+`p_collision` (clamped to `[0, 1]`), and `kT`.
 
 ## Parameters <!-- rq-eb0bc993 -->
 
@@ -511,13 +506,15 @@ Feature: Andersen stochastic thermostat
   # --- Per-step kernel sequence (slot integration) ---
 
   @rq-cef43ff0
-  Scenario: apply_post launches all expected kernels
+  Scenario: apply_post launches the resample kernel
     Given an Andersen thermostat with temperature=300, collision_rate=1e12,
       seed=1, particle_count=4
     And buffers prepared with non-zero velocities
     When thermostat.apply_post(&mut buffers, dt=1e-15, &mut timings) is called
-    Then KernelStage::KINETIC_ENERGY_REDUCE has count == 2
-    And KernelStage::ANDERSEN_RESAMPLE has count == 1
+    Then KernelStage::ANDERSEN_RESAMPLE has count == 1
+    And KernelStage::KINETIC_ENERGY_REDUCE has count == 0
+      (Andersen resamples velocities directly; it runs no kinetic-energy
+      reduction of its own)
 
   @rq-8fdfc981
   Scenario: apply_post on empty state is a no-op
@@ -546,12 +543,13 @@ Feature: Andersen stochastic thermostat
     Then state.draw_counter == 2
 
   @rq-b1e87ce4
-  Scenario: cumulative_injection records K_new − K_old per invocation
+  Scenario: cumulative_injection is not tracked (legacy field stays zero)
     Given an Andersen thermostat and a ParticleBuffers with known non-zero velocities
     When thermostat.apply_post(...) is called once
-    Then state.cumulative_injection equals K_new − K_old
-      (with K_new and K_old measured at the two KE reductions in that invocation)
-      to f64 round-off
+    Then state.cumulative_injection remains 0
+      (the injection accounting the conserved column would need requires a
+      kinetic-energy measurement before and after the resample, which
+      apply_post does not perform)
 
   # --- Log columns ---
 

@@ -394,8 +394,20 @@ the run normally; the warning is informational.
 
 ## Batched Replay Loop <!-- rq-76db55bb -->
 
-For an eligible phase with `[simulation].graph_batch_size = K`, the
-per-phase loop has the shape:
+A thermostat couples on a cadence, and on coupling steps the whole
+post-force region runs eagerly (the full-step kinetic-energy reduction
+is a fusion barrier, `framework.md`, `jit-composed-post-force.md`) with
+host-side thermostat work (e.g. NHC chain integration) that cannot be
+captured. A **thermostatted phase therefore runs on the per-step launch
+path**, not the batched graph loop — it is graph-ineligible. The
+coupling interval's benefit is still realised on that path: a
+non-coupling step (`step % coupling_interval != 0`) uses the composed
+post-force kernel and skips the thermostat's reduction and rescale,
+while a coupling step runs the full eager post-force region. Only a
+phase with no thermostat is eligible for the batched graph loop.
+
+For an eligible (thermostat-free) phase with
+`[simulation].graph_batch_size = K`, the per-phase loop has the shape:
 
 ```text
 needs_scalars(s) = (log_every > 0 and s % log_every == 0) or per_step_barostat_active
@@ -870,6 +882,24 @@ Feature: CUDA graph capture and replay
     When the timestep loop runs 10 steps
     Then the runner issues batches of sizes 3, 4, 3 (total 10)
     And trajectory frames are written at steps 4, 8
+
+  @rq-dce6f4cf
+  Scenario: A thermostatted phase is graph-ineligible and runs on the per-step path
+    Given graph_batch_size = 5, log_every = 0, traj_every = 0
+    And an active thermostat with coupling_interval = 4
+    When the timestep loop runs 8 steps
+    Then the phase runs on the per-step launch path (no phase graph is replayed)
+    And the six non-coupling steps launch the composed post-force kernel
+      (the trailing kick fused, the thermostat inert)
+    And the two coupling steps (4, 8) run the trailing kick standalone and
+      the thermostat's reduction and rescale
+
+  @rq-49f6bbfb
+  Scenario: A thermostat coupling every step also runs on the per-step path
+    Given graph_batch_size = 50 and an active thermostat with coupling_interval = 1
+    When the phase runs
+    Then every step runs on the per-step launch path (no phase graph is replayed)
+    And every step is a coupling step, so no composed post-force kernel is launched
 
   @rq-1c8a6d37
   Scenario: nl.pre_step is called once per batch boundary

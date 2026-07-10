@@ -7,6 +7,7 @@ use serde::Deserialize;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, c_rescale_compute_mu,
     compute_kinetic_energy_on_device, compute_total_virial_on_device,
+    rescale_positions_device_factor,
 };
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
@@ -260,6 +261,23 @@ impl Barostat for CRescaleBarostat {
     // `mu_device` and applies the rescale to positions.
     fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
         Some(self)
+    }
+
+    // rq-b85a38d6 — standalone position rescale for coupling steps, where
+    // the composed kernel is bypassed. Reads the `mu_device` scalar the
+    // preceding `apply` produced.
+    fn apply_post_force_rescale_eager(
+        &self,
+        buffers: &mut ParticleBuffers,
+        timings: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        if buffers.particle_count() == 0 {
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
+        rescale_positions_device_factor(buffers, &self.mu_device)?;
+        timings.kernel_stop(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
+        Ok(())
     }
 
 

@@ -87,16 +87,18 @@ fn unbox_berendsen(boxed: Box<dyn Thermostat>) -> BerendsenThermostat {
 /// per-particle kernel does in production. Tests that exercise the
 /// thermostat in isolation use this helper to keep the velocity
 /// update reachable.
+// `apply_post` now performs the per-particle rescale directly (a
+// thermostat contributes no composed fragment), so this helper just
+// calls it and drains the cumulative-injection accumulator into the host
+// field.
 fn berendsen_apply_post_with_rescale(
     therm: &mut BerendsenThermostat,
     buffers: &mut ParticleBuffers,
     dt: Real,
     timings: &mut Timings,
 ) -> Result<(), heddle_md::integrator::ThermostatError> {
-    use heddle_md::gpu::rescale_velocities_device_factor;
     therm.apply_post(buffers, dt, timings)?;
-    rescale_velocities_device_factor(buffers, &therm.factor_device)
-        .map_err(heddle_md::integrator::ThermostatError::Gpu)?;
+    therm.flush_pending_injection(&buffers.device)?;
     Ok(())
 }
 
@@ -192,10 +194,9 @@ fn berendsen_apply_post_launches_expected_kernels() {
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
     // The compute-factor scalar kernel is instrumented. rq-5f59fa80
     assert_eq!(count_for(KernelStage::BERENDSEN_COMPUTE_FACTOR), 1);
-    // The per-particle velocity rescale is dispatched by the
-    // JIT-composed post-force per-particle kernel; the standalone
-    // `BERENDSEN_RESCALE_VELOCITIES` stage is not recorded.
-    assert_eq!(count_for(KernelStage::BERENDSEN_RESCALE_VELOCITIES), 0);
+    // The per-particle velocity rescale runs as a standalone launch in
+    // apply_post (a thermostat contributes no composed fragment). rq-dd953328
+    assert_eq!(count_for(KernelStage::BERENDSEN_RESCALE_VELOCITIES), 1);
     // The thermostat does NOT launch the VV kernels (those belong to the
     // integrator).
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
@@ -330,28 +331,23 @@ fn berendsen_lambda_squared_clamped_to_zero_when_runaway() {
     }
 }
 
-// rq-7d9f2da7
+// rq-7d9f2da7 — with K_old = 0 the computed factor is 1, so the rescale
+// is an identity: velocities stay zero and cumulative_injection stays 0.
 #[test]
-fn berendsen_skips_rescale_when_k_zero() {
+fn berendsen_identity_rescale_when_k_zero() {
     let gpu = init_device().unwrap();
     let n = 4usize;
     let state = symmetric_state(n, 1.66e-27, 0.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let boxed = build_berendsen(&gpu, n, &berendsen_kind(300.0, 1.0e-13));
-    // Apply once with the trait object so apply_post runs on the box.
-    let mut therm = boxed;
-    therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
+    let mut therm = unbox_berendsen(build_berendsen(&gpu, n, &berendsen_kind(300.0, 1.0e-13)));
+    berendsen_apply_post_with_rescale(&mut therm, &mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
-    let report = timings.finalize().unwrap();
-    let count = report
-        .stages
-        .iter()
-        .find(|r| r.name == KernelStage::BERENDSEN_RESCALE_VELOCITIES.name())
-        .map(|r| r.count)
-        .unwrap_or(0);
-    assert_eq!(count, 0);
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    for v in &vx {
+        assert_eq!(*v, 0.0, "velocities must remain zero under an identity rescale");
+    }
+    assert_eq!(therm.cumulative_injection, 0.0);
 }
 
 // --- COM-momentum preservation ---
@@ -392,8 +388,9 @@ fn berendsen_cumulative_injection_matches_kinetic_change() {
     let mut therm = unbox_berendsen(build_berendsen(&gpu, n, &berendsen_kind(300.0, 1.0e-13)));
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let k_before = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
-    therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
+    // apply_post rescales; the helper also drains the injection
+    // accumulator into the host `cumulative_injection` field.
+    berendsen_apply_post_with_rescale(&mut therm, &mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let k_after = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     let expected = k_after - k_before;

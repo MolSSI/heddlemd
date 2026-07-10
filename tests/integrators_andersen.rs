@@ -70,6 +70,10 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
 /// post-force per-particle kernel does in production when Andersen's
 /// fragment is composed in. Tests that exercise Andersen in isolation
 /// (without building the composed kernel) use this helper.
+// `apply_post` now performs the per-particle resample directly (a
+// thermostat contributes no composed fragment), so this helper just
+// calls it and syncs the host-side `draw_counter` from the device
+// counter the resample incremented.
 fn andersen_apply_post_with_resample(
     therm: &mut AndersenThermostat,
     buffers: &mut ParticleBuffers,
@@ -77,24 +81,7 @@ fn andersen_apply_post_with_resample(
     timings: &mut Timings,
 ) -> Result<(), heddle_md::integrator::ThermostatError> {
     therm.apply_post(buffers, dt, timings)?;
-    let p_collision = ((therm.collision_rate as f64) * (dt as f64))
-        .clamp(0.0, 1.0) as Real;
-    let kt = therm.kt as Real;
-    timings
-        .kernel_start(KernelStage::ANDERSEN_RESAMPLE)
-        .map_err(heddle_md::integrator::ThermostatError::Timings)?;
-    andersen_resample(
-        buffers,
-        &mut therm.draw_counter_device,
-        therm.seed,
-        p_collision,
-        kt,
-    )
-    .map_err(heddle_md::integrator::ThermostatError::Gpu)?;
-    timings
-        .kernel_stop(KernelStage::ANDERSEN_RESAMPLE)
-        .map_err(heddle_md::integrator::ThermostatError::Timings)?;
-    therm.draw_counter += 1;
+    therm.flush_pending_injection(&buffers.device)?;
     Ok(())
 }
 
@@ -337,11 +324,11 @@ fn andersen_apply_post_launches_expected_kernels() {
             .map(|r| r.count)
             .unwrap_or(0)
     };
-    // Andersen's apply_post does no per-particle work; the
-    // Bernoulli + Maxwell-Boltzmann resample lives in the JIT-composed
-    // post-force per-particle kernel via Andersen's source fragment.
+    // rq-cef43ff0 — apply_post launches the standalone resample kernel
+    // directly (a thermostat contributes no composed fragment) and runs
+    // no kinetic-energy reduction of its own.
+    assert_eq!(count_for(KernelStage::ANDERSEN_RESAMPLE), 1);
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 0);
-    assert_eq!(count_for(KernelStage::ANDERSEN_RESAMPLE), 0);
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
 }
@@ -410,24 +397,22 @@ fn andersen_draw_counter_increments_per_apply_post() {
     assert_eq!(therm.draw_counter, 2);
 }
 
-// rq-b1e87ce4
+// rq-b1e87ce4 — `cumulative_injection` is a legacy diagnostic field that
+// is not tracked: apply_post performs no before/after kinetic-energy
+// reduction, so the field stays zero even though the resample changes the
+// kinetic energy.
 #[test]
-fn andersen_cumulative_injection_tracks_ke_change() {
+fn andersen_cumulative_injection_stays_zero() {
     let gpu = init_device().unwrap();
     let n = 32usize;
     let state = atomic_state(n);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = unbox_andersen(build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e16, 1)));
-    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
-    let k_before = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
-    let k_after = compute_kinetic_energy(&mut buffers, &mut scratch).unwrap() as f64;
-    let expected = k_after - k_before;
-    let rel = (therm.cumulative_injection - expected).abs() / expected.abs().max(1.0e-30);
-    assert!(rel < 1.0e-4);
+    assert_eq!(therm.cumulative_injection, 0.0);
 }
 
 // --- Log columns ---

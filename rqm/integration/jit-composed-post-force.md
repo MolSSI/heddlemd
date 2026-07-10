@@ -1,17 +1,25 @@
 # Feature: JIT-Composed Post-Force Per-Particle Kernel <!-- rq-8ac9773d -->
 
-Every integrator, thermostat, and barostat slot whose post-force
-work includes a one-thread-per-particle update exposes that work as
-a CUDA source fragment. At runner-construction time the runner
-collects the active fragments, JIT-compiles a single composed
-per-particle kernel via `cudarc::nvrtc::compile_ptx_with_opts`, and
-loads it on the device. Per-step, after the force evaluation
-finishes and after each slot's scalar-prep work has written its
-device-resident factor scalars, the runner launches the composed
-kernel once. The composed kernel runs each fragment's per-thread
-body in canonical order (integrator → thermostat → barostat),
-collapsing what would otherwise be one launch per slot per step
-into one launch covering every active post-force per-particle slot.
+Every integrator and barostat slot whose post-force work includes a
+one-thread-per-particle update exposes that work as a CUDA source
+fragment. At runner-construction time the runner collects the active
+fragments, JIT-compiles a single composed per-particle kernel via
+`cudarc::nvrtc::compile_ptx_with_opts`, and loads it on the device.
+Per-step, after the force evaluation finishes and after each slot's
+scalar-prep work has written its device-resident factor scalars, the
+runner launches the composed kernel once. The composed kernel runs each
+fragment's per-thread body in canonical order (integrator → barostat),
+collapsing what would otherwise be one launch per slot per step into one
+launch covering every active post-force per-particle slot.
+
+Thermostats do not participate in this kernel. A thermostat's coupling
+reduces the full-step kinetic energy — the kinetic energy of the
+velocities after the integrator's trailing kick — so the reduction is a
+fusion barrier between the trailing kick and the rescale
+(`docs/architecture.md`, *Step orchestration and kernel fusion*): the
+two cannot share a launch. The thermostat runs its reduction and rescale
+as their own launches on coupling steps, and on those steps the composed
+kernel is not used at all (see *Composed-Kernel Use and Coupling Steps*).
 
 This file specifies the mechanism, the source-fragment contract,
 the composed-kernel structure, the runner's dispatch contract, and
@@ -23,7 +31,7 @@ for the integration framework.
 
 ## Slot Participation <!-- rq-b85a38d6 -->
 
-Three trait families participate:
+Two trait families participate:
 
 - **`Integrator`** — the post-force fragment describes the
   integrator's final per-particle SubStep (the `KickHalf` or
@@ -35,16 +43,6 @@ Three trait families participate:
   `IntegratorRegistry::with_builtins()` exposes a non-empty
   post-force fragment.
 
-- **`Thermostat`** — the post-force fragment describes the
-  thermostat's per-particle velocity rescale (or per-particle
-  velocity resample). CSVR rescales by a device-resident factor
-  scalar; Berendsen thermostat rescales by a similar scalar; NHC
-  rescales by its chain-output scalar; Andersen draws a fresh
-  Maxwell-Boltzmann velocity per particle whose Philox state is
-  device-resident. Every thermostat in
-  `ThermostatRegistry::with_builtins()` exposes a non-empty
-  post-force fragment.
-
 - **`Barostat`** — the post-force fragment describes the
   barostat's per-particle position and/or velocity rescale.
   C-rescale rescales both velocities and positions by separate
@@ -53,14 +51,20 @@ Three trait families participate:
   `BarostatRegistry::with_builtins()` exposes a non-empty
   post-force fragment.
 
+A **`Thermostat`** never participates. Its post-force velocity rescale
+(or resample) follows a full-step kinetic-energy reduction that reads the
+post-trailing-kick velocities; that reduction is a fusion barrier
+(`docs/architecture.md`), so the thermostat runs its reduction and
+rescale as standalone launches in `apply_post` (`framework.md`,
+`csvr.md`, `nose-hoover-chain.md`, `berendsen.md`, `andersen.md`).
+
 Participation is optional per slot: a slot that returns `None`
 from `post_force_per_particle()` runs its post-force work through
 its natural eager path instead (the integrator's trailing kick
-executes in the plan walk; a thermostat performs its own velocity
-update inside `apply_post`; a per-step barostat performs its own
-rescale inside `apply`). Every kind in the built-in registries
-participates — that guarantee is enforced by a registry lint test,
-not by a runtime rejection.
+executes in the plan walk; a per-step barostat performs its own
+rescale inside `apply`). Every integrator and barostat kind in the
+built-in registries participates — that guarantee is enforced by a
+registry lint test, not by a runtime rejection.
 
 ### Suffix-closed subset selection <!-- rq-09306735 -->
 
@@ -68,7 +72,6 @@ The eager execution order of post-force work is
 
 ```text
 integrator trailing kick (plan walk)
-    → thermostat (apply_post)
     → per-step barostat (apply)
     → composed-kernel launch
 ```
@@ -76,16 +79,12 @@ integrator trailing kick (plan walk)
 Because the composed launch is last, a slot excluded from the
 composed kernel runs *before* every composed fragment. The composed
 set must therefore be a **suffix** of the configured order
-`[integrator, thermostat, barostat]` (unconfigured slots and
-periodic barostats are absent from the order):
+`[integrator, barostat]` (unconfigured slots and periodic barostats
+are absent from the order):
 
-- all three participate → full fusion (`{I, T, B}`);
+- both participate → full fusion (`{I, B}`);
 - the integrator does not participate → its kick runs in the plan
-  walk and `{T, B}` compose after it;
-- the thermostat does not participate → the integrator is also
-  excluded (its composed kick would otherwise run *after* the
-  thermostat's eager update, inverting the Trotter order) and at
-  most `{B}` composes;
+  walk and `{B}` composes after it;
 - no slot participates, or the maximal suffix is empty → no
   composed kernel is built and the plan walk executes every
   sub-step (the same shape as a phase with no post-force work).
@@ -95,7 +94,7 @@ plan carries a **terminal** `BarostatPoint` (its canonical placement,
 `framework.md`). A barostat placed at an interleaved (mid-plan)
 `BarostatPoint` is absent from the composed order — its `apply` runs
 its full standalone rescale during the plan walk — so it neither
-appears in the suffix nor forces the thermostat/integrator out of it.
+appears in the suffix nor forces the integrator out of it.
 
 `skip_substep_index` (see `framework.md`, `RunStepOptions`) is set
 to the plan's trailing-kick index **iff the integrator is in the
@@ -103,21 +102,33 @@ composed set**; a non-participating integrator's kick is never
 skipped. This derivation makes a silently lost kick
 unrepresentable.
 
-One topology has no valid execution order and is rejected at phase
-setup with `RunnerError::PostForceTopologyUnsatisfiable`: a
-**fragment-bearing thermostat** suffix-excluded by a per-step
-barostat **without** a fragment. Such a thermostat's `apply_post`
-only prepares its device-resident factor and relies on a composed
-multiply, so it has no eager fallback — dropping it would silently
-lose the thermostat's post-force update. The fix is to implement a
-post-force fragment on the barostat. (The analogous integrator case
-is harmless: a fragment-bearing integrator excluded by the suffix
-rule falls back to executing its trailing kick in the plan walk.)
+Because a thermostat contributes no fragment and its rescale always
+runs eagerly, every configured combination has a valid execution
+order: an excluded integrator falls back to its plan-walk kick, and an
+excluded barostat falls back to its standalone `apply` rescale. There
+is no unsatisfiable topology and the runner performs no phase-setup
+rejection on fusion grounds.
 
 When a configured slot is excluded from the composed set, the
 runner prints one explanatory line to stderr at phase setup naming
 the slot and the resulting composed coverage, so an unexpected
 loss of fusion is diagnosable.
+
+### Composed-Kernel Use and Coupling Steps <!-- rq-73e738ee -->
+
+The composed kernel is used only on steps where no thermostat
+couples. On a **coupling step** — a step where a configured thermostat
+acts, i.e. `step % coupling_interval == 0` (`framework.md`,
+`io/config-schema.md`) — the full-step kinetic-energy reduction sits
+between the trailing kick and the thermostat rescale, so the runner
+does not launch the composed kernel: the trailing kick, the reduction,
+the thermostat rescale, and any barostat rescale all run eagerly, in
+canonical order `integrator → thermostat → barostat`. On a
+non-coupling step (and on every step of an un-thermostatted run) the
+composed kernel fuses the trailing kick with any barostat rescale as
+described above. A run whose thermostat couples every step
+(`coupling_interval == 1`) therefore never uses the composed kernel;
+larger intervals restore fusion on the intervening steps.
 
 ## Source-Fragment Contract <!-- rq-ce72fe43 -->
 
@@ -205,30 +216,26 @@ extern "C" __global__ void heddle_jit_composed_post_force_per_particle(
 
     /* Fragment per-thread bodies inlined in canonical slot order:
        1. Integrator's post-force body (e.g. vv_kick body).
-       2. Thermostat's post-force body (e.g. CSVR rescale-velocities body).
-       3. Barostat's post-force body (e.g. c-rescale velocity + position rescale). */
+       2. Barostat's post-force body (e.g. c-rescale velocity + position rescale). */
 }
 ```
 
-Canonical evaluation order: integrator → thermostat → barostat.
-The integrator writes the final velocity; the thermostat reads &
-writes velocity; the barostat reads & writes velocity and
-positions. Each fragment's per-thread body sees the prior
-fragments' writes through the per-thread variables they wrote.
+Canonical evaluation order: integrator → barostat. The integrator
+writes the final velocity; the barostat reads & writes velocity and
+positions. Each fragment's per-thread body sees the prior fragments'
+writes through the per-thread variables they wrote.
 
-Pre-step work (kinetic-energy reductions, scalar samples, mu
-computations) runs as separate kernel launches before the composed
-kernel. The runner orchestrates the sequence:
+Pre-step work (virial reductions, scalar samples, mu computations)
+runs as separate kernel launches before the composed kernel. The
+runner orchestrates the sequence:
 
 1. Force evaluation (J1 + J2 composed kernels + SPME-recip).
-2. Thermostat's scalar prep — the existing `apply_post` is
-   responsible for producing every scalar the thermostat's
-   fragment reads (e.g. CSVR's factor scalar, NHC's chain output)
-   and writing it to a device-resident buffer.
-3. Barostat's scalar prep — same, for `apply`.
-4. Composed-kernel launch (this kernel).
-5. Post-rescale accumulators — barostat / thermostat injection
-   deltas (no per-particle work; only scalar bookkeeping).
+2. Barostat's scalar prep — the existing `apply` produces every
+   scalar the barostat's fragment reads (e.g. c-rescale's mu scalar)
+   and writes it to a device-resident buffer.
+3. Composed-kernel launch (this kernel).
+4. Post-rescale accumulators — barostat injection deltas (no
+   per-particle work; only scalar bookkeeping).
 
 The composed kernel reads the prepared scalars as `Real *factor`
 pointers passed through `entry_point_args` and dereferences
@@ -250,18 +257,17 @@ is skipped and no composed-kernel launch fires.
 ## Compilation <!-- rq-532a9e35 -->
 
 `SimulationSetup::new` (or whatever construction path the runner
-uses to assemble integrator + thermostat + barostat slots)
-performs the following at construction:
+uses to assemble integrator + barostat slots) performs the following
+at construction:
 
-1. Collect the active integrator's, thermostat's (if any), and
-   per-step barostat's (if any) post-force per-particle fragments by
-   calling each slot's `post_force_per_particle()` accessor and, for
-   each `Some(p)`, reading `p.post_force_per_particle_fragment()`.
-   Select the maximal participating suffix of
-   `[integrator, thermostat, barostat]` (see *Slot Participation*);
-   fragments outside the suffix are discarded and their slots run
-   eagerly. An empty suffix skips steps 2–4 entirely (no composed
-   kernel for the phase).
+1. Collect the active integrator's and per-step barostat's (if any)
+   post-force per-particle fragments by calling each slot's
+   `post_force_per_particle()` accessor and, for each `Some(p)`,
+   reading `p.post_force_per_particle_fragment()`. Select the maximal
+   participating suffix of `[integrator, barostat]` (see *Slot
+   Participation*); fragments outside the suffix are discarded and
+   their slots run eagerly. An empty suffix skips steps 2–4 entirely
+   (no composed kernel for the phase).
 
 2. Build the composed-kernel source by concatenating:
    1. The integration-shape preamble — the precision shims, PBC
@@ -319,20 +325,21 @@ The launch configuration is:
 
 The composed-kernel launch is recorded in `timings` under
 `KernelStage::JitComposedPostForce`. The per-slot
-`KernelStage::VV_KICK`, `KernelStage::CSVR_RESCALE_VELOCITIES`,
-etc. stages do not appear in runs that go through the JIT path —
-those standalone kernels do not exist.
+`KernelStage::VV_KICK` and the barostat rescale stages do not appear
+for slots covered by the composed kernel — those standalone kernels do
+not launch. A thermostat's standalone reduction and rescale stages
+(e.g. `KernelStage::CSVR_RESCALE_VELOCITIES`) do appear, on coupling
+steps, because a thermostat is never covered by the composed kernel.
 
 ## Determinism <!-- rq-6b628814 -->
 
 The composed kernel preserves same-GPU bit-exact reproducibility:
 
 1. *Composition order is deterministic.* Fragments are
-   concatenated in canonical slot order (integrator → thermostat
-   → barostat). Two runner constructions from byte-identical
-   configurations produce byte-identical composed source. nvrtc
-   with fixed flags produces byte-identical PTX from byte-
-   identical input.
+   concatenated in canonical slot order (integrator → barostat).
+   Two runner constructions from byte-identical configurations
+   produce byte-identical composed source. nvrtc with fixed flags
+   produces byte-identical PTX from byte-identical input.
 
 2. *Per-thread evaluation is independent.* Each thread handles
    one particle's worth of state. No atomics, no shared memory,
@@ -346,12 +353,12 @@ The composed kernel preserves same-GPU bit-exact reproducibility:
    per-stream ordering guarantees the scalar is committed before
    the composed kernel reads it.
 
-Cross-configuration equality with the legacy per-kernel path
-(separate `vv_kick` + `csvr_rescale_velocities` + `c_rescale_rescale_velocities` launches) is not a property: the
-composed kernel's in-register state-update order differs from the
-back-to-back-launch path's, so the two produce results that agree
-only within `f32` round-off. Same-configuration run-to-run byte
-equality is preserved.
+Cross-configuration equality with the separate per-kernel path
+(back-to-back `vv_kick` + `c_rescale_rescale_velocities` launches) is
+not a property: the composed kernel's in-register state-update order
+differs from the back-to-back-launch path's, so the two produce
+results that agree only within `f32` round-off. Same-configuration
+run-to-run byte equality is preserved.
 
 ## Slot Behaviour Contract <!-- rq-c71470d0 -->
 
@@ -365,13 +372,15 @@ method behaves as follows:
   integrator may still update internal counters or bookkeeping;
   it must not launch a per-particle kernel.
 
-- `Thermostat::apply_post(...)` — runs every part of the
-  thermostat's post-force work EXCEPT the per-particle rescale.
-  For CSVR: kinetic-energy reduction + sample-and-factor
-  (producing the factor scalar). For NHC: chain integration
-  producing the rescale scalar. For Andersen: any Philox-counter
-  bookkeeping. The per-particle rescale / resample is dispatched
-  via the composed kernel, not by `apply_post`.
+- `Thermostat::apply_post(...)` — a thermostat exposes no post-force
+  fragment, so `apply_post` runs **every** part of the thermostat's
+  post-force work, including the per-particle rescale, as its own
+  kernel launches. For CSVR: full-step kinetic-energy reduction +
+  sample-and-factor + the `rescale_velocities` launch. For NHC: chain
+  integration + the rescale launch. For Andersen: the per-particle
+  resample launch. It runs only on coupling steps (`framework.md`),
+  after the integrator's trailing kick, so the reduction reads the
+  full-step velocities.
 
 - `Barostat::apply(...)` — runs every part of the barostat's
   work EXCEPT the per-particle rescale (velocities + positions).
@@ -390,55 +399,24 @@ restructured.
 
 ## Runner Integration <!-- rq-c0384b03 -->
 
-The runner's per-step loop (see `framework.md`'s *Per-Step
-Interface*) reads as follows when the composed-kernel path is
-active:
+The runner's per-step loop is specified in full by `framework.md`'s
+*Per-Step Interface*; that pseudocode is the single authoritative
+description and is not duplicated here. The points specific to the
+composed-kernel path are:
 
-```text
-loop step in 1..=n_steps:
-    if let Some(t) = thermostat { t.apply_pre(buffers, dt, timings) }
-    let plan = integrator.plan(dt)
-    let defer_terminal_projection = constraint.is_some()
-        && integrator is in the composed set
-        && plan.ends_with_velocity_projection()
-    let defer_terminal_barostat = barostat_couples_per_step
-        && plan.terminal_barostat_point_dt().is_some()
-    for sub in &plan.steps:
-        match sub:
-            SubStep::ForceEval{..} => force_field.step(...)
-            SubStep::KickHalf{..} | SubStep::KickDrift{..}
-                if integrator is in the composed set
-                   and this is the post-force SubStep:
-                    /* skipped — composed kernel handles it */
-            SubStep::ConstraintPoint{ phase: AfterKick, .. }
-                if defer_terminal_projection and this is the trailing AfterKick:
-                    /* skipped — runner fires it after the composed launch */
-            SubStep::BarostatPoint{ .. }
-                if defer_terminal_barostat and this is the trailing BarostatPoint:
-                    /* skipped — runner fires apply in the post-walk tail */
-            SubStep::ConstraintPoint{ phase, dt } =>
-                constraint.dispatch(phase, buffers, sim_box, dt, timings)
-            SubStep::BarostatPoint{ dt } =>
-                barostat.apply(buffers, sim_box, dt, timings)  /* interleaved: full standalone */
-            other => integrator.execute(other, ...)
-    /* Post-force composed-kernel dispatch */
-    if let Some(t) = thermostat { t.apply_post(...) }
-        /* scalar prep when composed; the full velocity update
-           when the thermostat is not in the composed set */
-    if defer_terminal_barostat:
-        barostat.apply(...)
-        /* scalar prep + box mutation; the per-particle rescale fuses
-           into the composed kernel below */
-    if composed set is non-empty:
-        launch_post_force_composed_kernel(buffers, /* composed suffix */)
-    if defer_terminal_projection:
-        /* the displaced terminal velocity projection runs after every
-           per-particle velocity update, including the composed kernel's
-           fused kick and rescales */
-        constraint.apply_after_kick(buffers, sim_box,
-                                    plan.terminal_velocity_projection_dt(), timings)
-    /* output cadence */
-```
+- The composed kernel is launched only on a step that uses it — a
+  non-coupling step (`step % coupling_interval != 0`, or an
+  un-thermostatted run) with a participating integrator. On that step
+  the runner sets `skip_substep_index` to the integrator's trailing
+  kick, dispatches a deferred terminal `BarostatPoint`'s `apply` in the
+  post-walk tail, launches the composed kernel, then fires any deferred
+  terminal velocity projection.
+- On a coupling step the composed kernel is not launched. The trailing
+  kick runs in the plan walk, `thermostat.apply_post` performs the
+  full-step reduction and rescale, a terminal `BarostatPoint`'s `apply`
+  runs its full standalone rescale, and a trailing `AfterKick`
+  projection dispatches during the walk like any other
+  `ConstraintPoint`.
 
 The runner recognises the "post-force" SubStep as the final
 per-particle SubStep that follows the last `ForceEval` in the
@@ -480,13 +458,17 @@ placement relative to the composed launch is:
   `framework.md`) and fires `apply_after_kick` after
   `launch_post_force_composed_kernel`. The velocity projection is thus
   the last per-particle velocity operation of the step, after the
-  composed kernel's fused kick and any thermostat / barostat velocity
-  rescale (see `constraint-framework.md`, *Ordering of the terminal
-  velocity projection*).
+  composed kernel's fused kick and any barostat velocity rescale. On a
+  coupling step the composed kernel is not used, so the trailing kick
+  and the thermostat rescale run eagerly in the walk / `apply_post` and
+  the trailing `AfterKick` follows them there (see
+  `constraint-framework.md`, *Ordering of the terminal velocity
+  projection*).
 
 The integrator therefore stays in the composed set on constrained
-runs, and full kick / thermostat / barostat fusion is preserved; only
-the constraint projections run as extra launches, exactly as they do
+runs, and kick / barostat fusion is preserved on non-coupling steps;
+only the constraint projections (and, on coupling steps, the thermostat
+reduction and rescale) run as extra launches, exactly as they do
 without the composed kernel.
 
 ## Feature API <!-- rq-edf9864f -->
@@ -532,11 +514,6 @@ without the composed kernel.
 
 `StepError` carries variants for the J3 mechanism:
 
-- `RunnerError::PostForceTopologyUnsatisfiable` — a <!-- rq-37072376 -->
-  fragment-bearing thermostat is suffix-excluded by a per-step
-  barostat without a fragment (see *Suffix-closed subset
-  selection*). Reported from phase setup.
-
 - `PostForceFragmentCompileFailed { log: String }` — nvrtc <!-- rq-9ebdaea4 -->
   rejected the composed source.
 
@@ -545,8 +522,8 @@ without the composed kernel.
 
 ### Trait methods <!-- rq-ba5e545b -->
 
-`Integrator`, `Thermostat`, and `Barostat` each carry one accessor
-that declares post-force participation:
+`Integrator` and `Barostat` each carry one accessor that declares
+post-force participation:
 
 ```rust
 fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
@@ -557,7 +534,10 @@ fn post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle> {
 The default returns `None` (the slot does not participate). A slot
 that participates implements the `PostForcePerParticle` capability
 trait (defined in `integration/framework.md`'s *Feature API*) and
-returns `Some(self)`:
+returns `Some(self)`. `Thermostat` carries no such accessor: a
+thermostat's rescale always follows a full-step kinetic-energy
+reduction (a fusion barrier) and so runs as its own launch, never as a
+composed fragment.
 
 ```rust
 pub trait PostForcePerParticle {
@@ -661,53 +641,58 @@ Feature: JIT-composed post-force per-particle kernel
     And the loaded module name equals "heddle_jit_composed_post_force_per_particle"
 
   @rq-9a8a7dfa
-  Scenario: Composed kernel is compiled with thermostat + barostat fragments
-    Given a SimulationSetup with VelocityVerlet + CSVR + c-rescale
+  Scenario: Composed kernel is compiled with the barostat fragment
+    Given a SimulationSetup with VelocityVerlet + c-rescale
     When the runner is constructed
-    Then the composed source contains every active slot's fragment in
-      canonical order [velocity_verlet, csvr, c_rescale_barostat]
+    Then the composed source contains every active fragment in
+      canonical order [velocity_verlet, c_rescale_barostat]
+    And the composed source contains no thermostat fragment
     And the composed kernel is loaded successfully
 
   @rq-dcd0d421
   Scenario: A non-participating integrator's trailing kick executes in the plan walk
     Given a custom integrator whose post_force_per_particle() returns None
     And whose plan ends in a KickHalf
-    And a configured built-in thermostat
-    When the runner runs one timestep
+    And a configured built-in thermostat (coupling every step)
+    When the runner runs the phase
     Then the run completes with Ok
-    And the trailing KickHalf is dispatched (not skipped)
-    And the composed kernel covers only the thermostat
+    And the trailing KickHalf is dispatched to execute() every step (not skipped)
+    And no composed kernel is launched (the integrator has no fragment and
+      the thermostat never participates)
 
   @rq-79b8a246
-  Scenario: A non-participating thermostat forces the integrator out of the composed set
-    Given velocity-Verlet (participating) and a custom thermostat whose
-      post_force_per_particle() returns None
-    When the runner runs one timestep
-    Then no composed kernel is launched
-    And the plan walk executes the trailing KickHalf
-    And the thermostat's apply_post performs its own velocity update after the walk
+  Scenario: A thermostat never participates in the composed set
+    Given velocity-Verlet and any built-in thermostat with coupling_interval = 1
+    When the runner is constructed
+    Then the composed source contains no thermostat fragment
+    And the thermostat exposes no post_force_per_particle fragment
 
   @rq-7bd422a5
-  Scenario: A fully participating configuration keeps full fusion
-    Given VelocityVerlet + CSVR active (both participating)
-    When the runner runs one timestep
-    Then the composed kernel covers the integrator and the thermostat
+  Scenario: A non-coupling step keeps kick fusion; a coupling step does not
+    Given VelocityVerlet + CSVR active with coupling_interval = 4
+    When the runner runs step 1 (non-coupling)
+    Then the composed kernel is launched and covers the integrator
     And the trailing KickHalf is skipped from the plan walk
+    When the runner runs step 4 (coupling)
+    Then no composed kernel is launched
+    And the trailing KickHalf is dispatched in the plan walk
+    And CSVR's apply_post performs the reduction and rescale after it
 
   @rq-609dc377
-  Scenario: Every built-in slot kind exposes a post-force fragment
-    Given the built-in integrator, thermostat, and barostat registries
+  Scenario: Every built-in fusible slot kind exposes a post-force fragment
+    Given the built-in integrator and barostat registries
     When each kind is built with default-valid parameters
     Then every built integrator returns Some from post_force_per_particle()
-    And every built thermostat returns Some
     And every built per-step barostat returns Some
+    And every built thermostat returns None from post_force_per_particle()
 
   @rq-5e904c5d
-  Scenario: A fragment-bearing thermostat excluded by a fragment-less per-step barostat is rejected
-    Given a built-in thermostat (participating) and a custom per-step
-      barostat whose post_force_per_particle() returns None
+  Scenario: A fragment-less per-step barostat with a thermostat has a valid execution order
+    Given a built-in thermostat and a custom per-step barostat whose
+      post_force_per_particle() returns None
     When the runner enters the phase
-    Then phase setup fails with RunnerError::PostForceTopologyUnsatisfiable
+    Then phase setup succeeds (there is no PostForceTopologyUnsatisfiable rejection)
+    And on a coupling step the barostat's apply runs its own standalone rescale
 
   @rq-8a7ef593
   Scenario: Composed kernel is not compiled when no integrator is active
@@ -727,30 +712,32 @@ Feature: JIT-composed post-force per-particle kernel
   # --- Per-step dispatch ---
 
   @rq-8bfffd42
-  Scenario: One step launches the composed kernel exactly once
-    Given a runner with VelocityVerlet + CSVR + c-rescale active
-    When the runner runs one timestep
+  Scenario: A non-coupling step launches the composed kernel exactly once
+    Given a runner with VelocityVerlet + CSVR (coupling_interval = 4) + c-rescale active
+    When the runner runs step 1 (non-coupling)
     Then timings records exactly one sample for KernelStage::JitComposedPostForce
     And timings records zero samples for KernelStage::VV_KICK
-    And timings records zero samples for KernelStage::CSVR_RESCALE_VELOCITIES
     And timings records zero samples for KernelStage::C_RESCALE_RESCALE_VELOCITIES
+    And timings records zero samples for KernelStage::CSVR_RESCALE_VELOCITIES
+      (the thermostat is inert on a non-coupling step)
 
   @rq-e12c2668
   Scenario: Slot bind methods are invoked once each in canonical order
-    Given a runner with three active slots [A=integrator, B=thermostat, C=barostat],
-      each with instrumented bind methods that record their invocation order
+    Given a runner with two active fusible slots [A=integrator, B=barostat],
+      each with instrumented bind methods that record their invocation order,
+      on a non-coupling step
     When the runner runs one timestep
     Then A's bind_post_force_per_particle_args is invoked before B's
-    And B's bind_post_force_per_particle_args is invoked before C's
     And each bind method is invoked exactly once per step
 
   @rq-86dea9a1
-  Scenario: Thermostat's apply_post runs the scalar prep but not the rescale
-    Given a runner with CSVR thermostat active
+  Scenario: Thermostat's apply_post runs the reduction and the rescale
+    Given a runner with CSVR thermostat active (coupling_interval = 1)
     And CSVR's apply_post is instrumented to record kernel-launch counts
     When the runner runs one timestep
     Then CSVR's apply_post launched compute_kinetic_energy and csvr_sample_and_factor
-    And CSVR's apply_post did NOT launch any per-particle rescale kernel
+    And CSVR's apply_post also launched its per-particle rescale_velocities kernel
+    And no composed post-force kernel was launched that step
 
   @rq-56044cc3
   Scenario: Barostat's apply runs scalar prep but not per-particle rescale
@@ -763,10 +750,10 @@ Feature: JIT-composed post-force per-particle kernel
   # --- Correctness ---
 
   @rq-d6d4f598
-  Scenario: Composed-kernel output matches the legacy launch sequence within f32 round-off
-    Given the same physical state run two ways:
-      (a) the J3 composed-kernel path
-      (b) the legacy per-slot kernel sequence (vv_kick → csvr_rescale → c_rescale_rescale)
+  Scenario: Composed-kernel output matches the separate launch sequence within f32 round-off
+    Given the same physical state (VelocityVerlet + c-rescale, non-coupling step) run two ways:
+      (a) the composed-kernel path
+      (b) the separate per-slot kernel sequence (vv_kick → c_rescale_rescale)
     When one timestep is run on each
     Then per-particle positions, velocities agree within 1e-5 relative tolerance
     But the per-particle outputs are NOT byte-identical across (a) and (b)
@@ -782,20 +769,21 @@ Feature: JIT-composed post-force per-particle kernel
   # --- Per-fragment evaluation order ---
 
   @rq-9c5226e5
-  Scenario: Integrator kick runs before thermostat rescale (canonical order)
-    Given a runner with VelocityVerlet + CSVR
+  Scenario: Integrator kick runs before thermostat rescale (canonical order, eager coupling step)
+    Given a runner with VelocityVerlet + CSVR (coupling_interval = 1)
     And the CSVR factor scalar is set artificially to 0.5
     When one timestep is run
     Then the post-step velocity equals 0.5 * (pre-step velocity + a · dt/2)
       within f32 round-off
-    (The integrator's kick updates v first; then the thermostat's rescale
-     reads the updated v and scales it.)
+    (The integrator's trailing kick updates v first, in the plan walk; then
+     the thermostat's apply_post reduces the full-step KE and rescales it.)
 
   @rq-ae74d89b
-  Scenario: Barostat rescale runs after integrator + thermostat (canonical order)
-    Given a runner with VelocityVerlet + CSVR + c-rescale
+  Scenario: Barostat rescale runs after integrator and thermostat (canonical order)
+    Given a runner with VelocityVerlet + CSVR (coupling_interval = 1) + c-rescale
     And the c-rescale velocity scalar is set artificially to 1.1
-    When one timestep is run
+    When one timestep is run (a coupling step: integrator kick → thermostat
+      rescale → barostat rescale all run eagerly)
     Then the post-step velocity equals 1.1 * (CSVR-rescaled velocity)
       within f32 round-off
 
@@ -819,12 +807,13 @@ Feature: JIT-composed post-force per-particle kernel
       (the pre-force phase is out of scope for J3)
 
   @rq-a57fd4d5
-  Scenario: csvr_rescale_velocities standalone kernel does not exist
+  Scenario: A thermostat's rescale runs as a standalone kernel
     Given the project's kernel source tree
     When the thermostat-shape standalone kernel symbols are enumerated
-    Then no extern "C" kernel named csvr_rescale_velocities exists
-    And kinetic_energy_reduce and csvr_sample_and_factor still exist
-      (the scalar-prep kernels stay standalone)
+    Then the per-particle rescale kernel a thermostat uses (e.g. rescale_velocities)
+      exists as an extern "C" kernel
+    And kinetic_energy_reduce and csvr_sample_and_factor also exist
+      (a thermostat launches its reduction, factor, and rescale itself)
 
   @rq-33fa8597
   Scenario: c-rescale rescale_velocities and rescale_positions standalone kernels do not exist

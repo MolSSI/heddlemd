@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy_on_device,
-    csvr_sample_and_factor,
+    csvr_sample_and_factor, rescale_velocities_device_factor,
 };
 use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
@@ -163,33 +163,6 @@ impl CsvrThermostat {
     }
 }
 
-impl crate::integrator::PostForcePerParticle for CsvrThermostat {
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> crate::forces::PerParticleFragment {
-        crate::forces::PerParticleFragment {
-            label: "csvr",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *csvr_factor_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real csvr_factor = csvr_factor_device[0];\n\
-                 \x20       velocities_x[i] *= csvr_factor;\n\
-                 \x20       velocities_y[i] *= csvr_factor;\n\
-                 \x20       velocities_z[i] *= csvr_factor;",
-            ),
-        }
-    }
-
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.factor_device);
-    }}
-
 impl Thermostat for CsvrThermostat {
     // rq-7a124d43
     fn apply_post(
@@ -240,24 +213,18 @@ impl Thermostat for CsvrThermostat {
         )?;
         timings.kernel_stop(KernelStage::CSVR_SAMPLE_AND_FACTOR)?;
 
-        // The per-particle rescale `v ← α · v` is dispatched by the
-        // JIT-composed post-force per-particle kernel via this slot's
-        // source fragment (see `rqm/integration/jit-composed-post-force.md`).
-        // `apply_post` produces the device-resident `factor_device`
-        // scalar; the composed kernel reads it.
+        // 3. Per-particle rescale `v ← α · v`, reading `factor_device`
+        //    on the device. Because the kinetic-energy reduction above
+        //    reads the full-step (post-trailing-kick) velocities, it is a
+        //    fusion barrier: CSVR contributes no composed post-force
+        //    fragment and applies the rescale as its own launch here.
+        //    rq-86dea9a1
+        timings.kernel_start(KernelStage::CSVR_RESCALE_VELOCITIES)?;
+        rescale_velocities_device_factor(buffers, &self.factor_device)?;
+        timings.kernel_stop(KernelStage::CSVR_RESCALE_VELOCITIES)?;
 
         Ok(())
     }
-
-    // rq-86dea9a1 — CSVR's per-particle rescale fragment for the
-    // JIT-composed post-force kernel. The chain math
-    // (`csvr_sample_and_factor`) still runs as part of `apply_post`
-    // and produces `factor_device`; the composed kernel reads that
-    // device-resident scalar in this fragment's per-thread body.
-    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
-        Some(self)
-    }
-
 
     fn flush_pending_injection(
         &mut self,
