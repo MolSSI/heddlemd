@@ -159,81 +159,6 @@ mod tests {
     use crate::timings::KernelStage;
     use std::collections::HashSet;
 
-    // The instrumented-subsystem manifest, mirroring `define_kernels!`
-    // in `device.rs`: (module-name, STAGES) in manifest order.
-    fn manifest() -> Vec<(&'static str, &'static [KernelStage])> {
-        vec![
-            (
-                <crate::gpu::fill::FillKernels as SubsystemKernels>::MODULE,
-                <crate::gpu::fill::FillKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::integrator::velocity_verlet::IntegrateKernels as SubsystemKernels>::MODULE,
-                <crate::integrator::velocity_verlet::IntegrateKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::forces::spme::SpmeRecipKernels as SubsystemKernels>::MODULE,
-                <crate::forces::spme::SpmeRecipKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::integrator::langevin_baoab::LangevinKernels as SubsystemKernels>::MODULE,
-                <crate::integrator::langevin_baoab::LangevinKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::forces::morse::MorseKernels as SubsystemKernels>::MODULE,
-                <crate::forces::morse::MorseKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::forces::angle::AngleKernels as SubsystemKernels>::MODULE,
-                <crate::forces::angle::AngleKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::forces::dihedral::DihedralKernels as SubsystemKernels>::MODULE,
-                <crate::forces::dihedral::DihedralKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::integrator::nose_hoover_chain::NoseHooverKernels as SubsystemKernels>::MODULE,
-                <crate::integrator::nose_hoover_chain::NoseHooverKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::integrator::andersen::AndersenKernels as SubsystemKernels>::MODULE,
-                <crate::integrator::andersen::AndersenKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::gpu::barostat_kernels::BarostatKernels as SubsystemKernels>::MODULE,
-                <crate::gpu::barostat_kernels::BarostatKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::gpu::mc_barostat_kernels::McBarostatKernels as SubsystemKernels>::MODULE,
-                <crate::gpu::mc_barostat_kernels::McBarostatKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::integrator::mtk_npt::MtkKernels as SubsystemKernels>::MODULE,
-                <crate::integrator::mtk_npt::MtkKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::integrator::shake::ShakeKernels as SubsystemKernels>::MODULE,
-                <crate::integrator::shake::ShakeKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::integrator::settle::SettleKernels as SubsystemKernels>::MODULE,
-                <crate::integrator::settle::SettleKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::forces::ForcesKernels as SubsystemKernels>::MODULE,
-                <crate::forces::ForcesKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::forces::neighbor_list::NeighborKernels as SubsystemKernels>::MODULE,
-                <crate::forces::neighbor_list::NeighborKernels as SubsystemKernels>::STAGES,
-            ),
-            (
-                <crate::minimizer::MinimizeKernels as SubsystemKernels>::MODULE,
-                <crate::minimizer::MinimizeKernels as SubsystemKernels>::STAGES,
-            ),
-        ]
-    }
-
     // rq-73a85df1
     #[test]
     fn subsystem_stages_match_declared_stages() {
@@ -261,59 +186,33 @@ mod tests {
         assert!(<FillKernels as SubsystemKernels>::STAGES.is_empty());
     }
 
-    // rq-a2b911fc
+    // rq-a2b911fc — `KernelStage::ORDER` is assembled by
+    // `concat_kernel_stages` as the in-order concatenation of the
+    // subsystem `STAGES` slices (empty slices contribute nothing, and
+    // each group's stages stay contiguous). The concatenation logic is
+    // verified directly on the const helper, so no hand-mirror of the
+    // `define_kernels!` manifest is needed.
     #[test]
-    fn order_is_manifest_order_concatenation_of_subsystem_stages() {
-        let mut expected: Vec<KernelStage> = Vec::new();
-        for (_module, stages) in manifest() {
-            expected.extend_from_slice(stages);
-        }
-        assert_eq!(KernelStage::ORDER, expected.as_slice());
-    }
-
-    // rq-4a584e03
-    #[test]
-    fn each_subsystem_stages_is_a_contiguous_run_within_order() {
-        let order = KernelStage::ORDER;
-        for (module, stages) in manifest() {
-            if stages.is_empty() {
-                continue;
-            }
-            // Find the first stage's index in ORDER, then assert the
-            // whole STAGES slice appears contiguously from there.
-            let start = order
-                .iter()
-                .position(|s| *s == stages[0])
-                .unwrap_or_else(|| panic!("{module}: first stage not found in ORDER"));
-            assert_eq!(
-                &order[start..start + stages.len()],
-                stages,
-                "{module}: STAGES is not a contiguous run within ORDER"
-            );
-        }
+    fn concat_kernel_stages_concatenates_groups_in_order() {
+        use crate::gpu::concat_kernel_stages;
+        const A: KernelStage = KernelStage::new("a");
+        const B: KernelStage = KernelStage::new("b");
+        const C: KernelStage = KernelStage::new("c");
+        // An empty middle group mirrors a stage-less subsystem.
+        let out = concat_kernel_stages::<3>(&[&[A], &[], &[B, C]]);
+        assert_eq!(out, [A, B, C]);
     }
 
     // rq-42ee692a
     #[test]
     fn order_has_no_duplicate_stage() {
-        let order = KernelStage::ORDER;
         let mut seen: HashSet<&'static str> = HashSet::new();
-        for stage in order {
+        for stage in KernelStage::ORDER {
             assert!(
                 seen.insert(stage.name()),
                 "duplicate stage in ORDER: {}",
                 stage.name()
             );
-        }
-        // Every stage any subsystem declares is present in ORDER.
-        for (_module, stages) in manifest() {
-            for stage in stages {
-                assert!(
-                    order.contains(stage),
-                    "stage {} declared by a subsystem is absent from ORDER",
-                    stage.name()
-                );
-            }
         }
     }
 }

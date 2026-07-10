@@ -10056,18 +10056,6 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
-  "rq-4a584e03": {
-    "decl": "Scenario: Each subsystem's STAGES is a contiguous run within KernelStage::ORDER",
-    "file": "performance-analysis",
-    "refs": [
-      {
-        "file": "src/gpu/kernel_macros.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Each subsystem's STAGES is a contiguous run within KernelStage::ORDER",
-    "type": "scenario"
-  },
   "rq-4a6969aa": {
     "decl": "### Number formatting",
     "file": "io/log-output",
@@ -21471,7 +21459,7 @@
     "type": "scenario"
   },
   "rq-a2b911fc": {
-    "decl": "Scenario: KernelStage::ORDER is the manifest-order concatenation of subsystem STAGES",
+    "decl": "Scenario: KernelStage::ORDER is assembled as the in-order concatenation of subsystem STAGES",
     "file": "performance-analysis",
     "refs": [
       {
@@ -21479,7 +21467,7 @@
         "kind": "code"
       }
     ],
-    "title": "KernelStage::ORDER is the manifest-order concatenation of subsystem STAGES",
+    "title": "KernelStage::ORDER is assembled as the in-order concatenation of subsystem STAGES",
     "type": "scenario"
   },
   "rq-a2bb55c6": {

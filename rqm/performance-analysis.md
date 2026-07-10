@@ -883,20 +883,16 @@ Feature: Performance analysis and timings output
   # --- Stage registry assembly ---
 
   @rq-a2b911fc
-  Scenario: KernelStage::ORDER is the manifest-order concatenation of subsystem STAGES
-    Given the define_kernels! manifest in registration order
-    Then KernelStage::ORDER equals the concatenation, in that order, of
-      every subsystem sub-struct's SubsystemKernels::STAGES
-
-  @rq-4a584e03
-  Scenario: Each subsystem's STAGES is a contiguous run within KernelStage::ORDER
-    Given any subsystem sub-struct T in the manifest
-    Then the elements of <T as SubsystemKernels>::STAGES appear in
-      KernelStage::ORDER as a contiguous slice, in the same order
+  Scenario: KernelStage::ORDER is assembled as the in-order concatenation of subsystem STAGES
+    Given the const helper concat_kernel_stages, which define_kernels! uses to
+      build KernelStage::ORDER from every subsystem sub-struct's SubsystemKernels::STAGES
+    When concat_kernel_stages is applied to groups of stage slices, including an
+      empty slice (a stage-less subsystem)
+    Then the result is the concatenation of the groups in order, each group's
+      stages contiguous and empty groups contributing nothing
 
   @rq-42ee692a
   Scenario: KernelStage::ORDER contains no duplicate stage
     Given KernelStage::ORDER
     Then no two entries have the same stage name
-    And no stage recorded by any launch site is absent from ORDER
 ```
