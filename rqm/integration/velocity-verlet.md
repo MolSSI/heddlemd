@@ -379,17 +379,23 @@ StepPlan { steps: vec![
     SubStep::ForceEval,
     SubStep::KickHalf  { dt, label: "vv_kick"       },
     SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt },
+    SubStep::BarostatPoint { dt },
 ]}
 ```
 
-The three `ConstraintPoint` markers are present unconditionally and are
-no-ops when no constraint slot is installed, so the same plan drives
-constrained and unconstrained runs. The plan shape is identical for the
-lossy and lossless variants; the `lossless` flag is carried on the
-integrator's `&mut self` and read inside `execute()` to choose between
-the lossy and lossless kernels. (Lossless mode does not compose with a
-constraint slot — see *Compatibility Rules* in `constraint-framework.md`
-— so the markers are inert on a lossless run.)
+The three `ConstraintPoint` markers and the terminal `BarostatPoint`
+are present unconditionally and are no-ops when their slot is absent, so
+the same plan drives NVE, NVT, and NPT compositions. The `AfterKick`
+and `BarostatPoint` sub-steps form the plan's trailing post-force-marker
+run: the runner dispatches them in its post-walk tail (barostat `apply`
+before the composed launch, constraint velocity projection after it), so
+both compose with the composed post-force kernel (see `framework.md`,
+*Per-Step Interface*). The plan shape is identical for the lossy and
+lossless variants; the `lossless` flag is carried on the integrator's
+`&mut self` and read inside `execute()` to choose between the lossy and
+lossless kernels. (Lossless mode does not compose with a constraint slot
+— see *Compatibility Rules* in `constraint-framework.md` — so the
+`ConstraintPoint` markers are inert on a lossless run.)
 
 ### Sub-step Execution <!-- rq-51e5a0cd -->
 

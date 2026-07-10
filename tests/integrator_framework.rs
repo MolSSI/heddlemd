@@ -657,7 +657,8 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
 // =============================================================================
 
 use heddle_md::integrator::{
-    ConstraintError, ConstraintPhase, RunStepOptions, run_step, StepPlan, SubStep,
+    Barostat, BarostatPeriodicity, ConstraintError, ConstraintPhase,
+    RunStepOptions, run_step, StepPlan, SubStep,
 };
 
 /// A configurable stub Integrator whose plan and execute() behaviour
@@ -687,6 +688,7 @@ impl Integrator for PlanStub {
             SubStep::ForceEval { .. } => "exec_force_eval",
             SubStep::ThermostatHalf { .. } => "exec_thermostat_half",
             SubStep::ConstraintPoint { .. } => "exec_constraint_point",
+            SubStep::BarostatPoint { .. } => "exec_barostat_point",
             SubStep::Custom { .. } => "exec_custom",
         });
         if matches!(substep, SubStep::ForceEval { .. }) {
@@ -732,6 +734,38 @@ impl heddle_md::integrator::Constraint for RecordingConstraint {
         _t: &mut Timings,
     ) -> Result<(), ConstraintError> {
         self.log.record("after_kick");
+        Ok(())
+    }
+}
+
+/// Stub per-step (or periodic) barostat that records the `dt` of each
+/// `apply` call. A periodic instance leaves `apply` a no-op (mirroring a
+/// real periodic barostat, which couples through `apply_move`), so the
+/// `BarostatPoint` marker is inert for it.
+#[derive(Debug)]
+struct RecordingBarostat {
+    applies: std::sync::Arc<std::sync::Mutex<Vec<Real>>>,
+    periodic: bool,
+}
+
+impl Barostat for RecordingBarostat {
+    fn periodicity(&self) -> BarostatPeriodicity {
+        if self.periodic {
+            BarostatPeriodicity::EveryNSteps(1)
+        } else {
+            BarostatPeriodicity::EveryStep
+        }
+    }
+    fn apply(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &mut SimulationBox,
+        dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        if !self.periodic {
+            self.applies.lock().unwrap().push(dt);
+        }
         Ok(())
     }
 }
@@ -942,6 +976,7 @@ fn constraint_point_markers_dispatch_to_matching_hooks() {
         &mut ff,
         Some(&mut constraint),
         None,
+        None,
         0.1,
         &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
@@ -985,6 +1020,7 @@ fn repeated_markers_dispatch_once_each_in_plan_order() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
+        None,
         None,
         0.1,
         &mut timings,
@@ -1033,6 +1069,7 @@ fn plan_with_no_after_kick_marker_never_fires_after_kick() {
         &mut ff,
         Some(&mut constraint),
         None,
+        None,
         0.1,
         &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
@@ -1064,6 +1101,7 @@ fn plan_with_no_markers_fires_no_constraint_hooks() {
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
+        None,
         None,
         0.1,
         &mut timings,
@@ -1101,6 +1139,7 @@ fn plan_without_markers_fires_no_hooks_even_with_slot_present() {
         &mut ff,
         Some(&mut constraint),
         None,
+        None,
         0.1,
         &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
@@ -1123,7 +1162,7 @@ fn constraint_point_markers_dispatch_in_the_walk_or_no_op_without_slot() {
     };
     run_step(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        Some(&mut constraint), None, 0.1, &mut timings,
+        Some(&mut constraint), None, None, 0.1, &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
@@ -1135,7 +1174,7 @@ fn constraint_point_markers_dispatch_in_the_walk_or_no_op_without_slot() {
     let mut stub2 = PlanStub { plan: marker_plan_vv(), log: CallLog::default() };
     run_step(
         &mut stub2, &mut buffers, &mut sim_box, &mut ff,
-        None, None, 0.1, &mut timings,
+        None, None, None, 0.1, &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
@@ -1150,7 +1189,7 @@ fn constraint_point_markers_are_no_ops_without_a_slot() {
     // No constraint slot passed; the markers must be inert.
     run_step(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        None, None, 0.1, &mut timings,
+        None, None, None, 0.1, &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
@@ -1174,7 +1213,7 @@ fn constraint_point_hook_receives_the_markers_own_dt() {
     let mut constraint = DtRecordingConstraint { seen: seen.clone() };
     run_step(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        Some(&mut constraint), None, 0.1, &mut timings,
+        Some(&mut constraint), None, None, 0.1, &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
@@ -1204,7 +1243,7 @@ fn defer_terminal_velocity_projection_skips_trailing_after_kick_in_walk() {
     };
     run_step(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        Some(&mut constraint), None, 0.1, &mut timings,
+        Some(&mut constraint), None, None, 0.1, &mut timings,
         RunStepOptions {
             skip_substep_index: Some(k),
             defer_terminal_velocity_projection: true,
@@ -1234,6 +1273,150 @@ fn ends_with_velocity_projection_reflects_final_substep() {
     };
     assert!(!no_ends.ends_with_velocity_projection());
     assert_eq!(no_ends.terminal_velocity_projection_dt(), None);
+}
+
+// --- Plan-declared barostat points ---
+
+fn total_kick(dt: Real) -> SubStep {
+    SubStep::KickHalf { dt, label: "k", source: heddle_md::integrator::KickSource::Total }
+}
+
+// rq-b167a309
+#[test]
+fn terminal_barostat_point_dispatches_apply_once() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let mut stub = PlanStub {
+        plan: StepPlan { steps: vec![total_kick(0.3), SubStep::BarostatPoint { dt: 0.3 }] },
+        log: CallLog::default(),
+    };
+    let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
+    let mut baro = RecordingBarostat { applies: applies.clone(), periodic: false };
+    // No composed kernel / no deferral: the terminal BarostatPoint
+    // dispatches in the walk.
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, None, Some(&mut baro), 0.3, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(*applies.lock().unwrap(), vec![0.3 as Real]);
+}
+
+// rq-68061953
+#[test]
+fn barostat_point_is_no_op_without_a_barostat() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let mut stub = PlanStub {
+        plan: StepPlan { steps: vec![total_kick(0.1), SubStep::BarostatPoint { dt: 0.1 }] },
+        log: CallLog::default(),
+    };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, None, None, 0.1, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+}
+
+// rq-63fe749a
+#[test]
+fn barostat_point_is_inert_for_a_periodic_barostat() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let mut stub = PlanStub {
+        plan: StepPlan { steps: vec![total_kick(0.1), SubStep::BarostatPoint { dt: 0.1 }] },
+        log: CallLog::default(),
+    };
+    let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
+    let mut baro = RecordingBarostat { applies: applies.clone(), periodic: true };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, None, Some(&mut baro), 0.1, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    // A periodic barostat's apply is a no-op; the marker records nothing.
+    assert!(applies.lock().unwrap().is_empty());
+}
+
+// rq-f9d0621d
+#[test]
+fn has_barostat_points_and_terminal_dt_reflect_the_plan() {
+    let terminal = StepPlan {
+        steps: vec![total_kick(0.5), SubStep::BarostatPoint { dt: 0.5 }],
+    };
+    assert!(terminal.has_barostat_points());
+    assert_eq!(terminal.terminal_barostat_point_dt(), Some(0.5 as Real));
+    assert!(!terminal.has_interleaved_barostat_point());
+
+    let interleaved = StepPlan {
+        steps: vec![
+            SubStep::BarostatPoint { dt: 0.5 },
+            SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesOnly) },
+            total_kick(0.5),
+        ],
+    };
+    assert!(interleaved.has_barostat_points());
+    assert_eq!(interleaved.terminal_barostat_point_dt(), None);
+    assert!(interleaved.has_interleaved_barostat_point());
+}
+
+// rq-a2fbf61e
+#[test]
+fn defer_terminal_barostat_point_skips_it_in_the_walk() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
+                total_kick(0.1),
+                SubStep::BarostatPoint { dt: 0.1 },
+            ],
+        },
+        log: CallLog::default(),
+    };
+    let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
+    let mut baro = RecordingBarostat { applies: applies.clone(), periodic: false };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, None, Some(&mut baro), 0.1, &mut timings,
+        RunStepOptions {
+            defer_terminal_barostat_point: true,
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(applies.lock().unwrap().is_empty(), "terminal BarostatPoint must not dispatch in the walk when deferred");
+}
+
+// rq-e043b064
+#[test]
+fn interleaved_barostat_point_dispatches_apply_in_the_walk() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::BarostatPoint { dt: 0.2 },
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
+                total_kick(0.2),
+            ],
+        },
+        log: CallLog::default(),
+    };
+    let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
+    let mut baro = RecordingBarostat { applies: applies.clone(), periodic: false };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, None, Some(&mut baro), 0.2, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(*applies.lock().unwrap(), vec![0.2 as Real]);
 }
 
 // =====================================================================
@@ -1687,6 +1870,7 @@ fn class_sourced_kick_half_reads_class_accumulator_not_combined() {
         &mut ff,
         None,
         None,
+        None,
         0.5,
         &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
@@ -1726,6 +1910,7 @@ fn class_sourced_kick_drift_kicks_half_dt_and_drifts_dt() {
         &mut buffers,
         &mut sim_box,
         &mut ff,
+        None,
         None,
         None,
         0.5,
@@ -1768,6 +1953,7 @@ fn total_sourced_kick_is_dispatched_to_execute() {
         &mut ff,
         None,
         None,
+        None,
         0.5,
         &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
@@ -1804,6 +1990,7 @@ fn thermostat_half_markers_dispatch_at_marker_positions() {
         &mut ff,
         None,
         Some(&mut therm),
+        None,
         0.5,
         &mut timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
@@ -1840,6 +2027,7 @@ fn thermostat_half_is_noop_without_thermostat() {
         &mut buffers,
         &mut sim_box,
         &mut ff,
+        None,
         None,
         None,
         0.5,

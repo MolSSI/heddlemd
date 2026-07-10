@@ -119,6 +119,14 @@ pub enum RunnerError {
          implement a post-force fragment on the barostat"
     )]
     PostForceTopologyUnsatisfiable,
+    /// A per-step barostat is configured with an integrator whose plan
+    /// carries no `BarostatPoint`, so the barostat's `apply` would never
+    /// fire. rq-dbbffa7d
+    #[error(
+        "a per-step barostat is configured but integrator `{integrator}` emits no \
+         BarostatPoint in its plan; the barostat's coupling would never fire"
+    )]
+    BarostatPlacementMissing { integrator: String },
     #[error("JIT-composed post-force per-particle kernel failed to compile: {log}")]
     PostForceFragmentCompileFailed { log: String },
     #[error("JIT-composed post-force per-particle kernel failed to load: {0}")]
@@ -1359,6 +1367,13 @@ pub(crate) fn run_md_phase_inner(
     // apply_post / apply), which the graph captures like any other
     // launch — partial or absent composition does not affect graph
     // eligibility.
+    //
+    // The plan shape is a pure function of `dt` and the integrator's
+    // static configuration, so one probe serves every setup-time shape
+    // query (composed-set membership, thermostat/barostat/constraint
+    // marker topology, graph eligibility). Computing it once avoids
+    // redundant `plan()` allocations during phase setup.
+    let probe_plan = integrator.plan(phase.dt as Real);
     let mut composed_post_force: Option<crate::forces::JitComposedPostForcePerParticle> =
         None;
     let mut post_force_substep_index: Option<usize> = None;
@@ -1383,7 +1398,11 @@ pub(crate) fn run_md_phase_inner(
         // every configured slot AFTER it in the eager order also
         // composes (the composed launch runs last, so an eager slot
         // after a composed one would invert the operation order).
-        let include_baro = baro_active && baro_frag.is_some();
+        // rq-dbbffa7d — a per-step barostat participates only at a
+        // terminal (canonical) BarostatPoint; an interleaved point runs
+        // its apply standalone during the walk and is not fused.
+        let has_terminal_barostat_point = probe_plan.terminal_barostat_point_dt().is_some();
+        let include_baro = baro_active && baro_frag.is_some() && has_terminal_barostat_point;
         let include_therm =
             therm_active && therm_frag.is_some() && (!baro_active || include_baro);
         // A fragment-bearing thermostat suffix-excluded by a
@@ -1621,7 +1640,30 @@ pub(crate) fn run_md_phase_inner(
     // the composed-set membership is fixed at phase setup.
     let deferred_terminal_projection_dt: Option<Real> =
         if constraint.is_some() && post_force_substep_index.is_some() {
-            integrator.plan(dt).terminal_velocity_projection_dt()
+            probe_plan.terminal_velocity_projection_dt()
+        } else {
+            None
+        };
+
+    // rq-dbbffa7d — a per-step barostat requires the integrator's plan
+    // to carry a BarostatPoint, or its `apply` would never fire. When
+    // the barostat is present and the plan carries a terminal
+    // BarostatPoint (the canonical placement), the runner fires `apply`
+    // in its post-walk tail with the rescale fused into the composed
+    // kernel; `run_step` skips the marker via
+    // `defer_terminal_barostat_point`. An interleaved BarostatPoint is
+    // dispatched by `run_step` in the walk instead (eager path).
+    if barostat_couples_per_step(&barostat) && !probe_plan.has_barostat_points() {
+        return Err((
+            RunnerError::BarostatPlacementMissing {
+                integrator: phase.integrator.kind.clone(),
+            },
+            ExitPhase::Setup,
+        ));
+    }
+    let deferred_terminal_barostat_dt: Option<Real> =
+        if barostat_couples_per_step(&barostat) {
+            probe_plan.terminal_barostat_point_dt()
         } else {
             None
         };
@@ -1635,9 +1677,15 @@ pub(crate) fn run_md_phase_inner(
     // rq-9fbba3be — a plan containing ThermostatHalf sub-steps
     // dispatches host-side thermostat arithmetic mid-plan, which
     // cannot be captured; marker-bearing plans run on the eager path.
-    let plan_has_thermostat_points = integrator.plan(dt).has_thermostat_points();
+    let plan_has_thermostat_points = probe_plan.has_thermostat_points();
+    // rq-dbbffa7d — an interleaved (non-terminal) BarostatPoint runs
+    // its `apply` mid-walk, whose host-side barostat arithmetic cannot
+    // be captured; such plans run eager. A terminal BarostatPoint keeps
+    // the phase eligible (the barostat fuses into the composed kernel).
+    let plan_has_interleaved_barostat = probe_plan.has_interleaved_barostat_point();
     let graph_eligible = !setup.config.simulation.cuda_graphs_disable
         && !plan_has_thermostat_points
+        && !plan_has_interleaved_barostat
         && phase_slots_graph_compatible(setup, phase);
 
     // Graph-timing calibration: CUDA forbids `cuEventElapsedTime` on the
@@ -1665,6 +1713,7 @@ pub(crate) fn run_md_phase_inner(
             &mut barostat,
             &mut constraint,
             deferred_terminal_projection_dt,
+            deferred_terminal_barostat_dt,
             plan_has_thermostat_points,
             dt,
             composed_post_force.as_ref(),
@@ -1697,6 +1746,7 @@ pub(crate) fn run_md_phase_inner(
             &mut barostat,
             &mut constraint,
             deferred_terminal_projection_dt,
+            deferred_terminal_barostat_dt,
             dt,
             &mut timings,
             &setup.gpu.device,
@@ -1733,6 +1783,7 @@ pub(crate) fn run_md_phase_inner(
             &mut barostat,
             &mut constraint,
             deferred_terminal_projection_dt,
+            deferred_terminal_barostat_dt,
             dt,
             composed_post_force.as_ref(),
             post_force_substep_index,
@@ -1762,6 +1813,7 @@ pub(crate) fn run_md_phase_inner(
                 &mut barostat,
                 &mut constraint,
                 deferred_terminal_projection_dt,
+                deferred_terminal_barostat_dt,
             plan_has_thermostat_points,
                 dt,
                 composed_post_force.as_ref(),
@@ -1798,6 +1850,7 @@ pub(crate) fn run_md_phase_inner(
             &mut barostat,
             &mut constraint,
             deferred_terminal_projection_dt,
+            deferred_terminal_barostat_dt,
             plan_has_thermostat_points,
             dt,
             composed_post_force.as_ref(),
@@ -2445,6 +2498,7 @@ fn capture_phase_graph(
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
     deferred_terminal_projection_dt: Option<Real>,
+    deferred_terminal_barostat_dt: Option<Real>,
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
@@ -2460,6 +2514,7 @@ fn capture_phase_graph(
         barostat,
         constraint,
         deferred_terminal_projection_dt,
+        deferred_terminal_barostat_dt,
         dt,
         timings,
         device,
@@ -2481,6 +2536,7 @@ fn capture_phase_graph(
             barostat,
             constraint,
             deferred_terminal_projection_dt,
+            deferred_terminal_barostat_dt,
             dt,
             timings,
             device,
@@ -2512,6 +2568,7 @@ fn capture_one_graph(
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
     deferred_terminal_projection_dt: Option<Real>,
+    deferred_terminal_barostat_dt: Option<Real>,
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
@@ -2569,7 +2626,11 @@ fn capture_one_graph(
                 constraint_arg,
                 // Marker-bearing plans are excluded from capture, so
                 // there is never a ThermostatHalf to dispatch here;
-                // the capture path wraps the thermostat explicitly.
+                // the capture path wraps the thermostat explicitly. A
+                // captured plan has no interleaved BarostatPoint (those
+                // force the eager path), and its terminal BarostatPoint
+                // is deferred, so `run_step` needs no barostat here.
+                None,
                 None,
                 dt,
                 timings,
@@ -2577,6 +2638,7 @@ fn capture_one_graph(
                     run_neighbor_pre_step: false,
                     skip_substep_index: Some(skip_idx),
                     defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
+                    defer_terminal_barostat_point: deferred_terminal_barostat_dt.is_some(),
                     runner_needs_scalars: needs_scalars,
                 },
             )
@@ -2588,11 +2650,13 @@ fn capture_one_graph(
                 force_field,
                 constraint_arg,
                 None,
+                None,
                 dt,
                 timings,
                 crate::integrator::RunStepOptions {
                     run_neighbor_pre_step: false,
                     defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
+                    defer_terminal_barostat_point: deferred_terminal_barostat_dt.is_some(),
                     runner_needs_scalars: needs_scalars,
                     ..Default::default()
                 },
@@ -2609,9 +2673,12 @@ fn capture_one_graph(
             }
         }
     }
+    // rq-dbbffa7d — a terminal BarostatPoint's apply fires in the
+    // post-walk tail (scalar prep + box mutation); the per-particle
+    // rescale fuses into the composed launch below.
     if inner_failure.is_none() {
-        if let Some(b) = barostat.as_mut() {
-            if let Err(e) = b.apply(buffers, sim_box, dt, timings) {
+        if let (Some(barostat_dt), Some(b)) = (deferred_terminal_barostat_dt, barostat.as_mut()) {
+            if let Err(e) = b.apply(buffers, sim_box, barostat_dt, timings) {
                 inner_failure = Some(format!("barostat.apply: {e}"));
             }
         }
@@ -2677,6 +2744,7 @@ fn run_per_step_range(
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
     deferred_terminal_projection_dt: Option<Real>,
+    deferred_terminal_barostat_dt: Option<Real>,
     plan_owns_thermostat: bool,
     dt: Real,
     composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
@@ -2730,6 +2798,15 @@ fn run_per_step_range(
             let runner_needs_scalars =
                 step_needs_force_scalars(log_due, barostat_couples_per_step(barostat))
                     || is_move_boundary;
+            // rq-dbbffa7d — the barostat is passed so run_step can
+            // dispatch an interleaved BarostatPoint; a terminal one is
+            // deferred (skipped here, fired in the post-walk tail below).
+            // Created after the shared-borrow helpers above.
+            let barostat_arg: Option<&mut dyn crate::integrator::Barostat> =
+                match barostat.as_mut() {
+                    Some(b) => Some(b.as_mut()),
+                    None => None,
+                };
             let result = if let Some(skip_idx) = post_force_substep_index {
                 crate::integrator::run_step(
                     integrator.as_mut(),
@@ -2738,11 +2815,13 @@ fn run_per_step_range(
                     &mut setup.force_field,
                     constraint_arg,
                     thermostat_arg,
+                    barostat_arg,
                     dt,
                     &mut *timings,
                     crate::integrator::RunStepOptions {
                         skip_substep_index: Some(skip_idx),
                         defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
+                        defer_terminal_barostat_point: deferred_terminal_barostat_dt.is_some(),
                         runner_needs_scalars,
                         ..Default::default()
                     },
@@ -2755,10 +2834,12 @@ fn run_per_step_range(
                     &mut setup.force_field,
                     constraint_arg,
                     thermostat_arg,
+                    barostat_arg,
                     dt,
                     &mut *timings,
                     crate::integrator::RunStepOptions {
                         defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
+                        defer_terminal_barostat_point: deferred_terminal_barostat_dt.is_some(),
                         runner_needs_scalars,
                         ..Default::default()
                     },
@@ -2780,6 +2861,7 @@ fn run_per_step_range(
                     }
                     crate::integrator::StepError::Gpu(e) => RunnerError::Gpu(e),
                     crate::integrator::StepError::Thermostat(e) => RunnerError::Thermostat(e),
+                    crate::integrator::StepError::Barostat(e) => RunnerError::Barostat(e),
                     crate::integrator::StepError::Timings(e) => RunnerError::Timings(e),
                 };
                 (runner_err, ExitPhase::Loop)
@@ -2791,9 +2873,15 @@ fn run_per_step_range(
                     .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
             }
         }
-        if let Some(b) = barostat.as_mut() {
-            b.apply(&mut setup.buffers, &mut setup.sim_box, dt, &mut *timings)
-                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+        // rq-dbbffa7d — a terminal BarostatPoint's apply fires in the
+        // post-walk tail (scalar prep + box mutation); the per-particle
+        // rescale fuses into the composed launch below. An interleaved
+        // BarostatPoint was already dispatched inside run_step's walk.
+        if let Some(barostat_dt) = deferred_terminal_barostat_dt {
+            if let Some(b) = barostat.as_mut() {
+                b.apply(&mut setup.buffers, &mut setup.sim_box, barostat_dt, &mut *timings)
+                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+            }
         }
         if let Some(composed) = composed_post_force {
             launch_composed_post_force(
@@ -2946,6 +3034,7 @@ fn run_batched_graph_loop(
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
     deferred_terminal_projection_dt: Option<Real>,
+    deferred_terminal_barostat_dt: Option<Real>,
     dt: Real,
     composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
     post_force_substep_index: Option<usize>,
@@ -3098,6 +3187,7 @@ fn run_batched_graph_loop(
                 barostat,
                 constraint,
                 deferred_terminal_projection_dt,
+                deferred_terminal_barostat_dt,
                 dt,
                 timings,
                 &device,

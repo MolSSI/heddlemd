@@ -16,6 +16,12 @@ optional thermostat alone, with no pressure coupling and **no per-step
 virial**: the move's accept/reject decision uses only the configurational
 potential energy, never the instantaneous virial.
 
+Because the Monte-Carlo barostat is periodic
+(`Barostat::periodicity() == EveryNSteps`), its `apply` is the no-op
+default: the `SubStep::BarostatPoint` marker an integrator emits is
+inert for it (see `framework.md`, *Per-Step Interface*), and all
+coupling happens through `apply_move` at batch boundaries.
+
 Because the move scales molecular centres of mass and not individual
 atoms, it is a valid trial move for molecular systems with rigid
 constraints (e.g. SETTLE/SHAKE water): a uniform per-atom scale would

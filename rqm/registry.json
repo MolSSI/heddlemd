@@ -4242,7 +4242,7 @@
     "type": "scenario"
   },
   "rq-1d366b88": {
-    "decl": "- `RunStepOptions` — per-call options for `run_step`, bundling the four",
+    "decl": "- `RunStepOptions` — per-call options for `run_step`, bundling the",
     "file": "integration/framework",
     "refs": [
       {
@@ -4279,6 +4279,18 @@
     "refs": [],
     "title": "reduce_dihedral_forces",
     "type": "api-item"
+  },
+  "rq-1d9788b5": {
+    "decl": "Scenario: A per-step barostat with an integrator that emits no BarostatPoint is rejected at phase setup",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A per-step barostat with an integrator that emits no BarostatPoint is rejected at phase setup",
+    "type": "scenario"
   },
   "rq-1d9fd409": {
     "decl": "Scenario: Reject duplicate dihedral_type names",
@@ -5754,7 +5766,7 @@
     "type": "scenario"
   },
   "rq-277dbeb2": {
-    "decl": "- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, thermostat: Option<&mut dyn Thermostat>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>`",
+    "decl": "- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, thermostat: Option<&mut dyn Thermostat>, barostat: Option<&mut dyn Barostat>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>`",
     "file": "integration/framework",
     "refs": [
       {
@@ -13271,6 +13283,18 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-63fe749a": {
+    "decl": "Scenario: BarostatPoint is inert for a periodic barostat",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "BarostatPoint is inert for a periodic barostat",
+    "type": "scenario"
+  },
   "rq-6432ab1f": {
     "decl": "# Feature: TOML Simulation Config Schema",
     "file": "io/config-schema",
@@ -13763,6 +13787,18 @@
     ],
     "title": "Potential",
     "type": "api-item"
+  },
+  "rq-68061953": {
+    "decl": "Scenario: BarostatPoint is a no-op when no per-step barostat is configured",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "BarostatPoint is a no-op when no per-step barostat is configured",
+    "type": "scenario"
   },
   "rq-680ab854": {
     "decl": "Scenario: Reject reordered Properties columns",
@@ -21498,6 +21534,18 @@
     "title": "Fixed-Point Force Buffers",
     "type": "section"
   },
+  "rq-a2fbf61e": {
+    "decl": "Scenario: defer_terminal_barostat_point skips the trailing BarostatPoint in the walk",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "defer_terminal_barostat_point skips the trailing BarostatPoint in the walk",
+    "type": "scenario"
+  },
   "rq-a304e8cb": {
     "decl": "Scenario: A pair past the maximum slot cutoff contributes zero by bit-exact equality",
     "file": "forces/jit-composed-pair-force",
@@ -23344,6 +23392,18 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "NHC apply_post writes a single cumulative factor to factor_device",
+    "type": "scenario"
+  },
+  "rq-b167a309": {
+    "decl": "Scenario: A terminal BarostatPoint dispatches barostat.apply once",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A terminal BarostatPoint dispatches barostat.apply once",
     "type": "scenario"
   },
   "rq-b17e6de6": {
@@ -28816,7 +28876,19 @@
     "file": "integration/framework",
     "refs": [
       {
+        "file": "src/integrator/langevin_baoab.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/velocity_verlet.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
         "kind": "code"
       }
     ],
@@ -29410,6 +29482,18 @@
       }
     ],
     "title": "Reject NaN dt",
+    "type": "scenario"
+  },
+  "rq-e043b064": {
+    "decl": "Scenario: An interleaved BarostatPoint dispatches apply during the walk",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An interleaved BarostatPoint dispatches apply during the walk",
     "type": "scenario"
   },
   "rq-e06bcfb0": {
@@ -32874,6 +32958,18 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "Graph-mode run with a mid-phase re-capture is byte-identical to per-step",
+    "type": "scenario"
+  },
+  "rq-f9d0621d": {
+    "decl": "Scenario: has_barostat_points and terminal_barostat_point_dt reflect the plan",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "has_barostat_points and terminal_barostat_point_dt reflect the plan",
     "type": "scenario"
   },
   "rq-f9e0aa11": {

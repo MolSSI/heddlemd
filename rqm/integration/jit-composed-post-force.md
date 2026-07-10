@@ -90,6 +90,13 @@ periodic barostats are absent from the order):
   composed kernel is built and the plan walk executes every
   sub-step (the same shape as a phase with no post-force work).
 
+The per-step barostat participates in the composed set only when the
+plan carries a **terminal** `BarostatPoint` (its canonical placement,
+`framework.md`). A barostat placed at an interleaved (mid-plan)
+`BarostatPoint` is absent from the composed order — its `apply` runs
+its full standalone rescale during the plan walk — so it neither
+appears in the suffix nor forces the thermostat/integrator out of it.
+
 `skip_substep_index` (see `framework.md`, `RunStepOptions`) is set
 to the plan's trailing-kick index **iff the integrator is in the
 composed set**; a non-participating integrator's kick is never
@@ -394,6 +401,8 @@ loop step in 1..=n_steps:
     let defer_terminal_projection = constraint.is_some()
         && integrator is in the composed set
         && plan.ends_with_velocity_projection()
+    let defer_terminal_barostat = barostat_couples_per_step
+        && plan.terminal_barostat_point_dt().is_some()
     for sub in &plan.steps:
         match sub:
             SubStep::ForceEval{..} => force_field.step(...)
@@ -402,18 +411,24 @@ loop step in 1..=n_steps:
                    and this is the post-force SubStep:
                     /* skipped — composed kernel handles it */
             SubStep::ConstraintPoint{ phase: AfterKick, .. }
-                if defer_terminal_projection and this is the plan's final sub-step:
+                if defer_terminal_projection and this is the trailing AfterKick:
                     /* skipped — runner fires it after the composed launch */
+            SubStep::BarostatPoint{ .. }
+                if defer_terminal_barostat and this is the trailing BarostatPoint:
+                    /* skipped — runner fires apply in the post-walk tail */
             SubStep::ConstraintPoint{ phase, dt } =>
                 constraint.dispatch(phase, buffers, sim_box, dt, timings)
+            SubStep::BarostatPoint{ dt } =>
+                barostat.apply(buffers, sim_box, dt, timings)  /* interleaved: full standalone */
             other => integrator.execute(other, ...)
     /* Post-force composed-kernel dispatch */
     if let Some(t) = thermostat { t.apply_post(...) }
         /* scalar prep when composed; the full velocity update
            when the thermostat is not in the composed set */
-    if let Some(b) = barostat   { b.apply(...) }
-        /* scalar prep + box mutation when composed; the full
-           rescale when the barostat is not in the composed set */
+    if defer_terminal_barostat:
+        barostat.apply(...)
+        /* scalar prep + box mutation; the per-particle rescale fuses
+           into the composed kernel below */
     if composed set is non-empty:
         launch_post_force_composed_kernel(buffers, /* composed suffix */)
     if defer_terminal_projection:

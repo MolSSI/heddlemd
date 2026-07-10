@@ -50,6 +50,15 @@ hold:
   fragment, and its move runs on the host at batch boundaries (see
   *Periodic-barostat moves* below).
 
+- The integrator's plan has no `ThermostatHalf` sub-step and no
+  *interleaved* (non-terminal) `BarostatPoint`. Both dispatch host-side
+  slot arithmetic mid-plan, which stream capture cannot record, so such
+  plans run on the eager path. A *terminal* `BarostatPoint` (the
+  canonical placement the built-in integrators emit) keeps the phase
+  eligible: the barostat's `apply` runs in the post-walk tail and its
+  per-particle rescale fuses into the composed kernel exactly as a
+  fixed post-step barostat, so the captured sequence is unchanged.
+
 When any condition fails the phase runs the per-step launch loop
 described in `simulation-runner.md` step 17, with full per-kernel
 `Timings`.
@@ -297,9 +306,11 @@ sequence:
    - `thermostat.apply_pre(buffers, dt, timings)` if a thermostat is
      active
    - `run_step(integrator, buffers, sim_box, force_field, constraint,
-     dt, timings, RunStepOptions { run_neighbor_pre_step: false,
+     thermostat, barostat, dt, timings, RunStepOptions {
+     run_neighbor_pre_step: false,
      skip_substep_index: Some(integrator.post_force_substep_index(dt).unwrap()),
-     defer_terminal_velocity_projection, runner_needs_scalars })`, where
+     defer_terminal_velocity_projection, defer_terminal_barostat_point,
+     runner_needs_scalars })`, where
      `runner_needs_scalars` is `true` while recording the
      forces+scalars graph and `false` while recording the forces-only
      graph. The
@@ -314,13 +325,17 @@ sequence:
      slot is `None`); `defer_terminal_velocity_projection` is `true`
      when the constraint slot is installed and the composed kernel
      absorbs the trailing kick, so the trailing velocity projection is
-     fired after the composed launch (below). See
+     fired after the composed launch (below). `defer_terminal_barostat_point`
+     is `true` when a per-step barostat is configured and the plan
+     carries a terminal `BarostatPoint`, so the barostat's `apply` fires
+     in the post-walk tail (below) rather than the walk. See
      `integration/framework.md` for `RunStepOptions`.
    - `thermostat.apply_post(buffers, dt, timings)` if a thermostat
      is active (scalar prep only — no per-particle rescale)
-   - `barostat.apply(buffers, sim_box, dt, timings)` if a barostat
-     is active (scalar prep + box mutation — no per-particle
-     rescale)
+   - `barostat.apply(buffers, sim_box, dt, timings)` when
+     `defer_terminal_barostat_point` was set (terminal `BarostatPoint`):
+     scalar prep + box mutation — no per-particle rescale (fused into
+     the composed kernel below)
    - The composed JIT post-force per-particle kernel launch: the
      runner pre-populates a `ForceLaunchBuilder` with the common
      args (positions, images, velocities, forces, masses, device

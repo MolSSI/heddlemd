@@ -7,9 +7,13 @@ exactly. One of the pluggable barostat slots (see `framework.md`);
 selected by `kind = "c-rescale"` in the config's `[barostat]`
 section.
 
-The barostat runs once per timestep, after the integrator's step and
-after the optional thermostat's `apply_post`. Each invocation
-computes the instantaneous pressure from the kinetic energy and the
+The barostat's `apply` is dispatched once per timestep at the
+integrator plan's terminal `BarostatPoint` (see `framework.md`,
+*Per-Step Interface*); for the built-in integrators that is the
+canonical post-integration placement, so the runner fires it in the
+post-walk tail after the optional thermostat's `apply_post`. Each
+invocation computes the instantaneous pressure from the kinetic energy
+and the
 total scalar virial, derives an isotropic scale factor `μ` that
 combines a deterministic Berendsen-style relaxation toward the
 user-specified target pressure with a Brownian noise term sized so
@@ -31,12 +35,17 @@ detailed balance and the correct NPT volume fluctuations.
 ## Algorithm <!-- rq-9f95c5da -->
 
 The barostat is invoked through `apply(buffers, sim_box, dt,
-timings)` after `integrator.step()` and after the thermostat's
-`apply_post` (when a thermostat is configured) return. Both
-`buffers.virials` (per-particle scalar virials populated by the
-in-step force evaluation) and `buffers.velocities_*` (post-step
-velocities, possibly rescaled by the thermostat) are read by this
-hook.
+timings)`, dispatched at the plan's terminal `BarostatPoint` after the
+plan walk and after the thermostat's `apply_post` (when a thermostat is
+configured). Both `buffers.virials` (per-particle scalar virials
+populated by the in-step force evaluation) and `buffers.velocities_*`
+(post-step velocities, possibly rescaled by the thermostat) are read by
+this hook. The per-particle position rescale fuses into the composed
+post-force kernel at this canonical placement; c-rescale therefore
+composes with an integrator that emits a terminal `BarostatPoint`
+(`velocity-verlet`, `langevin-baoab`) and does not support interleaved
+(mid-plan) placement, which would require a standalone rescale in
+`apply`.
 
 For each invocation with timestep `dt`:
 

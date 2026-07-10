@@ -127,6 +127,10 @@ impl Integrator for LangevinBaoabState {
                     level: Some(crate::forces::AggregateLevel::ForcesOnly),
                 },
                 SubStep::KickHalf { dt, label: "B", source: crate::integrator::KickSource::Total },
+                // rq-dbbffa7d — terminal barostat point: langevin-baoab
+                // owns its thermostat but not a barostat, so it can host
+                // a per-step [barostat]; a no-op without one.
+                SubStep::BarostatPoint { dt },
             ],
         }
     }

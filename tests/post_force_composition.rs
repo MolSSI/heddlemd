@@ -299,6 +299,35 @@ fn non_participating_integrator_kick_executes_in_plan_walk() {
     assert_eq!(stage_count(&counts, "jit_composed_post_force"), 3);
 }
 
+// rq-1d9788b5 — a per-step barostat configured with an integrator whose
+// plan emits no BarostatPoint is rejected at phase setup. The eager-vv
+// stub's plan is [KickDrift, ForceEval, KickHalf] with no BarostatPoint,
+// so pairing it with a c-rescale barostat trips the placement guard.
+#[test]
+fn barostat_without_placement_marker_is_rejected() {
+    let dir = tmp("barostat_placement_missing");
+    write_lattice_init(&dir, 9, 4.4e-10);
+    let extra = "[phase.barostat]\nkind = \"c-rescale\"\n\
+                 pressure = 1.0\ntemperature = 30.0\ntau = 100.0\n\
+                 compressibility = 0.01\nseed = 1\n";
+    std::fs::write(
+        dir.join("sim.in.toml"),
+        lj_config(3, "kind = \"eager-vv\"", extra, false),
+    )
+    .unwrap();
+    let kick_execs = Arc::new(AtomicU64::new(0));
+    let mut registries = Registries::with_builtins();
+    registries.register_integrator(Box::new(EagerVvBuilder { kick_execs }));
+    let err = run_simulation_with_registries(&dir.join("sim.in.toml"), &registries)
+        .expect_err("expected BarostatPlacementMissing");
+    match err {
+        RunnerError::BarostatPlacementMissing { integrator } => {
+            assert_eq!(integrator, "eager-vv");
+        }
+        other => panic!("expected BarostatPlacementMissing, got {other:?}"),
+    }
+}
+
 // rq-79b8a246
 #[test]
 fn non_participating_thermostat_forces_integrator_out() {

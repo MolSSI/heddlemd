@@ -57,8 +57,8 @@ and no explicit Boltzmann factor appears in any expression above.
 
 ## Step Plan <!-- rq-ff46e833 -->
 
-`LangevinBaoabState::plan(dt)` returns the fixed six-element BAOAB
-sequence the runner walks:
+`LangevinBaoabState::plan(dt)` returns the fixed BAOAB sequence the
+runner walks:
 
 ```rust
 StepPlan { steps: vec![
@@ -68,12 +68,20 @@ StepPlan { steps: vec![
     SubStep::Drift    { dt, label: "A_post"     },   // second half-drift
     SubStep::ForceEval,                              // recompute F(x)
     SubStep::KickHalf { dt, label: "B"          },   // second half-kick
+    SubStep::BarostatPoint { dt },                   // per-step barostat coupling
 ]}
 ```
 
 The `Drift` sub-steps internally use `dt/2`; the integrator's
 `execute()` reads the `dt` carried on the sub-step and applies the
 appropriate factor. Likewise both `KickHalf`s apply `dt/2` internally.
+
+Langevin-BAOAB owns its thermostat (the `O` step) but not a barostat,
+so it can host a per-step `[barostat]` slot. The terminal
+`BarostatPoint` declares that coupling point; it is a no-op when no
+barostat is configured, and the runner fires the barostat's `apply` in
+its post-walk tail with the per-particle rescale fused into the composed
+post-force kernel (see `framework.md`, *Per-Step Interface*).
 
 `LangevinBaoabState::execute(sub, ...)` dispatches to the kernels:
 

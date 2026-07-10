@@ -10,13 +10,22 @@ compose at every timestep:
    (`apply_post`), so symmetric Trotter splittings such as
    Nosé-Hoover-chain can place a half-step on each side of the
    integrator's velocity-Verlet body.
-3. An optional `Barostat` — pressure coupling. A per-step barostat fires
-   once per step, after the thermostat's post-step, so it consumes the
-   freshest virial / kinetic-energy data and mutates the box for the next
-   step's force evaluation. A periodic barostat (declared through
-   `Barostat::periodicity`) instead performs no per-step work and runs a
+3. An optional `Barostat` — pressure coupling. A per-step barostat's
+   `apply` is dispatched at a `SubStep::BarostatPoint` marker the
+   integrator places in its plan, so pressure coupling is plan-declared
+   rather than fixed by the runner. An integrator that hosts a per-step
+   barostat emits a single terminal `BarostatPoint` after its final
+   velocity update; the runner runs `apply` there (consuming the
+   freshest virial / kinetic-energy data and mutating the box for the
+   next step's force evaluation), fusing the per-particle rescale into
+   the composed post-force kernel exactly as a fixed post-step barostat
+   would. An integrator whose splitting requires interleaved coupling
+   instead places the `BarostatPoint` mid-plan, where `apply` runs as a
+   standalone launch. A periodic barostat (declared through
+   `Barostat::periodicity`) performs no per-step work and runs a
    host-orchestrated move every `N` steps at a batch boundary through
-   `apply_move` (the Monte-Carlo barostat; see `mc-barostat.md`).
+   `apply_move` (the Monte-Carlo barostat; see `mc-barostat.md`); its
+   `apply` is the no-op default, so a `BarostatPoint` is inert for it.
 4. An optional `Constraint` — holonomic constraint projection (rigid
    bonds, rigid groups). Driven by the runner during its walk of the
    integrator's `StepPlan` (see *Per-Step Interface*): a
@@ -122,6 +131,28 @@ projection during the walk; it fires it after
 per-particle velocity operation of the step, after the composed
 kernel's fused kick and any thermostat / barostat rescale.
 
+Barostat placement is likewise plan-declared: the runner runs a
+per-step barostat's `apply` only where the plan carries a
+`SubStep::BarostatPoint` marker, not at a fixed runner position. A
+`BarostatPoint` is a no-op when no per-step barostat is configured, so
+an integrator that hosts a barostat emits the marker unconditionally.
+A **terminal** `BarostatPoint` (in the plan's trailing run of
+post-force markers, alongside any `AfterKick`) is the canonical
+placement: the runner fires `apply` in the post-walk tail before the
+composed launch and fuses the barostat's per-particle rescale into the
+composed kernel, exactly as a fixed post-step barostat would. A
+**non-terminal** `BarostatPoint` (mid-plan) is dispatched during the
+walk, where `apply` runs its full standalone work and the barostat is
+excluded from the composed kernel.
+
+The plan's trailing run of `ConstraintPoint { phase: AfterKick }` and
+`BarostatPoint` sub-steps are the **post-force markers**: the runner
+dispatches them in its post-walk tail rather than the plan walk, so
+they compose with the composed kernel. The tail order is fixed:
+barostat `apply` before the composed launch (it prepares the fused
+rescale), then the composed launch, then the constraint velocity
+projection after it.
+
 ```text
 loop step in 1..=n_steps:
     let plan = integrator.plan(dt)
@@ -134,17 +165,23 @@ loop step in 1..=n_steps:
        skipped (jit-composed-post-force.md, suffix selection). */
     let post_force_sub_idx = integrator_in_composed_set
         .then(|| plan.last_post_force_substep_index())
-    /* The composed kernel absorbs the trailing kick, so a trailing
-       AfterKick projection is displaced past the composed launch. */
+    /* Trailing post-force markers handled by the runner's tail, not
+       the walk (composed kernel absorbs the trailing kick between
+       them). */
     let defer_terminal_projection = constraint.is_some()
         && post_force_sub_idx.is_some()
-        && plan.ends_with_velocity_projection()
+        && plan.terminal_velocity_projection_dt().is_some()
+    let defer_terminal_barostat = barostat_couples_per_step
+        && plan.terminal_barostat_point_dt().is_some()
     for (i, sub) in plan.steps.iter().enumerate():
         if Some(i) == post_force_sub_idx {
             continue  /* composed kernel performs this SubStep */
         }
-        if defer_terminal_projection && i == plan.steps.len() - 1 {
-            continue  /* runner fires this after the composed launch */
+        if defer_terminal_projection && sub is the trailing AfterKick {
+            continue  /* runner fires it after the composed launch */
+        }
+        if defer_terminal_barostat && sub is the trailing BarostatPoint {
+            continue  /* runner fires apply in the post-walk tail */
         }
         match sub:
             SubStep::ForceEval { class: None, level } =>
@@ -164,6 +201,10 @@ loop step in 1..=n_steps:
                     BeforeDrift => constraint.apply_before_drift(buffers, sim_box, sub_dt, timings)
                     AfterDrift  => constraint.apply_after_drift(buffers, sim_box, sub_dt, timings)
                     AfterKick   => constraint.apply_after_kick(buffers, sim_box, sub_dt, timings)
+            SubStep::BarostatPoint { dt: sub_dt } =>
+                /* interleaved (non-terminal) placement: full standalone
+                   apply; no-op when no per-step barostat is configured */
+                barostat.apply(buffers, sim_box, sub_dt, timings)
             SubStep::KickHalf { dt: sub_dt, source: Class(c), .. } =>
                 /* runner-dispatched: only the runner holds ForceField */
                 class_kick_half(buffers, force_field.class_forces(c), sub_dt)
@@ -174,7 +215,12 @@ loop step in 1..=n_steps:
     if let Some(t) = thermostat, !plan_owns_thermostat {
         t.apply_post(buffers, dt, timings)  /* scalar prep */
     }
-    if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }  /* scalar prep */
+    if defer_terminal_barostat {
+        /* canonical terminal placement: scalar prep + box mutation;
+           per-particle rescale fused into the composed launch below */
+        barostat.apply(buffers, sim_box,
+                       plan.terminal_barostat_point_dt(), timings)
+    }
     if let Some(k) = post_force_composed_kernel {
         k.launch(buffers, integrator, thermostat.as_ref(), barostat.as_ref(),
                  sim_box, dt, timings)
@@ -195,7 +241,8 @@ loop and the composed kernel is launched after every slot's
 scalar-prep work. When the composed kernel is absent (no active
 integrator), the loop walks the plan in full and no composed
 launch fires; a trailing `AfterKick` projection then dispatches
-during the walk like any other `ConstraintPoint`.
+during the walk like any other `ConstraintPoint`, and a terminal
+`BarostatPoint` dispatches its full `apply` in the walk.
 
 The plan-walk portion of this loop — the inner per-sub-step dispatch,
 including the dispatch of `ConstraintPoint` markers to the constraint
@@ -346,8 +393,20 @@ parsing the config and before constructing any GPU state.
   hooks. This is how the user expresses NVE composition (or a
   self-thermostatted integrator standing alone).
 - The barostat slot is optional. When `[barostat]` is omitted, the
-  runner holds `None` and skips the `apply` hook. This is how the
-  user expresses constant-volume composition.
+  runner holds `None` and every `BarostatPoint` in the plan is a no-op.
+  This is how the user expresses constant-volume composition.
+- A per-step `[barostat]` requires the configured integrator's plan to
+  carry at least one `BarostatPoint` marker; otherwise the barostat's
+  `apply` would never fire. An integrator that does not own a barostat
+  and hosts a per-step barostat therefore emits a `BarostatPoint`
+  (`velocity-verlet` and `langevin-baoab` both emit a terminal one). A
+  registry lint test asserts this for every built-in integrator that
+  accepts a per-step barostat; the runner additionally guards at phase
+  setup, returning `RunnerError::BarostatPlacementMissing { integrator:
+  <kind name> }` when a per-step barostat is configured with an
+  integrator whose plan has no `BarostatPoint`. (A periodic barostat
+  couples through `apply_move` at batch boundaries and needs no
+  `BarostatPoint`.)
 - The `[thermostat]` and `[barostat]` slots accept at most one entry
   each per run. Composing multiple simultaneous thermostats or
   multiple simultaneous barostats is out of scope.
@@ -412,6 +471,19 @@ successfully.
       /// so a projection's velocity and virial factors use the correct
       /// interval.
       ConstraintPoint { phase: ConstraintPhase, dt: f32 },
+
+      /// Dispatch the configured per-step barostat's `apply` at this
+      /// point in the plan, with the given `dt`. Dispatched by the
+      /// runner, not by the integrator's `execute()`; a no-op when no
+      /// per-step barostat is configured (and inert for a periodic
+      /// barostat, whose `apply` is the no-op default). An integrator
+      /// that hosts a barostat places a single terminal `BarostatPoint`
+      /// (the canonical placement — the runner fuses the per-particle
+      /// rescale into the composed post-force kernel) or a mid-plan
+      /// `BarostatPoint` for interleaved coupling (the runner runs
+      /// `apply` standalone). `dt` is the sub-step timestep the coupling
+      /// operates over.
+      BarostatPoint { dt: f32 },
 
       /// Force-pipeline evaluation. Dispatched by the runner, not by
       /// the integrator's `execute()`. The `class` field selects
@@ -572,23 +644,39 @@ successfully.
     from CUDA-graph capture (a `ThermostatHalf` dispatches host-side
     thermostat arithmetic, which cannot be captured; such plans run
     on the eager path — see `cuda-graphs.md`).
-  - `StepPlan::ends_with_velocity_projection() -> bool` — `true` iff
-    the plan's final sub-step is
-    `ConstraintPoint { phase: ConstraintPhase::AfterKick, .. }`. The
-    runner consults this to decide whether a trailing velocity
-    projection is displaced past the composed post-force launch (see
-    *Per-Step Interface*). `ConstraintPoint` markers dispatch pure
-    kernel launches and never disqualify a plan from CUDA-graph
-    capture, so — unlike `has_thermostat_points()` — this predicate
-    does not affect graph eligibility.
+  - The plan's **trailing post-force markers** are the maximal trailing
+    run of `ConstraintPoint { phase: AfterKick }` and `BarostatPoint`
+    sub-steps (in any order among themselves). The runner dispatches
+    them in its post-walk tail rather than the plan walk so they compose
+    with the composed post-force kernel (see *Per-Step Interface*). The
+    four query methods below inspect this run.
+  - `StepPlan::ends_with_velocity_projection() -> bool` — `true` iff the
+    trailing post-force-marker run contains a
+    `ConstraintPoint { phase: AfterKick }`. The runner consults this to
+    decide whether a trailing velocity projection is displaced past the
+    composed post-force launch. `ConstraintPoint` markers dispatch pure
+    kernel launches and never disqualify a plan from CUDA-graph capture,
+    so — unlike `has_thermostat_points()` — this predicate does not
+    affect graph eligibility.
   - `StepPlan::terminal_velocity_projection_dt() -> Option<f32>` — the
-    `dt` carried by the plan's final
-    `ConstraintPoint { phase: AfterKick }` sub-step, or `None` when the
-    plan does not end with a velocity projection. The runner passes the
-    `Some` value to the displaced `apply_after_kick` fired after the
-    composed launch.
+    `dt` carried by the `ConstraintPoint { phase: AfterKick }` in the
+    trailing post-force-marker run, or `None` when there is none. The
+    runner passes the `Some` value to the displaced `apply_after_kick`
+    fired after the composed launch.
+  - `StepPlan::has_barostat_points() -> bool` — `true` iff any sub-step
+    is a `BarostatPoint`.
+  - `StepPlan::terminal_barostat_point_dt() -> Option<f32>` — the `dt`
+    carried by the `BarostatPoint` in the trailing post-force-marker
+    run (the canonical, composed-fused placement), or `None` when the
+    plan has no terminal `BarostatPoint`. A `BarostatPoint` outside the
+    trailing run (interleaved) is not reported here; the runner
+    dispatches it during the walk. A plan with a terminal
+    `BarostatPoint` stays CUDA-graph-eligible (the barostat participates
+    in the composed kernel exactly as a fixed post-step barostat); a
+    plan with an interleaved `BarostatPoint` runs on the eager path (the
+    mid-walk barostat arithmetic cannot be captured).
 
-- `RunStepOptions` — per-call options for `run_step`, bundling the four <!-- rq-1d366b88 -->
+- `RunStepOptions` — per-call options for `run_step`, bundling the <!-- rq-1d366b88 -->
   flags that select among plan-walk modes. Plain `Copy` data; a caller
   overrides individual fields against `Default`.
 
@@ -598,6 +686,7 @@ successfully.
       pub run_neighbor_pre_step: bool,
       pub skip_substep_index: Option<usize>,
       pub defer_terminal_velocity_projection: bool,
+      pub defer_terminal_barostat_point: bool,
       pub runner_needs_scalars: bool,
   }
   ```
@@ -613,7 +702,7 @@ successfully.
     work through the JIT-composed post-force kernel instead (see
     `jit-composed-post-force.md`). `None` walks every sub-step.
   - `defer_terminal_velocity_projection` — `true` makes `run_step`
-    skip dispatch of the plan's final sub-step when it is a
+    skip dispatch of the trailing-post-force-marker
     `ConstraintPoint { phase: AfterKick }`; the runner fires the
     corresponding `apply_after_kick` after the composed post-force
     launch so the projection follows the composed kernel's fused kick.
@@ -622,21 +711,33 @@ successfully.
     *Per-Step Interface* and `jit-composed-post-force.md`). `false`
     dispatches every `ConstraintPoint` in the walk, including a
     trailing `AfterKick`.
+  - `defer_terminal_barostat_point` — `true` makes `run_step` skip
+    dispatch of the trailing-post-force-marker `BarostatPoint`; the
+    runner fires `barostat.apply` in the post-walk tail (before the
+    composed launch) so the barostat's per-particle rescale fuses into
+    the composed kernel. Set by the runner when a per-step barostat is
+    configured and the plan carries a terminal `BarostatPoint`. `false`
+    dispatches every `BarostatPoint` in the walk as a full standalone
+    `apply` (the interleaved-coupling path).
   - `runner_needs_scalars` — `true` resolves every `ForceEval` to
     `AggregateLevel::ForcesAndScalars` regardless of the sub-step's own
     preference (see `resolve_aggregate_level`).
 
-  Constraint-hook dispatch itself is not gated by a flag: `run_step`
-  dispatches every `ConstraintPoint` marker it walks whenever a
-  `Constraint` slot is passed, and the markers are no-ops when the
-  slot is `None`. Only constraint-capable integrators emit the
-  markers.
+  Constraint-hook and per-step-barostat dispatch are not gated by a
+  standalone flag: `run_step` dispatches every `ConstraintPoint` marker
+  it walks whenever a `Constraint` slot is passed, and every
+  `BarostatPoint` it walks whenever a per-step `Barostat` is passed;
+  the markers are no-ops when the corresponding slot is absent. Only
+  the *terminal* markers are governed by the two `defer_*` flags, which
+  hand them to the runner's post-walk tail so they compose with the
+  post-force kernel.
 
   `RunStepOptions::default()` is
   `{ run_neighbor_pre_step: true, skip_substep_index: None,
-  defer_terminal_velocity_projection: false, runner_needs_scalars:
-  false }` — the ordinary per-step path that dispatches every
-  `ConstraintPoint` in the walk and uses the cheap force level.
+  defer_terminal_velocity_projection: false,
+  defer_terminal_barostat_point: false, runner_needs_scalars: false }`
+  — the ordinary per-step path that dispatches every `ConstraintPoint`
+  and `BarostatPoint` in the walk and uses the cheap force level.
 
 - `Integrator` — object-safe trait implemented by every concrete <!-- rq-78f484d9 -->
   integrator. Owns the core time-stepping algorithm.
@@ -779,6 +880,17 @@ successfully.
       /// `buffers.positions_*` and `sim_box`. Never launches the
       /// force pipeline directly. A periodic barostat leaves this at
       /// the no-op default.
+      ///
+      /// Dispatched at a `SubStep::BarostatPoint` marker (see
+      /// *Per-Step Interface*), not at a fixed runner position. At a
+      /// terminal (canonical) `BarostatPoint` the runner fires `apply`
+      /// in the post-walk tail and the per-particle rescale fuses into
+      /// the composed post-force kernel (so `apply` does scalar-prep and
+      /// box mutation; the rescale is the barostat's composed fragment).
+      /// At an interleaved (mid-plan) `BarostatPoint` the runner fires
+      /// `apply` during the walk and the barostat is excluded from the
+      /// composed kernel, so `apply` must perform its full per-particle
+      /// rescale itself.
       fn apply(
           &mut self,
           buffers: &mut ParticleBuffers,
@@ -1059,7 +1171,10 @@ successfully.
   `RunnerError::Barostat(BarostatError)`, plus
   `RunnerError::Constraint(ConstraintError)` for constraint-slot
   construction failures and hook-invocation failures
-  (`constraint-framework.md`).
+  (`constraint-framework.md`). It additionally carries
+  `RunnerError::BarostatPlacementMissing { integrator: String }`,
+  returned at phase setup when a per-step barostat is configured with an
+  integrator whose plan carries no `BarostatPoint` marker.
 
 ### Functions and methods <!-- rq-c8848b7f -->
 
@@ -1144,7 +1259,7 @@ successfully.
     correct when called on its other SubSteps regardless of
     whether the composed-kernel path is active.
 
-- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, thermostat: Option<&mut dyn Thermostat>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>` <!-- rq-277dbeb2 -->
+- `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, thermostat: Option<&mut dyn Thermostat>, barostat: Option<&mut dyn Barostat>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>` <!-- rq-277dbeb2 -->
   - The single free-function plan walker: realises the *Per-Step
     Interface* for one timestep. Calls `integrator.plan(dt)`, then
     dispatches each sub-step, skipping the sub-step at
@@ -1165,6 +1280,9 @@ successfully.
       `apply_after_drift` for `AfterDrift`, `apply_after_kick` for
       `AfterKick`), passing the marker's `dt`. A no-op when
       `constraint` is `None`.
+    - `SubStep::BarostatPoint { dt }` → `barostat.apply(buffers,
+      sim_box, dt, timings)`, passing the marker's `dt`. A no-op when
+      `barostat` is `None` or the barostat is periodic.
     - Every other sub-step (including `Total`-sourced kicks) →
       `integrator.execute(...)`.
   - `run_step` dispatches only the plan's explicit `ThermostatHalf`
@@ -1173,13 +1291,20 @@ successfully.
     runner's timestep loop, which consults
     `plan.has_thermostat_points()` (see *Per-Step Interface*).
   - When `opts.defer_terminal_velocity_projection` is `true`,
-    `run_step` skips dispatch of the plan's final sub-step if it is a
+    `run_step` skips dispatch of the trailing-post-force-marker
     `ConstraintPoint { phase: AfterKick }`; the runner fires the
     corresponding `apply_after_kick` after the composed post-force
     launch (see *Per-Step Interface*). Every non-terminal
     `ConstraintPoint` still dispatches in the walk. When `constraint`
     is `None`, or the plan carries no `ConstraintPoint` markers, the
     walk reduces to a straight plan walk with no constraint hooks.
+  - When `opts.defer_terminal_barostat_point` is `true`, `run_step`
+    skips dispatch of the trailing-post-force-marker `BarostatPoint`;
+    the runner fires `barostat.apply` in the post-walk tail (see
+    *Per-Step Interface*). Every non-terminal `BarostatPoint` still
+    dispatches in the walk. When `barostat` is `None` (or periodic),
+    or the plan carries no `BarostatPoint` markers, no per-step barostat
+    coupling fires from the walk.
   - Each `ForceEval`'s aggregate level is
     `resolve_aggregate_level(sub_step_level, opts.runner_needs_scalars)`.
   - The runner builds a `RunStepOptions` per step for the ordinary,
@@ -1819,6 +1944,60 @@ Feature: Pluggable integration framework
     Then plan.ends_with_velocity_projection() is true
     Given a plan whose final sub-step is KickHalf
     Then plan.ends_with_velocity_projection() is false
+
+  # --- Plan-declared barostat points ---
+
+  @rq-b167a309
+  Scenario: A terminal BarostatPoint dispatches barostat.apply once
+    Given a recording per-step barostat
+    And a stub integrator whose plan is [KickHalf, BarostatPoint { dt }]
+    When the runner executes one timestep with the barostat and no composed kernel
+    Then barostat.apply is recorded exactly once with the marker's dt
+
+  @rq-68061953
+  Scenario: BarostatPoint is a no-op when no per-step barostat is configured
+    Given a stub integrator whose plan contains a BarostatPoint
+    When run_step walks the plan with barostat = None
+    Then the walk completes with Ok(())
+    And no barostat method is invoked
+
+  @rq-63fe749a
+  Scenario: BarostatPoint is inert for a periodic barostat
+    Given a Monte-Carlo (periodic) barostat whose apply is the no-op default
+    And a stub integrator whose plan contains a terminal BarostatPoint
+    When the runner executes one timestep
+    Then barostat.apply performs no work
+    And the periodic move still fires through apply_move at its batch cadence
+
+  @rq-f9d0621d
+  Scenario: has_barostat_points and terminal_barostat_point_dt reflect the plan
+    Given a plan whose final sub-step is BarostatPoint { dt: 0.5 }
+    Then plan.has_barostat_points() is true
+    And plan.terminal_barostat_point_dt() is Some(0.5)
+    Given a plan with a BarostatPoint that is not in the trailing run
+    Then plan.has_barostat_points() is true
+    And plan.terminal_barostat_point_dt() is None
+
+  @rq-a2fbf61e
+  Scenario: defer_terminal_barostat_point skips the trailing BarostatPoint in the walk
+    Given a recording per-step barostat
+    And a stub integrator whose plan ends in [KickHalf, BarostatPoint]
+    When run_step is called with defer_terminal_barostat_point = true
+    Then barostat.apply is not invoked during the walk
+
+  @rq-e043b064
+  Scenario: An interleaved BarostatPoint dispatches apply during the walk
+    Given a recording per-step barostat
+    And a stub integrator whose plan is [BarostatPoint { dt }, ForceEval, KickHalf]
+    When run_step is called with defer_terminal_barostat_point = false
+    Then barostat.apply is invoked once during the walk, before the ForceEval
+
+  @rq-1d9788b5
+  Scenario: A per-step barostat with an integrator that emits no BarostatPoint is rejected at phase setup
+    Given a stub integrator whose plan contains no BarostatPoint
+    And a per-step barostat configured
+    When the runner enters the phase
+    Then it returns Err(RunnerError::BarostatPlacementMissing { integrator })
 
   # --- Class-sourced kicks ---
 

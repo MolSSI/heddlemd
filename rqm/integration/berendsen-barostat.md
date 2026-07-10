@@ -6,7 +6,9 @@ pressure-coupling slot. One of the pluggable barostat slots (see
 `framework.md`); selected by `kind = "berendsen"` in the config's
 `[barostat]` section.
 
-The barostat runs once per timestep, after the integrator's step and
+The barostat's `apply` is dispatched once per timestep at the
+integrator plan's terminal `BarostatPoint` (see `framework.md`,
+*Per-Step Interface*), which the runner fires in its post-walk tail
 after the optional thermostat's `apply_post`. Each invocation
 computes the instantaneous pressure from the kinetic energy and the
 total scalar virial, derives an isotropic scale factor `μ` that
@@ -32,8 +34,10 @@ byte-identical trajectories across runs on the same GPU.
 ## Algorithm <!-- rq-6fb6f0b7 -->
 
 The barostat is invoked through `apply(buffers, sim_box, dt,
-timings)` after `integrator.step()` and after the thermostat's
-`apply_post` (when a thermostat is configured) return. Both
+timings)`, dispatched at the plan's terminal `BarostatPoint` after the
+plan walk and after the thermostat's `apply_post` (when a thermostat is
+configured). Its per-particle position rescale fuses into the composed
+post-force kernel at this canonical placement. Both
 `buffers.virials` (per-particle scalar virials populated by the
 in-step force evaluation) and `buffers.velocities_*` (post-step
 velocities, possibly rescaled by the thermostat) are read by this

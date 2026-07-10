@@ -80,6 +80,10 @@ pub enum StepError {
     /// A plan-declared `ThermostatHalf` dispatch failed.
     #[error("{0}")]
     Thermostat(#[from] ThermostatError),
+    /// A plan-declared `BarostatPoint` dispatch failed.
+    // rq-dbbffa7d
+    #[error("{0}")]
+    Barostat(#[from] BarostatError),
     #[error("{0}")]
     Timings(#[from] crate::timings::TimingsError),
     // rq-0e26dde0
@@ -207,6 +211,15 @@ pub enum SubStep {
     /// use the correct interval.
     // rq-dbbffa7d
     ConstraintPoint { phase: ConstraintPhase, dt: Real },
+    /// Dispatch the configured per-step barostat's `apply` here with the
+    /// given `dt`. Dispatched by the runner, not by `execute()`; a no-op
+    /// when no per-step barostat is configured (and inert for a periodic
+    /// barostat, whose `apply` is the no-op default). A terminal
+    /// `BarostatPoint` is the canonical placement (the runner fuses the
+    /// per-particle rescale into the composed post-force kernel); a
+    /// mid-plan `BarostatPoint` runs `apply` standalone during the walk.
+    // rq-dbbffa7d
+    BarostatPoint { dt: Real },
     /// Force-pipeline evaluation. Dispatched by the runner, not by
     /// the integrator's `execute()`. `class` selects which force
     /// class(es) to re-evaluate:
@@ -251,9 +264,24 @@ impl SubStep {
             SubStep::KickDrift { .. } => "KickDrift",
             SubStep::ThermostatHalf { .. } => "ThermostatHalf",
             SubStep::ConstraintPoint { .. } => "ConstraintPoint",
+            SubStep::BarostatPoint { .. } => "BarostatPoint",
             SubStep::ForceEval { .. } => "ForceEval",
             SubStep::Custom { .. } => "Custom",
         }
+    }
+
+    // rq-dbbffa7d — `true` iff this sub-step is a trailing post-force
+    // marker: a terminal constraint velocity projection or a barostat
+    // point. The runner dispatches the trailing run of these in its
+    // post-walk tail rather than the plan walk.
+    fn is_post_force_marker(&self) -> bool {
+        matches!(
+            self,
+            SubStep::ConstraintPoint {
+                phase: ConstraintPhase::AfterKick,
+                ..
+            } | SubStep::BarostatPoint { .. }
+        )
     }
 }
 
@@ -282,7 +310,22 @@ impl StepPlan {
     }
 
     // rq-9fbba3be
-    /// `true` iff the plan's final sub-step is a
+    /// Index at which the plan's **trailing post-force markers** begin —
+    /// the maximal trailing run of `ConstraintPoint { AfterKick }` and
+    /// `BarostatPoint` sub-steps. Equals `steps.len()` when the final
+    /// sub-step is not a post-force marker. The runner dispatches this
+    /// trailing run in its post-walk tail so it composes with the
+    /// composed post-force kernel (see `framework.md`).
+    pub fn trailing_post_force_start(&self) -> usize {
+        let mut start = self.steps.len();
+        while start > 0 && self.steps[start - 1].is_post_force_marker() {
+            start -= 1;
+        }
+        start
+    }
+
+    // rq-9fbba3be
+    /// `true` iff the trailing post-force-marker run contains a
     /// `ConstraintPoint { phase: AfterKick }`. The runner consults this
     /// to decide whether a trailing velocity projection is displaced
     /// past the composed post-force launch (see `framework.md`).
@@ -291,29 +334,59 @@ impl StepPlan {
     /// `has_thermostat_points()` — this predicate does not affect graph
     /// eligibility.
     pub fn ends_with_velocity_projection(&self) -> bool {
-        matches!(
-            self.steps.last(),
-            Some(SubStep::ConstraintPoint {
-                phase: ConstraintPhase::AfterKick,
-                ..
-            })
-        )
+        self.terminal_velocity_projection_dt().is_some()
     }
 
     // rq-9fbba3be
-    /// The `dt` carried by the plan's final
-    /// `ConstraintPoint { phase: AfterKick }` sub-step. The runner
-    /// passes it to the displaced `apply_after_kick` fired after the
-    /// composed launch. Returns `None` when the plan does not end with a
-    /// velocity projection.
+    /// The `dt` carried by the `ConstraintPoint { phase: AfterKick }` in
+    /// the trailing post-force-marker run, or `None` when there is none.
+    /// The runner passes the `Some` value to the displaced
+    /// `apply_after_kick` fired after the composed launch.
     pub fn terminal_velocity_projection_dt(&self) -> Option<Real> {
-        match self.steps.last() {
-            Some(SubStep::ConstraintPoint {
-                phase: ConstraintPhase::AfterKick,
-                dt,
-            }) => Some(*dt),
-            _ => None,
-        }
+        self.steps[self.trailing_post_force_start()..]
+            .iter()
+            .find_map(|s| match s {
+                SubStep::ConstraintPoint {
+                    phase: ConstraintPhase::AfterKick,
+                    dt,
+                } => Some(*dt),
+                _ => None,
+            })
+    }
+
+    // rq-9fbba3be
+    /// `true` iff any sub-step is a `BarostatPoint`.
+    pub fn has_barostat_points(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s, SubStep::BarostatPoint { .. }))
+    }
+
+    // rq-9fbba3be
+    /// The `dt` carried by the `BarostatPoint` in the trailing
+    /// post-force-marker run (the canonical, composed-fused placement),
+    /// or `None` when the plan has no terminal `BarostatPoint`. A
+    /// `BarostatPoint` outside the trailing run (interleaved) is not
+    /// reported here.
+    pub fn terminal_barostat_point_dt(&self) -> Option<Real> {
+        self.steps[self.trailing_post_force_start()..]
+            .iter()
+            .find_map(|s| match s {
+                SubStep::BarostatPoint { dt } => Some(*dt),
+                _ => None,
+            })
+    }
+
+    // rq-9fbba3be
+    /// `true` iff the plan carries a `BarostatPoint` outside the trailing
+    /// post-force-marker run (interleaved placement). Such a plan runs on
+    /// the eager path: the mid-walk barostat arithmetic cannot be
+    /// captured into a CUDA graph.
+    pub fn has_interleaved_barostat_point(&self) -> bool {
+        let start = self.trailing_post_force_start();
+        self.steps[..start]
+            .iter()
+            .any(|s| matches!(s, SubStep::BarostatPoint { .. }))
     }
 }
 
@@ -422,6 +495,14 @@ pub struct RunStepOptions {
     /// the integrator's trailing kick and a constraint slot is
     /// installed. Default `false`.
     pub defer_terminal_velocity_projection: bool,
+    /// `true` makes `run_step` skip dispatch of the trailing-post-force-
+    /// marker `BarostatPoint`; the runner fires `barostat.apply` in the
+    /// post-walk tail (before the composed launch) so the barostat's
+    /// per-particle rescale fuses into the composed kernel. Set by the
+    /// runner when a per-step barostat is configured and the plan carries
+    /// a terminal `BarostatPoint`. Default `false` dispatches every
+    /// `BarostatPoint` in the walk as a full standalone `apply`.
+    pub defer_terminal_barostat_point: bool,
     /// `true` resolves every `ForceEval` to
     /// `AggregateLevel::ForcesAndScalars`. Default `false`.
     pub runner_needs_scalars: bool,
@@ -433,6 +514,7 @@ impl Default for RunStepOptions {
             run_neighbor_pre_step: true,
             skip_substep_index: None,
             defer_terminal_velocity_projection: false,
+            defer_terminal_barostat_point: false,
             runner_needs_scalars: false,
         }
     }
@@ -461,6 +543,7 @@ pub fn run_step(
     force_field: &mut ForceField,
     mut constraint: Option<&mut dyn Constraint>,
     mut thermostat: Option<&mut dyn Thermostat>,
+    mut barostat: Option<&mut dyn Barostat>,
     dt: Real,
     timings: &mut Timings,
     opts: RunStepOptions,
@@ -469,19 +552,23 @@ pub fn run_step(
         run_neighbor_pre_step,
         skip_substep_index,
         defer_terminal_velocity_projection,
+        defer_terminal_barostat_point,
         runner_needs_scalars,
     } = opts;
     let plan = integrator.plan(dt);
-    let last_idx = plan.steps.len().wrapping_sub(1);
+    // rq-277dbeb2 — the trailing run of post-force markers (terminal
+    // velocity projection and/or terminal barostat point) that the
+    // runner dispatches in its post-walk tail rather than the walk.
+    let trailing_start = plan.trailing_post_force_start();
     for (idx, sub) in plan.steps.iter().enumerate() {
         if Some(idx) == skip_substep_index {
             continue;
         }
-        // rq-277dbeb2 — the runner fires the plan's trailing velocity
+        // rq-277dbeb2 — the runner fires the trailing velocity
         // projection after the composed post-force launch (which
         // performs the absorbed kick), so skip it here.
         if defer_terminal_velocity_projection
-            && idx == last_idx
+            && idx >= trailing_start
             && matches!(
                 sub,
                 SubStep::ConstraintPoint {
@@ -489,6 +576,15 @@ pub fn run_step(
                     ..
                 }
             )
+        {
+            continue;
+        }
+        // rq-dbbffa7d — the runner fires the trailing barostat point in
+        // the post-walk tail (its per-particle rescale fuses into the
+        // composed launch), so skip it here.
+        if defer_terminal_barostat_point
+            && idx >= trailing_start
+            && matches!(sub, SubStep::BarostatPoint { .. })
         {
             continue;
         }
@@ -571,6 +667,17 @@ pub fn run_step(
                     }
                 }
             }
+            // rq-dbbffa7d — plan-declared, interleaved (non-terminal)
+            // barostat point: a full standalone `apply` during the walk.
+            // A no-op when no per-step barostat is configured (and inert
+            // for a periodic barostat, whose `apply` is the no-op
+            // default). Terminal barostat points are deferred above and
+            // fired by the runner's post-walk tail.
+            SubStep::BarostatPoint { dt: sub_dt } => {
+                if let Some(b) = barostat.as_mut() {
+                    b.apply(buffers, sim_box, *sub_dt, timings)?;
+                }
+            }
             other => {
                 integrator.execute(other, buffers, sim_box, timings)?;
             }
@@ -647,6 +754,7 @@ impl IntegratorStepExt for dyn Integrator + '_ {
             force_field,
             None,
             None,
+            None,
             dt,
             timings,
             RunStepOptions { runner_needs_scalars: true, ..Default::default() },
@@ -670,6 +778,7 @@ impl<T: Integrator> IntegratorStepExt for T {
             buffers,
             sim_box,
             force_field,
+            None,
             None,
             None,
             dt,
@@ -746,6 +855,7 @@ impl IntegratorStepWithConstraintExt for dyn ConstraintCapableIntegrator + '_ {
             force_field,
             Some(constraint),
             None,
+            None,
             dt,
             timings,
             RunStepOptions {
@@ -777,6 +887,7 @@ impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
             sim_box,
             force_field,
             Some(constraint),
+            None,
             None,
             dt,
             timings,

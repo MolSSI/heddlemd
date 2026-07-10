@@ -182,6 +182,11 @@ impl Integrator for VelocityVerletState {
                     phase: ConstraintPhase::AfterKick,
                     dt,
                 },
+                // rq-dbbffa7d — terminal barostat point (canonical
+                // placement): a no-op without a per-step barostat, else
+                // fired in the runner's post-walk tail with the rescale
+                // fused into the composed post-force kernel.
+                SubStep::BarostatPoint { dt },
             ],
         }
     }
