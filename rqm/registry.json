@@ -1308,6 +1308,18 @@
     "title": "Suffix-closed subset selection",
     "type": "section"
   },
+  "rq-0945ffcb": {
+    "decl": "Scenario: NVE velocity-Verlet with SETTLE keeps rigid water on both the position and velocity manifolds",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NVE velocity-Verlet with SETTLE keeps rigid water on both the position and velocity manifolds",
+    "type": "scenario"
+  },
   "rq-098fabd1": {
     "decl": "Scenario: compute_total_virial matches the host-side sum on small N",
     "file": "integration/berendsen-barostat",
@@ -3615,6 +3627,18 @@
     "title": "Fast-only system matches velocity Verlet at the inner timestep",
     "type": "scenario"
   },
+  "rq-195a6215": {
+    "decl": "Scenario: defer_terminal_velocity_projection skips the trailing AfterKick in the walk",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "defer_terminal_velocity_projection skips the trailing AfterKick in the walk",
+    "type": "scenario"
+  },
   "rq-1979ae5a": {
     "decl": "## Device-resident lattice mirror",
     "file": "simulation-box",
@@ -5736,6 +5760,10 @@
       {
         "file": "src/integrator/mod.rs",
         "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
       }
     ],
     "title": "run_step",
@@ -6319,6 +6347,18 @@
     "title": "AggregateLevel::ForcesAndScalars selects the _fev entry point",
     "type": "scenario"
   },
+  "rq-2b7e8273": {
+    "decl": "Scenario: ends_with_velocity_projection reflects the plan's final sub-step",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ends_with_velocity_projection reflects the plan's final sub-step",
+    "type": "scenario"
+  },
   "rq-2bbc4121": {
     "decl": "Scenario: Construct with matching arrays and explicit unique IDs",
     "file": "particle-state",
@@ -6730,6 +6770,18 @@
     "title": "Two atoms at equilibrium distance produce zero force",
     "type": "scenario"
   },
+  "rq-2e4f64b0": {
+    "decl": "Scenario: ConstraintPoint markers are no-ops when no constraint slot is configured",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ConstraintPoint markers are no-ops when no constraint slot is configured",
+    "type": "scenario"
+  },
   "rq-2e53772f": {
     "decl": "- `ForceField::step_no_neighbor_check(buffers: &mut ParticleBuffers,",
     "file": "cuda-graphs",
@@ -6953,7 +7005,7 @@
     "type": "scenario"
   },
   "rq-309d8d50": {
-    "decl": "Scenario: supports_constraints == false suppresses all hook insertion",
+    "decl": "Scenario: A plan with no ConstraintPoint markers fires no hooks even with a slot present",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -6961,7 +7013,7 @@
         "kind": "code"
       }
     ],
-    "title": "supports_constraints == false suppresses all hook insertion",
+    "title": "A plan with no ConstraintPoint markers fires no hooks even with a slot present",
     "type": "scenario"
   },
   "rq-30c21c70": {
@@ -8252,7 +8304,7 @@
     "type": "scenario"
   },
   "rq-3b42c2ff": {
-    "decl": "Scenario: Plan with two Drift sub-steps fires before/after_drift twice",
+    "decl": "Scenario: Repeated markers dispatch once each in plan order",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -8260,7 +8312,7 @@
         "kind": "code"
       }
     ],
-    "title": "Plan with two Drift sub-steps fires before/after_drift twice",
+    "title": "Repeated markers dispatch once each in plan order",
     "type": "scenario"
   },
   "rq-3b6d5001": {
@@ -13105,6 +13157,18 @@
     "title": "Diagnostic log columns",
     "type": "section"
   },
+  "rq-62c54adc": {
+    "decl": "Scenario: A ConstraintPoint hook receives the marker's own dt",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A ConstraintPoint hook receives the marker's own dt",
+    "type": "scenario"
+  },
   "rq-62e2469f": {
     "decl": "Scenario: morse_bond_force on zero bonds is a no-op",
     "file": "forces/morse-bonded",
@@ -14068,6 +14132,14 @@
     "title": "Periodic dihedral_type rejects non-finite k_phi",
     "type": "scenario"
   },
+  "rq-6b22e2c4": {
+    "decl": "### Ordering of the terminal velocity projection",
+    "file": "integration/constraint-framework",
+    "level": 3,
+    "refs": [],
+    "title": "Ordering of the terminal velocity projection",
+    "type": "section"
+  },
   "rq-6b38fe0b": {
     "decl": "Scenario: reduce_dihedral_forces on zero particles is a no-op",
     "file": "forces/periodic-dihedral",
@@ -14836,7 +14908,7 @@
     "type": "scenario"
   },
   "rq-7047ea32": {
-    "decl": "Scenario: Integrator without constraints skips all three hooks",
+    "decl": "Scenario: Integrator with a marker-bearing plan and no constraint slot fires no hooks",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -14844,7 +14916,7 @@
         "kind": "code"
       }
     ],
-    "title": "Integrator without constraints skips all three hooks",
+    "title": "Integrator with a marker-bearing plan and no constraint slot fires no hooks",
     "type": "scenario"
   },
   "rq-706c4b80": {
@@ -18850,7 +18922,7 @@
     "type": "scenario"
   },
   "rq-90538790": {
-    "decl": "Scenario: Dispatch loop calls all three constraint hooks in order",
+    "decl": "Scenario: Dispatch loop calls all three constraint hooks in marker order",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -18858,7 +18930,7 @@
         "kind": "code"
       }
     ],
-    "title": "Dispatch loop calls all three constraint hooks in order",
+    "title": "Dispatch loop calls all three constraint hooks in marker order",
     "type": "scenario"
   },
   "rq-909e5bb4": {
@@ -19942,7 +20014,7 @@
     "type": "scenario"
   },
   "rq-99034e90": {
-    "decl": "Scenario: Plan with a single Drift sub-step fires before_drift and after_drift around it",
+    "decl": "Scenario: A plan's ConstraintPoint markers dispatch to the matching hooks",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -19950,7 +20022,7 @@
         "kind": "code"
       }
     ],
-    "title": "Plan with a single Drift sub-step fires before_drift and after_drift around it",
+    "title": "A plan's ConstraintPoint markers dispatch to the matching hooks",
     "type": "scenario"
   },
   "rq-990d287d": {
@@ -21144,7 +21216,12 @@
     "decl": "### Step Plan",
     "file": "integration/velocity-verlet",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/velocity_verlet.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Step Plan",
     "type": "section"
   },
@@ -21899,6 +21976,18 @@
     "title": "Packed-neighbour pass runs one block per i-block",
     "type": "scenario"
   },
+  "rq-a78ba267": {
+    "decl": "Scenario: With a composed kernel absorbing the trailing kick, the AfterKick projection fires after the composed launch",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "With a composed kernel absorbing the trailing kick, the AfterKick projection fires after the composed launch",
+    "type": "scenario"
+  },
   "rq-a7aac794": {
     "decl": "Scenario: Cell counts reflect perpendicular widths for a tilted box",
     "file": "forces/neighbor-list",
@@ -22086,7 +22175,7 @@
     "type": "scenario"
   },
   "rq-a90e4189": {
-    "decl": "Scenario: Plan whose final sub-step is not a Kick does not fire after_kick",
+    "decl": "Scenario: A plan with no AfterKick marker never fires apply_after_kick",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -22094,7 +22183,7 @@
         "kind": "code"
       }
     ],
-    "title": "Plan whose final sub-step is not a Kick does not fire after_kick",
+    "title": "A plan with no AfterKick marker never fires apply_after_kick",
     "type": "scenario"
   },
   "rq-a91f1e58": {
@@ -25409,7 +25498,7 @@
     "type": "section"
   },
   "rq-c3b3ec99": {
-    "decl": "Scenario: Custom sub-step alone fires no constraint hooks",
+    "decl": "Scenario: A plan with no ConstraintPoint markers fires no constraint hooks",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -25417,7 +25506,7 @@
         "kind": "code"
       }
     ],
-    "title": "Custom sub-step alone fires no constraint hooks",
+    "title": "A plan with no ConstraintPoint markers fires no constraint hooks",
     "type": "scenario"
   },
   "rq-c3b69180": {
@@ -28335,6 +28424,14 @@
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
   },
+  "rq-d9290792": {
+    "decl": "### Interaction with the constraint slot",
+    "file": "integration/jit-composed-post-force",
+    "level": 3,
+    "refs": [],
+    "title": "Interaction with the constraint slot",
+    "type": "section"
+  },
   "rq-d9344e8e": {
     "decl": "### Types",
     "file": "registry-framework",
@@ -31180,6 +31277,18 @@
     "title": "Duplicate exclusion rejected",
     "type": "scenario"
   },
+  "rq-eea8aa89": {
+    "decl": "- `ConstraintPhase` — which constraint hook a `ConstraintPoint` <!-- inline -->",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ConstraintPhase",
+    "type": "api-item"
+  },
   "rq-eebf9f95": {
     "decl": "Scenario: r_skin default tracks the maximum atomic-unit cutoff",
     "file": "io/unit-system",
@@ -31208,6 +31317,18 @@
     ],
     "title": "Parameters",
     "type": "section"
+  },
+  "rq-eef4fb58": {
+    "decl": "Scenario: Two identical constrained velocity-Verlet runs are byte-identical",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two identical constrained velocity-Verlet runs are byte-identical",
+    "type": "scenario"
   },
   "rq-ef1feb38": {
     "decl": "### Types",
@@ -31574,6 +31695,18 @@
     "title": "Missing init field",
     "type": "scenario"
   },
+  "rq-f0f29827": {
+    "decl": "Scenario: A constrained velocity-Verlet phase runs under CUDA-graph capture and replay",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A constrained velocity-Verlet phase runs under CUDA-graph capture and replay",
+    "type": "scenario"
+  },
   "rq-f10530c8": {
     "decl": "Scenario: Two built composites claiming the same constituent error at construction",
     "file": "forces/framework",
@@ -31747,6 +31880,18 @@
     "title": "Open refuses to overwrite an existing file",
     "type": "scenario"
   },
+  "rq-f223c0e2": {
+    "decl": "Scenario: velocity-Verlet + CSVR + SETTLE keeps velocities on the manifold after the thermostat rescale",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "velocity-Verlet + CSVR + SETTLE keeps velocities on the manifold after the thermostat rescale",
+    "type": "scenario"
+  },
   "rq-f232d41b": {
     "decl": "Scenario: kernel_start with a KernelStage not in ORDER panics",
     "file": "performance-analysis",
@@ -31895,10 +32040,15 @@
     "type": "scenario"
   },
   "rq-f34598ae": {
-    "decl": "Scenario: install_constraint_hooks gates constraint-hook insertion",
+    "decl": "Scenario: ConstraintPoint markers dispatch to the constraint slot in the walk",
     "file": "integration/framework",
-    "refs": [],
-    "title": "install_constraint_hooks gates constraint-hook insertion",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ConstraintPoint markers dispatch to the constraint slot in the walk",
     "type": "scenario"
   },
   "rq-f34a4f43": {

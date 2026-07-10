@@ -1609,14 +1609,22 @@ pub(crate) fn run_md_phase_inner(
     let dt = phase.dt as Real;
     let phase_name = phase.name.as_str();
 
-    // Pre-fetch the supports_constraints bit before the per-step loop;
-    // the registry borrow does not need to be held during the loop body.
-    let supports_constraints = setup
-        .registries
-        .integrators
-        .lookup(&phase.integrator.kind)
-        .map(|b| b.supports_constraints(&phase.integrator.params))
-        .unwrap_or(false);
+    // rq-277dbeb2 — when a constraint slot is installed and the composed
+    // post-force kernel absorbs the integrator's trailing kick, the
+    // plan's trailing velocity projection is displaced past the composed
+    // launch: `run_step` skips it (via
+    // `defer_terminal_velocity_projection`) and the runner fires it after
+    // the launch with the marker's dt. `None` when no such displaced
+    // projection exists (no constraint slot, no composed kernel over the
+    // integrator, or the plan does not end with a velocity projection).
+    // The value is a phase-level constant: the plan shape is static and
+    // the composed-set membership is fixed at phase setup.
+    let deferred_terminal_projection_dt: Option<Real> =
+        if constraint.is_some() && post_force_substep_index.is_some() {
+            integrator.plan(dt).terminal_velocity_projection_dt()
+        } else {
+            None
+        };
 
     // Decide whether this phase is eligible for CUDA graph capture.
     // See `rqm/cuda-graphs.md` for the activation policy. Every
@@ -1656,7 +1664,7 @@ pub(crate) fn run_md_phase_inner(
             &mut thermostat,
             &mut barostat,
             &mut constraint,
-            supports_constraints,
+            deferred_terminal_projection_dt,
             plan_has_thermostat_points,
             dt,
             composed_post_force.as_ref(),
@@ -1688,7 +1696,7 @@ pub(crate) fn run_md_phase_inner(
             &mut thermostat,
             &mut barostat,
             &mut constraint,
-            supports_constraints,
+            deferred_terminal_projection_dt,
             dt,
             &mut timings,
             &setup.gpu.device,
@@ -1724,7 +1732,7 @@ pub(crate) fn run_md_phase_inner(
             &mut thermostat,
             &mut barostat,
             &mut constraint,
-            supports_constraints,
+            deferred_terminal_projection_dt,
             dt,
             composed_post_force.as_ref(),
             post_force_substep_index,
@@ -1753,7 +1761,7 @@ pub(crate) fn run_md_phase_inner(
                 &mut thermostat,
                 &mut barostat,
                 &mut constraint,
-                supports_constraints,
+                deferred_terminal_projection_dt,
             plan_has_thermostat_points,
                 dt,
                 composed_post_force.as_ref(),
@@ -1789,7 +1797,7 @@ pub(crate) fn run_md_phase_inner(
             &mut thermostat,
             &mut barostat,
             &mut constraint,
-            supports_constraints,
+            deferred_terminal_projection_dt,
             plan_has_thermostat_points,
             dt,
             composed_post_force.as_ref(),
@@ -2436,7 +2444,7 @@ fn capture_phase_graph(
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
-    supports_constraints: bool,
+    deferred_terminal_projection_dt: Option<Real>,
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
@@ -2451,7 +2459,7 @@ fn capture_phase_graph(
         thermostat,
         barostat,
         constraint,
-        supports_constraints,
+        deferred_terminal_projection_dt,
         dt,
         timings,
         device,
@@ -2472,7 +2480,7 @@ fn capture_phase_graph(
             thermostat,
             barostat,
             constraint,
-            supports_constraints,
+            deferred_terminal_projection_dt,
             dt,
             timings,
             device,
@@ -2503,7 +2511,7 @@ fn capture_one_graph(
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
-    supports_constraints: bool,
+    deferred_terminal_projection_dt: Option<Real>,
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
@@ -2568,7 +2576,7 @@ fn capture_one_graph(
                 crate::integrator::RunStepOptions {
                     run_neighbor_pre_step: false,
                     skip_substep_index: Some(skip_idx),
-                    install_constraint_hooks: supports_constraints,
+                    defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
                     runner_needs_scalars: needs_scalars,
                 },
             )
@@ -2584,7 +2592,7 @@ fn capture_one_graph(
                 timings,
                 crate::integrator::RunStepOptions {
                     run_neighbor_pre_step: false,
-                    install_constraint_hooks: supports_constraints,
+                    defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
                     runner_needs_scalars: needs_scalars,
                     ..Default::default()
                 },
@@ -2625,6 +2633,19 @@ fn capture_one_graph(
             }
         }
     }
+    // rq-277dbeb2 — the displaced terminal velocity projection runs
+    // after the composed launch (its fused kick), so it is the last
+    // per-particle velocity operation of the step. Captured into the
+    // graph so replay reproduces it.
+    if inner_failure.is_none() {
+        if let Some(projection_dt) = deferred_terminal_projection_dt {
+            if let Some(c) = constraint.as_mut() {
+                if let Err(e) = c.apply_after_kick(buffers, sim_box, projection_dt, timings) {
+                    inner_failure = Some(format!("deferred constraint.apply_after_kick: {e}"));
+                }
+            }
+        }
+    }
     // Always end capture, even on inner failure — a captured stream
     // must be closed to avoid leaving the device in capture mode.
     let graph = end_stream_capture(device)?;
@@ -2655,7 +2676,7 @@ fn run_per_step_range(
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
-    supports_constraints: bool,
+    deferred_terminal_projection_dt: Option<Real>,
     plan_owns_thermostat: bool,
     dt: Real,
     composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
@@ -2721,7 +2742,7 @@ fn run_per_step_range(
                     &mut *timings,
                     crate::integrator::RunStepOptions {
                         skip_substep_index: Some(skip_idx),
-                        install_constraint_hooks: supports_constraints,
+                        defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
                         runner_needs_scalars,
                         ..Default::default()
                     },
@@ -2737,7 +2758,7 @@ fn run_per_step_range(
                     dt,
                     &mut *timings,
                     crate::integrator::RunStepOptions {
-                        install_constraint_hooks: supports_constraints,
+                        defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
                         runner_needs_scalars,
                         ..Default::default()
                     },
@@ -2787,6 +2808,15 @@ fn run_per_step_range(
                 &mut *timings,
             )
             .map_err(|e| (e, ExitPhase::Loop))?;
+        }
+        // rq-277dbeb2 — the displaced terminal velocity projection runs
+        // after the composed launch (its fused kick), so it is the last
+        // per-particle velocity operation of the step.
+        if let Some(projection_dt) = deferred_terminal_projection_dt {
+            if let Some(c) = constraint.as_mut() {
+                c.apply_after_kick(&mut setup.buffers, &setup.sim_box, projection_dt, &mut *timings)
+                    .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Loop))?;
+            }
         }
 
         // rq-03a5a290 — a periodic (Monte-Carlo) barostat runs its
@@ -2915,7 +2945,7 @@ fn run_batched_graph_loop(
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
-    supports_constraints: bool,
+    deferred_terminal_projection_dt: Option<Real>,
     dt: Real,
     composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
     post_force_substep_index: Option<usize>,
@@ -3067,7 +3097,7 @@ fn run_batched_graph_loop(
                 thermostat,
                 barostat,
                 constraint,
-                supports_constraints,
+                deferred_terminal_projection_dt,
                 dt,
                 timings,
                 &device,

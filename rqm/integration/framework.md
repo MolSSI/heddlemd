@@ -19,14 +19,15 @@ compose at every timestep:
    `apply_move` (the Monte-Carlo barostat; see `mc-barostat.md`).
 4. An optional `Constraint` — holonomic constraint projection (rigid
    bonds, rigid groups). Driven by the runner during its walk of the
-   integrator's `StepPlan` (see *Per-Step Interface*): the runner
-   inserts the constraint's hooks at the canonical sub-step
-   boundaries (before / after every `Drift` or `KickDrift`, and after
-   the final velocity update). Integrators never reference the
-   constraint slot. The slot, its trait, its data layout, and its
-   compatibility rules are defined in `constraint-framework.md`; the
-   v1 implementation (SETTLE for three-atom rigid water) lives in
-   `settle.md`.
+   integrator's `StepPlan` (see *Per-Step Interface*): a
+   constraint-capable integrator places `SubStep::ConstraintPoint`
+   markers in its plan at the sub-step boundaries where the slot must
+   snapshot or project, and the runner dispatches each marker to the
+   corresponding `Constraint` hook. Integrators never hold a reference
+   to the constraint slot; they only declare where its hooks belong.
+   The slot, its trait, its data layout, and its compatibility rules
+   are defined in `constraint-framework.md`; the v1 implementation
+   (SETTLE for three-atom rigid water) lives in `settle.md`.
 
 Each slot is independently registered and independently selectable
 from TOML. Omitting `[thermostat]` selects NVE; omitting `[barostat]`
@@ -88,11 +89,12 @@ The default registry exposes three barostats:
 An integrator describes its work as an ordered sequence of typed
 *sub-steps* (a `StepPlan`) and exposes a method that executes one
 sub-step at a time. The runner walks the plan, dispatching each
-sub-step to either `integrator.execute(...)` or `force_field.step(...)`
-depending on the sub-step's variant, and inserts the constraint slot's
-hooks at the canonical sub-step boundaries (see `constraint-framework.md`
-for the hook contract). Integrators never reference the constraint
-slot directly.
+sub-step to `integrator.execute(...)`, `force_field.step(...)`, the
+configured thermostat, or the configured constraint slot depending on
+the sub-step's variant (see `constraint-framework.md` for the hook
+contract). Integrators never reference the constraint slot directly;
+a constraint-capable integrator only declares where the slot's hooks
+belong by placing `SubStep::ConstraintPoint` markers in its plan.
 
 The runner drives the timestep loop in a fixed pattern. Thermostat
 placement has two topologies, selected by the plan itself: a plan with
@@ -101,6 +103,25 @@ before the walk, `apply_post` after — the default topology every
 single-timestep integrator uses); a plan containing `ThermostatHalf`
 sub-steps owns its thermostat placement and receives no wrapping.
 
+Constraint placement is fully plan-declared: the runner fires a
+constraint hook only where the plan carries a `SubStep::ConstraintPoint`
+marker (see `constraint-framework.md`). The runner performs no
+structural inference from `Drift` / `KickHalf` variants. A
+`ConstraintPoint` is a no-op when the run has no constraint slot, so a
+constraint-capable integrator emits the markers unconditionally and the
+same plan drives constrained and unconstrained runs.
+
+One `ConstraintPoint` is treated specially by the composed post-force
+kernel. When the composed kernel (`jit-composed-post-force.md`) absorbs
+the integrator's trailing kick, that kick executes *after* the plan
+walk returns, so a trailing `ConstraintPoint { phase: AfterKick }`
+velocity projection — which must follow the kick — is displaced past
+the composed launch. The runner does not dispatch that trailing
+projection during the walk; it fires it after
+`launch_composed_post_force`, so the projection is the last
+per-particle velocity operation of the step, after the composed
+kernel's fused kick and any thermostat / barostat rescale.
+
 ```text
 loop step in 1..=n_steps:
     let plan = integrator.plan(dt)
@@ -108,17 +129,22 @@ loop step in 1..=n_steps:
     if let Some(t) = thermostat, !plan_owns_thermostat {
         t.apply_pre(buffers, dt, timings)
     }
-    let install_hooks = constraint.is_some()
-        && integrator_builder.supports_constraints(&integrator_slot.params)
     /* Some only when the integrator is in the composed set — a
        non-participating integrator's trailing kick is never
        skipped (jit-composed-post-force.md, suffix selection). */
     let post_force_sub_idx = integrator_in_composed_set
         .then(|| plan.last_post_force_substep_index())
+    /* The composed kernel absorbs the trailing kick, so a trailing
+       AfterKick projection is displaced past the composed launch. */
+    let defer_terminal_projection = constraint.is_some()
+        && post_force_sub_idx.is_some()
+        && plan.ends_with_velocity_projection()
     for (i, sub) in plan.steps.iter().enumerate():
-        let is_drift = matches!(sub, SubStep::Drift{..} | SubStep::KickDrift{..})
-        if install_hooks && is_drift {
-            constraint.apply_before_drift(buffers, sim_box, dt, timings)
+        if Some(i) == post_force_sub_idx {
+            continue  /* composed kernel performs this SubStep */
+        }
+        if defer_terminal_projection && i == plan.steps.len() - 1 {
+            continue  /* runner fires this after the composed launch */
         }
         match sub:
             SubStep::ForceEval { class: None, level } =>
@@ -132,26 +158,19 @@ loop step in 1..=n_steps:
                 match phase:
                     Pre  => thermostat.apply_pre(buffers, sub_dt, timings)
                     Post => thermostat.apply_post(buffers, sub_dt, timings)
+            SubStep::ConstraintPoint { phase, dt: sub_dt } =>
+                /* no-op when constraint is None */
+                match phase:
+                    BeforeDrift => constraint.apply_before_drift(buffers, sim_box, sub_dt, timings)
+                    AfterDrift  => constraint.apply_after_drift(buffers, sim_box, sub_dt, timings)
+                    AfterKick   => constraint.apply_after_kick(buffers, sim_box, sub_dt, timings)
             SubStep::KickHalf { dt: sub_dt, source: Class(c), .. } =>
                 /* runner-dispatched: only the runner holds ForceField */
                 class_kick_half(buffers, force_field.class_forces(c), sub_dt)
             SubStep::KickDrift { dt: sub_dt, source: Class(c), .. } =>
                 class_kick_drift(buffers, force_field.class_forces(c), sub_dt)
-            other if Some(i) == post_force_sub_idx =>
-                /* skip — the composed kernel performs this SubStep;
-                   post_force_sub_idx is Some only when the composed
-                   kernel exists and includes the integrator */
             other =>
                 integrator.execute(other, buffers, sim_box, timings)
-        if install_hooks && is_drift {
-            constraint.apply_after_drift(buffers, sim_box, dt, timings)
-        }
-    let last_is_kick = matches!(
-        plan.steps.last(),
-        Some(SubStep::KickHalf{..} | SubStep::KickDrift{..}))
-    if install_hooks && last_is_kick {
-        constraint.apply_after_kick(buffers, sim_box, dt, timings)
-    }
     if let Some(t) = thermostat, !plan_owns_thermostat {
         t.apply_post(buffers, dt, timings)  /* scalar prep */
     }
@@ -159,6 +178,12 @@ loop step in 1..=n_steps:
     if let Some(k) = post_force_composed_kernel {
         k.launch(buffers, integrator, thermostat.as_ref(), barostat.as_ref(),
                  sim_box, dt, timings)
+    }
+    if defer_terminal_projection {
+        /* the displaced trailing velocity projection, using the
+           trailing AfterKick marker's own dt */
+        constraint.apply_after_kick(buffers, sim_box,
+                                    plan.terminal_velocity_projection_dt(), timings)
     }
     ...trajectory / log output...
 ```
@@ -169,23 +194,29 @@ When the runner's JIT-composed post-force per-particle kernel
 loop and the composed kernel is launched after every slot's
 scalar-prep work. When the composed kernel is absent (no active
 integrator), the loop walks the plan in full and no composed
-launch fires.
+launch fires; a trailing `AfterKick` projection then dispatches
+during the walk like any other `ConstraintPoint`.
 
-The plan-walk portion of this loop — the inner per-sub-step dispatch
-plus the constraint-hook insertion — is the free function `run_step`,
-parameterised by a `RunStepOptions` value (see *Feature API*). The
-runner builds one `RunStepOptions` per step to select among the
-variations the loop needs: `run_neighbor_pre_step` toggles the
+The plan-walk portion of this loop — the inner per-sub-step dispatch,
+including the dispatch of `ConstraintPoint` markers to the constraint
+slot — is the free function `run_step`, parameterised by a
+`RunStepOptions` value (see *Feature API*). The runner builds one
+`RunStepOptions` per step to select among the variations the loop
+needs: `run_neighbor_pre_step` toggles the
 `force_field.step_no_neighbor_check` path used during CUDA-graph
 capture, `skip_substep_index` skips the SubStep the composed post-force
-kernel handles, `install_constraint_hooks` gates the hook insertion,
-and `runner_needs_scalars` forces the scalar-aggregating force level.
+kernel handles, `defer_terminal_velocity_projection` suppresses
+dispatch of the plan's trailing `ConstraintPoint { phase: AfterKick }`
+so the runner can fire it after the composed launch, and
+`runner_needs_scalars` forces the scalar-aggregating force level.
 `run_step` is the only plan walker; there are no per-combination
 wrapper functions.
 
 The runner calls `integrator.plan(dt)` once per timestep, plus once
 per phase as a shape probe (`has_thermostat_points()` selects the
-thermostat topology and CUDA-graph eligibility). `plan(dt)` is
+thermostat topology and CUDA-graph eligibility;
+`ends_with_velocity_projection()` selects whether a trailing velocity
+projection is displaced past the composed launch). `plan(dt)` is
 a pure function of `dt` and the integrator's static configuration; it
 returns the same `StepPlan` shape every call with the same `dt` (no
 per-step branching on simulation state). Plans may contain zero or
@@ -196,11 +227,15 @@ It receives no `&mut ForceField` because force evaluation is dispatched
 by the runner, not the integrator. The integrator's per-sub-step
 kernel launches bracket their own timings stages.
 
-When `constraint` is `None`, when the integrator's builder's
-`supports_constraints(&params)` returns `false`, or when the plan
-has no Drift / KickDrift sub-steps, no constraint hooks fire and the
-loop reduces to a straight plan walk. The integrator code never
-mentions the constraint slot.
+When `constraint` is `None`, or when the plan carries no
+`ConstraintPoint` markers, no constraint hooks fire and the loop
+reduces to a straight plan walk. Only constraint-capable integrators
+emit `ConstraintPoint` markers, and the config loader rejects a
+non-empty `[constraints]` section paired with an integrator whose
+builder's `supports_constraints(&params)` returns `false` (see
+`constraint-framework.md`), so a constraint slot is present only
+alongside a marker-emitting plan. The integrator code never mentions
+the constraint slot; it only places the markers.
 
 The runner's `step` value is local to the timestep loop; it gates
 trajectory and log writes via `step % trajectory_every == 0` and
@@ -364,6 +399,20 @@ successfully.
       /// suppressed for that plan.
       ThermostatHalf { dt: f32, phase: ThermostatPhase },
 
+      /// Dispatch the configured constraint slot's hook at this point
+      /// in the plan, with the given `dt`. Dispatched by the runner,
+      /// not by the integrator's `execute()`; a no-op when the run has
+      /// no constraint slot. `phase` selects which hook fires (see
+      /// `ConstraintPhase`). Constraint-capable integrators place these
+      /// markers to declare where the slot must snapshot or project;
+      /// the runner performs no structural inference from the plan's
+      /// kick / drift shape. `dt` is the sub-step timestep the hook
+      /// operates over (the inner timestep for a multiple-timestep
+      /// integrator, the full timestep for a single-step integrator),
+      /// so a projection's velocity and virial factors use the correct
+      /// interval.
+      ConstraintPoint { phase: ConstraintPhase, dt: f32 },
+
       /// Force-pipeline evaluation. Dispatched by the runner, not by
       /// the integrator's `execute()`. The `class` field selects
       /// which force class(es) to re-evaluate (see
@@ -445,16 +494,40 @@ successfully.
   }
   ```
 
+- `ConstraintPhase` — which constraint hook a `ConstraintPoint` <!-- inline --> <!-- rq-eea8aa89 -->
+  sub-step dispatches. Each variant maps to one `Constraint` trait
+  method (see `constraint-framework.md`):
+
+  ```rust
+  pub enum ConstraintPhase {
+      /// `constraint.apply_before_drift(buffers, sim_box, dt, timings)`
+      /// — snapshot the pre-drift positions. Placed immediately before
+      /// a position-updating sub-step.
+      BeforeDrift,
+      /// `constraint.apply_after_drift(buffers, sim_box, dt, timings)`
+      /// — project positions onto the constraint manifold and update
+      /// the corresponding half-step velocities. Placed immediately
+      /// after a position-updating sub-step.
+      AfterDrift,
+      /// `constraint.apply_after_kick(buffers, sim_box, dt, timings)`
+      /// — project velocities onto the constraint manifold. Placed
+      /// after a velocity-updating sub-step. When the composed
+      /// post-force kernel absorbs the preceding kick, a plan-final
+      /// `AfterKick` marker is displaced past the composed launch and
+      /// fired by the runner (see *Per-Step Interface*).
+      AfterKick,
+  }
+  ```
+
   - `label` on every variant that carries one is integrator-private
     and exists for debugging, timings stage selection, and (for
     `Custom`) dispatch inside `execute()`. The runner does not
     interpret the label.
-  - The constraint slot's hook insertion logic
-    (`constraint-framework.md`) reads only the variant tag, not the
-    label, `class`, or `source` payloads. `KickHalf` and `KickDrift`
-    count as velocity updates regardless of `source`;
-    `ThermostatHalf` is neither a drift nor a velocity update and
-    attracts no constraint hooks.
+  - Constraint hook placement is driven entirely by `ConstraintPoint`
+    markers; the runner does no structural inference from `Drift` /
+    `KickHalf` / `KickDrift` variants. A `ConstraintPoint` is a no-op
+    when the run has no constraint slot, exactly as `ThermostatHalf`
+    is a no-op without a thermostat.
   - Single-step integrators (velocity-Verlet, Langevin BAOAB,
     NHC/CSVR/Andersen/Berendsen-paired plans) emit
     `ForceEval { class: None, level: Some(ForcesOnly) }` so the runner
@@ -499,6 +572,21 @@ successfully.
     from CUDA-graph capture (a `ThermostatHalf` dispatches host-side
     thermostat arithmetic, which cannot be captured; such plans run
     on the eager path — see `cuda-graphs.md`).
+  - `StepPlan::ends_with_velocity_projection() -> bool` — `true` iff
+    the plan's final sub-step is
+    `ConstraintPoint { phase: ConstraintPhase::AfterKick, .. }`. The
+    runner consults this to decide whether a trailing velocity
+    projection is displaced past the composed post-force launch (see
+    *Per-Step Interface*). `ConstraintPoint` markers dispatch pure
+    kernel launches and never disqualify a plan from CUDA-graph
+    capture, so — unlike `has_thermostat_points()` — this predicate
+    does not affect graph eligibility.
+  - `StepPlan::terminal_velocity_projection_dt() -> Option<f32>` — the
+    `dt` carried by the plan's final
+    `ConstraintPoint { phase: AfterKick }` sub-step, or `None` when the
+    plan does not end with a velocity projection. The runner passes the
+    `Some` value to the displaced `apply_after_kick` fired after the
+    composed launch.
 
 - `RunStepOptions` — per-call options for `run_step`, bundling the four <!-- rq-1d366b88 -->
   flags that select among plan-walk modes. Plain `Copy` data; a caller
@@ -509,7 +597,7 @@ successfully.
   pub struct RunStepOptions {
       pub run_neighbor_pre_step: bool,
       pub skip_substep_index: Option<usize>,
-      pub install_constraint_hooks: bool,
+      pub defer_terminal_velocity_projection: bool,
       pub runner_needs_scalars: bool,
   }
   ```
@@ -524,21 +612,31 @@ successfully.
     for sub-step `i`; the runner dispatches that sub-step's per-particle
     work through the JIT-composed post-force kernel instead (see
     `jit-composed-post-force.md`). `None` walks every sub-step.
-  - `install_constraint_hooks` — `true` (with a constraint slot passed
-    to `run_step`) fires the constraint hooks at the canonical sub-step
-    boundaries. Set from
-    `IntegratorBuilder::supports_constraints(&params)`; a constraint
-    slot may be passed with this `false` when the integrator does not
-    support hooks (see `constraint-framework.md`).
+  - `defer_terminal_velocity_projection` — `true` makes `run_step`
+    skip dispatch of the plan's final sub-step when it is a
+    `ConstraintPoint { phase: AfterKick }`; the runner fires the
+    corresponding `apply_after_kick` after the composed post-force
+    launch so the projection follows the composed kernel's fused kick.
+    Set by the runner exactly when the composed kernel absorbs the
+    integrator's trailing kick and a constraint slot is installed (see
+    *Per-Step Interface* and `jit-composed-post-force.md`). `false`
+    dispatches every `ConstraintPoint` in the walk, including a
+    trailing `AfterKick`.
   - `runner_needs_scalars` — `true` resolves every `ForceEval` to
     `AggregateLevel::ForcesAndScalars` regardless of the sub-step's own
     preference (see `resolve_aggregate_level`).
 
+  Constraint-hook dispatch itself is not gated by a flag: `run_step`
+  dispatches every `ConstraintPoint` marker it walks whenever a
+  `Constraint` slot is passed, and the markers are no-ops when the
+  slot is `None`. Only constraint-capable integrators emit the
+  markers.
+
   `RunStepOptions::default()` is
   `{ run_neighbor_pre_step: true, skip_substep_index: None,
-  install_constraint_hooks: false, runner_needs_scalars: false }` — the
-  ordinary per-step path with no constraint hooks and the cheap force
-  level.
+  defer_terminal_velocity_projection: false, runner_needs_scalars:
+  false }` — the ordinary per-step path that dispatches every
+  `ConstraintPoint` in the walk and uses the cheap force level.
 
 - `Integrator` — object-safe trait implemented by every concrete <!-- rq-78f484d9 -->
   integrator. Owns the core time-stepping algorithm.
@@ -1062,6 +1160,11 @@ successfully.
       `thermostat.apply_pre(buffers, dt, timings)` (`phase: Pre`) or
       `thermostat.apply_post(buffers, dt, timings)` (`phase: Post`).
       A no-op when `thermostat` is `None`.
+    - `SubStep::ConstraintPoint { phase, dt }` → the matching
+      `Constraint` hook (`apply_before_drift` for `BeforeDrift`,
+      `apply_after_drift` for `AfterDrift`, `apply_after_kick` for
+      `AfterKick`), passing the marker's `dt`. A no-op when
+      `constraint` is `None`.
     - Every other sub-step (including `Total`-sourced kicks) →
       `integrator.execute(...)`.
   - `run_step` dispatches only the plan's explicit `ThermostatHalf`
@@ -1069,12 +1172,14 @@ successfully.
     (`apply_pre` before the walk, `apply_post` after) belongs to the
     runner's timestep loop, which consults
     `plan.has_thermostat_points()` (see *Per-Step Interface*).
-  - When `opts.install_constraint_hooks` is `true` and `constraint` is
-    `Some`, fires `apply_before_drift` / `apply_after_drift` around each
-    Drift / KickDrift sub-step and `apply_after_kick` after a terminal
-    velocity update. When `constraint` is `None`, or
-    `install_constraint_hooks` is `false`, or the plan has no Drift /
-    KickDrift, the walk reduces to a straight plan walk.
+  - When `opts.defer_terminal_velocity_projection` is `true`,
+    `run_step` skips dispatch of the plan's final sub-step if it is a
+    `ConstraintPoint { phase: AfterKick }`; the runner fires the
+    corresponding `apply_after_kick` after the composed post-force
+    launch (see *Per-Step Interface*). Every non-terminal
+    `ConstraintPoint` still dispatches in the walk. When `constraint`
+    is `None`, or the plan carries no `ConstraintPoint` markers, the
+    walk reduces to a straight plan walk with no constraint hooks.
   - Each `ForceEval`'s aggregate level is
     `resolve_aggregate_level(sub_step_level, opts.runner_needs_scalars)`.
   - The runner builds a `RunStepOptions` per step for the ordinary,
@@ -1230,10 +1335,12 @@ invariant under the same conditions each slot individually guarantees:
   source code that implement the corresponding trait and register a
   builder.
 - Constrained and constant-pressure multiple-timestepping. The RESPA
-  integrator (`respa.md`) covers NVE/NVT; RESPA with holonomic
-  constraints (RATTLE inside the inner loop) and RESPA-NPT splittings
-  are out of scope and rejected at config validation (see `respa.md`,
-  *Compatibility*).
+  integrator (`respa.md`) covers NVE/NVT. The `ConstraintPoint` marker
+  vocabulary can express RATTLE inside the inner loop (a
+  velocity-projection marker after every inner kick), but RESPA does
+  not emit those markers and rejects a `[constraints]` section at
+  config validation; constrained RESPA and RESPA-NPT splittings are
+  out of scope here (see `respa.md`, *Compatibility*).
 - Constraint algorithms other than SETTLE. M-SHAKE, P-LINCS, and
   every other constraint algorithm are out of scope for this
   framework file; they share the `Constraint` slot defined in
@@ -1634,7 +1741,7 @@ Feature: Pluggable integration framework
     When RunStepOptions::default() is constructed
     Then run_neighbor_pre_step is true
     And skip_substep_index is None
-    And install_constraint_hooks is false
+    And defer_terminal_velocity_projection is false
     And runner_needs_scalars is false
 
   @rq-d0240417
@@ -1658,12 +1765,15 @@ Feature: Pluggable integration framework
     And integrator.execute is invoked for every other non-ForceEval sub-step
 
   @rq-f34598ae
-  Scenario: install_constraint_hooks gates constraint-hook insertion
-    Given a constraint slot and an integrator whose plan has a Drift sub-step
-    When run_step is called with Some(constraint) and RunStepOptions { install_constraint_hooks: true, ..default }
-    Then apply_before_drift and apply_after_drift fire around the Drift sub-step
-    When run_step is called with Some(constraint) and RunStepOptions { install_constraint_hooks: false, ..default }
-    Then no constraint hook fires
+  Scenario: ConstraintPoint markers dispatch to the constraint slot in the walk
+    Given a recording constraint slot and an integrator whose plan is
+      [ConstraintPoint { phase: BeforeDrift }, Drift, ConstraintPoint { phase: AfterDrift },
+       ForceEval, KickHalf, ConstraintPoint { phase: AfterKick }]
+    When run_step is called with Some(constraint) and RunStepOptions::default()
+    Then the recorded hook order is exactly
+      [apply_before_drift, apply_after_drift, apply_after_kick]
+    When run_step is called with the same plan and constraint = None
+    Then no constraint hook fires and the walk completes with Ok(())
 
   @rq-43025b6a
   Scenario: runner_needs_scalars forces ForcesAndScalars
@@ -1677,6 +1787,38 @@ Feature: Pluggable integration framework
     Then the only free plan-walk function is run_step(.., opts: RunStepOptions)
     And no run_step_no_neighbor_check / run_step_with_skipped_substep /
       run_step_with_skipped_substep_no_neighbor_check / run_step_no_constraint functions exist
+
+  # --- Plan-declared constraint points ---
+
+  @rq-2e4f64b0
+  Scenario: ConstraintPoint markers are no-ops when no constraint slot is configured
+    Given a velocity-Verlet integrator whose plan contains ConstraintPoint markers
+    When run_step walks the plan with constraint = None
+    Then the walk completes with Ok(())
+    And no constraint method is invoked
+
+  @rq-62c54adc
+  Scenario: A ConstraintPoint hook receives the marker's own dt
+    Given a recording constraint slot
+    And an integrator whose plan contains ConstraintPoint { phase: AfterKick, dt: 0.5 }
+    When run_step walks the plan with Some(constraint) and RunStepOptions::default()
+    Then apply_after_kick is invoked with dt == 0.5
+
+  @rq-195a6215
+  Scenario: defer_terminal_velocity_projection skips the trailing AfterKick in the walk
+    Given a recording constraint slot
+    And an integrator whose plan ends in [KickHalf at index k, ConstraintPoint { phase: AfterKick } at index k+1]
+    When run_step is called with skip_substep_index = Some(k) and defer_terminal_velocity_projection = true
+    Then integrator.execute is not invoked for index k
+    And apply_after_kick is not invoked during the walk
+    And the walk completes with Ok(())
+
+  @rq-2b7e8273
+  Scenario: ends_with_velocity_projection reflects the plan's final sub-step
+    Given a plan whose final sub-step is ConstraintPoint { phase: AfterKick }
+    Then plan.ends_with_velocity_projection() is true
+    Given a plan whose final sub-step is KickHalf
+    Then plan.ends_with_velocity_projection() is false
 
   # --- Class-sourced kicks ---
 

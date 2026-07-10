@@ -100,8 +100,14 @@ independently configurable.
   returns `false`, so a config carrying both `kind = "respa"` and a
   `[constraints]` section fails validation with the framework's
   standard integrator/constraint incompatibility error. Correct
-  constrained RESPA requires RATTLE after every inner velocity update,
-  which the constraint hook contract does not express.
+  constrained RESPA requires RATTLE after every inner velocity update.
+  The `ConstraintPoint` marker vocabulary (`framework.md`) can express
+  this — a velocity-projection marker after each inner kick — but the
+  RESPA plan does not emit those markers, and constrained RESPA (its
+  per-inner-kick projection sequence and the accumulation of the
+  constraint virial across multiple projections per outer step) is a
+  separate feature. `RespaIntegrator` emits no `ConstraintPoint`
+  markers.
 - **Barostats:** rejected. A config carrying both `kind = "respa"`
   and a `[barostat]` section fails config validation with
   `ConfigError::InvalidValue` naming the incompatibility. RESPA-NPT

@@ -657,7 +657,7 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
 // =============================================================================
 
 use heddle_md::integrator::{
-    ConstraintError, RunStepOptions, run_step, StepPlan, SubStep,
+    ConstraintError, ConstraintPhase, RunStepOptions, run_step, StepPlan, SubStep,
 };
 
 /// A configurable stub Integrator whose plan and execute() behaviour
@@ -686,6 +686,7 @@ impl Integrator for PlanStub {
             SubStep::KickDrift { .. } => "exec_kick_drift",
             SubStep::ForceEval { .. } => "exec_force_eval",
             SubStep::ThermostatHalf { .. } => "exec_thermostat_half",
+            SubStep::ConstraintPoint { .. } => "exec_constraint_point",
             SubStep::Custom { .. } => "exec_custom",
         });
         if matches!(substep, SubStep::ForceEval { .. }) {
@@ -731,6 +732,46 @@ impl heddle_md::integrator::Constraint for RecordingConstraint {
         _t: &mut Timings,
     ) -> Result<(), ConstraintError> {
         self.log.record("after_kick");
+        Ok(())
+    }
+}
+
+/// Stub constraint that records the `dt` each hook receives, used to
+/// verify a `ConstraintPoint` marker's own `dt` reaches the hook.
+#[derive(Debug)]
+struct DtRecordingConstraint {
+    seen: std::sync::Arc<std::sync::Mutex<Vec<Real>>>,
+}
+
+impl heddle_md::integrator::Constraint for DtRecordingConstraint {
+    fn apply_before_drift(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        self.seen.lock().unwrap().push(dt);
+        Ok(())
+    }
+    fn apply_after_drift(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        self.seen.lock().unwrap().push(dt);
+        Ok(())
+    }
+    fn apply_after_kick(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        self.seen.lock().unwrap().push(dt);
         Ok(())
     }
 }
@@ -866,20 +907,28 @@ fn execute_with_force_eval_directly_returns_unexpected_substep() {
     }
 }
 
+// A plan with the three velocity-Verlet ConstraintPoint markers.
+fn marker_plan_vv() -> StepPlan {
+    StepPlan {
+        steps: vec![
+            SubStep::ConstraintPoint { phase: ConstraintPhase::BeforeDrift, dt: 0.1 },
+            SubStep::Drift { dt: 0.1, label: "d" },
+            SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, dt: 0.1 },
+            SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
+            SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
+            SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt: 0.1 },
+        ],
+    }
+}
+
 // rq-99034e90
 #[test]
-fn plan_with_one_drift_fires_before_after_drift() {
+fn constraint_point_markers_dispatch_to_matching_hooks() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
     let log = CallLog::default();
     let mut stub = PlanStub {
-        plan: StepPlan {
-            steps: vec![
-                SubStep::Drift { dt: 0.1, label: "d" },
-                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
-                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
-            ],
-        },
+        plan: marker_plan_vv(),
         log: CallLog { events: log.events.clone() },
     };
     let constraint_log = CallLog::default();
@@ -895,11 +944,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
         None,
         0.1,
         &mut timings,
-        RunStepOptions {
-            install_constraint_hooks: true,
-            runner_needs_scalars: true,
-            ..Default::default()
-        },
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -908,7 +953,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
 
 // rq-3b42c2ff
 #[test]
-fn plan_with_two_drifts_fires_before_after_drift_twice() {
+fn repeated_markers_dispatch_once_each_in_plan_order() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
     let stub_log = CallLog::default();
@@ -916,11 +961,16 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
         plan: StepPlan {
             steps: vec![
                 SubStep::KickHalf { dt: 0.1, label: "B", source: heddle_md::integrator::KickSource::Total },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::BeforeDrift, dt: 0.1 },
                 SubStep::Drift { dt: 0.1, label: "A_pre" },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, dt: 0.1 },
                 SubStep::Custom { dt: 0.1, label: "O" },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::BeforeDrift, dt: 0.1 },
                 SubStep::Drift { dt: 0.1, label: "A_post" },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, dt: 0.1 },
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "B", source: heddle_md::integrator::KickSource::Total },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt: 0.1 },
             ],
         },
         log: CallLog { events: stub_log.events.clone() },
@@ -938,11 +988,7 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
         None,
         0.1,
         &mut timings,
-        RunStepOptions {
-            install_constraint_hooks: true,
-            runner_needs_scalars: true,
-            ..Default::default()
-        },
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -960,16 +1006,18 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
 
 // rq-a90e4189
 #[test]
-fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
+fn plan_with_no_after_kick_marker_never_fires_after_kick() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
     let stub_log = CallLog::default();
     let mut stub = PlanStub {
         plan: StepPlan {
             steps: vec![
-                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::BeforeDrift, dt: 0.1 },
+                SubStep::Drift { dt: 0.1, label: "d" },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, dt: 0.1 },
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
-                SubStep::Custom { dt: 0.1, label: "post" },
+                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
             ],
         },
         log: CallLog { events: stub_log.events.clone() },
@@ -987,11 +1035,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
         None,
         0.1,
         &mut timings,
-        RunStepOptions {
-            install_constraint_hooks: true,
-            runner_needs_scalars: true,
-            ..Default::default()
-        },
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1000,7 +1044,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
 
 // rq-c3b3ec99
 #[test]
-fn custom_substep_alone_fires_no_constraint_hooks() {
+fn plan_with_no_markers_fires_no_constraint_hooks() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
     let stub_log = CallLog::default();
@@ -1023,11 +1067,7 @@ fn custom_substep_alone_fires_no_constraint_hooks() {
         None,
         0.1,
         &mut timings,
-        RunStepOptions {
-            install_constraint_hooks: true,
-            runner_needs_scalars: true,
-            ..Default::default()
-        },
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1036,7 +1076,7 @@ fn custom_substep_alone_fires_no_constraint_hooks() {
 
 // rq-309d8d50
 #[test]
-fn install_constraint_hooks_false_suppresses_all_hooks() {
+fn plan_without_markers_fires_no_hooks_even_with_slot_present() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
     let stub_log = CallLog::default();
@@ -1063,15 +1103,137 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
         None,
         0.1,
         &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    let events = constraint_log.events.lock().unwrap().clone();
+    assert!(events.is_empty(), "expected no constraint events, got {events:?}");
+}
+
+// rq-f34598ae
+#[test]
+fn constraint_point_markers_dispatch_in_the_walk_or_no_op_without_slot() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    // With a slot: markers dispatch in walk order.
+    let mut stub = PlanStub { plan: marker_plan_vv(), log: CallLog::default() };
+    let constraint_log = CallLog::default();
+    let mut constraint = RecordingConstraint {
+        log: CallLog { events: constraint_log.events.clone() },
+    };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        Some(&mut constraint), None, 0.1, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(
+        *constraint_log.events.lock().unwrap(),
+        vec!["before_drift", "after_drift", "after_kick"]
+    );
+    // Same plan, no slot: completes Ok with no dispatch.
+    let mut stub2 = PlanStub { plan: marker_plan_vv(), log: CallLog::default() };
+    run_step(
+        &mut stub2, &mut buffers, &mut sim_box, &mut ff,
+        None, None, 0.1, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+}
+
+// rq-2e4f64b0
+#[test]
+fn constraint_point_markers_are_no_ops_without_a_slot() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let mut stub = PlanStub { plan: marker_plan_vv(), log: CallLog::default() };
+    // No constraint slot passed; the markers must be inert.
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, None, 0.1, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+}
+
+// rq-62c54adc
+#[test]
+fn constraint_point_hook_receives_the_markers_own_dt() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![SubStep::ConstraintPoint {
+                phase: ConstraintPhase::AfterKick,
+                dt: 0.5,
+            }],
+        },
+        log: CallLog::default(),
+    };
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
+    let mut constraint = DtRecordingConstraint { seen: seen.clone() };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        Some(&mut constraint), None, 0.1, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(*seen.lock().unwrap(), vec![0.5 as Real]);
+}
+
+// rq-195a6215
+#[test]
+fn defer_terminal_velocity_projection_skips_trailing_after_kick_in_walk() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    // Plan ends in [KickHalf @ k, ConstraintPoint(AfterKick) @ k+1].
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
+                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt: 0.1 },
+            ],
+        },
+        log: CallLog::default(),
+    };
+    let k = 1usize; // index of the trailing KickHalf
+    let constraint_log = CallLog::default();
+    let mut constraint = RecordingConstraint {
+        log: CallLog { events: constraint_log.events.clone() },
+    };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        Some(&mut constraint), None, 0.1, &mut timings,
         RunStepOptions {
-            install_constraint_hooks: false,
+            skip_substep_index: Some(k),
+            defer_terminal_velocity_projection: true,
             runner_needs_scalars: true,
             ..Default::default()
         },
     )
     .unwrap();
-    let events = constraint_log.events.lock().unwrap().clone();
-    assert!(events.is_empty(), "expected no constraint events, got {events:?}");
+    // The trailing AfterKick is not dispatched during the walk.
+    assert!(constraint_log.events.lock().unwrap().is_empty());
+}
+
+// rq-2b7e8273
+#[test]
+fn ends_with_velocity_projection_reflects_final_substep() {
+    let ends = StepPlan {
+        steps: vec![
+            SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
+            SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt: 0.1 },
+        ],
+    };
+    assert!(ends.ends_with_velocity_projection());
+    assert_eq!(ends.terminal_velocity_projection_dt(), Some(0.1 as Real));
+
+    let no_ends = StepPlan {
+        steps: vec![SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total }],
+    };
+    assert!(!no_ends.ends_with_velocity_projection());
+    assert_eq!(no_ends.terminal_velocity_projection_dt(), None);
 }
 
 // =====================================================================

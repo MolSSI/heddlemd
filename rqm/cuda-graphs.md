@@ -299,7 +299,7 @@ sequence:
    - `run_step(integrator, buffers, sim_box, force_field, constraint,
      dt, timings, RunStepOptions { run_neighbor_pre_step: false,
      skip_substep_index: Some(integrator.post_force_substep_index(dt).unwrap()),
-     install_constraint_hooks, runner_needs_scalars })`, where
+     defer_terminal_velocity_projection, runner_needs_scalars })`, where
      `runner_needs_scalars` is `true` while recording the
      forces+scalars graph and `false` while recording the forces-only
      graph. The
@@ -309,8 +309,13 @@ sequence:
      (the trailing `KickHalf` / `KickDrift` per
      `Integrator::post_force_substep_index`) — the composed kernel
      handles it. (When no composed post-force kernel is active,
-     `skip_substep_index` is `None`.) See `integration/framework.md` for
-     `RunStepOptions`.
+     `skip_substep_index` is `None`.) `run_step` dispatches the plan's
+     `ConstraintPoint` markers to the constraint slot (a no-op when the
+     slot is `None`); `defer_terminal_velocity_projection` is `true`
+     when the constraint slot is installed and the composed kernel
+     absorbs the trailing kick, so the trailing velocity projection is
+     fired after the composed launch (below). See
+     `integration/framework.md` for `RunStepOptions`.
    - `thermostat.apply_post(buffers, dt, timings)` if a thermostat
      is active (scalar prep only — no per-particle rescale)
    - `barostat.apply(buffers, sim_box, dt, timings)` if a barostat
@@ -323,6 +328,13 @@ sequence:
      `bind_post_force_per_particle_args(...)` in canonical order
      (integrator → thermostat → barostat), then pushes the
      trailing `n` arg, then issues one `cuLaunchKernel`.
+   - `constraint.apply_after_kick(buffers, sim_box, dt, timings)` when
+     `defer_terminal_velocity_projection` was set: the deferred
+     terminal velocity projection, captured after the composed launch
+     so it follows the fused kick and any per-particle rescale. The
+     constraint kernels are pure launches (the SETTLE / SHAKE builders
+     report `graph_compatible == true`), so a constrained phase is
+     graph-eligible.
    - The displacement-check kernel
      `neighbor_displacement_check_flag` launched by
      `force_field.step_no_neighbor_check` after the post-force

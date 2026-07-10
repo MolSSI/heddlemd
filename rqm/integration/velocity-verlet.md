@@ -19,11 +19,17 @@ half-kick is contributed by the integrator's
 JIT-composed post-force per-particle kernel
 (`heddle_jit_composed_post_force_per_particle`); see
 `rqm/integration/jit-composed-post-force.md`. The integrator declares a
-three-element `StepPlan` (`KickDrift`, `ForceEval`, `KickHalf`). The runner
-dispatches `KickDrift` to `execute()` (which launches `vv_kick_drift`),
-dispatches `ForceEval` to `force_field.step(...)` (see `framework.md`),
-and skips the trailing `KickHalf` `execute()` call because the composed
-kernel handles the trailing half-kick.
+`StepPlan` of `KickDrift`, `ForceEval`, and `KickHalf` interleaved with
+three `ConstraintPoint` markers (`BeforeDrift`, `AfterDrift`,
+`AfterKick`) that declare where a constraint slot snapshots and
+projects. The runner dispatches `KickDrift` to `execute()` (which
+launches `vv_kick_drift`), dispatches `ForceEval` to
+`force_field.step(...)` (see `framework.md`), skips the trailing
+`KickHalf` `execute()` call because the composed kernel handles the
+trailing half-kick, and dispatches each `ConstraintPoint` marker to the
+constraint slot (a no-op when no slot is installed). The markers are
+present unconditionally, so the same plan drives constrained and
+unconstrained runs.
 
 No standalone `vv_kick` or `vv_kick_lossless` kernel is declared. The
 trailing half-kick lives only in the integrator's source fragment.
@@ -363,19 +369,27 @@ The `"velocity-verlet"` builder's predicate methods (see
 
 ### Step Plan <!-- rq-a097b162 -->
 
-`VelocityVerletState::plan(dt)` returns a fixed three-element plan:
+`VelocityVerletState::plan(dt)` returns a fixed six-element plan:
 
 ```rust
 StepPlan { steps: vec![
+    SubStep::ConstraintPoint { phase: ConstraintPhase::BeforeDrift, dt },
     SubStep::KickDrift { dt, label: "vv_kick_drift" },
+    SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, dt },
     SubStep::ForceEval,
     SubStep::KickHalf  { dt, label: "vv_kick"       },
+    SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt },
 ]}
 ```
 
-The plan shape is identical for the lossy and lossless variants; the
-`lossless` flag is carried on the integrator's `&mut self` and read
-inside `execute()` to choose between the lossy and lossless kernels.
+The three `ConstraintPoint` markers are present unconditionally and are
+no-ops when no constraint slot is installed, so the same plan drives
+constrained and unconstrained runs. The plan shape is identical for the
+lossy and lossless variants; the `lossless` flag is carried on the
+integrator's `&mut self` and read inside `execute()` to choose between
+the lossy and lossless kernels. (Lossless mode does not compose with a
+constraint slot — see *Compatibility Rules* in `constraint-framework.md`
+— so the markers are inert on a lossless run.)
 
 ### Sub-step Execution <!-- rq-51e5a0cd -->
 
@@ -431,13 +445,15 @@ of J3's scope.
 ### Runner-Driven Constraint Hooks <!-- rq-9b03044f -->
 
 The runner walks the plan (see `framework.md` and
-`constraint-framework.md`). When a constraint slot is configured and
-the `"velocity-verlet"` builder's
-`IntegratorBuilder::supports_constraints(&params)` returns `true`,
-the runner inserts `apply_before_drift` / `apply_after_drift` around
-the `KickDrift` sub-step and fires `apply_after_kick` after the final
-`KickHalf`. Velocity Verlet's `execute()` is unaware of the
-constraint slot.
+`constraint-framework.md`) and dispatches each `ConstraintPoint`
+marker in the plan to the configured constraint slot: `BeforeDrift`
+before the `KickDrift`, `AfterDrift` after it, and `AfterKick` after
+the final `KickHalf`. When the composed post-force kernel absorbs the
+trailing `KickHalf`, the runner defers the trailing `AfterKick` marker
+and fires `apply_after_kick` after the composed launch, so the
+velocity projection follows the composed kernel's fused half-kick
+(see `jit-composed-post-force.md`). Velocity Verlet's `execute()` is
+unaware of the constraint slot; it only places the markers in `plan`.
 
 The builder's `supports_constraints(&params)` returns `true` when
 `params.lossless == false` and `false` when `params.lossless == true`.

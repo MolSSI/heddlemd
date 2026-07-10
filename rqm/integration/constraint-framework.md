@@ -48,29 +48,35 @@ of the run, dropped at end of run.
 ## Per-Step Interface <!-- rq-f08d7a33 -->
 
 The constraint slot's hooks are fired by the runner during its walk of
-the integrator's `StepPlan` (see `framework.md`). The integrator
-describes its work as an ordered sequence of `SubStep`s; the runner
-identifies the canonical hook positions by inspecting the variant of
-each sub-step and inserts the corresponding hook call. Integrators
-never reference the constraint slot.
+the integrator's `StepPlan` (see `framework.md`). Hook placement is
+plan-declared: a constraint-capable integrator places
+`SubStep::ConstraintPoint { phase, dt }` markers in its plan, and the
+runner dispatches each marker to the corresponding hook with the
+marker's `dt`. The runner performs no structural inference from the
+plan's kick / drift shape. Integrators never reference the constraint
+slot; they only declare where the hooks belong.
 
-The four hook positions are:
+The three MD hooks map one-to-one to `ConstraintPhase` variants; a
+fourth hook is driven separately by the minimization runner:
 
-| Hook                              | When the runner fires it                                                                | What the slot does                                                                                                                            |
-| --------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apply_before_drift`              | Immediately before every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                                |
-| `apply_after_drift`               | Immediately after every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
-| `apply_after_kick`                | Once per timestep, after the final sub-step in the plan, iff that sub-step is a `SubStep::KickHalf` or `SubStep::KickDrift` | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.                     |
-| `apply_position_projection_only`  | After each trial position update inside an energy-minimization phase (see `rqm/minimization/steepest-descent.md`) | Applies a minimal-displacement, descent-compatible projection (a retraction) that moves the current positions back onto the constraint manifold without modifying velocities or virials. Does not consume `dt`. |
+| Hook                              | Marker phase / driver                                     | What the slot does                                                                                                                            |
+| --------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apply_before_drift`              | `ConstraintPoint { phase: BeforeDrift }`                  | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                                |
+| `apply_after_drift`               | `ConstraintPoint { phase: AfterDrift }`                   | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
+| `apply_after_kick`                | `ConstraintPoint { phase: AfterKick }`                    | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.                     |
+| `apply_position_projection_only`  | Minimization runner (see `rqm/minimization/steepest-descent.md`) | Applies a minimal-displacement, descent-compatible projection (a retraction) that moves the current positions back onto the constraint manifold without modifying velocities or virials. Does not consume `dt`. |
 
 The first three hooks fire only during the integrator's plan walk in
-MD phases. The fourth hook fires only during minimization phases and
-is driven by the runner's minimization loop (see
-`rqm/minimization/steepest-descent.md`).
+MD phases, once per marker of the corresponding phase. The fourth hook
+fires only during minimization phases; the minimization loop drives it
+directly and it is never expressed as a `ConstraintPoint` marker (a
+minimization phase has no integrator plan).
 
 For the registered `velocity-verlet` (lossy) integrator, whose plan is
-`[KickDrift, ForceEval, KickHalf]` (see `velocity-verlet.md`), the
-runner's interleaved sequence becomes:
+`[ConstraintPoint { BeforeDrift }, KickDrift, ConstraintPoint { AfterDrift },
+ForceEval, KickHalf, ConstraintPoint { AfterKick }]` (see
+`velocity-verlet.md`), the runner's interleaved sequence when the
+composed post-force kernel is inactive is:
 
 ```text
 constraint.apply_before_drift(buffers, sim_box, dt, timings)
@@ -81,14 +87,21 @@ integrator.execute(SubStep::KickHalf { .. }, buffers, sim_box, timings)
 constraint.apply_after_kick(buffers, sim_box, dt, timings)
 ```
 
-When the constraint slot is `None`, the runner skips hook insertion
-entirely; the plan walk reduces to the bare sub-step dispatch. When
-`IntegratorBuilder::supports_constraints(&params)` returns `false`
-the runner also skips hook insertion (and the config loader rejects this
-combination with a non-empty `[constraints]` section before the run
-starts). When the plan contains no `Drift` or `KickDrift` sub-steps,
-only the final-velocity `apply_after_kick` hook can fire — and only
-if the plan's last sub-step is a `KickHalf` or `KickDrift`.
+When the composed post-force kernel absorbs the trailing `KickHalf`,
+that kick executes after the plan walk, so the runner defers the
+trailing `AfterKick` projection and fires `apply_after_kick` after the
+composed launch — after the composed kernel's fused kick and any
+thermostat / barostat velocity rescale. The velocity projection is
+therefore the last per-particle velocity operation of the step in
+either path (see *Ordering of the terminal velocity projection*).
+
+When the constraint slot is `None`, or when the plan carries no
+`ConstraintPoint` markers, no hook fires and the plan walk reduces to
+the bare sub-step dispatch. Only constraint-capable integrators emit
+the markers, and the config loader rejects a non-empty `[constraints]`
+section paired with an integrator whose builder's
+`supports_constraints(&params)` returns `false` before the run starts,
+so a constraint slot is present only alongside a marker-emitting plan.
 
 The runner brackets each hook call with its own timings stage
 (`CONSTRAINT_BEFORE_DRIFT`, `CONSTRAINT_AFTER_DRIFT`,
@@ -100,35 +113,69 @@ finer-grained stages within those brackets.
 receive `&SimulationBox` (immutably) to read lattice parameters for
 minimum-image distance evaluation; none mutates the box.
 
+### Ordering of the terminal velocity projection <!-- rq-6b22e2c4 -->
+
+`apply_after_kick` is the last per-particle velocity operation of the
+timestep. The runner enforces this in both execution paths:
+
+- **Composed-kernel inactive** — the `AfterKick` marker dispatches in
+  the plan walk, immediately after the integrator's trailing kick,
+  which is the final velocity update.
+- **Composed-kernel active** — the composed post-force kernel performs
+  the integrator's trailing kick (and any thermostat / barostat
+  per-particle rescale) after the plan walk. The runner therefore
+  defers the trailing `AfterKick` marker and fires `apply_after_kick`
+  after the composed launch, so it still runs last.
+
+Placing the velocity projection last is the physically general choice.
+The projection is, at fixed positions, a linear projection of the
+velocity vector onto the constraint-orthogonal subspace. A global
+uniform velocity rescale (CSVR, Nosé-Hoover chain, Berendsen, and the
+scalar velocity rescale of the c-rescale barostat) commutes with it and
+preserves the manifold, so the relative order of projection and rescale
+is immaterial for those slots. A per-particle velocity resample
+(Andersen) does not preserve the manifold and does not commute; running
+the projection last repairs the constraint after the resample. Firing
+`apply_after_kick` last is thus correct for every thermostat and
+barostat in the default registry, and no thermostat is excluded from
+composition with a constraint slot on ordering grounds.
+
+The kinetic energy a thermostat couples to is reduced during its
+scalar-prep (`apply_post` / `apply`), which runs before the composed
+launch; that timing is a property of the composed post-force pipeline
+independent of constraints (`jit-composed-post-force.md`) and is
+unchanged by the presence of a constraint slot.
+
 ## Convenience Trait Surface <!-- rq-0e26dde0 -->
 
 The runner walks an integrator's plan via the free function
 [`run_step`] (see `integration/framework.md`'s *Feature API* for the
-full signature), passing a `RunStepOptions` whose
-`install_constraint_hooks` field it sets from
-`IntegratorBuilder::supports_constraints(&params)`. Tests and direct
-library consumers use a convenience layer instead. That
-layer is split into two traits so that the `&mut dyn Constraint`
-argument is reachable only from a type that has statically opted in to
-constraint-hook insertion:
+full signature), passing the constraint slot as the `constraint`
+argument and setting `defer_terminal_velocity_projection` when the
+composed kernel absorbs the trailing kick. Tests and direct library
+consumers use a convenience layer instead. That layer is split into two
+traits so that the `&mut dyn Constraint` argument is reachable only
+from a type that has statically opted in to constraint-hook insertion:
 
 - **`IntegratorStepExt`** — a blanket convenience trait implemented
   for every type that implements `Integrator`. Its single method
-  `step(...)` walks the integrator's plan without installing any
-  constraint hooks. The method takes no `Constraint` argument and
-  calls `run_step` with `RunStepOptions { install_constraint_hooks:
-  false, .. }`. Available on every `Integrator` (`velocity-verlet`,
-  `langevin-baoab`, `mtk-npt`, …).
+  `step(...)` walks the integrator's plan with no constraint slot. The
+  method takes no `Constraint` argument and calls `run_step` with
+  `constraint = None`, so any `ConstraintPoint` markers in the plan
+  dispatch as no-ops. Available on every `Integrator`
+  (`velocity-verlet`, `langevin-baoab`, `mtk-npt`, …).
 - **`IntegratorStepWithConstraintExt`** — a convenience trait whose
   blanket impl is bounded on `Self: ConstraintCapableIntegrator`. Its
   single method `step_with_constraint(..., &mut dyn Constraint, ...)`
-  walks the plan with `RunStepOptions { install_constraint_hooks: true,
-  .. }`. Available only on types that statically declare themselves
-  constraint-capable; calling it on a non-marker type is a compile
-  error.
+  walks the plan with `constraint = Some(..)`, so the plan's
+  `ConstraintPoint` markers dispatch to the slot. It uses
+  `RunStepOptions::default()` (no composed-kernel skip), so a trailing
+  `AfterKick` marker dispatches in the walk. Available only on types
+  that statically declare themselves constraint-capable; calling it on
+  a non-marker type is a compile error.
 
 The runner consumes `run_step` directly and bypasses both convenience
-traits, so its hook-insertion behaviour is unaffected.
+traits, so its hook-dispatch behaviour is unaffected.
 
 ### ConstraintCapableIntegrator marker <!-- rq-866dcea2 -->
 
@@ -704,10 +751,10 @@ second receives an empty index set and contributes no slot.
   ```
 
   `step` calls `run_step(self, …, constraint = None, …,
-  RunStepOptions { install_constraint_hooks: false,
-  runner_needs_scalars: true, ..Default::default() })`. The runner
-  uses the lower-level `run_step` directly and does not depend on this
-  trait.
+  RunStepOptions { runner_needs_scalars: true, ..Default::default()
+  })`. With `constraint = None`, any `ConstraintPoint` markers in the
+  plan dispatch as no-ops. The runner uses the lower-level `run_step`
+  directly and does not depend on this trait.
 
 - `IntegratorStepWithConstraintExt` — convenience trait whose blanket <!-- rq-f71ff87f -->
   impl is bounded on `Self: ConstraintCapableIntegrator`. Drives a
@@ -737,8 +784,10 @@ second receives an empty index set and contributes no slot.
   `StepError::IntegratorRejectsConstraint { reason }` without
   dispatching `plan()`, `execute()`, or any kernel. Otherwise it
   calls `run_step(self, …, constraint = Some(constraint), …,
-  RunStepOptions { install_constraint_hooks: true,
-  runner_needs_scalars: true, ..Default::default() })`.
+  RunStepOptions { runner_needs_scalars: true, ..Default::default()
+  })`. Because `defer_terminal_velocity_projection` defaults to
+  `false`, a trailing `AfterKick` marker dispatches in the walk (this
+  convenience path drives no composed post-force kernel).
 
 - `StepError` — unified error type returned by `run_step` and both <!-- rq-52e52d7b -->
   convenience-trait methods. Defined in `src/integrator/mod.rs`.
@@ -818,7 +867,12 @@ algorithm individually guarantees:
   streams are introduced.
 - The intra-step hook order (`apply_before_drift`, then drift, then
   `apply_after_drift`, then force evaluation, then kick, then
-  `apply_after_kick`) is fixed and identical across runs.
+  `apply_after_kick`) is fixed by the integrator's `ConstraintPoint`
+  marker sequence and is identical across runs. `apply_after_kick` is
+  the last per-particle velocity operation of the step in both the
+  composed-kernel and non-composed paths (see *Ordering of the
+  terminal velocity projection*), so the two paths agree on order
+  even though they differ on where the trailing kick executes.
 - Group order in the device-side group buffers matches `groups` in
   the host-side `ConstraintList`, which is sorted by each group's
   minimum particle index. Two independently-constructed
@@ -967,8 +1021,9 @@ Feature: Constraint slot framework
   # --- Per-step dispatch ---
 
   @rq-90538790
-  Scenario: Dispatch loop calls all three constraint hooks in order
+  Scenario: Dispatch loop calls all three constraint hooks in marker order
     Given a velocity-Verlet integrator (lossless=false) with constraints
+    And no composed post-force kernel active
     And a recording wrapper that timestamps every Constraint hook call
     When the runner executes one timestep
     Then the recorded order is exactly
@@ -976,51 +1031,65 @@ Feature: Constraint slot framework
     And each hook fires exactly once
 
   @rq-7047ea32
-  Scenario: Integrator without constraints skips all three hooks
-    Given a velocity-Verlet integrator (lossless=false) with constraint slot = None
+  Scenario: Integrator with a marker-bearing plan and no constraint slot fires no hooks
+    Given a velocity-Verlet integrator (lossless=false) whose plan carries ConstraintPoint markers
+    And the constraint slot is None
     And a recording stub Constraint that records every call
     When the runner executes one timestep
     Then no constraint hooks are recorded
 
   @rq-99034e90
-  Scenario: Plan with a single Drift sub-step fires before_drift and after_drift around it
-    Given a stub integrator whose plan(dt) returns [Drift, ForceEval, KickHalf]
-      and supports_constraints() returns true
+  Scenario: A plan's ConstraintPoint markers dispatch to the matching hooks
+    Given a stub integrator whose plan(dt) returns
+      [ConstraintPoint { phase: BeforeDrift }, Drift, ConstraintPoint { phase: AfterDrift },
+       ForceEval, KickHalf, ConstraintPoint { phase: AfterKick }]
     And a recording Constraint slot
-    When the runner executes one timestep
+    When the runner executes one timestep with no composed kernel
     Then the recorded order is exactly
       [apply_before_drift, apply_after_drift, apply_after_kick]
 
   @rq-3b42c2ff
-  Scenario: Plan with two Drift sub-steps fires before/after_drift twice
+  Scenario: Repeated markers dispatch once each in plan order
     Given a stub integrator whose plan(dt) returns
-      [KickHalf, Drift, Custom("ou"), Drift, ForceEval, KickHalf]
-      and supports_constraints() returns true
+      [KickHalf, ConstraintPoint { phase: BeforeDrift }, Drift, ConstraintPoint { phase: AfterDrift },
+       Custom("ou"), ConstraintPoint { phase: BeforeDrift }, Drift, ConstraintPoint { phase: AfterDrift },
+       ForceEval, KickHalf, ConstraintPoint { phase: AfterKick }]
     And a recording Constraint slot
-    When the runner executes one timestep
-    Then apply_before_drift fires exactly twice (once before each Drift)
-    And apply_after_drift fires exactly twice (once after each Drift)
-    And apply_after_kick fires exactly once after the final KickHalf
+    When the runner executes one timestep with no composed kernel
+    Then apply_before_drift fires exactly twice
+    And apply_after_drift fires exactly twice
+    And apply_after_kick fires exactly once, last
 
   @rq-a90e4189
-  Scenario: Plan whose final sub-step is not a Kick does not fire after_kick
-    Given a stub integrator whose plan(dt) returns [KickHalf, ForceEval, Custom("post")]
-      and supports_constraints() returns true
+  Scenario: A plan with no AfterKick marker never fires apply_after_kick
+    Given a stub integrator whose plan(dt) returns
+      [ConstraintPoint { phase: BeforeDrift }, Drift, ConstraintPoint { phase: AfterDrift },
+       ForceEval, KickHalf]
     And a recording Constraint slot
     When the runner executes one timestep
     Then apply_after_kick is not recorded
 
   @rq-c3b3ec99
-  Scenario: Custom sub-step alone fires no constraint hooks
+  Scenario: A plan with no ConstraintPoint markers fires no constraint hooks
     Given a stub integrator whose plan(dt) returns [Custom("ou")]
-      and supports_constraints() returns true
     And a recording Constraint slot
     When the runner executes one timestep
     Then no constraint hooks are recorded
 
+  @rq-a78ba267
+  Scenario: With a composed kernel absorbing the trailing kick, the AfterKick projection fires after the composed launch
+    Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
+    And the composed post-force kernel is active and includes the integrator's trailing kick
+    And a recording wrapper that timestamps every Constraint hook call and the composed-kernel launch
+    When the runner executes one timestep
+    Then the recorded order is exactly
+      [apply_before_drift, apply_after_drift, composed_post_force_launch, apply_after_kick]
+    And apply_after_kick is not dispatched during the plan walk
+
   @rq-77f959b2
   Scenario: apply_position_projection_only is not fired during the MD plan walk
     Given a velocity-Verlet integrator (lossless=false) with a SHAKE constraint slot
+    And no composed post-force kernel active
     And a recording wrapper that timestamps every Constraint hook call
     When the runner executes one MD timestep
     Then apply_position_projection_only is not recorded
@@ -1083,14 +1152,14 @@ Feature: Constraint slot framework
     Then builder.supports_position_projection_only(&params) returns true
 
   @rq-309d8d50
-  Scenario: supports_constraints == false suppresses all hook insertion
+  Scenario: A plan with no ConstraintPoint markers fires no hooks even with a slot present
     Given a stub integrator whose plan(dt) returns [KickDrift, ForceEval, KickHalf]
-      and supports_constraints() returns false
-    And a recording Constraint slot
+      and emits no ConstraintPoint markers (supports_constraints() returns false)
+    And a recording Constraint slot passed to run_step
     When the runner executes one timestep
     Then no constraint hooks are recorded
-    (the config loader would normally reject this combination before reaching the loop;
-     this scenario exercises the runner-side safety check.)
+    (the config loader would normally reject a [constraints] section with such an
+     integrator before reaching the loop; a non-marker-emitting plan simply drives no hooks.)
 
   @rq-03329010
   Scenario: apply_before_drift on empty state is a no-op
@@ -1284,4 +1353,51 @@ Feature: Constraint slot framework
     Then it returns Err(StepError::IntegratorRejectsConstraint { reason }) where reason equals the VV lossless rejection message
     And no integrator sub-step is dispatched (Integrator::plan and Integrator::execute are not called)
     And no Constraint hook is recorded
+
+  # --- End-to-end runner integration (velocity-Verlet + constraints) ---
+  # These run the full runner (run_simulation), which builds and launches
+  # the composed post-force per-particle kernel, so they exercise the
+  # deferred terminal velocity projection that the direct step_with_constraint
+  # path (above) does not.
+
+  @rq-0945ffcb
+  Scenario: NVE velocity-Verlet with SETTLE keeps rigid water on both the position and velocity manifolds
+    Given a config with [integrator] kind = "velocity-verlet", lossless = false
+    And an [[md]] phase in NVE (no [thermostat], no [barostat]) running 50 steps
+    And a topology whose [constraints] section declares rigid-water groups with kind = "settle"
+    And an initial state slightly off the constraint manifold in both positions and velocities
+    When heddlemd run is invoked and completes with exit code 0
+    Then at the final step every constrained bond length equals its r0 within relative tolerance 1e-6
+    And for every constraint (i, j) the along-bond relative velocity (r_i - r_j) · (v_i - v_j) is zero within a tolerance scaled to the bond length and timestep
+    (the velocity-manifold check is the regression guard: the terminal RATTLE must run after the composed kernel's trailing kick, not before it)
+
+  @rq-f223c0e2
+  Scenario: velocity-Verlet + CSVR + SETTLE keeps velocities on the manifold after the thermostat rescale
+    Given a config with [integrator] kind = "velocity-verlet", lossless = false
+    And a [thermostat] kind = "csvr"
+    And a topology declaring rigid-water groups with kind = "settle"
+    And an [[md]] phase running 50 steps
+    When heddlemd run is invoked and completes with exit code 0
+    Then at the final step every constrained bond length equals its r0 within relative tolerance 1e-6
+    And for every constraint the along-bond relative velocity is zero within tolerance
+    (the composed kernel fuses the trailing kick and the CSVR velocity rescale; the deferred RATTLE runs after both)
+
+  @rq-f0f29827
+  Scenario: A constrained velocity-Verlet phase runs under CUDA-graph capture and replay
+    Given a config with [integrator] kind = "velocity-verlet", lossless = false
+    And a topology declaring rigid-water groups with kind = "settle"
+    And an [[md]] phase whose slots are all graph-compatible (the SETTLE builder reports graph_compatible == true)
+    And a run long enough to trigger graph capture and batched replay
+    When heddlemd run is invoked and completes with exit code 0
+    Then the phase runs on the CUDA-graph path (a captured graph is replayed, not the eager per-step path)
+    And at the final step every constrained bond length and along-bond relative velocity are on the manifold within tolerance
+
+  @rq-eef4fb58
+  Scenario: Two identical constrained velocity-Verlet runs are byte-identical
+    Given a config with [integrator] kind = "velocity-verlet", lossless = false
+    And a topology declaring rigid-water groups with kind = "settle"
+    And a fixed seed and identical initial state
+    When the same run executes twice on the same GPU
+    Then the two trajectory files are byte-identical
+    And the two final ParticleStates agree byte-for-byte
 ```

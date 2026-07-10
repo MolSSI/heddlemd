@@ -150,6 +150,32 @@ pub enum ThermostatPhase {
     Post,
 }
 
+// rq-eea8aa89
+/// Which constraint hook a `SubStep::ConstraintPoint` dispatches. Each
+/// variant maps to one `Constraint` trait method (see
+/// `rqm/integration/constraint-framework.md`). A constraint-capable
+/// integrator places these markers in its plan to declare where the
+/// slot must snapshot or project; the runner does no structural
+/// inference from the plan's kick / drift shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintPhase {
+    /// `constraint.apply_before_drift(...)` — snapshot pre-drift
+    /// positions. Placed immediately before a position-updating
+    /// sub-step.
+    BeforeDrift,
+    /// `constraint.apply_after_drift(...)` — project positions onto the
+    /// constraint manifold and update the corresponding half-step
+    /// velocities. Placed immediately after a position-updating
+    /// sub-step.
+    AfterDrift,
+    /// `constraint.apply_after_kick(...)` — project velocities onto the
+    /// constraint manifold. Placed after a velocity-updating sub-step.
+    /// When the composed post-force kernel absorbs the preceding kick,
+    /// a plan-final `AfterKick` marker is displaced past the composed
+    /// launch and fired by the runner (see `framework.md`).
+    AfterKick,
+}
+
 // rq-dbbffa7d
 /// One piece of an integrator's per-timestep work, described in the
 /// `StepPlan` returned by [`Integrator::plan`].
@@ -173,6 +199,14 @@ pub enum SubStep {
     /// the runner's default apply_pre/apply_post wrapping is
     /// suppressed for that plan.
     ThermostatHalf { dt: Real, phase: ThermostatPhase },
+    /// Dispatch the configured constraint slot's hook here with the
+    /// given `dt`. Dispatched by the runner, not by `execute()`; a
+    /// no-op when the run has no constraint slot. `phase` selects the
+    /// hook (see [`ConstraintPhase`]). `dt` is the sub-step timestep
+    /// the projection operates over, so its velocity and virial factors
+    /// use the correct interval.
+    // rq-dbbffa7d
+    ConstraintPoint { phase: ConstraintPhase, dt: Real },
     /// Force-pipeline evaluation. Dispatched by the runner, not by
     /// the integrator's `execute()`. `class` selects which force
     /// class(es) to re-evaluate:
@@ -216,21 +250,10 @@ impl SubStep {
             SubStep::Drift { .. } => "Drift",
             SubStep::KickDrift { .. } => "KickDrift",
             SubStep::ThermostatHalf { .. } => "ThermostatHalf",
+            SubStep::ConstraintPoint { .. } => "ConstraintPoint",
             SubStep::ForceEval { .. } => "ForceEval",
             SubStep::Custom { .. } => "Custom",
         }
-    }
-
-    /// True iff a constraint slot's `apply_before_drift` /
-    /// `apply_after_drift` hooks should fire around this sub-step.
-    pub fn is_drift(&self) -> bool {
-        matches!(self, SubStep::Drift { .. } | SubStep::KickDrift { .. })
-    }
-
-    /// True iff a constraint slot's `apply_after_kick` hook should fire
-    /// after this sub-step when it is the final sub-step of the plan.
-    pub fn is_velocity_update(&self) -> bool {
-        matches!(self, SubStep::KickHalf { .. } | SubStep::KickDrift { .. })
     }
 }
 
@@ -256,6 +279,41 @@ impl StepPlan {
         self.steps
             .iter()
             .any(|s| matches!(s, SubStep::ThermostatHalf { .. }))
+    }
+
+    // rq-9fbba3be
+    /// `true` iff the plan's final sub-step is a
+    /// `ConstraintPoint { phase: AfterKick }`. The runner consults this
+    /// to decide whether a trailing velocity projection is displaced
+    /// past the composed post-force launch (see `framework.md`).
+    /// `ConstraintPoint` markers dispatch pure kernel launches and never
+    /// disqualify a plan from CUDA-graph capture, so — unlike
+    /// `has_thermostat_points()` — this predicate does not affect graph
+    /// eligibility.
+    pub fn ends_with_velocity_projection(&self) -> bool {
+        matches!(
+            self.steps.last(),
+            Some(SubStep::ConstraintPoint {
+                phase: ConstraintPhase::AfterKick,
+                ..
+            })
+        )
+    }
+
+    // rq-9fbba3be
+    /// The `dt` carried by the plan's final
+    /// `ConstraintPoint { phase: AfterKick }` sub-step. The runner
+    /// passes it to the displaced `apply_after_kick` fired after the
+    /// composed launch. Returns `None` when the plan does not end with a
+    /// velocity projection.
+    pub fn terminal_velocity_projection_dt(&self) -> Option<Real> {
+        match self.steps.last() {
+            Some(SubStep::ConstraintPoint {
+                phase: ConstraintPhase::AfterKick,
+                dt,
+            }) => Some(*dt),
+            _ => None,
+        }
     }
 }
 
@@ -356,9 +414,14 @@ pub struct RunStepOptions {
     /// JIT-composed post-force per-particle kernel handles it). Default
     /// `None`.
     pub skip_substep_index: Option<usize>,
-    /// `true` (with a constraint slot passed) fires the constraint
-    /// hooks at the canonical sub-step boundaries. Default `false`.
-    pub install_constraint_hooks: bool,
+    /// `true` makes `run_step` skip dispatch of the plan's final
+    /// sub-step when it is a `ConstraintPoint { phase: AfterKick }`; the
+    /// runner fires the corresponding `apply_after_kick` after the
+    /// composed post-force launch so the projection follows the fused
+    /// kick. Set by the runner exactly when the composed kernel absorbs
+    /// the integrator's trailing kick and a constraint slot is
+    /// installed. Default `false`.
+    pub defer_terminal_velocity_projection: bool,
     /// `true` resolves every `ForceEval` to
     /// `AggregateLevel::ForcesAndScalars`. Default `false`.
     pub runner_needs_scalars: bool,
@@ -369,7 +432,7 @@ impl Default for RunStepOptions {
         RunStepOptions {
             run_neighbor_pre_step: true,
             skip_substep_index: None,
-            install_constraint_hooks: false,
+            defer_terminal_velocity_projection: false,
             runner_needs_scalars: false,
         }
     }
@@ -378,17 +441,18 @@ impl Default for RunStepOptions {
 /// Walk an integrator's plan for one timestep — the single plan-walk
 /// entry point.
 ///
-/// Executes the integrator's sub-steps and the force pipeline together,
-/// optionally weaving constraint-slot hook calls around any `Drift` or
-/// `KickDrift` sub-step and after the final velocity update. The
-/// per-step variations (graph-capture neighbour handling, composed
-/// post-force skip, scalar-prep, constraint hooks) are selected by
-/// `opts`; see [`RunStepOptions`].
+/// Executes the integrator's sub-steps and the force pipeline together.
+/// `ConstraintPoint` markers dispatch to the constraint slot (a no-op
+/// when `constraint` is `None`); the other per-step variations
+/// (graph-capture neighbour handling, composed post-force skip,
+/// deferred terminal projection, scalar-prep) are selected by `opts`;
+/// see [`RunStepOptions`].
 ///
-/// `opts.install_constraint_hooks` should be `true` only when both
-/// `constraint.is_some()` and the integrator's builder
-/// `supports_constraints(&params)` would return `true`; otherwise no
-/// hooks fire regardless of the `constraint` argument.
+/// When `opts.defer_terminal_velocity_projection` is `true`, the plan's
+/// final sub-step is skipped if it is a
+/// `ConstraintPoint { phase: AfterKick }`; the runner fires the
+/// corresponding `apply_after_kick` after the composed post-force launch
+/// so the projection follows the composed kernel's fused kick.
 #[allow(clippy::too_many_arguments)]
 pub fn run_step(
     integrator: &mut dyn Integrator,
@@ -404,20 +468,29 @@ pub fn run_step(
     let RunStepOptions {
         run_neighbor_pre_step,
         skip_substep_index,
-        install_constraint_hooks,
+        defer_terminal_velocity_projection,
         runner_needs_scalars,
     } = opts;
     let plan = integrator.plan(dt);
-    let install = install_constraint_hooks && constraint.is_some();
+    let last_idx = plan.steps.len().wrapping_sub(1);
     for (idx, sub) in plan.steps.iter().enumerate() {
         if Some(idx) == skip_substep_index {
             continue;
         }
-        let is_drift = sub.is_drift();
-        if install && is_drift {
-            if let Some(c) = constraint.as_mut() {
-                c.apply_before_drift(buffers, sim_box, dt, timings)?;
-            }
+        // rq-277dbeb2 — the runner fires the plan's trailing velocity
+        // projection after the composed post-force launch (which
+        // performs the absorbed kick), so skip it here.
+        if defer_terminal_velocity_projection
+            && idx == last_idx
+            && matches!(
+                sub,
+                SubStep::ConstraintPoint {
+                    phase: ConstraintPhase::AfterKick,
+                    ..
+                }
+            )
+        {
+            continue;
         }
         match sub {
             SubStep::ForceEval { class: None, level } => {
@@ -479,24 +552,28 @@ pub fn run_step(
                     }
                 }
             }
+            // rq-dbbffa7d — plan-declared constraint hook; a no-op when
+            // the run has no constraint slot. Each phase dispatches to
+            // the matching `Constraint` trait method with the marker's
+            // own `dt`.
+            SubStep::ConstraintPoint { phase, dt: sub_dt } => {
+                if let Some(c) = constraint.as_mut() {
+                    match phase {
+                        ConstraintPhase::BeforeDrift => {
+                            c.apply_before_drift(buffers, sim_box, *sub_dt, timings)?
+                        }
+                        ConstraintPhase::AfterDrift => {
+                            c.apply_after_drift(buffers, sim_box, *sub_dt, timings)?
+                        }
+                        ConstraintPhase::AfterKick => {
+                            c.apply_after_kick(buffers, sim_box, *sub_dt, timings)?
+                        }
+                    }
+                }
+            }
             other => {
                 integrator.execute(other, buffers, sim_box, timings)?;
             }
-        }
-        if install && is_drift {
-            if let Some(c) = constraint.as_mut() {
-                c.apply_after_drift(buffers, sim_box, dt, timings)?;
-            }
-        }
-    }
-    let last_is_kick = plan
-        .steps
-        .last()
-        .map(|s| s.is_velocity_update())
-        .unwrap_or(false);
-    if install && last_is_kick {
-        if let Some(c) = constraint.as_mut() {
-            c.apply_after_kick(buffers, sim_box, dt, timings)?;
         }
     }
     Ok(())
@@ -672,7 +749,6 @@ impl IntegratorStepWithConstraintExt for dyn ConstraintCapableIntegrator + '_ {
             dt,
             timings,
             RunStepOptions {
-                install_constraint_hooks: true,
                 runner_needs_scalars: true,
                 ..Default::default()
             },
@@ -705,7 +781,6 @@ impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
             dt,
             timings,
             RunStepOptions {
-                install_constraint_hooks: true,
                 runner_needs_scalars: true,
                 ..Default::default()
             },

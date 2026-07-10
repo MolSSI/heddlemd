@@ -1123,3 +1123,276 @@ mode = "all-pairs"
     assert!(ps.n_steps > 0 && ps.n_steps <= 500, "iters = {}", ps.n_steps);
     assert!(ps.convergence.is_some(), "minimization did not converge");
 }
+
+// =====================================================================
+// End-to-end runner integration: velocity-Verlet MD + SETTLE.
+//
+// These drive the full runner via run_simulation, which builds and
+// launches the JIT-composed post-force per-particle kernel. That path
+// absorbs velocity-Verlet's trailing half-kick into the composed kernel
+// and fires the deferred terminal RATTLE (`apply_after_kick`) *after*
+// the composed launch — the code path the direct step_with_constraint
+// unit tests do not cover. The load-bearing assertion is the velocity
+// manifold `(r_i - r_j) · (v_i - v_j) == 0`: had the projection run
+// before the composed kick (the pre-fix ordering) it would be violated
+// even though bond lengths look fine.
+// =====================================================================
+
+// SI geometry (units = "si"): two rigid SPC/E waters, oxygens 5.0 Å
+// apart so the intermolecular LJ is gentle and the run stays stable.
+const E2E_D_OH: f64 = 1.0e-10;
+const E2E_D_HH: f64 = 1.633e-10;
+
+fn e2e_init_xyz() -> &'static str {
+    "6\n\
+     Lattice=\"5.0e-9 0 0 0 5.0e-9 0 0 0 5.0e-9\" Properties=species:S:1:pos:R:3\n\
+     O  -2.500000000e-10 0.000000000e0 0.000000000e0\n\
+     H  -1.500000000e-10 0.000000000e0 0.000000000e0\n\
+     H  -2.833800000e-10 9.426400000e-11 0.000000000e0\n\
+     O   2.500000000e-10 0.000000000e0 0.000000000e0\n\
+     H   3.500000000e-10 0.000000000e0 0.000000000e0\n\
+     H   2.166200000e-10 9.426400000e-11 0.000000000e0\n"
+}
+
+/// Write init + topology + config into `dir` and return the config path.
+/// `thermostat_block` is inserted verbatim (empty string for NVE).
+fn e2e_write_case(
+    dir: &std::path::Path,
+    n_steps: u64,
+    seed: u64,
+    thermostat_block: &str,
+    traj_name: &str,
+) -> PathBuf {
+    use std::fs;
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join("water.in.xyz"), e2e_init_xyz()).unwrap();
+    fs::write(
+        dir.join("water.in.topology"),
+        "[constraints]\n0 1 2 SPCE\n3 4 5 SPCE\n",
+    )
+    .unwrap();
+    let cfg = format!(
+        r#"schema_version = 1
+units = "si"
+init = "water.in.xyz"
+topology = "water.in.topology"
+
+[simulation]
+seed = {seed}
+temperature = 300.0
+
+[[phase]]
+name = "run"
+n_steps = {n_steps}
+dt = 2.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+{thermostat_block}
+[phase.output]
+trajectory_path = "{traj_name}"
+trajectory_every = 1
+
+[[particle_types]]
+name = "O"
+mass = 2.6566e-26
+charge = 0.0
+
+[[particle_types]]
+name = "H"
+mass = 1.6735e-27
+charge = 0.0
+
+[[pair_interactions]]
+between = ["O", "O"]
+kind = "lennard-jones"
+sigma = 3.166e-10
+epsilon = 1.080e-21
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[pair_interactions]]
+between = ["H", "H"]
+kind = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[pair_interactions]]
+between = ["H", "O"]
+kind = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[constraint_types]]
+name = "SPCE"
+kind = "settle"
+d_OH = 1.0e-10
+d_HH = 1.633e-10
+
+[neighbor_list]
+mode = "all-pairs"
+"#
+    );
+    let cfg_path = dir.join("water.in.toml");
+    fs::write(&cfg_path, cfg).unwrap();
+    cfg_path
+}
+
+/// Parse the final frame of an extended-XYZ trajectory into per-atom
+/// positions and velocities (columns `species x y z vx vy vz [images]`).
+fn e2e_parse_last_frame(path: &std::path::Path) -> (Vec<[f64; 3]>, Vec<[f64; 3]>) {
+    let text = std::fs::read_to_string(path).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    let (mut pos, mut vel) = (Vec::new(), Vec::new());
+    let mut i = 0;
+    while i < lines.len() {
+        let n: usize = lines[i].trim().parse().unwrap();
+        let mut p = Vec::with_capacity(n);
+        let mut v = Vec::with_capacity(n);
+        for a in 0..n {
+            let cols: Vec<&str> = lines[i + 2 + a].split_whitespace().collect();
+            p.push([
+                cols[1].parse().unwrap(),
+                cols[2].parse().unwrap(),
+                cols[3].parse().unwrap(),
+            ]);
+            v.push([
+                cols[4].parse().unwrap(),
+                cols[5].parse().unwrap(),
+                cols[6].parse().unwrap(),
+            ]);
+        }
+        pos = p;
+        vel = v;
+        i += 2 + n;
+    }
+    (pos, vel)
+}
+
+/// Assert one three-atom rigid water (atoms `base..base+3`) lies on both
+/// the position manifold (bond lengths equal r0) and the velocity
+/// manifold (relative velocity along each constraint bond is zero).
+fn e2e_assert_water_on_manifold(pos: &[[f64; 3]], vel: &[[f64; 3]], base: usize) {
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let norm = |a: [f64; 3]| dot(a, a).sqrt();
+    // A velocity scale for the relative-tolerance denominator.
+    let vmag = vel
+        .iter()
+        .flat_map(|v| v.iter().map(|c| c.abs()))
+        .fold(0.0_f64, f64::max);
+    let pairs = [
+        (base, base + 1, E2E_D_OH),
+        (base, base + 2, E2E_D_OH),
+        (base + 1, base + 2, E2E_D_HH),
+    ];
+    for (i, j, r0) in pairs {
+        let dr = sub(pos[i], pos[j]);
+        let dv = sub(vel[i], vel[j]);
+        let len = norm(dr);
+        assert!(
+            (len - r0).abs() <= 1e-5 * r0,
+            "position manifold: bond {i}-{j} length {len:e} != r0 {r0:e}"
+        );
+        let d = dot(dr, dv);
+        let scale = (len * vmag).max(1e-30);
+        assert!(
+            d.abs() <= 1e-4 * scale,
+            "velocity manifold: bond {i}-{j} (r·v) = {d:e}, scale {scale:e} \
+             (RATTLE must run after the composed kick)"
+        );
+    }
+}
+
+// rq-a78ba267 — a single MD step through the composed-kernel path: the
+// deferred RATTLE fires after the composed launch, so even one step
+// leaves velocities on the manifold. Had it run before the composed
+// kick, the post-kick velocities would be off-manifold.
+#[test]
+fn e2e_single_step_defers_rattle_after_composed_launch() {
+    let gpu = init_device().unwrap();
+    let _ = gpu;
+    let dir =
+        std::env::temp_dir().join(format!("heddlemd-e2e-1step-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cfg = e2e_write_case(&dir, 1, 1, "", "traj.xyz");
+    heddle_md::runner::run_simulation(&cfg).unwrap();
+    let (pos, vel) = e2e_parse_last_frame(&dir.join("traj.xyz"));
+    e2e_assert_water_on_manifold(&pos, &vel, 0);
+    e2e_assert_water_on_manifold(&pos, &vel, 3);
+}
+
+// rq-0945ffcb — NVE velocity-Verlet with SETTLE keeps rigid water on
+// both the position and the velocity manifolds over many steps.
+#[test]
+fn e2e_nve_settle_keeps_water_on_position_and_velocity_manifolds() {
+    let gpu = init_device().unwrap();
+    let _ = gpu;
+    let dir = std::env::temp_dir().join(format!("heddlemd-e2e-nve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cfg = e2e_write_case(&dir, 50, 1, "", "traj.xyz");
+    let summary = heddle_md::runner::run_simulation(&cfg).unwrap();
+    assert_eq!(summary.phases.len(), 1);
+    assert_eq!(summary.phases[0].kind, "md");
+    let (pos, vel) = e2e_parse_last_frame(&dir.join("traj.xyz"));
+    e2e_assert_water_on_manifold(&pos, &vel, 0);
+    e2e_assert_water_on_manifold(&pos, &vel, 3);
+}
+
+// rq-f223c0e2 — velocity-Verlet + CSVR thermostat + SETTLE: the composed
+// kernel fuses the trailing kick and the CSVR velocity rescale, and the
+// deferred RATTLE runs after both, keeping velocities on the manifold.
+#[test]
+fn e2e_vv_csvr_settle_keeps_velocities_on_manifold() {
+    let gpu = init_device().unwrap();
+    let _ = gpu;
+    let dir = std::env::temp_dir().join(format!("heddlemd-e2e-csvr-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let thermostat = "\n[phase.thermostat]\nkind = \"csvr\"\ntemperature = 300.0\ntau = 1.0e-13\nseed = 7\n";
+    let cfg = e2e_write_case(&dir, 50, 1, thermostat, "traj.xyz");
+    heddle_md::runner::run_simulation(&cfg).unwrap();
+    let (pos, vel) = e2e_parse_last_frame(&dir.join("traj.xyz"));
+    e2e_assert_water_on_manifold(&pos, &vel, 0);
+    e2e_assert_water_on_manifold(&pos, &vel, 3);
+}
+
+// rq-f0f29827 — a constrained velocity-Verlet phase runs long enough to
+// trigger CUDA-graph capture + batched replay (the SETTLE builder is
+// graph-compatible), and the manifold still holds at the end.
+#[test]
+fn e2e_constrained_vv_under_cuda_graph_path() {
+    let gpu = init_device().unwrap();
+    let _ = gpu;
+    let dir = std::env::temp_dir().join(format!("heddlemd-e2e-graph-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    // > GRAPH_TIMING_CALIBRATION_STEPS (8) so capture + replay is exercised.
+    let cfg = e2e_write_case(&dir, 40, 1, "", "traj.xyz");
+    let summary = heddle_md::runner::run_simulation(&cfg).unwrap();
+    assert_eq!(summary.phases[0].n_steps, 40);
+    let (pos, vel) = e2e_parse_last_frame(&dir.join("traj.xyz"));
+    e2e_assert_water_on_manifold(&pos, &vel, 0);
+    e2e_assert_water_on_manifold(&pos, &vel, 3);
+}
+
+// rq-eef4fb58 — two identical constrained runs are byte-identical.
+#[test]
+fn e2e_two_identical_constrained_runs_are_byte_identical() {
+    let gpu = init_device().unwrap();
+    let _ = gpu;
+    let dir = std::env::temp_dir().join(format!("heddlemd-e2e-det-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let d1 = dir.join("a");
+    let d2 = dir.join("b");
+    let cfg1 = e2e_write_case(&d1, 30, 42, "", "traj.xyz");
+    let cfg2 = e2e_write_case(&d2, 30, 42, "", "traj.xyz");
+    heddle_md::runner::run_simulation(&cfg1).unwrap();
+    heddle_md::runner::run_simulation(&cfg2).unwrap();
+    let a = std::fs::read(d1.join("traj.xyz")).unwrap();
+    let b = std::fs::read(d2.join("traj.xyz")).unwrap();
+    assert_eq!(a, b, "two identical constrained runs produced differing trajectories");
+}

@@ -149,12 +149,25 @@ impl crate::integrator::PostForcePerParticle for VelocityVerletState {
 impl Integrator for VelocityVerletState {
     // rq-aa68f468
     fn plan(&self, dt: Real) -> StepPlan {
+        use crate::integrator::ConstraintPhase;
+        // rq-a097b162 — the three ConstraintPoint markers are present
+        // unconditionally and are no-ops when no constraint slot is
+        // installed, so the same plan drives constrained and
+        // unconstrained runs.
         StepPlan {
             steps: vec![
+                SubStep::ConstraintPoint {
+                    phase: ConstraintPhase::BeforeDrift,
+                    dt,
+                },
                 SubStep::KickDrift {
                     dt,
                     label: "vv_kick_drift",
                     source: crate::integrator::KickSource::Total,
+                },
+                SubStep::ConstraintPoint {
+                    phase: ConstraintPhase::AfterDrift,
+                    dt,
                 },
                 SubStep::ForceEval {
                     class: None,
@@ -164,6 +177,10 @@ impl Integrator for VelocityVerletState {
                     dt,
                     label: "vv_kick",
                     source: crate::integrator::KickSource::Total,
+                },
+                SubStep::ConstraintPoint {
+                    phase: ConstraintPhase::AfterKick,
+                    dt,
                 },
             ],
         }

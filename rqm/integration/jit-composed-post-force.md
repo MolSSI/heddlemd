@@ -391,6 +391,9 @@ active:
 loop step in 1..=n_steps:
     if let Some(t) = thermostat { t.apply_pre(buffers, dt, timings) }
     let plan = integrator.plan(dt)
+    let defer_terminal_projection = constraint.is_some()
+        && integrator is in the composed set
+        && plan.ends_with_velocity_projection()
     for sub in &plan.steps:
         match sub:
             SubStep::ForceEval{..} => force_field.step(...)
@@ -398,6 +401,11 @@ loop step in 1..=n_steps:
                 if integrator is in the composed set
                    and this is the post-force SubStep:
                     /* skipped — composed kernel handles it */
+            SubStep::ConstraintPoint{ phase: AfterKick, .. }
+                if defer_terminal_projection and this is the plan's final sub-step:
+                    /* skipped — runner fires it after the composed launch */
+            SubStep::ConstraintPoint{ phase, dt } =>
+                constraint.dispatch(phase, buffers, sim_box, dt, timings)
             other => integrator.execute(other, ...)
     /* Post-force composed-kernel dispatch */
     if let Some(t) = thermostat { t.apply_post(...) }
@@ -408,6 +416,12 @@ loop step in 1..=n_steps:
            rescale when the barostat is not in the composed set */
     if composed set is non-empty:
         launch_post_force_composed_kernel(buffers, /* composed suffix */)
+    if defer_terminal_projection:
+        /* the displaced terminal velocity projection runs after every
+           per-particle velocity update, including the composed kernel's
+           fused kick and rescales */
+        constraint.apply_after_kick(buffers, sim_box,
+                                    plan.terminal_velocity_projection_dt(), timings)
     /* output cadence */
 ```
 
@@ -425,6 +439,40 @@ folded.
 For phases without a post-force composed kernel (no integrator
 plan, e.g. SD minimisation), the composed-kernel launch is
 skipped entirely; the runner's loop reverts to its non-JIT shape.
+
+### Interaction with the constraint slot <!-- rq-d9290792 -->
+
+The composed post-force kernel and the `Constraint` slot
+(`constraint-framework.md`) compose without changing the suffix
+selection above. A constraint slot never contributes a per-particle
+fragment — its position and velocity projections iterate to
+convergence and do not fit the single-pass per-particle model — so the
+integrator's participation in the composed set is decided exactly as
+for an unconstrained run.
+
+The constraint slot's hooks run as their own kernel launches at the
+plan-declared `ConstraintPoint` markers (`framework.md`). Their
+placement relative to the composed launch is:
+
+- `BeforeDrift` (snapshot) and `AfterDrift` (position projection)
+  precede the last `ForceEval` and therefore run in the plan walk,
+  ahead of the composed launch, in both the composed and non-composed
+  paths.
+- A trailing `AfterKick` (velocity projection) must follow the
+  integrator's final kick. When the composed kernel absorbs that kick,
+  the kick executes after the plan walk, so the runner defers the
+  trailing `AfterKick` marker (`defer_terminal_velocity_projection`,
+  `framework.md`) and fires `apply_after_kick` after
+  `launch_post_force_composed_kernel`. The velocity projection is thus
+  the last per-particle velocity operation of the step, after the
+  composed kernel's fused kick and any thermostat / barostat velocity
+  rescale (see `constraint-framework.md`, *Ordering of the terminal
+  velocity projection*).
+
+The integrator therefore stays in the composed set on constrained
+runs, and full kick / thermostat / barostat fusion is preserved; only
+the constraint projections run as extra launches, exactly as they do
+without the composed kernel.
 
 ## Feature API <!-- rq-edf9864f -->
 
@@ -549,10 +597,12 @@ not on the `AggregateLevel` of the prior force evaluation.
   computation.
 
 - **Composition of the SHAKE / RATTLE constraint hooks.**
-  Constraint slots (`constraint-framework.md`) install hooks
-  before / after Drift substeps; those hooks iterate to
-  convergence and do not fit the single-pass per-particle
-  fragment model. They stay outside the composed kernel.
+  Constraint slots (`constraint-framework.md`) run their hooks at
+  plan-declared `ConstraintPoint` markers; those hooks iterate to
+  convergence and do not fit the single-pass per-particle fragment
+  model. They stay outside the composed kernel as their own launches;
+  see *Interaction with the constraint slot* for how the trailing
+  velocity projection is ordered relative to the composed launch.
 
 - **Composition of pre-force or mid-plan stochastic substeps.**
   Langevin-BAOAB's mid-plan OU step runs between drift substeps
