@@ -94,16 +94,20 @@ impl Integrator for VelocityVerletState {
                     label: "vv_kick",
                     source: crate::integrator::KickSource::Total,
                 },
-                SubStep::ConstraintPoint {
-                    phase: ConstraintPhase::AfterKick,
-                    dt,
-                },
                 // rq-dbbffa7d — terminal barostat point (canonical
                 // placement): a no-op without a per-step barostat, else
                 // fired in the runner's post-walk tail, where the
                 // barostat's apply runs the rescale as a standalone
-                // launch.
+                // launch. Precedes the AfterKick projection so the
+                // velocity projection is the last per-particle velocity
+                // operation of the step (RATTLE-last): a barostat velocity
+                // rescale placed after it would knock the velocities back
+                // off the constraint manifold.
                 SubStep::BarostatPoint { dt },
+                SubStep::ConstraintPoint {
+                    phase: ConstraintPhase::AfterKick,
+                    dt,
+                },
             ],
         }
     }

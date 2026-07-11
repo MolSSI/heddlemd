@@ -100,16 +100,6 @@ impl ResourceSet {
         self.0 & (1 << r.bit()) != 0
     }
 
-    /// Union of two sets.
-    pub fn union(&self, other: &ResourceSet) -> ResourceSet {
-        ResourceSet(self.0 | other.0)
-    }
-
-    /// `true` iff the two sets share at least one resource.
-    pub fn intersects(&self, other: &ResourceSet) -> bool {
-        self.0 & other.0 != 0
-    }
-
     /// Iterate the resources present in the set (bit order).
     pub fn iter(&self) -> impl Iterator<Item = Resource> + '_ {
         Resource::ALL.into_iter().filter(move |&r| self.contains(r))

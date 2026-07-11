@@ -369,18 +369,23 @@ StepPlan { steps: vec![
     SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, dt },
     SubStep::ForceEval,
     SubStep::KickHalf  { dt, label: "vv_kick"       },
-    SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt },
     SubStep::BarostatPoint { dt },
+    SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt },
 ]}
 ```
 
 The three `ConstraintPoint` markers and the terminal `BarostatPoint`
 are present unconditionally and are no-ops when their slot is absent, so
-the same plan drives NVE, NVT, and NPT compositions. The `AfterKick`
-and `BarostatPoint` sub-steps form the plan's post-force tail: the
-runner dispatches it as a fixed ordered sequence — trailing kick,
-thermostat `apply_post`, barostat `apply`, then constraint velocity
-projection (see `framework.md`, *Per-Step Interface*). The plan shape is
+the same plan drives NVE, NVT, and NPT compositions. The `BarostatPoint`
+and `AfterKick` sub-steps form the plan's post-force tail, and their plan
+order is the order the runner dispatches them: the runner walks the tail
+as a fixed ordered sequence — trailing kick, thermostat `apply_post`,
+barostat `apply`, then constraint velocity projection (see `framework.md`,
+*Per-Step Interface*). The barostat rescale precedes the `AfterKick`
+projection so that the velocity projection is the last per-particle
+velocity operation of the step (RATTLE-last): a barostat velocity rescale
+placed after it would knock the velocities back off the constraint
+manifold. The plan shape is
 identical for the lossy and lossless variants; the `lossless` flag is
 carried on the integrator's `&mut self` and read inside `execute()` to
 choose between the lossy and lossless kernels. (Lossless mode does not

@@ -265,6 +265,41 @@ competing definition of the timestep, and the two must be reconciled by
 special cases. Eliminating that class of special case is the standard this
 principle sets.
 
+### One deliberate exception: default-topology thermostat coupling
+
+Constraint projection and per-step barostat scaling are declared in the
+schedule as typed operations (`ConstraintPoint`, `BarostatPoint`) that the
+`run_step` executor walks in place. Thermostat coupling is only *partly*
+plan-declared, and the asymmetry is intentional.
+
+An integrator whose coupling is genuinely per-sub-step — RESPA, which
+thermostats at inner-loop boundaries — emits explicit `ThermostatHalf`
+markers, and those are walked like any other operation. But the common
+case (velocity-Verlet and friends, full-step kinetic-energy coupling) does
+*not* place thermostat markers in its plan. Instead the runner applies the
+thermostat's `apply_pre` half on the step's entry velocities before the
+walk and its `apply_post` half at the post-force-marker boundary, after the
+trailing kick. This coupling is driven by a `coupling_interval` cadence
+that can span multiple whole steps, so its natural unit is "wrap the step,"
+not "a marker at a fixed sub-step offset" — the placement is a property of
+the run's coupling schedule, not of the integrator's per-step shape, and a
+plan (which is re-emitted every step with the same shape) is the wrong
+place to encode a multi-step cadence.
+
+This does technically mean the default-topology schedule is not the *whole*
+physics: the thermostat halves live in the runner's wrapping logic rather
+than in the `StepPlan`. It is a bounded exception, not a second execution
+model — the wrapping carries no ordering rules that compete with the plan
+(it brackets the walk; it never reorders operations within it or changes
+which state an operation observes), and a plan that *does* own its
+thermostat placement (any plan carrying `ThermostatHalf`) suppresses the
+wrapping entirely, so the two mechanisms are mutually exclusive by
+construction rather than reconciled by special cases. The full-step
+kinetic-energy reduction the coupling consumes is itself a fusion barrier
+(see the corollary above), which is the deeper reason the thermostat rescale
+could never have fused into the integrator kick regardless of where it is
+declared.
+
 ## Rust / CUDA boundary
 
 The host code is written in Rust. CUDA kernels are written in CUDA C and

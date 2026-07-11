@@ -1319,6 +1319,58 @@ fn one_run_step_call_produces_the_whole_canonical_post_force_order() {
     );
 }
 
+// rq-24e3c49a
+#[test]
+fn afterkick_projection_fires_after_the_per_step_barostat_rescale() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    // A *real* velocity-Verlet integrator (not a PlanStub): its own
+    // plan() is what pins the post-force tail order, so this test guards
+    // the emitted marker order rather than a hand-written stub plan. A
+    // constraint slot and a per-step barostat record into one shared
+    // ordered log; the integrator's kick/drift kernels do not record, so
+    // only the constraint hooks and the barostat apply reach the log.
+    let registry = IntegratorRegistry::with_builtins();
+    let mut integ = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
+    let order = CallLog::default();
+    let mut constraint = RecordingConstraint {
+        log: CallLog { events: order.events.clone() },
+    };
+    let mut barostat = OrderRecordingBarostat {
+        log: CallLog { events: order.events.clone() },
+    };
+    run_step(
+        &mut *integ, &mut buffers, &mut sim_box, &mut ff,
+        Some(&mut constraint), None, Some(&mut barostat),
+        0.1, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    let events = order.events.lock().unwrap().clone();
+    let baro = events
+        .iter()
+        .position(|e| *e == "barostat_apply")
+        .expect("barostat apply was dispatched");
+    let after = events
+        .iter()
+        .position(|e| *e == "after_kick")
+        .expect("after_kick projection was dispatched");
+    // RATTLE-last: the barostat velocity rescale precedes the terminal
+    // velocity projection...
+    assert!(
+        baro < after,
+        "expected barostat_apply before after_kick, got {:?}",
+        events
+    );
+    // ...and the projection is the last per-particle velocity operation
+    // of the step.
+    assert_eq!(
+        events.last().copied(),
+        Some("after_kick"),
+        "expected after_kick last, got {:?}",
+        events
+    );
+}
+
 // rq-d64bc1c6
 #[test]
 fn trailing_kick_runs_via_execute_in_the_main_walk() {

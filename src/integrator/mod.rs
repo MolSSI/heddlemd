@@ -266,8 +266,8 @@ pub enum SubStep {
 
 impl SubStep {
     /// Returns the variant name (without the payload) as a static
-    /// string. Useful for error reporting and the runner's hook-position
-    /// inference.
+    /// string. Used for schedule-validation error reporting (naming the
+    /// offending operation in a [`ScheduleError`]) and other diagnostics.
     pub fn variant_name(&self) -> &'static str {
         match self {
             SubStep::KickHalf { .. } => "KickHalf",

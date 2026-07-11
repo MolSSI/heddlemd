@@ -5426,6 +5426,18 @@
     "title": "- The R2C forward transform `rho → rho_hat` is invoked via",
     "type": "anchor"
   },
+  "rq-24e3c49a": {
+    "decl": "Scenario: The AfterKick projection fires after the per-step barostat rescale (RATTLE-last)",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The AfterKick projection fires after the per-step barostat rescale (RATTLE-last)",
+    "type": "scenario"
+  },
   "rq-24f280af": {
     "decl": "### Effective exclusions",
     "file": "forces/topology",

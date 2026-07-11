@@ -1078,6 +1078,15 @@ Feature: Constraint slot framework
       [apply_before_drift, apply_after_drift, trailing_kick, apply_after_kick]
     And apply_after_kick is not dispatched during run_step's main walk
 
+  @rq-24e3c49a
+  Scenario: The AfterKick projection fires after the per-step barostat rescale (RATTLE-last)
+    Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
+    And a per-step barostat slot whose apply rescales positions, velocities, and the box
+    And a recording wrapper that timestamps the barostat apply and every Constraint hook call
+    When the runner executes one timestep
+    Then apply_after_kick is recorded after the barostat apply
+    And apply_after_kick is the last per-particle velocity operation of the step
+
   @rq-77f959b2
   Scenario: apply_position_projection_only is not fired during the MD plan walk
     Given a velocity-Verlet integrator (lossless=false) with a SHAKE constraint slot

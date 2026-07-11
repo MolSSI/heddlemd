@@ -145,9 +145,10 @@ hand-built plans.
 - `Resource` — closed enum: `Positions`, `Velocities`, `Images`, `Box`, <!-- rq-f44776cb -->
   `Forces`, `ClassForces(ForceClass)`. `Copy`, `Eq`, `Hash`.
 - `ResourceSet` — a set of `Resource`. Supports construction from a slice <!-- rq-5cf3694c -->
-  / iterator, membership test, union, and intersection-with a set (enough
-  to express the read check and the `{ Positions, Box }` invalidation
-  test).
+  / iterator, membership test (`contains`), single-element `insert` /
+  `remove`, and iteration (`iter`) — enough to express the read check and
+  the `{ Positions, Box }` invalidation test, both of which the validator
+  performs element-wise over an operation's footprint.
 - `OpFootprint` — `{ reads: ResourceSet, writes: ResourceSet }`. <!-- rq-5414f115 -->
 - `ScheduleError` — error returned by validation. Includes at minimum: <!-- rq-3fd3777d -->
   - `ReadsStaleResource { index: usize, op: &'static str, resource: Resource }`
