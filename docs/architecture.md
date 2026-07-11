@@ -204,11 +204,18 @@ A timestep is more than the integrator: on any given step it may also
 carry thermostat coupling, barostat scaling, and constraint projection.
 These interleave with the integrator's kicks and drifts at method-specific
 points, and several of them reduce to per-particle velocity or position
-updates that can share a single kernel launch. HeddleMD fuses those updates
-— most visibly through the JIT-composed post-force per-particle kernel — to
-cut launch count and enable CUDA-graph capture (see `rqm/integration/`).
+updates.
 
-The governing principle for all such fusion is:
+HeddleMD represents a timestep as **one canonical schedule**: the ordered
+`StepPlan` of typed operations an integrator returns, walked by the single
+`run_step` executor. Each operation declares the state it reads and writes
+— its resource footprint — and the schedule is validated for
+dependency-correctness before a run begins: no operation may observe
+force-derived state that a preceding position or box mutation invalidated
+without an intervening force evaluation (see
+`rqm/integration/op-model.md` and `rqm/integration/framework.md`).
+
+The governing principle for any optimization over this schedule is:
 
 > **Fusion is a semantics-preserving optimization over one canonical
 > schedule. It is never a second execution model with its own ordering
@@ -235,6 +242,22 @@ after it in the schedule, and fusion cannot merge the operation that
 *produces* the reduced quantity's inputs with the one that *consumes* the
 reduced result. Where those two would otherwise fuse, the reduction splits
 them; the schedule, not the fuser, decides which state the consumer sees.
+
+In the current engine this principle is enforced structurally rather than
+exploited for launch-count reduction. The schedule's per-operation
+footprints are dependency-validated at phase setup, so an ill-ordered
+plan is rejected rather than silently producing wrong dynamics. No
+per-timestep pointwise coalescing pass runs: profiling of representative
+workloads found the coalescible post-force pointwise operations to be a
+negligible fraction of GPU time — they are separated by the reductions
+they consume, which are barriers — so every scheduled operation is its
+own kernel launch. Coalescing remains a possible future pass precisely
+because the schedule and its validated dependencies already define what a
+correct fusion would have to preserve. (The pair-force pipeline
+separately JIT-composes each configured potential slot's functional form
+into a single fused pair-force kernel; that is a compile-time composition
+of force *contributions*, not a per-timestep pointwise fuser, and is
+governed by `rqm/forces/`, not this principle.)
 
 When a fusion mechanism instead carries its own ordering rules — deciding
 placement or which state an operation observes — it has become a second,

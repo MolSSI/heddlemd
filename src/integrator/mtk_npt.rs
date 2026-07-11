@@ -67,7 +67,7 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::nose_hoover_chain::{nhc_chain_sub_step, yoshida_weights};
-use super::{Integrator, IntegratorBuilder, IntegratorError, Resource, ResourceSet, StepPlan, SubStep};
+use super::{Integrator, IntegratorBuilder, IntegratorError, OpFootprint, Resource, StepPlan, SubStep};
 
 // Host-side Φ_v / Φ_x factor. Computes sinh(α)/α with a Taylor
 // fallback when |α| < TAYLOR_THRESHOLD so the result stays finite and
@@ -283,6 +283,87 @@ impl MtkNptIntegrator {
     }
 }
 
+/// The MTK integrator's private sub-step kinds, each carried through a
+/// `SubStep::Custom` in the plan. `MtkStep` is the single source of truth
+/// for a sub-step's plan `label` and its resource footprint, and the
+/// key `execute()` dispatches on — so the label used in `plan()` and the
+/// arm matched in `execute()` cannot drift apart. rq-c50ff880
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MtkStep {
+    KeReducePre,
+    VirReducePre,
+    CellChainPre,
+    ParticleChainPre,
+    BaroKickPre,
+    KeReducePost,
+    VirReducePost,
+    KeReducePostKick,
+    BaroKickPost,
+    ParticleChainPost,
+    CellChainPost,
+}
+
+impl MtkStep {
+    const ALL: [MtkStep; 11] = [
+        MtkStep::KeReducePre,
+        MtkStep::VirReducePre,
+        MtkStep::CellChainPre,
+        MtkStep::ParticleChainPre,
+        MtkStep::BaroKickPre,
+        MtkStep::KeReducePost,
+        MtkStep::VirReducePost,
+        MtkStep::KeReducePostKick,
+        MtkStep::BaroKickPost,
+        MtkStep::ParticleChainPost,
+        MtkStep::CellChainPost,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            MtkStep::KeReducePre => "ke_reduce_pre",
+            MtkStep::VirReducePre => "vir_reduce_pre",
+            MtkStep::CellChainPre => "cell_chain_pre",
+            MtkStep::ParticleChainPre => "particle_chain_pre",
+            MtkStep::BaroKickPre => "baro_kick_pre",
+            MtkStep::KeReducePost => "ke_reduce_post",
+            MtkStep::VirReducePost => "vir_reduce_post",
+            MtkStep::KeReducePostKick => "ke_reduce_post_kick",
+            MtkStep::BaroKickPost => "baro_kick_post",
+            MtkStep::ParticleChainPost => "particle_chain_post",
+            MtkStep::CellChainPost => "cell_chain_post",
+        }
+    }
+
+    fn from_label(label: &str) -> Option<MtkStep> {
+        MtkStep::ALL.into_iter().find(|s| s.label() == label)
+    }
+
+    /// Tracked-resource footprint (see `op-model.md`). KE reductions read
+    /// velocities; the particle chain scales per-particle velocities. The
+    /// virial reduction reads the (untracked) per-particle virial buffer;
+    /// the cell chain and barostat kicks update only host-side extended
+    /// scalars (`self.p_eps`, the cell DOF) — none touches a tracked
+    /// resource, so their footprint is empty. No MTK sub-step reads
+    /// forces or writes positions/box (the `drift_box` `Drift` does that).
+    fn footprint(self) -> OpFootprint {
+        use Resource::Velocities;
+        match self {
+            MtkStep::KeReducePre
+            | MtkStep::KeReducePost
+            | MtkStep::KeReducePostKick => OpFootprint::new(&[Velocities], &[]),
+            MtkStep::ParticleChainPre | MtkStep::ParticleChainPost => {
+                OpFootprint::new(&[Velocities], &[Velocities])
+            }
+            MtkStep::VirReducePre
+            | MtkStep::VirReducePost
+            | MtkStep::CellChainPre
+            | MtkStep::CellChainPost
+            | MtkStep::BaroKickPre
+            | MtkStep::BaroKickPost => OpFootprint::new(&[], &[]),
+        }
+    }
+}
+
 impl Integrator for MtkNptIntegrator {
     // rq-aa68f468 rq-8cda2c89
     fn plan(&self, dt: Real) -> StepPlan {
@@ -294,39 +375,33 @@ impl Integrator for MtkNptIntegrator {
         // sub-step is the cell-coupled velocity update; the Drift
         // sub-step is the cell-coupled position update plus the
         // SimulationBox rescale.
-        // rq-c50ff880 — Custom-op footprints over tracked resources.
-        // KE reductions read velocities; virial reductions and the cell
-        // (extended-DOF) chain touch only untracked scalars / the cell
-        // momentum; the particle chain and barostat velocity kick scale
-        // per-particle velocities. None reads forces or writes
-        // positions / box (the `drift_box` Drift does the box rescale).
-        let velocities = || ResourceSet::from_slice(&[Resource::Velocities]);
-        let ke_reduce = || (velocities(), ResourceSet::empty());
-        let scalar_only = || (ResourceSet::empty(), ResourceSet::empty());
-        let vel_scale = || (velocities(), velocities());
-        let custom = |label: &'static str, (reads, writes): (ResourceSet, ResourceSet)| {
-            SubStep::Custom { dt, label, reads, writes }
+        // rq-c50ff880 — each `Custom` sub-step carries its `MtkStep`'s
+        // label and resource footprint; `execute()` dispatches on the
+        // same `MtkStep`.
+        let custom = |step: MtkStep| {
+            let fp = step.footprint();
+            SubStep::Custom { dt, label: step.label(), reads: fp.reads, writes: fp.writes }
         };
         StepPlan {
             steps: vec![
-                custom("ke_reduce_pre", ke_reduce()),
-                custom("vir_reduce_pre", scalar_only()),
-                custom("cell_chain_pre", scalar_only()),
-                custom("particle_chain_pre", vel_scale()),
-                custom("baro_kick_pre", vel_scale()),
+                custom(MtkStep::KeReducePre),
+                custom(MtkStep::VirReducePre),
+                custom(MtkStep::CellChainPre),
+                custom(MtkStep::ParticleChainPre),
+                custom(MtkStep::BaroKickPre),
                 SubStep::KickHalf { dt, label: "vel_kick_pre", source: crate::integrator::KickSource::Total },
                 SubStep::Drift { dt, label: "drift_box" },
                 SubStep::ForceEval {
                     class: None,
                     level: Some(crate::forces::AggregateLevel::ForcesAndScalars),
                 },
-                custom("ke_reduce_post", ke_reduce()),
-                custom("vir_reduce_post", scalar_only()),
+                custom(MtkStep::KeReducePost),
+                custom(MtkStep::VirReducePost),
                 SubStep::KickHalf { dt, label: "vel_kick_post", source: crate::integrator::KickSource::Total },
-                custom("ke_reduce_post_kick", ke_reduce()),
-                custom("baro_kick_post", vel_scale()),
-                custom("particle_chain_post", vel_scale()),
-                custom("cell_chain_post", scalar_only()),
+                custom(MtkStep::KeReducePostKick),
+                custom(MtkStep::BaroKickPost),
+                custom(MtkStep::ParticleChainPost),
+                custom(MtkStep::CellChainPost),
             ],
         }
     }
@@ -355,42 +430,104 @@ impl Integrator for MtkNptIntegrator {
         let nf = self.g_dof as f64;
 
         match substep {
-            SubStep::Custom { label: "ke_reduce_pre", .. } => {
-                timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-                self.scratch_k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-                timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-                Ok(())
-            }
-            SubStep::Custom { label: "vir_reduce_pre", .. } => {
-                timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
-                let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
-                timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
-                self.scratch_volume = sim_box.volume() as f64;
-                self.scratch_pressure =
-                    (2.0 * self.scratch_k + w_vir) / (3.0 * self.scratch_volume);
-                Ok(())
-            }
-            SubStep::Custom { label: "cell_chain_pre", .. } => {
-                self.cell_chain_half_step(dt);
-                Ok(())
-            }
-            SubStep::Custom { label: "particle_chain_pre", .. } => {
-                self.scratch_k =
-                    self.particle_chain_half_step(dt, buffers, self.scratch_k, timings)?;
-                Ok(())
-            }
-            SubStep::Custom { label: "baro_kick_pre", .. } => {
-                // p_eps ← p_eps + (dt/2) · (3V(P − P_ext) + (6/N_f) · K).
-                // `(6/N_f)·K` is MTK's `(d/N_f)·2K` correction (d = 3):
-                // the piston force term arising from the `1 + d/N_f`
-                // coupling; `N_f` is the constraint- and COM-removed
-                // thermal DOF count (floored to 1 at construction).
-                self.p_eps += 0.5
-                    * dt_f64
-                    * (3.0 * self.scratch_volume * (self.scratch_pressure - self.pressure)
-                        + 6.0 / nf * self.scratch_k);
-                Ok(())
-            }
+            // rq-c50ff880 — every MTK `Custom` sub-step dispatches on its
+            // `MtkStep`, recovered from the plan `label`. The inner match
+            // is exhaustive over `MtkStep`, so a new kind cannot be added
+            // to the plan without a corresponding dispatch arm here.
+            SubStep::Custom { label, .. } => match MtkStep::from_label(label) {
+                Some(MtkStep::KeReducePre) => {
+                    timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                    self.scratch_k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+                    timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                    Ok(())
+                }
+                Some(MtkStep::VirReducePre) => {
+                    timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
+                    let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
+                    timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
+                    self.scratch_volume = sim_box.volume() as f64;
+                    self.scratch_pressure =
+                        (2.0 * self.scratch_k + w_vir) / (3.0 * self.scratch_volume);
+                    Ok(())
+                }
+                Some(MtkStep::CellChainPre) => {
+                    self.cell_chain_half_step(dt);
+                    Ok(())
+                }
+                Some(MtkStep::ParticleChainPre) => {
+                    self.scratch_k =
+                        self.particle_chain_half_step(dt, buffers, self.scratch_k, timings)?;
+                    Ok(())
+                }
+                Some(MtkStep::BaroKickPre) => {
+                    // p_eps ← p_eps + (dt/2) · (3V(P − P_ext) + (6/N_f) · K).
+                    // `(6/N_f)·K` is MTK's `(d/N_f)·2K` correction (d = 3):
+                    // the piston force term arising from the `1 + d/N_f`
+                    // coupling; `N_f` is the constraint- and COM-removed
+                    // thermal DOF count (floored to 1 at construction).
+                    self.p_eps += 0.5
+                        * dt_f64
+                        * (3.0 * self.scratch_volume * (self.scratch_pressure - self.pressure)
+                            + 6.0 / nf * self.scratch_k);
+                    Ok(())
+                }
+                Some(MtkStep::KeReducePost) => {
+                    timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                    self.scratch_k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+                    timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                    Ok(())
+                }
+                Some(MtkStep::VirReducePost) => {
+                    timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
+                    let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
+                    timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
+                    // Host volume is stale after drift_box's
+                    // `multiply_lattice_isotropic`; refresh from device
+                    // so `scratch_volume` reflects the post-drift box.
+                    sim_box.flush_from_device().map_err(|_| {
+                        IntegratorError::Gpu(GpuError(cudarc::driver::DriverError(
+                            cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
+                        )))
+                    })?;
+                    self.scratch_volume = sim_box.volume() as f64;
+                    self.scratch_pressure =
+                        (2.0 * self.scratch_k + w_vir) / (3.0 * self.scratch_volume);
+                    Ok(())
+                }
+                Some(MtkStep::KeReducePostKick) => {
+                    timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                    self.scratch_k_post_kick =
+                        compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+                    timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                    Ok(())
+                }
+                Some(MtkStep::BaroKickPost) => {
+                    // Mirror of `baro_kick_pre`; see the `(6/N_f)·K` note
+                    // there for the DOF form.
+                    self.p_eps += 0.5
+                        * dt_f64
+                        * (3.0 * self.scratch_volume * (self.scratch_pressure - self.pressure)
+                            + 6.0 / nf * self.scratch_k_post_kick);
+                    Ok(())
+                }
+                Some(MtkStep::ParticleChainPost) => {
+                    let k_after_part = self.particle_chain_half_step(
+                        dt,
+                        buffers,
+                        self.scratch_k_post_kick,
+                        timings,
+                    )?;
+                    self.most_recent_pressure = self.scratch_pressure;
+                    self.most_recent_volume = self.scratch_volume;
+                    self.most_recent_ke = k_after_part;
+                    Ok(())
+                }
+                Some(MtkStep::CellChainPost) => {
+                    self.cell_chain_half_step(dt);
+                    Ok(())
+                }
+                None => Err(IntegratorError::UnexpectedSubStep { variant: "Custom" }),
+            },
             SubStep::KickHalf { label: "vel_kick_pre", .. }
             | SubStep::KickHalf { label: "vel_kick_post", .. } => {
                 // `α = (1 + d/N_f) · v_eps` with d = 3: the MTK
@@ -424,61 +561,6 @@ impl Integrator for MtkNptIntegrator {
                         cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
                     )))
                 })?;
-                Ok(())
-            }
-            SubStep::Custom { label: "ke_reduce_post", .. } => {
-                timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-                self.scratch_k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-                timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-                Ok(())
-            }
-            SubStep::Custom { label: "vir_reduce_post", .. } => {
-                timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
-                let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
-                timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
-                // Host volume is stale after drift_box's
-                // `multiply_lattice_isotropic`; refresh from device
-                // so `scratch_volume` reflects the post-drift box.
-                sim_box.flush_from_device().map_err(|_| {
-                    IntegratorError::Gpu(GpuError(cudarc::driver::DriverError(
-                        cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
-                    )))
-                })?;
-                self.scratch_volume = sim_box.volume() as f64;
-                self.scratch_pressure =
-                    (2.0 * self.scratch_k + w_vir) / (3.0 * self.scratch_volume);
-                Ok(())
-            }
-            SubStep::Custom { label: "ke_reduce_post_kick", .. } => {
-                timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-                self.scratch_k_post_kick =
-                    compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-                timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-                Ok(())
-            }
-            SubStep::Custom { label: "baro_kick_post", .. } => {
-                // Mirror of `baro_kick_pre`; see the `(6/N_f)·K` note
-                // there for the DOF form.
-                self.p_eps += 0.5
-                    * dt_f64
-                    * (3.0 * self.scratch_volume * (self.scratch_pressure - self.pressure)
-                        + 6.0 / nf * self.scratch_k_post_kick);
-                Ok(())
-            }
-            SubStep::Custom { label: "particle_chain_post", .. } => {
-                let k_after_part = self.particle_chain_half_step(
-                    dt,
-                    buffers,
-                    self.scratch_k_post_kick,
-                    timings,
-                )?;
-                self.most_recent_pressure = self.scratch_pressure;
-                self.most_recent_volume = self.scratch_volume;
-                self.most_recent_ke = k_after_part;
-                Ok(())
-            }
-            SubStep::Custom { label: "cell_chain_post", .. } => {
-                self.cell_chain_half_step(dt);
                 Ok(())
             }
             other => Err(IntegratorError::UnexpectedSubStep {
