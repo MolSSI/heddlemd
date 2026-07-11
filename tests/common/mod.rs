@@ -6,6 +6,9 @@
 // rq-8d45ae10 — end-to-end test harness (Case, SystemBuilder, assertions).
 pub mod e2e;
 
+// rq-ec1452c6 — potential consistency harness (ConsistencyFixture, checks).
+pub mod consistency;
+
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;

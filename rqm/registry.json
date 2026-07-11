@@ -1844,6 +1844,18 @@
     "title": "SPME real-space cutoff participates in box-too-small check",
     "type": "scenario"
   },
+  "rq-0d01f64a": {
+    "decl": "Scenario: A sign-flipped force fails the finite-difference check",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A sign-flipped force fails the finite-difference check",
+    "type": "scenario"
+  },
   "rq-0d14734d": {
     "decl": "- `__device__ __forceinline__ void philox_normal_real_pair(uint32 a, uint32 b, uint32 c, uint32 d, Real *n0, Real *n1);`",
     "file": "precision",
@@ -2003,6 +2015,18 @@
       }
     ],
     "title": "apply_post launches the expected kernel set",
+    "type": "scenario"
+  },
+  "rq-0e8b48bd": {
+    "decl": "Scenario: A correct pair virial matches the scaling finite difference",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A correct pair virial matches the scaling finite difference",
     "type": "scenario"
   },
   "rq-0ebfcbbc": {
@@ -3737,6 +3761,14 @@
     "title": "rescale_positions",
     "type": "api-item"
   },
+  "rq-19c1c994": {
+    "decl": "## Minimal Systems",
+    "file": "forces/potential-consistency-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Minimal Systems",
+    "type": "section"
+  },
   "rq-19ccc047": {
     "decl": "Scenario: [thermostat] unknown kind is rejected",
     "file": "io/config-schema",
@@ -3966,6 +3998,18 @@
       }
     ],
     "title": "A stretched bond's virial equals r * F_mag",
+    "type": "scenario"
+  },
+  "rq-1b1e47ee": {
+    "decl": "Scenario: A force that does not vanish beyond the cutoff fails",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A force that does not vanish beyond the cutoff fails",
     "type": "scenario"
   },
   "rq-1b34278b": {
@@ -5448,6 +5492,18 @@
     "title": "N_mol is the molecule count, not the atom count",
     "type": "scenario"
   },
+  "rq-24c9bf90": {
+    "decl": "Scenario: An inconsistent virial fails the virial check",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An inconsistent virial fails the virial check",
+    "type": "scenario"
+  },
   "rq-24cd0b9c": {
     "decl": "Scenario: SimulationSetup::new short-circuits at the first failing step helper",
     "file": "simulation-runner",
@@ -6676,6 +6732,22 @@
     "title": "resolve_aggregate_level",
     "type": "api-item"
   },
+  "rq-2d06b5d2": {
+    "decl": "Scenario: A correct pair potential passes the finite-difference check",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A correct pair potential passes the finite-difference check",
+    "type": "scenario"
+  },
   "rq-2d107b4d": {
     "decl": "Scenario: Reject an empty `[[analyses]]` array",
     "file": "analysis/framework",
@@ -6903,6 +6975,18 @@
     "refs": [],
     "title": "A built-in is not overridden by a later same-kind registration",
     "type": "scenario"
+  },
+  "rq-2e64e2c1": {
+    "decl": "- `assert_all_builtin_potentials_consistent(gpu: &GpuContext)`",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "assert_all_builtin_potentials_consistent",
+    "type": "api-item"
   },
   "rq-2e98a75d": {
     "decl": "# ignored.",
@@ -7786,6 +7870,18 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-3654fa69": {
+    "decl": "Scenario: A force missing the 1/r factor fails the finite-difference check",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A force missing the 1/r factor fails the finite-difference check",
+    "type": "scenario"
   },
   "rq-36665dda": {
     "decl": "Scenario: g_r normalisation matches the ideal-gas reference",
@@ -9672,6 +9768,18 @@
     "title": "load_config",
     "type": "api-item"
   },
+  "rq-45ceac42": {
+    "decl": "- `PotentialShape` — the four fragment-composed shapes the harness drives.",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PotentialShape",
+    "type": "api-item"
+  },
   "rq-45d384b3": {
     "decl": "Scenario: Bonds join their atoms into one molecule",
     "file": "forces/topology",
@@ -10174,6 +10282,14 @@
     "title": "Same-type pair uses the diagonal parameter slot",
     "type": "scenario"
   },
+  "rq-4a1699c4": {
+    "decl": "## Feature API",
+    "file": "forces/potential-consistency-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-4a328491": {
     "decl": "Scenario: compute_total_virial on empty state returns 0.0 without launching",
     "file": "integration/berendsen-barostat",
@@ -10597,6 +10713,14 @@
     ],
     "title": "μ clamped to μ_min when the formula yields a non-positive μ³",
     "type": "scenario"
+  },
+  "rq-4dccf720": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/potential-consistency-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-4dcd812b": {
     "decl": "### Rust Launch Helpers",
@@ -11090,6 +11214,18 @@
     ],
     "title": "ChargeList",
     "type": "api-item"
+  },
+  "rq-525bf72b": {
+    "decl": "Scenario: A uniformly wrong but self-consistent form fails a reference point",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A uniformly wrong but self-consistent form fails a reference point",
+    "type": "scenario"
   },
   "rq-5269221c": {
     "decl": "Scenario: wrap_position is idempotent for a triclinic box",
@@ -13127,6 +13263,14 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-61232d64": {
+    "decl": "## Tolerances and f32",
+    "file": "forces/potential-consistency-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Tolerances and f32",
+    "type": "section"
+  },
   "rq-6136714b": {
     "decl": "Scenario: Construct for a SETTLE'd water system",
     "file": "integration/berendsen",
@@ -14648,6 +14792,18 @@
     "title": "log_column_values",
     "type": "api-item"
   },
+  "rq-6d39e77d": {
+    "decl": "Scenario: A discontinuous switch fails the continuity check",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A discontinuous switch fails the continuity check",
+    "type": "scenario"
+  },
   "rq-6d4a49ac": {
     "decl": "#### `[[dihedral_types]]` (optional array of tables)",
     "file": "io/config-schema",
@@ -14707,6 +14863,19 @@
     ],
     "title": "SI-mode writer multiplies the Lattice by the bohr -> meter factor",
     "type": "scenario"
+  },
+  "rq-6dbbbccc": {
+    "decl": "## Fixture Registry and Coverage",
+    "file": "forces/potential-consistency-harness",
+    "level": 2,
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Fixture Registry and Coverage",
+    "type": "section"
   },
   "rq-6dc17c20": {
     "decl": "Scenario: SPME reciprocal stream uses double-precision cuFFT plans under f64",
@@ -15845,6 +16014,18 @@
     "title": "Constraint groups are sorted by minimum particle index",
     "type": "scenario"
   },
+  "rq-75cb6f7d": {
+    "decl": "Scenario: A built-in potential without a fixture fails coverage",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A built-in potential without a fixture fails coverage",
+    "type": "scenario"
+  },
   "rq-75dc5b88": {
     "decl": "Scenario: A four-slot run (thermostat, barostat, constraint) completes and stays on the manifold",
     "file": "e2e-testing",
@@ -16009,6 +16190,18 @@
     ],
     "title": "Batched Replay Loop",
     "type": "section"
+  },
+  "rq-7700c3b8": {
+    "decl": "Scenario: A fixture system carries exactly one active slot",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fixture system carries exactly one active slot",
+    "type": "scenario"
   },
   "rq-7711b39b": {
     "decl": "Scenario: Self-block sparse candidates do not double-emit intramolecular pairs",
@@ -16818,6 +17011,18 @@
     "refs": [],
     "title": "Rust Launch Helpers",
     "type": "section"
+  },
+  "rq-7c83a420": {
+    "decl": "- `Tolerance` — a relative tolerance with an absolute floor. `Default` supplies",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Tolerance",
+    "type": "api-item"
   },
   "rq-7cc7e568": {
     "decl": "Scenario: flush_from_device does not bump the generation",
@@ -20076,6 +20281,18 @@
     "title": "reduce_bond_forces on zero particles is a no-op",
     "type": "scenario"
   },
+  "rq-96809580": {
+    "decl": "- `ReferencePoint` — an analytic check at one coordinate value.",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ReferencePoint",
+    "type": "api-item"
+  },
   "rq-96d9c9df": {
     "decl": "Scenario: Reject phase dt <= 0",
     "file": "io/config-schema",
@@ -20716,6 +20933,14 @@
     "title": "Missing [simulation].seed",
     "type": "scenario"
   },
+  "rq-9c0e9e48": {
+    "decl": "### Functions",
+    "file": "forces/potential-consistency-harness",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
+  },
   "rq-9c1c58ef": {
     "decl": "Scenario: Exclusion scales default to 0.0 when both columns omitted",
     "file": "forces/topology",
@@ -20831,6 +21056,18 @@
     "refs": [],
     "title": "JIT fragment behaviour <!-- rq-lj-jit-frag -->",
     "type": "section"
+  },
+  "rq-9cd51562": {
+    "decl": "- `assert_potential_consistent(fixture: &ConsistencyFixture, gpu: &GpuContext)`",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "assert_potential_consistent",
+    "type": "api-item"
   },
   "rq-9ce1bd52": {
     "decl": "Scenario: validate_against accepts a well-formed config",
@@ -20982,6 +21219,18 @@
     "title": "frequency defaults to 25 when omitted",
     "type": "scenario"
   },
+  "rq-9d9747ed": {
+    "decl": "Scenario: Asymmetric force assignment fails Newton's third law",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Asymmetric force assignment fails Newton's third law",
+    "type": "scenario"
+  },
   "rq-9d9ca545": {
     "decl": "### Reduction Kernel",
     "file": "forces/harmonic-angle",
@@ -21000,6 +21249,22 @@
       }
     ],
     "title": "Sections may appear in any order",
+    "type": "scenario"
+  },
+  "rq-9db48a6d": {
+    "decl": "Scenario: A dihedral potential passes all applicable invariants",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A dihedral potential passes all applicable invariants",
     "type": "scenario"
   },
   "rq-9dd716cf": {
@@ -24714,6 +24979,19 @@
     "title": "Non-finite check precedes non-positive check on a diagonal",
     "type": "scenario"
   },
+  "rq-b9fde79c": {
+    "decl": "## Invariants",
+    "file": "forces/potential-consistency-harness",
+    "level": 2,
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Invariants",
+    "type": "section"
+  },
   "rq-ba281906": {
     "decl": "Scenario: SPME reciprocal stream uses single-precision cuFFT plans in the default build",
     "file": "precision",
@@ -25102,6 +25380,18 @@
     "title": "Validation",
     "type": "section"
   },
+  "rq-bd34fa41": {
+    "decl": "Scenario: Lennard-Jones reference points hold",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Lennard-Jones reference points hold",
+    "type": "scenario"
+  },
   "rq-bd367201": {
     "decl": "Scenario: Near-collinear geometry (sin θ ≈ 0) produces zero force",
     "file": "forces/harmonic-angle",
@@ -25213,6 +25503,14 @@
     ],
     "title": "ForceField",
     "type": "api-item"
+  },
+  "rq-be32cfe0": {
+    "decl": "## Out of Scope",
+    "file": "forces/potential-consistency-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-be54d0f6": {
     "decl": "Scenario: Sort does not fire when generation is unchanged",
@@ -27607,6 +27905,18 @@
     "title": "log_column_names",
     "type": "api-item"
   },
+  "rq-cfa07a3c": {
+    "decl": "Scenario: Every built-in fragment potential passes the sweep",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Every built-in fragment potential passes the sweep",
+    "type": "scenario"
+  },
   "rq-cfb1e3aa": {
     "decl": "Scenario: The constraint-iteration order matches the topology's declared order",
     "file": "integration/shake",
@@ -28933,6 +29243,18 @@
     "refs": [],
     "title": "Feature: Harmonic Angle Bonded Potential",
     "type": "file"
+  },
+  "rq-da0e909a": {
+    "decl": "- `builtin_consistency_fixtures() -> Vec<ConsistencyFixture>`",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "builtin_consistency_fixtures",
+    "type": "api-item"
   },
   "rq-da327920": {
     "decl": "- `AnglePotential` — capability trait an angle slot implements,",
@@ -30414,6 +30736,22 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-e4ad8b2c": {
+    "decl": "Scenario: An angle potential reports zero scalar virial",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An angle potential reports zero scalar virial",
+    "type": "scenario"
+  },
   "rq-e4bd99f7": {
     "decl": "Scenario: SPME-real JIT fragment reports CutoffHandling::Uniform(r_cut_real)",
     "file": "forces/spme",
@@ -30663,6 +31001,14 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-e67ef8c3": {
+    "decl": "### Types",
+    "file": "forces/potential-consistency-harness",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-e6b37d18": {
     "decl": "- `ForceField` adds the fixed-point class accumulator fields",
     "file": "forces/packed-neighbour-pair-force",
@@ -30898,6 +31244,18 @@
     ],
     "title": "lookup returns None for an unregistered kind",
     "type": "scenario"
+  },
+  "rq-e8b786b3": {
+    "decl": "- `ConsistencyFixture` — everything needed to drive one potential. It carries",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ConsistencyFixture",
+    "type": "api-item"
   },
   "rq-e8ba1aff": {
     "decl": "### Packed-Neighbour Entry-Point Arguments",
@@ -31352,6 +31710,18 @@
     ],
     "title": "TimingsWriterError",
     "type": "api-item"
+  },
+  "rq-ec1452c6": {
+    "decl": "# Feature: Potential Consistency Harness",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Potential Consistency Harness",
+    "type": "file"
   },
   "rq-ec18d174": {
     "decl": "- `MorseBondedState` — implements the `Potential` trait with",
@@ -32590,6 +32960,22 @@
     "title": "Reproducibility",
     "type": "section"
   },
+  "rq-f417a0f5": {
+    "decl": "Scenario: A bonded potential that halves its own energy fails the finite-difference check",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/common/consistency.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A bonded potential that halves its own energy fails the finite-difference check",
+    "type": "scenario"
+  },
   "rq-f44776cb": {
     "decl": "- `Resource` — closed enum: `Positions`, `Velocities`, `Images`, `Box`,",
     "file": "integration/op-model",
@@ -33485,6 +33871,18 @@
     "title": "Copy of a SimulationBox carries the original's generation",
     "type": "scenario"
   },
+  "rq-fad67bb5": {
+    "decl": "Scenario: A C1 switching function joins smoothly and vanishes at the cutoff",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A C1 switching function joins smoothly and vanishes at the cutoff",
+    "type": "scenario"
+  },
   "rq-faf1dd2e": {
     "decl": "Scenario: Per-batch host work is a single 4-byte download",
     "file": "cuda-graphs",
@@ -33763,6 +34161,18 @@
     ],
     "title": "AndersenBuilder",
     "type": "api-item"
+  },
+  "rq-fd3ba41e": {
+    "decl": "Scenario: Equal and opposite pair forces pass",
+    "file": "forces/potential-consistency-harness",
+    "refs": [
+      {
+        "file": "tests/potential_consistency.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Equal and opposite pair forces pass",
+    "type": "scenario"
   },
   "rq-fd51fccb": {
     "decl": "Scenario: ConstraintBuilder default supports_position_projection_only returns true",
