@@ -144,6 +144,35 @@ pub struct PhaseSummary {
     /// token (`"force_tolerance"`, `"energy_tolerance"`,
     /// `"force_zero"`, `"max_iterations"`). `None` for MD phases.
     pub convergence: Option<&'static str>,
+    /// The phase's physics series, one entry per emitted CSV log row and
+    /// in the same order; empty when `log_every == 0`. Captured from the
+    /// same forces-and-scalars evaluation that produces each log row, so
+    /// it adds no force evaluations beyond those logging already
+    /// performs. Empty for minimization phases.
+    pub physics: Vec<PhysicsSample>,
+}
+
+// rq-0286c77d — one physics snapshot of the system, carried in
+// `PhaseSummary.physics`. All values are f64 in Hartree atomic units,
+// computed with f64 arithmetic on f32-downloaded state (matching the
+// KE/temperature convention used throughout the runner).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhysicsSample {
+    /// Absolute step index within the phase.
+    pub step: u64,
+    /// Simulated time at that step (`step * dt`).
+    pub time: f64,
+    pub kinetic_energy: f64,
+    pub potential_energy: f64,
+    /// `kinetic_energy + potential_energy`.
+    pub total_energy: f64,
+    /// Instantaneous kinetic temperature, using the same thermal-DOF
+    /// convention as `compute_temperature`.
+    pub temperature: f64,
+    /// Instantaneous scalar pressure `(2*KE + virial) / (3*V)`.
+    pub pressure: f64,
+    /// Simulation-box volume at that step.
+    pub volume: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -1438,6 +1467,8 @@ pub(crate) fn run_md_phase_inner(
 
     let mut frames_written: u64 = 0;
     let mut log_rows_written: u64 = 0;
+    // rq-0286c77d — physics series, one entry per emitted log row.
+    let mut physics: Vec<PhysicsSample> = Vec::new();
 
     // Phase step-0 outputs.
     if traj_writer.is_some() || log_writer.is_some() {
@@ -1500,6 +1531,11 @@ pub(crate) fn run_md_phase_inner(
             .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?;
         timings.record_host(HostStage::LOG_WRITE, lw);
         log_rows_written += 1;
+        // rq-0286c77d
+        physics.push(
+            capture_physics_sample(0, 0.0, ke, n_thermal_dof, &mut setup.buffers, &setup.sim_box)
+                .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Setup))?,
+        );
     }
 
     let n_steps = phase.n_steps;
@@ -1595,6 +1631,7 @@ pub(crate) fn run_md_phase_inner(
             progress_every,
             &mut frames_written,
             &mut log_rows_written,
+            &mut physics,
         )?;
         timings.snapshot_graph_representatives();
     }
@@ -1653,6 +1690,7 @@ pub(crate) fn run_md_phase_inner(
             progress_every,
             &mut frames_written,
             &mut log_rows_written,
+            &mut physics,
         )?;
         if let Some(resume) = fallback_from {
             run_per_step_range(
@@ -1680,6 +1718,7 @@ pub(crate) fn run_md_phase_inner(
                 progress_every,
                 &mut frames_written,
                 &mut log_rows_written,
+                &mut physics,
             )?;
         }
     } else {
@@ -1713,6 +1752,7 @@ pub(crate) fn run_md_phase_inner(
             progress_every,
             &mut frames_written,
             &mut log_rows_written,
+            &mut physics,
         )?;
     }
 
@@ -1743,6 +1783,8 @@ pub(crate) fn run_md_phase_inner(
         elapsed_micros: phase_elapsed.as_micros(),
         kind: "md",
         convergence: None,
+        // rq-0286c77d
+        physics,
     })
 }
 
@@ -2111,6 +2153,8 @@ pub(crate) fn run_minimization_phase_inner(
         elapsed_micros: phase_elapsed.as_micros(),
         kind: "minimization",
         convergence: Some(reason.token()),
+        // rq-0286c77d — minimization phases capture no physics series.
+        physics: Vec::new(),
     })
 }
 
@@ -2181,6 +2225,43 @@ fn phase_slots_graph_compatible(
 /// select `AggregateLevel` / the captured graph through this predicate.
 fn step_needs_force_scalars(log_due: bool, barostat_active: bool) -> bool {
     log_due || barostat_active
+}
+
+// rq-0286c77d — capture one `PhysicsSample` for a log row. The forces
+// buffers hold valid scalars here because a log-due step evaluates
+// forces-and-scalars (see `step_needs_force_scalars`), so the potential
+// energy and virial reductions read current-configuration data. Uses a
+// throwaway length-1 reduction scratch; runs only at the log cadence.
+fn capture_physics_sample(
+    step: u64,
+    time: f64,
+    ke: f64,
+    n_thermal_dof: u32,
+    buffers: &mut ParticleBuffers,
+    sim_box: &crate::pbc::SimulationBox,
+) -> Result<PhysicsSample, crate::gpu::GpuError> {
+    let mut scratch = buffers
+        .device
+        .alloc_zeros::<Real>(1)
+        .map_err(crate::gpu::GpuError::from)?;
+    let pe = compute_total_potential_energy(buffers, &mut scratch)? as f64;
+    let virial = crate::gpu::compute_total_virial(buffers, &mut scratch)? as f64;
+    let volume = sim_box.volume() as f64;
+    let pressure = if volume > 0.0 {
+        (2.0 * ke + virial) / (3.0 * volume)
+    } else {
+        0.0
+    };
+    Ok(PhysicsSample {
+        step,
+        time,
+        kinetic_energy: ke,
+        potential_energy: pe,
+        total_energy: ke + pe,
+        temperature: compute_temperature(ke, n_thermal_dof),
+        pressure,
+        volume,
+    })
 }
 
 // rq-26dce0f6 rq-c6c56cdc
@@ -2415,6 +2496,8 @@ fn run_per_step_range(
     progress_every: u64,
     frames_written: &mut u64,
     log_rows_written: &mut u64,
+    // rq-0286c77d — physics series appended to on each emitted log row.
+    physics: &mut Vec<PhysicsSample>,
 ) -> Result<(), (RunnerError, ExitPhase)> {
     for step in start_step..=n_steps {
         // rq-ee10237d — a coupling step: the runner-wrapped thermostat
@@ -2595,6 +2678,18 @@ fn run_per_step_range(
                 .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
             timings.record_host(HostStage::LOG_WRITE, lw);
             *log_rows_written += 1;
+            // rq-0286c77d
+            physics.push(
+                capture_physics_sample(
+                    step,
+                    time,
+                    ke,
+                    n_thermal_dof,
+                    &mut setup.buffers,
+                    &setup.sim_box,
+                )
+                .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?,
+            );
         }
 
         // rq-73fbb111
@@ -2642,6 +2737,8 @@ fn run_batched_graph_loop(
     progress_every: u64,
     frames_written: &mut u64,
     log_rows_written: &mut u64,
+    // rq-0286c77d — physics series appended to on each emitted log row.
+    physics: &mut Vec<PhysicsSample>,
 ) -> Result<Option<u64>, (RunnerError, ExitPhase)> {
     let n_steps = phase.n_steps;
     let log_every = phase.output.log_every;
@@ -2806,6 +2903,7 @@ fn run_batched_graph_loop(
             log_extra_columns,
             frames_written,
             log_rows_written,
+            physics,
         )?;
 
         if progress_to_stdout && (step % progress_every == 0 || step == n_steps) {
@@ -2840,6 +2938,8 @@ fn handle_step_output(
     log_extra_columns: &[(&'static str, crate::units::Dimension)],
     frames_written: &mut u64,
     log_rows_written: &mut u64,
+    // rq-0286c77d — physics series appended to on each emitted log row.
+    physics: &mut Vec<PhysicsSample>,
 ) -> Result<(), (RunnerError, ExitPhase)> {
     let want_traj =
         phase.output.trajectory_every > 0 && step % phase.output.trajectory_every == 0;
@@ -2913,6 +3013,11 @@ fn handle_step_output(
             .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
         timings.record_host(HostStage::LOG_WRITE, lw);
         *log_rows_written += 1;
+        // rq-0286c77d
+        physics.push(
+            capture_physics_sample(step, time, ke, n_thermal_dof, &mut setup.buffers, &setup.sim_box)
+                .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?,
+        );
     }
     Ok(())
 }

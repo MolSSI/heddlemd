@@ -382,6 +382,18 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-0286c77d": {
+    "decl": "- `PhysicsSample` — one physics snapshot of the system, carried in",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PhysicsSample",
+    "type": "api-item"
+  },
   "rq-028f5f8e": {
     "decl": "Scenario: Empty registry produces a zero-slot ForceField",
     "file": "forces/framework",
@@ -1464,6 +1476,18 @@
     "title": "Dispatch loop calls thermostat.apply_pre, plan walk, thermostat.apply_post in that order",
     "type": "scenario"
   },
+  "rq-0a87253a": {
+    "decl": "Scenario: A Case creates a unique, empty working directory",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A Case creates a unique, empty working directory",
+    "type": "scenario"
+  },
   "rq-0a8831b1": {
     "decl": "- `Bond` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`,",
     "file": "forces/topology",
@@ -1629,6 +1653,18 @@
     ],
     "title": "periodicity",
     "type": "api-item"
+  },
+  "rq-0baf3195": {
+    "decl": "Scenario: A constrained water system with a per-step barostat stays on the manifold",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A constrained water system with a per-step barostat stays on the manifold",
+    "type": "scenario"
   },
   "rq-0bb735c9": {
     "decl": "## Empty State",
@@ -4675,6 +4711,18 @@
     "title": "TrajectoryWriterError",
     "type": "api-item"
   },
+  "rq-1fdcfc84": {
+    "decl": "Scenario: SystemBuilder writes a runnable input set",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SystemBuilder writes a runnable input set",
+    "type": "scenario"
+  },
   "rq-1fde7f32": {
     "decl": "Scenario: Four-column form sets LJ and Coulomb scales independently",
     "file": "forces/topology",
@@ -5949,10 +5997,10 @@
     "type": "section"
   },
   "rq-2846ee8b": {
-    "decl": "Scenario: Bit-exact equality after a 100-step run",
+    "decl": "Scenario: Bit-exact output after a 100-step run",
     "file": "pipeline-reproducibility",
     "refs": [],
-    "title": "Bit-exact equality after a 100-step run",
+    "title": "Bit-exact output after a 100-step run",
     "type": "scenario"
   },
   "rq-2856405a": {
@@ -9077,6 +9125,14 @@
     "title": "Reject `between` referencing a type with zero particles",
     "type": "scenario"
   },
+  "rq-40e46b58": {
+    "decl": "## Physics Readout",
+    "file": "e2e-testing",
+    "level": 2,
+    "refs": [],
+    "title": "Physics Readout",
+    "type": "section"
+  },
   "rq-40ed9975": {
     "decl": "Scenario: Langevin BAOAB missing friction is rejected",
     "file": "io/config-schema",
@@ -10986,6 +11042,18 @@
       }
     ],
     "title": "Composer emits no exclusion-correction entry points",
+    "type": "scenario"
+  },
+  "rq-5214e3b3": {
+    "decl": "Scenario: An NPT run's box volume responds to the barostat",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An NPT run's box volume responds to the barostat",
     "type": "scenario"
   },
   "rq-52204841": {
@@ -14263,11 +14331,11 @@
     "type": "scenario"
   },
   "rq-6b6180af": {
-    "decl": "## Velocity-Verlet Loop",
+    "decl": "## Run Procedure",
     "file": "pipeline-reproducibility",
     "level": 2,
     "refs": [],
-    "title": "Velocity-Verlet Loop",
+    "title": "Run Procedure",
     "type": "section"
   },
   "rq-6b625df1": {
@@ -15749,6 +15817,18 @@
     "title": "Constraint groups are sorted by minimum particle index",
     "type": "scenario"
   },
+  "rq-75dc5b88": {
+    "decl": "Scenario: A four-slot run (thermostat, barostat, constraint) completes and stays on the manifold",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A four-slot run (thermostat, barostat, constraint) completes and stays on the manifold",
+    "type": "scenario"
+  },
   "rq-75f86ce3": {
     "decl": "Scenario: pre_step reports no reallocation when a rebuild reuses the buffers",
     "file": "forces/neighbor-list",
@@ -15983,6 +16063,14 @@
     ],
     "title": "TimingsError",
     "type": "api-item"
+  },
+  "rq-77a0c4d3": {
+    "decl": "## Out of Scope",
+    "file": "e2e-testing",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-77c04470": {
     "decl": "Scenario: RunnerError::OutputExists renders as prose",
@@ -17859,6 +17947,18 @@
     "title": "Langevin BAOAB kind with valid parameters is accepted",
     "type": "scenario"
   },
+  "rq-86bf63c3": {
+    "decl": "Scenario: An SPME electrostatics run is byte-identical across runs",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An SPME electrostatics run is byte-identical across runs",
+    "type": "scenario"
+  },
   "rq-86c31917": {
     "decl": "Scenario: Philox uniform consumes two lanes per call in the f64 build",
     "file": "precision",
@@ -17872,6 +17972,14 @@
     "refs": [],
     "title": "Single-pair pass is skipped when its count is zero",
     "type": "scenario"
+  },
+  "rq-86d56532": {
+    "decl": "## Coverage",
+    "file": "e2e-testing",
+    "level": 2,
+    "refs": [],
+    "title": "Coverage",
+    "type": "section"
   },
   "rq-86f01d20": {
     "decl": "- `AnalysisBuilder` — open-shaped builder trait. Mirrors",
@@ -17946,6 +18054,18 @@
       }
     ],
     "title": "Reject non-finite r_switch",
+    "type": "scenario"
+  },
+  "rq-87307e49": {
+    "decl": "Scenario: A SETTLE-constrained run is byte-identical across runs",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A SETTLE-constrained run is byte-identical across runs",
     "type": "scenario"
   },
   "rq-874dbfec": {
@@ -18644,6 +18764,19 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-8d45ae10": {
+    "decl": "## Test Harness",
+    "file": "e2e-testing",
+    "level": 2,
+    "refs": [
+      {
+        "file": "tests/common/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Test Harness",
+    "type": "section"
+  },
   "rq-8d5a8d9c": {
     "decl": "Scenario: reduce_angle_forces on zero particles is a no-op",
     "file": "forces/harmonic-angle",
@@ -19259,6 +19392,14 @@
     ],
     "title": "Atom with no dihedrals gets zero accumulator",
     "type": "scenario"
+  },
+  "rq-9213dcb5": {
+    "decl": "### Slot composition (post-force tail)",
+    "file": "e2e-testing",
+    "level": 3,
+    "refs": [],
+    "title": "Slot composition (post-force tail)",
+    "type": "section"
   },
   "rq-922c9a86": {
     "decl": "# Both scales default to 0.0 (full exclusion) when omitted.",
@@ -20274,6 +20415,13 @@
     "title": "spme_recip_compute_influence",
     "type": "api-item"
   },
+  "rq-99dd6bf8": {
+    "decl": "# Feature: End-to-End Test Harness and Coverage",
+    "file": "e2e-testing",
+    "refs": [],
+    "title": "Feature: End-to-End Test Harness and Coverage",
+    "type": "file"
+  },
   "rq-9a19bfa3": {
     "decl": "- `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>`",
     "file": "particle-state",
@@ -21040,6 +21188,18 @@
     ],
     "title": "pub",
     "type": "api-item"
+  },
+  "rq-9ef78757": {
+    "decl": "Scenario: A C-rescale barostat run is byte-identical across runs",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A C-rescale barostat run is byte-identical across runs",
+    "type": "scenario"
   },
   "rq-9f080e19": {
     "decl": "## Out of Scope",
@@ -21931,6 +22091,19 @@
     "title": "ParticleTypeConfig",
     "type": "api-item"
   },
+  "rq-a5e72a70": {
+    "decl": "### Types",
+    "file": "e2e-testing",
+    "level": 3,
+    "refs": [
+      {
+        "file": "tests/common/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-a6bc92a1": {
     "decl": "Scenario: Philox uniform consumes one lane per call in the default build",
     "file": "precision",
@@ -22411,6 +22584,18 @@
       }
     ],
     "title": "SI-mode log row converts time to seconds",
+    "type": "scenario"
+  },
+  "rq-a9e9f039": {
+    "decl": "Scenario: An Andersen thermostat run is byte-identical across runs",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An Andersen thermostat run is byte-identical across runs",
     "type": "scenario"
   },
   "rq-aa00b384": {
@@ -23227,6 +23412,18 @@
     "title": "Accessors",
     "type": "section"
   },
+  "rq-b02a9070": {
+    "decl": "Scenario: An NPT run drives mean pressure to the target",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An NPT run drives mean pressure to the target",
+    "type": "scenario"
+  },
   "rq-b033ac1d": {
     "decl": "### Mutators",
     "file": "simulation-box",
@@ -23537,10 +23734,10 @@
     "type": "api-item"
   },
   "rq-b2314952": {
-    "decl": "Scenario: Bit-exact equality after a single full velocity-Verlet step",
+    "decl": "Scenario: Bit-exact output after a single-step run",
     "file": "pipeline-reproducibility",
     "refs": [],
-    "title": "Bit-exact equality after a single full velocity-Verlet step",
+    "title": "Bit-exact output after a single-step run",
     "type": "scenario"
   },
   "rq-b248aadf": {
@@ -24651,6 +24848,14 @@
     "refs": [],
     "title": "Trivial-mode pre_step does no work",
     "type": "scenario"
+  },
+  "rq-bb76b520": {
+    "decl": "### Pressure control",
+    "file": "e2e-testing",
+    "level": 3,
+    "refs": [],
+    "title": "Pressure control",
+    "type": "section"
   },
   "rq-bb78f1de": {
     "decl": "Scenario: A binding that pushes more arguments than declared panics",
@@ -27795,6 +28000,18 @@
     "title": "A pair-force slot honours ForcesOnly",
     "type": "scenario"
   },
+  "rq-d2cd8351": {
+    "decl": "Scenario: An NVE velocity-Verlet run conserves total energy",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An NVE velocity-Verlet run conserves total energy",
+    "type": "scenario"
+  },
   "rq-d2d0fb5f": {
     "decl": "### `Integrator` trait overrides",
     "file": "integration/mtk-npt",
@@ -29204,6 +29421,18 @@
     "file": "precision",
     "refs": [],
     "title": "ParticleState fields are Vec<Real>",
+    "type": "scenario"
+  },
+  "rq-dd4240b5": {
+    "decl": "Scenario: A CSVR thermostat run is byte-identical across runs",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A CSVR thermostat run is byte-identical across runs",
     "type": "scenario"
   },
   "rq-dd6fe266": {
@@ -30882,6 +31111,19 @@
     "title": "compute_sort_keys",
     "type": "api-item"
   },
+  "rq-e9ed7da2": {
+    "decl": "### Functions",
+    "file": "e2e-testing",
+    "level": 3,
+    "refs": [
+      {
+        "file": "tests/common/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Functions",
+    "type": "section"
+  },
   "rq-ea0ee5ef": {
     "decl": "Scenario: Neighbor list contains every particle within r_cut + r_skin",
     "file": "forces/neighbor-list",
@@ -31511,6 +31753,14 @@
     "title": "Reproducibility",
     "type": "section"
   },
+  "rq-ef58789c": {
+    "decl": "## Gherkin Scenarios",
+    "file": "e2e-testing",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-ef5aa4b7": {
     "decl": "Scenario: File does not exist",
     "file": "forces/topology",
@@ -32131,6 +32381,14 @@
       }
     ],
     "title": "`[[angle_types]]` (optional array of tables)",
+    "type": "section"
+  },
+  "rq-f29e3f73": {
+    "decl": "### Energy conservation",
+    "file": "e2e-testing",
+    "level": 3,
+    "refs": [],
+    "title": "Energy conservation",
     "type": "section"
   },
   "rq-f2e3fa58": {
@@ -33851,6 +34109,14 @@
     "level": 2,
     "refs": [],
     "title": "Force Accumulation",
+    "type": "section"
+  },
+  "rq-ff8b6a9a": {
+    "decl": "### Reproducibility",
+    "file": "e2e-testing",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
     "type": "section"
   },
   "rq-ff8e283d": {

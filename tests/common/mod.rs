@@ -3,6 +3,9 @@
 
 #![allow(dead_code)]
 
+// rq-8d45ae10 — end-to-end test harness (Case, SystemBuilder, assertions).
+pub mod e2e;
+
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;

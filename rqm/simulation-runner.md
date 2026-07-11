@@ -1151,6 +1151,30 @@ wrapper that dispatches between the two on the first CLI argument.
     `log_every == 0`).
   - `elapsed_micros: u128` — wall-clock interval from the start of
     the phase's warm-up to the end of the phase's writer flushes.
+  - `physics: Vec<PhysicsSample>` — the phase's physics series, one
+    entry per emitted CSV log row and in the same order, empty when
+    `log_every == 0`. Each entry is captured from the same
+    `ForcesAndScalars` evaluation that produces the log row, so the
+    series adds no force evaluations beyond those logging already
+    performs. This lets a caller assert on the trajectory's physics
+    (energy drift, mean temperature or pressure) without re-parsing the
+    CSV log file.
+
+- `PhysicsSample` — one physics snapshot of the system, carried in <!-- rq-0286c77d -->
+  `PhaseSummary.physics`. All values are `f64` in Hartree atomic units,
+  computed with `f64` arithmetic on `f32`-downloaded state (matching the
+  KE/temperature convention used throughout the runner).
+  - `step: u64` — the absolute step index within the phase.
+  - `time: f64` — the simulated time at that step.
+  - `kinetic_energy: f64`, `potential_energy: f64`, `total_energy: f64`
+    — the instantaneous energies (`total_energy == kinetic_energy +
+    potential_energy`).
+  - `temperature: f64` — the instantaneous kinetic temperature, using
+    the same thermal-degrees-of-freedom convention as
+    `compute_temperature` (`io/log-output.md`).
+  - `pressure: f64` — the instantaneous scalar pressure from the kinetic
+    and virial contributions at the current box volume.
+  - `volume: f64` — the simulation-box volume at that step.
 
 - `lint_simulation(config_path: &Path, with_gpu: bool) -> LintReport` <!-- rq-4ff84310 -->
   - Convenience wrapper. Equivalent to
