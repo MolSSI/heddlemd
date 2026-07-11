@@ -121,6 +121,12 @@ contract). Integrators never reference the constraint slot directly;
 a constraint-capable integrator only declares where the slot's hooks
 belong by placing `SubStep::ConstraintPoint` markers in its plan.
 
+Each sub-step declares the simulation state it reads and writes — its
+resource footprint — and the runner validates the plan's data
+dependencies at phase setup, rejecting a schedule that consumes stale
+force-derived state. The resource model, footprints, and validation are
+defined in `op-model.md`.
+
 The runner drives the timestep loop by calling the free function
 `run_step` once per timestep. `run_step` walks the integrator's **entire**
 `StepPlan` — through its post-force tail — and is the single executor of
@@ -529,8 +535,12 @@ successfully.
       /// barostat sub-steps, kinetic-energy reductions for a
       /// barostat, etc.). `dt` carries the plan timestep so
       /// `execute()` can compute sub-step factors statelessly; the
-      /// `label` lets `execute()` dispatch to the right kernel.
-      Custom { dt: f32, label: &'static str },
+      /// `label` lets `execute()` dispatch to the right kernel. `reads`
+      /// and `writes` declare the sub-step's resource footprint for
+      /// schedule dependency validation (see `op-model.md`); a built-in
+      /// variant's footprint is fixed by its kind, but a `Custom`
+      /// sub-step's is known only to the integrator that emits it.
+      Custom { dt: f32, label: &'static str, reads: ResourceSet, writes: ResourceSet },
   }
   ```
 

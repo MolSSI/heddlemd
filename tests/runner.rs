@@ -993,6 +993,127 @@ cutoff = 1.0e-9
     assert_eq!(plan_calls.load(Ordering::SeqCst), 4);
 }
 
+// rq-7734703f
+#[test]
+fn runner_rejects_dependency_invalid_schedule_at_setup() {
+    // A stub integrator whose plan reads Forces after a Drift with no
+    // intervening ForceEval (stale forces) is rejected at phase setup;
+    // the timestep loop never runs.
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use heddle_md::gpu::{GpuContext, ParticleBuffers};
+    use heddle_md::integrator::{
+        Integrator, IntegratorBuilder, IntegratorError, KickSource, StepPlan, SubStep,
+    };
+    use heddle_md::pbc::SimulationBox;
+    use heddle_md::timings::Timings;
+
+    #[derive(Debug)]
+    struct BadScheduleIntegrator {
+        step_calls: Arc<AtomicU64>,
+    }
+    impl Integrator for BadScheduleIntegrator {
+        fn plan(&self, dt: Real) -> StepPlan {
+            // [KickDrift{Total}, KickHalf{Total}] — the kick reads Forces
+            // the drift invalidated, with no ForceEval between.
+            StepPlan {
+                steps: vec![
+                    SubStep::KickDrift { dt, label: "kd", source: KickSource::Total },
+                    SubStep::KickHalf { dt, label: "k", source: KickSource::Total },
+                ],
+            }
+        }
+        fn execute(
+            &mut self,
+            _substep: &SubStep,
+            _buffers: &mut ParticleBuffers,
+            _sim_box: &mut SimulationBox,
+            _timings: &mut Timings,
+        ) -> Result<(), IntegratorError> {
+            self.step_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct BadScheduleBuilder {
+        step_calls: Arc<AtomicU64>,
+    }
+    impl heddle_md::registry::KindedBuilder for BadScheduleBuilder {
+        fn kind_name(&self) -> &'static str {
+            "bad-schedule-stub"
+        }
+    }
+    impl IntegratorBuilder for BadScheduleBuilder {
+        fn validate_params(&self, _params: &toml::Value) -> Result<(), heddle_md::io::ConfigError> {
+            Ok(())
+        }
+        fn build(
+            &self,
+            _gpu: &GpuContext,
+            _particle_count: usize,
+            _n_constraints: usize,
+            _params: &toml::Value,
+        ) -> Result<Box<dyn Integrator>, IntegratorError> {
+            Ok(Box::new(BadScheduleIntegrator { step_calls: self.step_calls.clone() }))
+        }
+    }
+
+    let dir = tmp_path("bad_schedule_stub");
+    let cfg = r#"schema_version = 1
+init = "sim.in.xyz"
+
+[simulation]
+cuda_graphs_disable = true
+seed = 1
+temperature = 300.0
+
+[[phase]]
+name = "run"
+n_steps = 3
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "bad-schedule-stub"
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+kind = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#;
+    let cfg_path = dir.join("sim.in.toml");
+    std::fs::write(&cfg_path, cfg).unwrap();
+    write_init(&dir, 4, true);
+
+    let step_calls = Arc::new(AtomicU64::new(0));
+    let mut registries = Registries::with_builtins();
+    registries.register_integrator(Box::new(BadScheduleBuilder { step_calls: step_calls.clone() }));
+
+    let err = run_simulation_with_registries(&cfg_path, &registries).unwrap_err();
+    match err {
+        RunnerError::InvalidSchedule { integrator, source } => {
+            assert_eq!(integrator, "bad-schedule-stub");
+            assert!(matches!(
+                source,
+                heddle_md::integrator::ScheduleError::ReadsStaleResource {
+                    index: 1,
+                    resource: heddle_md::integrator::Resource::Forces,
+                    ..
+                }
+            ));
+        }
+        other => panic!("expected InvalidSchedule, got {other:?}"),
+    }
+    // The timestep loop never ran: execute was never called.
+    assert_eq!(step_calls.load(Ordering::SeqCst), 0);
+}
+
 // rq-0069339b
 #[test]
 fn custom_kind_with_empty_registries_fails_with_unknown_kind() {

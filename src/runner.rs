@@ -117,6 +117,16 @@ pub enum RunnerError {
          BarostatPoint in its plan; the barostat's coupling would never fire"
     )]
     BarostatPlacementMissing { integrator: String },
+    /// An integrator's `StepPlan` fails schedule dependency validation
+    /// (an operation reads force-derived state a preceding position/box
+    /// mutation invalidated, with no intervening force evaluation). See
+    /// `rqm/integration/op-model.md`. rq-77f1e6ef
+    #[error("integrator `{integrator}` emits a dependency-invalid schedule: {source}")]
+    InvalidSchedule {
+        integrator: String,
+        #[source]
+        source: crate::integrator::ScheduleError,
+    },
 }
 
 // rq-5c1cfc93 rq-b00170c6
@@ -1353,6 +1363,21 @@ pub(crate) fn run_md_phase_inner(
     // eligibility). Computing it once avoids redundant `plan()`
     // allocations during phase setup.
     let probe_plan = integrator.plan(phase.dt as Real);
+
+    // rq-77f1e6ef — validate the schedule's data dependencies before the
+    // timestep loop: reject a plan whose operation reads force-derived
+    // state that a preceding position/box mutation invalidated, with no
+    // intervening force evaluation (see `op-model.md`). The plan shape is
+    // static, so one check per phase covers every step.
+    probe_plan.validate().map_err(|source| {
+        (
+            RunnerError::InvalidSchedule {
+                integrator: phase.integrator.kind.clone(),
+                source,
+            },
+            ExitPhase::Setup,
+        )
+    })?;
 
     // Open per-phase output writers.
     let mut traj_writer: Option<TrajectoryWriter> = if phase.output.trajectory_every > 0 {

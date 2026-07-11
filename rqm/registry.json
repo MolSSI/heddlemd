@@ -354,6 +354,14 @@
     "title": "Reject non-positive dt",
     "type": "scenario"
   },
+  "rq-025c93eb": {
+    "decl": "### Functions and methods",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [],
+    "title": "Functions and methods",
+    "type": "section"
+  },
   "rq-027153d9": {
     "decl": "Scenario: topology field is resolved relative to the config directory",
     "file": "io/config-schema",
@@ -868,6 +876,18 @@
       }
     ],
     "title": "Top-level units field defaults to SI when absent",
+    "type": "scenario"
+  },
+  "rq-0625c5d4": {
+    "decl": "Scenario: Base resources are readable at the start of a step",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Base resources are readable at the start of a step",
     "type": "scenario"
   },
   "rq-062ea284": {
@@ -1616,6 +1636,19 @@
     "level": 2,
     "refs": [],
     "title": "Empty State",
+    "type": "section"
+  },
+  "rq-0bc28d40": {
+    "decl": "### Types",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Types",
     "type": "section"
   },
   "rq-0bc3a66e": {
@@ -2705,6 +2738,18 @@
     "title": "Parameters",
     "type": "section"
   },
+  "rq-129c5de9": {
+    "decl": "- `StepPlan::validate(&self) -> Result<(), ScheduleError>`",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "StepPlan",
+    "type": "api-item"
+  },
   "rq-129cb281": {
     "decl": "Scenario: apply_after_drift on empty state is a no-op",
     "file": "integration/constraint-framework",
@@ -2727,6 +2772,18 @@
       }
     ],
     "title": "MtkNpt + [thermostat] is rejected (owns its thermostat)",
+    "type": "scenario"
+  },
+  "rq-12a0b0f8": {
+    "decl": "Scenario: A class-specific force evaluation re-validates only its own class",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A class-specific force evaluation re-validates only its own class",
     "type": "scenario"
   },
   "rq-12a0c828": {
@@ -4140,6 +4197,18 @@
     "title": "nl.pre_step is called once per batch boundary",
     "type": "scenario"
   },
+  "rq-1c8baf7d": {
+    "decl": "Scenario: A velocity-Verlet plan validates",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A velocity-Verlet plan validates",
+    "type": "scenario"
+  },
   "rq-1ca1e95a": {
     "decl": "## Launch Configuration",
     "file": "forces/harmonic-bond",
@@ -4613,6 +4682,18 @@
     "title": "Four-column form sets LJ and Coulomb scales independently",
     "type": "scenario"
   },
+  "rq-1fecec44": {
+    "decl": "Scenario: SubStep::footprint reports the declared reads and writes",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SubStep::footprint reports the declared reads and writes",
+    "type": "scenario"
+  },
   "rq-1feec66c": {
     "decl": "Scenario: KE is bit-identical across two host runs with identical f32 inputs",
     "file": "io/log-output",
@@ -4928,6 +5009,14 @@
     ],
     "title": "All-pairs mode skips the box-too-small check",
     "type": "scenario"
+  },
+  "rq-21d945b9": {
+    "decl": "## Feature API",
+    "file": "integration/op-model",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-21e17441": {
     "decl": "Scenario: Construct MtkNptIntegrator with defaults (unconstrained system)",
@@ -7925,6 +8014,14 @@
     "title": "BarostatRegistry::with_builtins() exposes the registered barostats",
     "type": "scenario"
   },
+  "rq-38931487": {
+    "decl": "## Resources",
+    "file": "integration/op-model",
+    "level": 2,
+    "refs": [],
+    "title": "Resources",
+    "type": "section"
+  },
   "rq-38b80e11": {
     "decl": "## Out of Scope",
     "file": "forces/harmonic-angle",
@@ -8879,6 +8976,18 @@
     "title": "NeighborListConfig",
     "type": "api-item"
   },
+  "rq-3fd3777d": {
+    "decl": "- `ScheduleError` — error returned by validation. Includes at minimum:",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ScheduleError",
+    "type": "api-item"
+  },
   "rq-3fdb7e01": {
     "decl": "- `NamedSlotConfig` — open-shaped parsed entry for the",
     "file": "io/config-schema",
@@ -9110,6 +9219,18 @@
       }
     ],
     "title": "Reject topology = init",
+    "type": "scenario"
+  },
+  "rq-41dab871": {
+    "decl": "Scenario: A RESPA plan validates",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A RESPA plan validates",
     "type": "scenario"
   },
   "rq-41eb5e02": {
@@ -10054,6 +10175,18 @@
     "title": "ParticleBuffers",
     "type": "api-item"
   },
+  "rq-4ab1c94e": {
+    "decl": "Scenario: A Custom operation reading only base resources always validates",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A Custom operation reading only base resources always validates",
+    "type": "scenario"
+  },
   "rq-4ac937ef": {
     "decl": "### Shared Philox header",
     "file": "integration/andersen",
@@ -10659,6 +10792,14 @@
     "title": "Empty bond_type name rejected",
     "type": "scenario"
   },
+  "rq-506baad0": {
+    "decl": "## Out of Scope",
+    "file": "integration/op-model",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-507c40d1": {
     "decl": "- `pub const REAL_IS_F64: bool;`",
     "file": "precision",
@@ -11149,6 +11290,18 @@
     "refs": [],
     "title": "Valid periodic dihedral_type is accepted",
     "type": "scenario"
+  },
+  "rq-5414f115": {
+    "decl": "- `OpFootprint` — `{ reads: ResourceSet, writes: ResourceSet }`.",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "OpFootprint",
+    "type": "api-item"
   },
   "rq-545c961a": {
     "decl": "Scenario: fractional_coords inverts cartesian_coords",
@@ -12238,6 +12391,18 @@
     "refs": [],
     "title": "Single-Periodic-Copy Fast Path",
     "type": "section"
+  },
+  "rq-5cf3694c": {
+    "decl": "- `ResourceSet` — a set of `Resource`. Supports construction from a slice",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ResourceSet",
+    "type": "api-item"
   },
   "rq-5d18fa01": {
     "decl": "Scenario: shake_positions updates half-step velocities consistently with the position correction",
@@ -14093,6 +14258,13 @@
     "title": "Velocity-Verlet Loop",
     "type": "section"
   },
+  "rq-6b625df1": {
+    "decl": "# Feature: Op Schedule Dependency Model",
+    "file": "integration/op-model",
+    "refs": [],
+    "title": "Feature: Op Schedule Dependency Model",
+    "type": "file"
+  },
   "rq-6b721a52": {
     "decl": "Scenario: validate_against accepts a potential-table kind claimed by a registered custom builder",
     "file": "io/config-schema",
@@ -15742,6 +15914,18 @@
     "title": "rescale_positions multiplies every position component by the factor",
     "type": "scenario"
   },
+  "rq-7734703f": {
+    "decl": "Scenario: The runner rejects a plan that fails validation at phase setup",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The runner rejects a plan that fails validation at phase setup",
+    "type": "scenario"
+  },
   "rq-7740cfb1": {
     "decl": "## Determinism",
     "file": "integration/mtk-npt",
@@ -15824,6 +16008,19 @@
     ],
     "title": "Convergence on force tolerance ends the phase",
     "type": "scenario"
+  },
+  "rq-77f1e6ef": {
+    "decl": "### Runner integration",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Runner integration",
+    "type": "section"
   },
   "rq-77f42047": {
     "decl": "Scenario: Missing compressibility rejected",
@@ -16937,6 +17134,18 @@
     "title": "Reject when charges has the wrong length",
     "type": "scenario"
   },
+  "rq-7fde3409": {
+    "decl": "Scenario: Cached forces are readable at the start of a step",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Cached forces are readable at the start of a step",
+    "type": "scenario"
+  },
   "rq-7fe57a77": {
     "decl": "Scenario: System total scalar virial equals sum of particle shares",
     "file": "forces/framework",
@@ -18017,6 +18226,14 @@
     "level": 3,
     "refs": [],
     "title": "Reduction Kernel",
+    "type": "section"
+  },
+  "rq-89908fc6": {
+    "decl": "### When validation runs",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [],
+    "title": "When validation runs",
     "type": "section"
   },
   "rq-89b8e85c": {
@@ -19444,6 +19661,18 @@
       }
     ],
     "title": "SI-mode trajectory frame converts the lattice to metres",
+    "type": "scenario"
+  },
+  "rq-95031d97": {
+    "decl": "Scenario: A class kick on an accumulator invalidated by a drift is stale",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A class kick on an accumulator invalidated by a drift is stale",
     "type": "scenario"
   },
   "rq-9504346c": {
@@ -21577,6 +21806,18 @@
     "title": "max_volume_step grows when acceptance is high",
     "type": "scenario"
   },
+  "rq-a53f18a6": {
+    "decl": "Scenario: A bare Drift then a total kick is stale",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A bare Drift then a total kick is stale",
+    "type": "scenario"
+  },
   "rq-a54cc657": {
     "decl": "- `Config::validate(&self) -> Result<(), ConfigError>`",
     "file": "io/config-schema",
@@ -22326,6 +22567,18 @@
     "refs": [],
     "title": "Each row declares one rigid constraint group of k atoms.",
     "type": "file"
+  },
+  "rq-ab2607c7": {
+    "decl": "Scenario: The empty plan validates",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The empty plan validates",
+    "type": "scenario"
   },
   "rq-ab40fe6d": {
     "decl": "Scenario: Reject non-blank content after the last data row",
@@ -23676,6 +23929,18 @@
     "title": "Skin-distance contract under batched replay",
     "type": "section"
   },
+  "rq-b577c9bd": {
+    "decl": "Scenario: A force evaluation re-validates forces after a position update",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A force evaluation re-validates forces after a position update",
+    "type": "scenario"
+  },
   "rq-b5b33e00": {
     "decl": "- `NeighborListState::pair_snapshot(&self, device: &Arc<CudaDevice>)",
     "file": "forces/packed-neighbour-pair-force",
@@ -24954,6 +25219,14 @@
     "title": "Lint flow",
     "type": "section"
   },
+  "rq-c04f856f": {
+    "decl": "## Operation footprints",
+    "file": "integration/op-model",
+    "level": 2,
+    "refs": [],
+    "title": "Operation footprints",
+    "type": "section"
+  },
   "rq-c0548f4c": {
     "decl": "Scenario: MTK-NPT phase runs per-step with standalone launches",
     "file": "cuda-graphs",
@@ -25632,6 +25905,27 @@
     "title": "Log file header includes andersen_conserved when Andersen is the thermostat",
     "type": "scenario"
   },
+  "rq-c50ff880": {
+    "decl": "### Custom operation footprints",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator/langevin_baoab.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Custom operation footprints",
+    "type": "section"
+  },
   "rq-c5116f45": {
     "decl": "Scenario: Re-capture consumes no physical step",
     "file": "cuda-graphs",
@@ -25706,6 +26000,19 @@
     ],
     "title": "Missing seed rejected",
     "type": "scenario"
+  },
+  "rq-c5c17dcd": {
+    "decl": "## Dependency validation",
+    "file": "integration/op-model",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Dependency validation",
+    "type": "section"
   },
   "rq-c5e00a28": {
     "decl": "Scenario: Write a single frame with velocities and without images",
@@ -26008,6 +26315,14 @@
     "level": 3,
     "refs": [],
     "title": "Functions",
+    "type": "section"
+  },
+  "rq-c8783edf": {
+    "decl": "## Relationship to fusion and determinism",
+    "file": "integration/op-model",
+    "level": 2,
+    "refs": [],
+    "title": "Relationship to fusion and determinism",
     "type": "section"
   },
   "rq-c8835814": {
@@ -26843,6 +27158,18 @@
     "title": "n > 6 is rejected at config-load time",
     "type": "scenario"
   },
+  "rq-ce497f66": {
+    "decl": "Scenario: A KickDrift reads valid forces before invalidating them",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A KickDrift reads valid forces before invalidating them",
+    "type": "scenario"
+  },
   "rq-ce519f29": {
     "decl": "Scenario: First-wins when two dihedrals share the same (i, l) 1-4 pair",
     "file": "forces/topology",
@@ -26948,6 +27275,18 @@
     "refs": [],
     "title": "Pair enumeration",
     "type": "section"
+  },
+  "rq-cf364916": {
+    "decl": "Scenario: A Custom operation that reads forces after a drift is stale",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A Custom operation that reads forces after a drift is stale",
+    "type": "scenario"
   },
   "rq-cf456bb4": {
     "decl": "# Column format: atom_i  atom_j  bond_type_name",
@@ -27281,6 +27620,18 @@
     ],
     "title": "apply_pre is the trait default (no-op)",
     "type": "scenario"
+  },
+  "rq-d20fe5ce": {
+    "decl": "- `SubStep::footprint(&self) -> OpFootprint`",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SubStep",
+    "type": "api-item"
   },
   "rq-d225bef2": {
     "decl": "Scenario: Dihedral energy matches the closed-form expression",
@@ -29104,6 +29455,18 @@
       }
     ],
     "title": "step() on a ForceField with both slots sums LJ and Morse",
+    "type": "scenario"
+  },
+  "rq-df53eb91": {
+    "decl": "Scenario: A force read after a drift with no intervening force evaluation is stale",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A force read after a drift with no intervening force evaluation is stale",
     "type": "scenario"
   },
   "rq-df6d79a1": {
@@ -31834,6 +32197,14 @@
     "title": "Constraint hooks fire in canonical order across the walk and the tail",
     "type": "scenario"
   },
+  "rq-f3467a4e": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/op-model",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-f34a4f43": {
     "decl": "Scenario: Single-pair kernel observes the same _f/_fev convention",
     "file": "forces/pair-force-kernel",
@@ -31916,6 +32287,18 @@
     "refs": [],
     "title": "Reproducibility",
     "type": "section"
+  },
+  "rq-f44776cb": {
+    "decl": "- `Resource` — closed enum: `Positions`, `Velocities`, `Images`, `Box`,",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Resource",
+    "type": "api-item"
   },
   "rq-f45b8166": {
     "decl": "### Per-phase output paths",

@@ -1053,7 +1053,7 @@ fn repeated_markers_dispatch_once_each_in_plan_order() {
                 SubStep::ConstraintPoint { phase: ConstraintPhase::BeforeDrift, dt: 0.1 },
                 SubStep::Drift { dt: 0.1, label: "A_pre" },
                 SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, dt: 0.1 },
-                SubStep::Custom { dt: 0.1, label: "O" },
+                SubStep::Custom { dt: 0.1, label: "O", reads: heddle_md::integrator::ResourceSet::empty(), writes: heddle_md::integrator::ResourceSet::empty() },
                 SubStep::ConstraintPoint { phase: ConstraintPhase::BeforeDrift, dt: 0.1 },
                 SubStep::Drift { dt: 0.1, label: "A_post" },
                 SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, dt: 0.1 },
@@ -1139,7 +1139,7 @@ fn plan_with_no_markers_fires_no_constraint_hooks() {
     let stub_log = CallLog::default();
     let mut stub = PlanStub {
         plan: StepPlan {
-            steps: vec![SubStep::Custom { dt: 0.1, label: "only" }],
+            steps: vec![SubStep::Custom { dt: 0.1, label: "only", reads: heddle_md::integrator::ResourceSet::empty(), writes: heddle_md::integrator::ResourceSet::empty() }],
         },
         log: CallLog { events: stub_log.events.clone() },
     };

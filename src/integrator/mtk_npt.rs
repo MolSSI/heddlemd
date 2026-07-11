@@ -67,7 +67,7 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::nose_hoover_chain::{nhc_chain_sub_step, yoshida_weights};
-use super::{Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep};
+use super::{Integrator, IntegratorBuilder, IntegratorError, Resource, ResourceSet, StepPlan, SubStep};
 
 // Host-side Φ_v / Φ_x factor. Computes sinh(α)/α with a Taylor
 // fallback when |α| < TAYLOR_THRESHOLD so the result stays finite and
@@ -294,26 +294,39 @@ impl Integrator for MtkNptIntegrator {
         // sub-step is the cell-coupled velocity update; the Drift
         // sub-step is the cell-coupled position update plus the
         // SimulationBox rescale.
+        // rq-c50ff880 — Custom-op footprints over tracked resources.
+        // KE reductions read velocities; virial reductions and the cell
+        // (extended-DOF) chain touch only untracked scalars / the cell
+        // momentum; the particle chain and barostat velocity kick scale
+        // per-particle velocities. None reads forces or writes
+        // positions / box (the `drift_box` Drift does the box rescale).
+        let velocities = || ResourceSet::from_slice(&[Resource::Velocities]);
+        let ke_reduce = || (velocities(), ResourceSet::empty());
+        let scalar_only = || (ResourceSet::empty(), ResourceSet::empty());
+        let vel_scale = || (velocities(), velocities());
+        let custom = |label: &'static str, (reads, writes): (ResourceSet, ResourceSet)| {
+            SubStep::Custom { dt, label, reads, writes }
+        };
         StepPlan {
             steps: vec![
-                SubStep::Custom { dt, label: "ke_reduce_pre" },
-                SubStep::Custom { dt, label: "vir_reduce_pre" },
-                SubStep::Custom { dt, label: "cell_chain_pre" },
-                SubStep::Custom { dt, label: "particle_chain_pre" },
-                SubStep::Custom { dt, label: "baro_kick_pre" },
+                custom("ke_reduce_pre", ke_reduce()),
+                custom("vir_reduce_pre", scalar_only()),
+                custom("cell_chain_pre", scalar_only()),
+                custom("particle_chain_pre", vel_scale()),
+                custom("baro_kick_pre", vel_scale()),
                 SubStep::KickHalf { dt, label: "vel_kick_pre", source: crate::integrator::KickSource::Total },
                 SubStep::Drift { dt, label: "drift_box" },
                 SubStep::ForceEval {
                     class: None,
                     level: Some(crate::forces::AggregateLevel::ForcesAndScalars),
                 },
-                SubStep::Custom { dt, label: "ke_reduce_post" },
-                SubStep::Custom { dt, label: "vir_reduce_post" },
+                custom("ke_reduce_post", ke_reduce()),
+                custom("vir_reduce_post", scalar_only()),
                 SubStep::KickHalf { dt, label: "vel_kick_post", source: crate::integrator::KickSource::Total },
-                SubStep::Custom { dt, label: "ke_reduce_post_kick" },
-                SubStep::Custom { dt, label: "baro_kick_post" },
-                SubStep::Custom { dt, label: "particle_chain_post" },
-                SubStep::Custom { dt, label: "cell_chain_post" },
+                custom("ke_reduce_post_kick", ke_reduce()),
+                custom("baro_kick_post", vel_scale()),
+                custom("particle_chain_post", vel_scale()),
+                custom("cell_chain_post", scalar_only()),
             ],
         }
     }

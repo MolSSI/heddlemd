@@ -10,7 +10,7 @@ use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
-use super::{Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep};
+use super::{Integrator, IntegratorBuilder, IntegratorError, Resource, ResourceSet, StepPlan, SubStep};
 use crate::precision::Real;
 
 // rq-1f87880c — typed parameter struct for the "langevin-baoab"
@@ -91,7 +91,14 @@ impl Integrator for LangevinBaoabState {
             steps: vec![
                 SubStep::KickHalf { dt, label: "B", source: crate::integrator::KickSource::Total },
                 SubStep::Drift { dt, label: "A_pre" },
-                SubStep::Custom { dt, label: "O" },
+                // The Ornstein-Uhlenbeck thermostat step is a per-particle
+                // velocity update. rq-c50ff880
+                SubStep::Custom {
+                    dt,
+                    label: "O",
+                    reads: ResourceSet::from_slice(&[Resource::Velocities]),
+                    writes: ResourceSet::from_slice(&[Resource::Velocities]),
+                },
                 SubStep::Drift { dt, label: "A_post" },
                 SubStep::ForceEval {
                     class: None,
@@ -129,7 +136,7 @@ impl Integrator for LangevinBaoabState {
                 timings.kernel_stop(KernelStage::LANGEVIN_DRIFT_HALF)?;
                 Ok(())
             }
-            SubStep::Custom { dt, label } if *label == "O" => {
+            SubStep::Custom { dt, label, .. } if *label == "O" => {
                 let alpha = (-(self.friction as Real) * *dt).exp();
                 // k_B = 1 in atomic units; temperature is already k_B · T.
                 let kt = self.temperature as Real;

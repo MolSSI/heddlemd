@@ -22,6 +22,7 @@ pub mod langevin_baoab;
 pub mod mc_barostat;
 pub mod mtk_npt;
 pub mod nose_hoover_chain;
+pub mod op_model;
 pub mod philox;
 pub mod respa;
 pub mod settle;
@@ -37,6 +38,8 @@ pub use csvr::{CsvrBuilder, CsvrThermostat};
 pub use langevin_baoab::{LangevinBaoabBuilder, LangevinBaoabState};
 pub use mc_barostat::{McBarostat, McBarostatBuilder};
 pub use mtk_npt::{MtkNptBuilder, MtkNptIntegrator};
+// rq-0bc28d40
+pub use op_model::{OpFootprint, Resource, ResourceSet, ScheduleError};
 pub use nose_hoover_chain::{
     NoseHooverChainBuilder, NoseHooverChainThermostat, nhc_chain_sub_step,
 };
@@ -247,8 +250,18 @@ pub enum SubStep {
     /// timestep so the integrator's `execute()` can compute its
     /// substep-specific factors without needing to cache `dt` in
     /// `&mut self`; the `label` lets `execute()` dispatch to the right
-    /// kernel.
-    Custom { dt: Real, label: &'static str },
+    /// kernel. `reads` / `writes` declare the sub-step's resource
+    /// footprint for schedule dependency validation (see
+    /// `op-model.md`); a built-in variant's footprint is fixed by its
+    /// kind, but a `Custom` sub-step's is known only to the integrator
+    /// that emits it.
+    // rq-c50ff880
+    Custom {
+        dt: Real,
+        label: &'static str,
+        reads: ResourceSet,
+        writes: ResourceSet,
+    },
 }
 
 impl SubStep {
@@ -265,6 +278,47 @@ impl SubStep {
             SubStep::BarostatPoint { .. } => "BarostatPoint",
             SubStep::ForceEval { .. } => "ForceEval",
             SubStep::Custom { .. } => "Custom",
+        }
+    }
+
+    // rq-d20fe5ce — the operation's resource footprint (the state it
+    // reads and writes) for schedule dependency validation. Built-in
+    // variants have footprints fixed by kind and fields; a `Custom`
+    // sub-step returns the footprint it carries. See `op-model.md`.
+    pub fn footprint(&self) -> OpFootprint {
+        use Resource::*;
+        match self {
+            SubStep::KickHalf { source: KickSource::Total, .. } => {
+                OpFootprint::new(&[Velocities, Forces], &[Velocities])
+            }
+            SubStep::KickHalf { source: KickSource::Class(c), .. } => {
+                OpFootprint::new(&[Velocities, ClassForces(*c)], &[Velocities])
+            }
+            SubStep::Drift { .. } => OpFootprint::new(&[Velocities], &[Positions, Images]),
+            SubStep::KickDrift { source: KickSource::Total, .. } => {
+                OpFootprint::new(&[Velocities, Forces], &[Velocities, Positions, Images])
+            }
+            SubStep::KickDrift { source: KickSource::Class(c), .. } => {
+                OpFootprint::new(&[Velocities, ClassForces(*c)], &[Velocities, Positions, Images])
+            }
+            SubStep::ForceEval { class: None, .. } => OpFootprint::new(
+                &[Positions, Box],
+                &[Forces, ClassForces(ForceClass::Fast), ClassForces(ForceClass::Slow)],
+            ),
+            SubStep::ForceEval { class: Some(c), .. } => {
+                OpFootprint::new(&[Positions, Box], &[Forces, ClassForces(*c)])
+            }
+            SubStep::ThermostatHalf { .. } => OpFootprint::new(&[Velocities], &[Velocities]),
+            SubStep::ConstraintPoint { phase: ConstraintPhase::AfterDrift, .. } => {
+                OpFootprint::new(&[Positions, Velocities, Box], &[Positions, Velocities])
+            }
+            SubStep::ConstraintPoint { .. } => {
+                OpFootprint::new(&[Positions, Velocities, Box], &[Velocities])
+            }
+            SubStep::BarostatPoint { .. } => {
+                OpFootprint::new(&[Velocities, Box], &[Positions, Velocities, Box])
+            }
+            SubStep::Custom { reads, writes, .. } => OpFootprint { reads: *reads, writes: *writes },
         }
     }
 
@@ -293,6 +347,21 @@ pub struct StepPlan {
 impl StepPlan {
     pub fn empty() -> Self {
         StepPlan { steps: Vec::new() }
+    }
+
+    // rq-129c5de9
+    /// Validate the schedule's data dependencies against the carried-in
+    /// valid set: every operation must read only currently-valid
+    /// resources, where a write to `Positions` or `Box` invalidates the
+    /// force-derived resources until a force evaluation reproduces them.
+    /// Returns the first [`ScheduleError`], or `Ok(())` for a
+    /// dependency-correct schedule (including the empty plan). Pure:
+    /// launches no kernels and touches no device buffers. See
+    /// `op-model.md`.
+    pub fn validate(&self) -> Result<(), ScheduleError> {
+        op_model::validate_footprints(
+            self.steps.iter().map(|s| (s.variant_name(), s.footprint())),
+        )
     }
 
     // rq-9fbba3be
