@@ -81,16 +81,10 @@ fn unbox_berendsen(boxed: Box<dyn Thermostat>) -> BerendsenThermostat {
     unsafe { *Box::from_raw(Box::into_raw(boxed) as *mut BerendsenThermostat) }
 }
 
-/// Runs Berendsen's `apply_post` and then dispatches the standalone
-/// `rescale_velocities_device_factor` against the slot's
-/// `factor_device`, mirroring what the JIT-composed post-force
-/// per-particle kernel does in production. Tests that exercise the
-/// thermostat in isolation use this helper to keep the velocity
-/// update reachable.
-// `apply_post` now performs the per-particle rescale directly (a
-// thermostat contributes no composed fragment), so this helper just
-// calls it and drains the cumulative-injection accumulator into the host
-// field.
+/// Runs Berendsen's `apply_post` (which performs the per-particle
+/// velocity rescale as a standalone launch) and drains the
+/// cumulative-injection accumulator into the host field. Tests that
+/// exercise the thermostat in isolation use this helper.
 fn berendsen_apply_post_with_rescale(
     therm: &mut BerendsenThermostat,
     buffers: &mut ParticleBuffers,

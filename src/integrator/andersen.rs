@@ -57,9 +57,8 @@ pub struct AndersenThermostat {
     pub draw_counter: u64,
     pub kt: f64,
     /// Legacy field retained for diagnostic compatibility. Always
-    /// zero; the per-step `(K_new − K_old)` accounting that the
-    /// standalone path tracked is not reproduced inside the
-    /// JIT-composed post-force per-particle kernel.
+    /// zero; the per-step `(K_new − K_old)` energy accounting is not
+    /// tracked by the resample kernel.
     pub cumulative_injection: f64,
     /// Device-resident Philox counter. `andersen_resample` reads it and
     /// increments it (one lane in the first block) after the per-thread
@@ -226,8 +225,8 @@ impl ThermostatBuilder for AndersenBuilder {
 }
 
 // rq-2093594f rq-5e059f6b — Andersen's per-particle resample kernel.
-// `apply_post` launches it directly on coupling steps (a thermostat
-// contributes no composed post-force fragment).
+// `apply_post` launches it directly on coupling steps, as a standalone
+// launch.
 crate::gpu_kernels! {
     module: "andersen",
     ptx: crate::kernels::ANDERSEN,

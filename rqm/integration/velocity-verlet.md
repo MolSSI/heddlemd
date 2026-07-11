@@ -14,25 +14,19 @@ thermostat (the `"velocity-verlet"` builder's
 The per-particle arithmetic is split across the pre-force `vv_kick_drift`
 CUDA kernel and a post-force half-kick. The pre-force kernel performs the
 first half-velocity update followed by the position update. The post-force
-half-kick is contributed by the integrator's
-`post_force_per_particle_fragment()` and is dispatched by the
-JIT-composed post-force per-particle kernel
-(`heddle_jit_composed_post_force_per_particle`); see
-`rqm/integration/jit-composed-post-force.md`. The integrator declares a
+half-kick is the `vv_kick` kernel, launched by the integrator's
+`execute()` at the plan's trailing `KickHalf`. The integrator declares a
 `StepPlan` of `KickDrift`, `ForceEval`, and `KickHalf` interleaved with
 three `ConstraintPoint` markers (`BeforeDrift`, `AfterDrift`,
 `AfterKick`) that declare where a constraint slot snapshots and
 projects. The runner dispatches `KickDrift` to `execute()` (which
 launches `vv_kick_drift`), dispatches `ForceEval` to
-`force_field.step(...)` (see `framework.md`), skips the trailing
-`KickHalf` `execute()` call because the composed kernel handles the
-trailing half-kick, and dispatches each `ConstraintPoint` marker to the
-constraint slot (a no-op when no slot is installed). The markers are
-present unconditionally, so the same plan drives constrained and
-unconstrained runs.
-
-No standalone `vv_kick` or `vv_kick_lossless` kernel is declared. The
-trailing half-kick lives only in the integrator's source fragment.
+`force_field.step(...)` (see `framework.md`), runs the trailing
+`KickHalf` via `execute()` (which launches `vv_kick`) in the post-force
+tail, and dispatches each `ConstraintPoint` marker to the constraint
+slot (a no-op when no slot is installed). The markers are present
+unconditionally, so the same plan drives constrained and unconstrained
+runs.
 
 The integrator ships in two modes:
 
@@ -191,16 +185,13 @@ extern "C" __global__ void vv_kick_drift_lossless(
     unsigned int n);
 ```
 
-The post-force half-kick is **not** a standalone kernel. It is the
-integrator's `post_force_per_particle_fragment` body, composed into the
-JIT post-force per-particle kernel
-(`heddle_jit_composed_post_force_per_particle`) at phase setup. The
-lossy fragment performs `v += (F / m) · (dt / 2)`. The lossless
-fragment carries the same compensated-sum extended-precision update
-documented below for the drift variant, applied to velocities only;
-it reads and writes the `velocities_{x,y,z}_lo` buffers as additional
-fragment kernel parameters bound by
-`VelocityVerletState::bind_post_force_per_particle_args`.
+The post-force half-kick is the standalone `vv_kick` kernel (and
+`vv_kick_lossless` in lossless mode), launched by `execute()` at the
+plan's trailing `KickHalf`. The lossy kernel performs
+`v += (F / m) · (dt / 2)`. The lossless kernel carries the same
+compensated-sum extended-precision update documented below for the drift
+variant, applied to velocities only; it reads and writes the
+`velocities_{x,y,z}_lo` buffers.
 
 `vv_kick_drift` and `vv_kick_drift_lossless` are the drift-bearing
 kernels that wrap positions (via the triclinic *Wrap Algorithm*
@@ -386,16 +377,16 @@ StepPlan { steps: vec![
 The three `ConstraintPoint` markers and the terminal `BarostatPoint`
 are present unconditionally and are no-ops when their slot is absent, so
 the same plan drives NVE, NVT, and NPT compositions. The `AfterKick`
-and `BarostatPoint` sub-steps form the plan's trailing post-force-marker
-run: the runner dispatches them in its post-walk tail (barostat `apply`
-before the composed launch, constraint velocity projection after it), so
-both compose with the composed post-force kernel (see `framework.md`,
-*Per-Step Interface*). The plan shape is identical for the lossy and
-lossless variants; the `lossless` flag is carried on the integrator's
-`&mut self` and read inside `execute()` to choose between the lossy and
-lossless kernels. (Lossless mode does not compose with a constraint slot
-— see *Compatibility Rules* in `constraint-framework.md` — so the
-`ConstraintPoint` markers are inert on a lossless run.)
+and `BarostatPoint` sub-steps form the plan's post-force tail: the
+runner dispatches it as a fixed ordered sequence — trailing kick,
+thermostat `apply_post`, barostat `apply`, then constraint velocity
+projection (see `framework.md`, *Per-Step Interface*). The plan shape is
+identical for the lossy and lossless variants; the `lossless` flag is
+carried on the integrator's `&mut self` and read inside `execute()` to
+choose between the lossy and lossless kernels. (Lossless mode does not
+compose with a constraint slot — see *Compatibility Rules* in
+`constraint-framework.md` — so the `ConstraintPoint` markers are inert
+on a lossless run.)
 
 ### Sub-step Execution <!-- rq-51e5a0cd -->
 
@@ -409,57 +400,44 @@ dispatches:
   `*_LOSSLESS` stage names — see `performance-analysis.md`). Applies
   the first half-kick using the cached `F(t)` and drifts positions
   to `x(t+dt)`.
-- `SubStep::KickHalf { dt, .. }` → handled by the JIT-composed
-  post-force per-particle kernel (see `jit-composed-post-force.md`).
-  `execute()` is not invoked for this SubStep by a conforming
-  runner.
+- `SubStep::KickHalf { dt, .. }` → launches `vv_kick` (lossy) or
+  `vv_kick_lossless` (lossless), applying the trailing half-kick
+  `v ← v + (F / m) · (dt / 2)`. The runner runs this in the post-force
+  tail.
 - Any other variant → returns
   `IntegratorError::UnexpectedSubStep { variant: <name> }`. A
   conforming runner never produces this case: `ForceEval` is
   dispatched directly by the runner, and Velocity Verlet's plan
   contains no `Drift` or `Custom` sub-steps.
 
-### Post-Force Per-Particle Fragment <!-- rq-0034617f -->
+### Trailing Half-Kick <!-- rq-0034617f -->
 
-`VelocityVerletState::post_force_per_particle_fragment()` returns
-the `KickHalf` per-thread body as a `PerParticleFragment`:
+The post-force half-kick is the `vv_kick` kernel (`vv_kick_lossless`
+in lossless mode), launched by `execute()` at the plan's trailing
+`KickHalf`:
 
-- The functor body reads
-  `velocities_x/y/z[i]`, `forces_x/y/z[i]`, `masses[i]`, computes
-  `v ← v + (F / m) · (dt / 2)`, and writes back to
-  `velocities_x/y/z[i]`. The `dt` value is read from a per-fragment
-  scalar argument.
+- The lossy kernel reads `velocities_x/y/z[i]`, `forces_x/y/z[i]`,
+  `masses[i]`, computes `v ← v + (F / m) · (dt / 2)`, and writes back
+  to `velocities_x/y/z[i]`.
+- The lossless kernel additionally reads `velocities_x/y/z_lo[i]` and
+  applies the compensated-summation update described in *Algorithm*.
+  `VelocityVerletBuilder` selects the kernel by the `lossless` flag.
 
-- The `lossless` variant's body additionally reads
-  `velocities_x/y/z_lo[i]` and applies the compensated-summation
-  update described in *Algorithm*. `VelocityVerletBuilder` selects
-  the lossy or lossless fragment based on the `lossless` config
-  flag; both fragments expose the same `velocity_verlet` label.
-
-- `entry_point_args` declares `Real vv_dt` plus (lossless variant
-  only) `double *vv_velocities_x_lo, *vv_velocities_y_lo,
-  *vv_velocities_z_lo`. The slot's
-  `bind_post_force_per_particle_args` pushes these onto the launch
-  builder.
-
-The per-particle-shape standalone kernels `vv_kick` and
-`vv_kick_lossless` no longer exist; their bodies live in the
-fragment. The pre-force-shape standalone kernels `vv_kick_drift`
-and `vv_kick_drift_lossless` remain — pre-force composition is out
-of J3's scope.
+The pre-force-shape kernels `vv_kick_drift` / `vv_kick_drift_lossless`
+and the post-force `vv_kick` / `vv_kick_lossless` are all ordinary
+standalone launches.
 
 ### Runner-Driven Constraint Hooks <!-- rq-9b03044f -->
 
 The runner walks the plan (see `framework.md` and
 `constraint-framework.md`) and dispatches each `ConstraintPoint`
-marker in the plan to the configured constraint slot: `BeforeDrift`
-before the `KickDrift`, `AfterDrift` after it, and `AfterKick` after
-the final `KickHalf`. When the composed post-force kernel absorbs the
-trailing `KickHalf`, the runner defers the trailing `AfterKick` marker
-and fires `apply_after_kick` after the composed launch, so the
-velocity projection follows the composed kernel's fused half-kick
-(see `jit-composed-post-force.md`). Velocity Verlet's `execute()` is
-unaware of the constraint slot; it only places the markers in `plan`.
+marker to the configured constraint slot: `BeforeDrift` before the
+`KickDrift`, `AfterDrift` after it, and `AfterKick` after the trailing
+`KickHalf`. The trailing `AfterKick` runs in the post-force tail, after
+the trailing kick and any thermostat / barostat rescale, so the velocity
+projection is the last per-particle velocity operation of the step.
+Velocity Verlet's `execute()` is unaware of the constraint slot; it
+only places the markers in `plan`.
 
 The builder's `supports_constraints(&params)` returns `true` when
 `params.lossless == false` and `false` when `params.lossless == true`.

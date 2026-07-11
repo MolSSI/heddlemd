@@ -65,15 +65,10 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     .unwrap()
 }
 
-/// Runs Andersen's `apply_post` followed by the standalone
-/// `andersen_resample` kernel — the equivalent of what the JIT-composed
-/// post-force per-particle kernel does in production when Andersen's
-/// fragment is composed in. Tests that exercise Andersen in isolation
-/// (without building the composed kernel) use this helper.
-// `apply_post` now performs the per-particle resample directly (a
-// thermostat contributes no composed fragment), so this helper just
-// calls it and syncs the host-side `draw_counter` from the device
-// counter the resample incremented.
+/// Runs Andersen's `apply_post` (which performs the per-particle
+/// velocity resample as a standalone launch) and syncs the host-side
+/// `draw_counter` from the device counter the resample incremented.
+/// Tests that exercise Andersen in isolation use this helper.
 fn andersen_apply_post_with_resample(
     therm: &mut AndersenThermostat,
     buffers: &mut ParticleBuffers,
@@ -430,11 +425,10 @@ fn andersen_log_column_names_returns_andersen_conserved() {
 // rq-26ff4aea
 #[test]
 fn andersen_log_column_values_returns_kinetic_plus_potential() {
-    // The cumulative-injection correction the historical standalone
-    // path tracked is not reproduced by the JIT-composed post-force
-    // per-particle path; Andersen's conserved log column reports
-    // `K + U` without the injection correction. See `andersen.md`
-    // *Source Fragment* for the rationale.
+    // The per-step `(K_new − K_old)` energy accounting is not tracked
+    // by the resample path; Andersen's conserved log column reports
+    // `K + U` without the injection correction. See `andersen.md` for
+    // the rationale.
     let gpu = init_device().unwrap();
     let therm = unbox_andersen(build_andersen(&gpu, 4, &andersen_kind(300.0, 1.0e12, 1)));
     let extras = therm.log_column_values(2.5e-20, 3.0e-20);

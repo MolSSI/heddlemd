@@ -1,10 +1,10 @@
 {
   "rq-0034617f": {
-    "decl": "### Post-Force Per-Particle Fragment",
+    "decl": "### Trailing Half-Kick",
     "file": "integration/velocity-verlet",
     "level": 3,
     "refs": [],
-    "title": "Post-Force Per-Particle Fragment",
+    "title": "Trailing Half-Kick",
     "type": "section"
   },
   "rq-0040baca": {
@@ -400,13 +400,6 @@
     ],
     "title": "Drop best-effort flushes",
     "type": "scenario"
-  },
-  "rq-02d0e4f9": {
-    "decl": "- `heddle_jit_composed_post_force_per_particle` — the composed",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "heddle_jit_composed_post_force_per_particle",
-    "type": "api-item"
   },
   "rq-02edd314": {
     "decl": "## Feature API",
@@ -1279,27 +1272,6 @@
     "title": "Per-step loop does not compute scalars on a trajectory-only step",
     "type": "scenario"
   },
-  "rq-09306735": {
-    "decl": "### Suffix-closed subset selection",
-    "file": "integration/jit-composed-post-force",
-    "level": 3,
-    "refs": [
-      {
-        "file": "src/integrator/mod.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
-      },
-      {
-        "file": "tests/integrators_respa.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Suffix-closed subset selection",
-    "type": "section"
-  },
   "rq-0945ffcb": {
     "decl": "Scenario: NVE velocity-Verlet with SETTLE keeps rigid water on both the position and velocity manifolds",
     "file": "integration/constraint-framework",
@@ -1626,13 +1598,6 @@
     "title": "heddle_jit_composed_pair_force_f",
     "type": "api-item"
   },
-  "rq-0b8e5852": {
-    "decl": "Scenario: Composed post-force kernel is compiled before capture begins",
-    "file": "cuda-graphs",
-    "refs": [],
-    "title": "Composed post-force kernel is compiled before capture begins",
-    "type": "scenario"
-  },
   "rq-0ba1a24a": {
     "decl": "- `periodicity(&self) -> BarostatPeriodicity` — default",
     "file": "integration/mc-barostat",
@@ -1654,7 +1619,7 @@
     "type": "section"
   },
   "rq-0bc3a66e": {
-    "decl": "Scenario: Graph mode and per-step mode use the same composed kernel",
+    "decl": "Scenario: Graph mode and per-step mode issue the same launches",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -1662,7 +1627,7 @@
         "kind": "code"
       }
     ],
-    "title": "Graph mode and per-step mode use the same composed kernel",
+    "title": "Graph mode and per-step mode issue the same launches",
     "type": "scenario"
   },
   "rq-0c2265eb": {
@@ -3648,7 +3613,7 @@
     "type": "scenario"
   },
   "rq-195a6215": {
-    "decl": "Scenario: defer_terminal_velocity_projection skips the trailing AfterKick in the walk",
+    "decl": "Scenario: The terminal velocity projection is the last per-particle velocity operation",
     "file": "integration/framework",
     "refs": [
       {
@@ -3656,7 +3621,7 @@
         "kind": "code"
       }
     ],
-    "title": "defer_terminal_velocity_projection skips the trailing AfterKick in the walk",
+    "title": "The terminal velocity projection is the last per-particle velocity operation",
     "type": "scenario"
   },
   "rq-1979ae5a": {
@@ -3887,7 +3852,7 @@
     "type": "scenario"
   },
   "rq-1b0504e7": {
-    "decl": "Scenario: Two independent runs of the same composed configuration are byte-identical",
+    "decl": "Scenario: Two independent runs of the same slot combination are byte-identical",
     "file": "integration/framework",
     "refs": [
       {
@@ -3895,7 +3860,7 @@
         "kind": "code"
       }
     ],
-    "title": "Two independent runs of the same composed configuration are byte-identical",
+    "title": "Two independent runs of the same slot combination are byte-identical",
     "type": "scenario"
   },
   "rq-1b14dbf1": {
@@ -4175,14 +4140,6 @@
     "title": "nl.pre_step is called once per batch boundary",
     "type": "scenario"
   },
-  "rq-1c911e56": {
-    "decl": "## Gherkin Scenarios",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Gherkin Scenarios",
-    "type": "section"
-  },
   "rq-1ca1e95a": {
     "decl": "## Launch Configuration",
     "file": "forces/harmonic-bond",
@@ -4262,7 +4219,7 @@
     "type": "scenario"
   },
   "rq-1d366b88": {
-    "decl": "- `RunStepOptions` — per-call options for `run_step`, bundling the",
+    "decl": "- `RunStepOptions` — per-call options for `run_step`. Plain `Copy`",
     "file": "integration/framework",
     "refs": [
       {
@@ -4332,11 +4289,11 @@
     "type": "scenario"
   },
   "rq-1db7cf2a": {
-    "decl": "## JIT-Composed Post-Force Kernel in the Captured Sequence",
+    "decl": "## Post-Force Per-Particle Launches in the Captured Sequence",
     "file": "cuda-graphs",
     "level": 2,
     "refs": [],
-    "title": "JIT-Composed Post-Force Kernel in the Captured Sequence",
+    "title": "Post-Force Per-Particle Launches in the Captured Sequence",
     "type": "section"
   },
   "rq-1dc985cc": {
@@ -4906,14 +4863,6 @@
     "refs": [],
     "title": "from_config populates r_switch from the parsed PairInteractionConfig",
     "type": "scenario"
-  },
-  "rq-215c2fd9": {
-    "decl": "## Composed-Kernel Structure",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Composed-Kernel Structure",
-    "type": "section"
   },
   "rq-2196fc45": {
     "decl": "### Types",
@@ -5796,6 +5745,10 @@
       {
         "file": "src/runner.rs",
         "kind": "code"
+      },
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
       }
     ],
     "title": "run_step",
@@ -5853,13 +5806,6 @@
     ],
     "title": "cell-list mode with an [spme] table is accepted",
     "type": "scenario"
-  },
-  "rq-282850ad": {
-    "decl": "- `post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` —",
-    "file": "integration/mc-barostat",
-    "refs": [],
-    "title": "post_force_per_particle",
-    "type": "api-item"
   },
   "rq-282af621": {
     "decl": "## Box Generation Tracking",
@@ -6776,13 +6722,6 @@
     "title": "MTK conserved Hamiltonian",
     "type": "section"
   },
-  "rq-2e33e1b8": {
-    "decl": "- `Integrator::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline -->",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Integrator",
-    "type": "api-item"
-  },
   "rq-2e3bda9a": {
     "decl": "Scenario: Bonded composed module is not compiled when no bonded slot is active",
     "file": "forces/jit-composed-intramolecular",
@@ -7369,13 +7308,6 @@
     "file": "forces/framework",
     "refs": [],
     "title": "step_class(Slow) refreshes only Slow slots' contributions",
-    "type": "scenario"
-  },
-  "rq-33fa8597": {
-    "decl": "Scenario: c-rescale rescale_velocities and rescale_positions standalone kernels do not exist",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "c-rescale rescale_velocities and rescale_positions standalone kernels do not exist",
     "type": "scenario"
   },
   "rq-34329bda": {
@@ -8676,7 +8608,7 @@
     "type": "section"
   },
   "rq-3d84a5b8": {
-    "decl": "Scenario: A non-participating slot does not affect graph eligibility",
+    "decl": "Scenario: A user integrator that is graph-compatible keeps the phase eligible",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -8684,7 +8616,7 @@
         "kind": "code"
       }
     ],
-    "title": "A non-participating slot does not affect graph eligibility",
+    "title": "A user integrator that is graph-compatible keeps the phase eligible",
     "type": "scenario"
   },
   "rq-3db027c2": {
@@ -9179,18 +9111,6 @@
     ],
     "title": "Reject topology = init",
     "type": "scenario"
-  },
-  "rq-4187d20f": {
-    "decl": "- `PostForcePerParticle` — capability trait carrying both an <!-- inline -->",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator/mod.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PostForcePerParticle",
-    "type": "api-item"
   },
   "rq-41eb5e02": {
     "decl": "#### Other attributes",
@@ -9846,7 +9766,7 @@
     "type": "scenario"
   },
   "rq-482921eb": {
-    "decl": "Scenario: post_force_substep_index selects the trailing outer kick",
+    "decl": "Scenario: Plan ends with the trailing outer half-kick",
     "file": "integration/respa",
     "refs": [
       {
@@ -9854,7 +9774,7 @@
         "kind": "code"
       }
     ],
-    "title": "post_force_substep_index selects the trailing outer kick",
+    "title": "Plan ends with the trailing outer half-kick",
     "type": "scenario"
   },
   "rq-483fc240": {
@@ -11129,14 +11049,6 @@
     "title": "velocity-verlet (lossless) does not support constraints",
     "type": "scenario"
   },
-  "rq-532a9e35": {
-    "decl": "## Compilation",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Compilation",
-    "type": "section"
-  },
   "rq-5355f3f0": {
     "decl": "Scenario: wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
     "file": "simulation-box",
@@ -11422,18 +11334,6 @@
     "title": "Repeated kernel_start/kernel_stop pairs accumulate",
     "type": "scenario"
   },
-  "rq-56044cc3": {
-    "decl": "Scenario: Barostat's apply runs scalar prep but not per-particle rescale",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "src/integrator/c_rescale_barostat.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Barostat's apply runs scalar prep but not per-particle rescale",
-    "type": "scenario"
-  },
   "rq-560ce2e2": {
     "decl": "Scenario: SimulationSetup::new and lint --with-gpu invoke the same step helpers",
     "file": "simulation-runner",
@@ -11529,13 +11429,6 @@
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
     "title": "AngleForceFragment",
-    "type": "api-item"
-  },
-  "rq-56a36cba": {
-    "decl": "- `JitComposedPostForcePerParticle` — module + entry-point handle",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "JitComposedPostForcePerParticle",
     "type": "api-item"
   },
   "rq-56ad97f1": {
@@ -12270,18 +12163,6 @@
     "title": "Degenerate geometry produces zero energy and virial in addition to zero force",
     "type": "scenario"
   },
-  "rq-5c607daa": {
-    "decl": "- `PostForceBindContext<'a>` — context passed to every active",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "src/forces/jit_composed.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PostForceBindContext",
-    "type": "api-item"
-  },
   "rq-5c63aa07": {
     "decl": "Scenario: Plan shape is a pure function of dt",
     "file": "integration/respa",
@@ -12607,18 +12488,6 @@
     "title": "reduce on zero particles is a no-op",
     "type": "scenario"
   },
-  "rq-5e904c5d": {
-    "decl": "Scenario: A fragment-less per-step barostat with a thermostat has a valid execution order",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "tests/post_force_composition.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A fragment-less per-step barostat with a thermostat has a valid execution order",
-    "type": "scenario"
-  },
   "rq-5ec02591": {
     "decl": "- `spme_recip_apply_influence(spme_state) -> Result<(), GpuError>`",
     "file": "forces/spme",
@@ -12903,18 +12772,6 @@
     "title": "One particle's contribution at a single cell matches the fixed-point B-spline value",
     "type": "scenario"
   },
-  "rq-609dc377": {
-    "decl": "Scenario: Every built-in fusible slot kind exposes a post-force fragment",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "tests/post_force_composition.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Every built-in fusible slot kind exposes a post-force fragment",
-    "type": "scenario"
-  },
   "rq-60b19852": {
     "decl": "Scenario: Two phases of different kinds may share a numerical seed",
     "file": "io/config-schema",
@@ -13080,11 +12937,11 @@
     "type": "section"
   },
   "rq-61f241f6": {
-    "decl": "## Post-Force Per-Particle Fragment",
+    "decl": "## Position Rescale",
     "file": "integration/c-rescale-barostat",
     "level": 2,
     "refs": [],
-    "title": "Post-Force Per-Particle Fragment",
+    "title": "Position Rescale",
     "type": "section"
   },
   "rq-61fa8b93": {
@@ -14236,14 +14093,6 @@
     "title": "Velocity-Verlet Loop",
     "type": "section"
   },
-  "rq-6b628814": {
-    "decl": "## Determinism",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Determinism",
-    "type": "section"
-  },
   "rq-6b721a52": {
     "decl": "Scenario: validate_against accepts a potential-table kind claimed by a registered custom builder",
     "file": "io/config-schema",
@@ -14274,13 +14123,6 @@
     "refs": [],
     "title": "ConstraintBuilder",
     "type": "api-item"
-  },
-  "rq-6bd00f49": {
-    "decl": "Scenario: Berendsen thermostat apply_post writes factor_device via on-device compute",
-    "file": "cuda-graphs",
-    "refs": [],
-    "title": "Berendsen thermostat apply_post writes factor_device via on-device compute",
-    "type": "scenario"
   },
   "rq-6bd0b42f": {
     "decl": "## NHC conserved Hamiltonian",
@@ -14603,13 +14445,6 @@
       }
     ],
     "title": "Reject yoshida_order outside {1, 3, 5, 7}",
-    "type": "scenario"
-  },
-  "rq-6dc9fc6d": {
-    "decl": "Scenario: Andersen fragment is self-contained for Philox draw",
-    "file": "cuda-graphs",
-    "refs": [],
-    "title": "Andersen fragment is self-contained for Philox draw",
     "type": "scenario"
   },
   "rq-6de1f8d5": {
@@ -15369,14 +15204,6 @@
     ],
     "title": "Amortized type-index loads preserve per-particle forces bit-for-bit",
     "type": "scenario"
-  },
-  "rq-73e738ee": {
-    "decl": "### Composed-Kernel Use and Coupling Steps",
-    "file": "integration/jit-composed-post-force",
-    "level": 3,
-    "refs": [],
-    "title": "Composed-Kernel Use and Coupling Steps",
-    "type": "section"
   },
   "rq-73efd4be": {
     "decl": "Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs",
@@ -16319,18 +16146,6 @@
     "title": "ForceField",
     "type": "api-item"
   },
-  "rq-79b8a246": {
-    "decl": "Scenario: A thermostat never participates in the composed set",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "tests/post_force_composition.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A thermostat never participates in the composed set",
-    "type": "scenario"
-  },
   "rq-79c091e0": {
     "decl": "Scenario: ShakeConstraintsState::new with empty constraint list succeeds and is a no-op",
     "file": "integration/shake",
@@ -16361,13 +16176,6 @@
     "refs": [],
     "title": "A pair contributes only to fragments whose cutoff_squared passes",
     "type": "scenario"
-  },
-  "rq-7a000f0e": {
-    "decl": "- `ForceLaunchBuilder` — reused from",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "ForceLaunchBuilder",
-    "type": "api-item"
   },
   "rq-7a076bc9": {
     "decl": "Scenario: Builder validate_params rejects an unknown field",
@@ -16617,18 +16425,6 @@
     ],
     "title": "Parameters",
     "type": "section"
-  },
-  "rq-7bd422a5": {
-    "decl": "Scenario: A non-coupling step keeps kick fusion; a coupling step does not",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "tests/post_force_composition.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A non-coupling step keeps kick fusion; a coupling step does not",
-    "type": "scenario"
   },
   "rq-7bf70ee9": {
     "decl": "Scenario: n = 0 is rejected at config-load time",
@@ -17860,18 +17656,6 @@
     "title": "Single-pair pass is skipped when its count is zero",
     "type": "scenario"
   },
-  "rq-86dea9a1": {
-    "decl": "Scenario: Thermostat's apply_post runs the reduction and the rescale",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "src/integrator/csvr.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Thermostat's apply_post runs the reduction and the rescale",
-    "type": "scenario"
-  },
   "rq-86f01d20": {
     "decl": "- `AnalysisBuilder` — open-shaped builder trait. Mirrors",
     "file": "analysis/framework",
@@ -18355,13 +18139,6 @@
     "title": "log_column_names",
     "type": "api-item"
   },
-  "rq-8a66232e": {
-    "decl": "Scenario: Slot apply methods perform scalar prep only",
-    "file": "cuda-graphs",
-    "refs": [],
-    "title": "Slot apply methods perform scalar prep only",
-    "type": "scenario"
-  },
   "rq-8a7c1b6a": {
     "decl": "Scenario: Force magnitude matches the closed-form harmonic expression",
     "file": "forces/harmonic-bond",
@@ -18372,13 +18149,6 @@
       }
     ],
     "title": "Force magnitude matches the closed-form harmonic expression",
-    "type": "scenario"
-  },
-  "rq-8a7ef593": {
-    "decl": "Scenario: Composed kernel is not compiled when no integrator is active",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "Composed kernel is not compiled when no integrator is active",
     "type": "scenario"
   },
   "rq-8a9c44f8": {
@@ -18428,18 +18198,6 @@
     ],
     "title": "check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths",
     "type": "scenario"
-  },
-  "rq-8ac9773d": {
-    "decl": "# Feature: JIT-Composed Post-Force Per-Particle Kernel",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Feature: JIT-Composed Post-Force Per-Particle Kernel",
-    "type": "file"
   },
   "rq-8b1827a9": {
     "decl": "## Gherkin Scenarios",
@@ -18501,10 +18259,10 @@
     "type": "scenario"
   },
   "rq-8b964ce3": {
-    "decl": "Scenario: Captured graph contains exactly one composed post-force launch per step",
+    "decl": "Scenario: Captured graph contains the standalone post-force launches per step",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Captured graph contains exactly one composed post-force launch per step",
+    "title": "Captured graph contains the standalone post-force launches per step",
     "type": "scenario"
   },
   "rq-8bccc91c": {
@@ -18526,13 +18284,6 @@
     "refs": [],
     "title": "Parameter Binding and Launch",
     "type": "section"
-  },
-  "rq-8bfffd42": {
-    "decl": "Scenario: A non-coupling step launches the composed kernel exactly once",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "A non-coupling step launches the composed kernel exactly once",
-    "type": "scenario"
   },
   "rq-8c045718": {
     "decl": "Scenario: minimum_image of the zero displacement is zero",
@@ -19212,10 +18963,10 @@
     "type": "scenario"
   },
   "rq-91c02dd8": {
-    "decl": "Scenario: NHC phase falls back to per-step launches but still uses the composed kernel",
+    "decl": "Scenario: A thermostatted phase is graph-ineligible and runs per-step",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "NHC phase falls back to per-step launches but still uses the composed kernel",
+    "title": "A thermostatted phase is graph-ineligible and runs per-step",
     "type": "scenario"
   },
   "rq-91c4727a": {
@@ -19903,13 +19654,6 @@
     "title": "reduce_bond_forces on zero particles is a no-op",
     "type": "scenario"
   },
-  "rq-96749659": {
-    "decl": "- `PostForceFragmentLoadFailed(GpuError)` — `load_ptx` rejected",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "PostForceFragmentLoadFailed",
-    "type": "api-item"
-  },
   "rq-96d9c9df": {
     "decl": "Scenario: Reject phase dt <= 0",
     "file": "io/config-schema",
@@ -20338,13 +20082,6 @@
     "title": "log_column_values",
     "type": "api-item"
   },
-  "rq-9a8a7dfa": {
-    "decl": "Scenario: Composed kernel is compiled with the barostat fragment",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "Composed kernel is compiled with the barostat fragment",
-    "type": "scenario"
-  },
   "rq-9a9523d9": {
     "decl": "Scenario: minimum_image at the +L/2 boundary maps to -L/2",
     "file": "simulation-box",
@@ -20584,26 +20321,6 @@
       }
     ],
     "title": "min_perpendicular_width of an xy-tilted box reflects the xy contribution",
-    "type": "scenario"
-  },
-  "rq-9c5226e5": {
-    "decl": "Scenario: Integrator kick runs before thermostat rescale (canonical order, eager coupling step)",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "src/integrator/langevin_baoab.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/integrator/mtk_npt.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/integrator/velocity_verlet.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Integrator kick runs before thermostat rescale (canonical order, eager coupling step)",
     "type": "scenario"
   },
   "rq-9c80a966": {
@@ -21002,14 +20719,6 @@
     "title": "harmonic bond_type rejects non-positive r0",
     "type": "scenario"
   },
-  "rq-9e9db6d9": {
-    "decl": "### Types",
-    "file": "integration/jit-composed-post-force",
-    "level": 3,
-    "refs": [],
-    "title": "Types",
-    "type": "section"
-  },
   "rq-9eb167f0": {
     "decl": "Scenario: Lossless mode selects the lossless integrator kernels",
     "file": "simulation-runner",
@@ -21029,13 +20738,6 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
-  },
-  "rq-9ebdaea4": {
-    "decl": "- `PostForceFragmentCompileFailed { log: String }` — nvrtc",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "PostForceFragmentCompileFailed",
-    "type": "api-item"
   },
   "rq-9ec19227": {
     "decl": "## `Timings` Interaction",
@@ -21640,7 +21342,7 @@
     "type": "section"
   },
   "rq-a2fbf61e": {
-    "decl": "Scenario: defer_terminal_barostat_point skips the trailing BarostatPoint in the walk",
+    "decl": "Scenario: run_step's main walk does not dispatch the terminal BarostatPoint",
     "file": "integration/framework",
     "refs": [
       {
@@ -21648,7 +21350,7 @@
         "kind": "code"
       }
     ],
-    "title": "defer_terminal_barostat_point skips the trailing BarostatPoint in the walk",
+    "title": "run_step's main walk does not dispatch the terminal BarostatPoint",
     "type": "scenario"
   },
   "rq-a304e8cb": {
@@ -21872,13 +21574,6 @@
     "title": "Pair beyond cutoff yields zero per-particle energy and virial",
     "type": "scenario"
   },
-  "rq-a50d8a1f": {
-    "decl": "Scenario: Berendsen barostat apply writes mu_device via on-device compute",
-    "file": "cuda-graphs",
-    "refs": [],
-    "title": "Berendsen barostat apply writes mu_device via on-device compute",
-    "type": "scenario"
-  },
   "rq-a516b529": {
     "decl": "Scenario: max_volume_step grows when acceptance is high",
     "file": "integration/mc-barostat",
@@ -21922,13 +21617,6 @@
     "file": "forces/harmonic-angle",
     "refs": [],
     "title": "Three atoms at equilibrium angle produce zero force on each",
-    "type": "scenario"
-  },
-  "rq-a57fd4d5": {
-    "decl": "Scenario: A thermostat's rescale runs as a standalone kernel",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "A thermostat's rescale runs as a standalone kernel",
     "type": "scenario"
   },
   "rq-a587753e": {
@@ -22114,14 +21802,6 @@
     "title": "fast_math defaults to true and can be disabled",
     "type": "scenario"
   },
-  "rq-a77e722d": {
-    "decl": "## Out of Scope",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Out of Scope",
-    "type": "section"
-  },
   "rq-a786df3a": {
     "decl": "Scenario: Packed-neighbour pass runs one block per i-block",
     "file": "forces/packed-neighbour-pair-force",
@@ -22130,7 +21810,7 @@
     "type": "scenario"
   },
   "rq-a78ba267": {
-    "decl": "Scenario: With a composed kernel absorbing the trailing kick, the AfterKick projection fires after the composed launch",
+    "decl": "Scenario: The AfterKick projection fires in the post-force tail after the trailing kick",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -22138,7 +21818,7 @@
         "kind": "code"
       }
     ],
-    "title": "With a composed kernel absorbing the trailing kick, the AfterKick projection fires after the composed launch",
+    "title": "The AfterKick projection fires in the post-force tail after the trailing kick",
     "type": "scenario"
   },
   "rq-a7aac794": {
@@ -23054,13 +22734,6 @@
     "title": "Reject an unresolvable cross pair when combining is unavailable",
     "type": "scenario"
   },
-  "rq-ae74d89b": {
-    "decl": "Scenario: Barostat rescale runs after integrator and thermostat (canonical order)",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "Barostat rescale runs after integrator and thermostat (canonical order)",
-    "type": "scenario"
-  },
   "rq-ae7f8045": {
     "decl": "Scenario: File does not exist",
     "file": "io/config-schema",
@@ -23497,15 +23170,8 @@
     "title": "Registry builds a RESPA integrator",
     "type": "scenario"
   },
-  "rq-b154f270": {
-    "decl": "Scenario: NHC apply_post writes a single cumulative factor to factor_device",
-    "file": "cuda-graphs",
-    "refs": [],
-    "title": "NHC apply_post writes a single cumulative factor to factor_device",
-    "type": "scenario"
-  },
   "rq-b167a309": {
-    "decl": "Scenario: A terminal BarostatPoint dispatches barostat.apply once",
+    "decl": "Scenario: A terminal BarostatPoint dispatches barostat.apply once in the tail",
     "file": "integration/framework",
     "refs": [
       {
@@ -23513,7 +23179,7 @@
         "kind": "code"
       }
     ],
-    "title": "A terminal BarostatPoint dispatches barostat.apply once",
+    "title": "A terminal BarostatPoint dispatches barostat.apply once in the tail",
     "type": "scenario"
   },
   "rq-b17e6de6": {
@@ -23827,13 +23493,6 @@
     "title": "Both new kernels on empty state are no-ops",
     "type": "scenario"
   },
-  "rq-b3c1def1": {
-    "decl": "Scenario: Composed kernel is compiled when an integrator is active",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "Composed kernel is compiled when an integrator is active",
-    "type": "scenario"
-  },
   "rq-b3cbcae1": {
     "decl": "### PTX Module Loading",
     "file": "forces/periodic-dihedral",
@@ -23919,13 +23578,6 @@
     "refs": [],
     "title": "`Thermostat` trait overrides",
     "type": "section"
-  },
-  "rq-b4788314": {
-    "decl": "Scenario: FragmentCompileFailed surfaces every active fragment's label",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "FragmentCompileFailed surfaces every active fragment's label",
-    "type": "scenario"
   },
   "rq-b49bfdff": {
     "decl": "Scenario: Packed-neighbour pass applies exclusion_scale inline",
@@ -24409,35 +24061,6 @@
     "title": "Per-class accumulator buffers are zero-initialised at construction",
     "type": "scenario"
   },
-  "rq-b85a38d6": {
-    "decl": "## Slot Participation",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [
-      {
-        "file": "src/integrator/berendsen_barostat.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/integrator/c_rescale_barostat.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/integrator/mod.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
-      },
-      {
-        "file": "tests/post_force_composition.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Slot Participation",
-    "type": "section"
-  },
   "rq-b87fd5e8": {
     "decl": "Scenario: Positions visibly evolve over the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -24488,14 +24111,6 @@
     ],
     "title": "Unwrapped displacement is preserved under wrap",
     "type": "scenario"
-  },
-  "rq-b929e7e0": {
-    "decl": "### Error variants",
-    "file": "integration/jit-composed-post-force",
-    "level": 3,
-    "refs": [],
-    "title": "Error variants",
-    "type": "section"
   },
   "rq-b96ce51d": {
     "decl": "Scenario: LosslessBuffers::new with particle_count = 0",
@@ -24626,14 +24241,6 @@
     ],
     "title": "sim_box.generation() advances every plan walk",
     "type": "scenario"
-  },
-  "rq-ba5e545b": {
-    "decl": "### Trait methods",
-    "file": "integration/jit-composed-post-force",
-    "level": 3,
-    "refs": [],
-    "title": "Trait methods",
-    "type": "section"
   },
   "rq-ba6d3eaa": {
     "decl": "Scenario: SD caps step at max_step",
@@ -25203,13 +24810,6 @@
     "title": "rescale_velocities on empty state is a no-op",
     "type": "scenario"
   },
-  "rq-bf2e99c3": {
-    "decl": "Scenario: A runner with no active integrator / thermostat / barostat skips the composed kernel",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "A runner with no active integrator / thermostat / barostat skips the composed kernel",
-    "type": "scenario"
-  },
   "rq-bf3ec42e": {
     "decl": "## Empty State and degenerate cases",
     "file": "integration/berendsen-barostat",
@@ -25326,19 +24926,11 @@
     "title": "Lint flow",
     "type": "section"
   },
-  "rq-c0384b03": {
-    "decl": "## Runner Integration",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Runner Integration",
-    "type": "section"
-  },
   "rq-c0548f4c": {
-    "decl": "Scenario: MTK-NPT phase falls back to per-step launches but still uses the composed kernel",
+    "decl": "Scenario: MTK-NPT phase runs per-step with standalone launches",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "MTK-NPT phase falls back to per-step launches but still uses the composed kernel",
+    "title": "MTK-NPT phase runs per-step with standalone launches",
     "type": "scenario"
   },
   "rq-c0668cb7": {
@@ -26275,14 +25867,6 @@
     "title": "Empty-bin g_r is exactly 0.0",
     "type": "scenario"
   },
-  "rq-c71470d0": {
-    "decl": "## Slot Behaviour Contract",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Slot Behaviour Contract",
-    "type": "section"
-  },
   "rq-c74e6546": {
     "decl": "Scenario: No per-potential standalone kernel is loaded",
     "file": "forces/pair-force-kernel",
@@ -26850,13 +26434,6 @@
     "title": "lookup",
     "type": "api-item"
   },
-  "rq-cb31286f": {
-    "decl": "- `Barostat::post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` <!-- inline -->",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Barostat",
-    "type": "api-item"
-  },
   "rq-cb480c95": {
     "decl": "## Compatibility",
     "file": "integration/respa",
@@ -27251,14 +26828,6 @@
     "refs": [],
     "title": "Influence recompute under a C-rescale barostat fires every step",
     "type": "scenario"
-  },
-  "rq-ce72fe43": {
-    "decl": "## Source-Fragment Contract",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Source-Fragment Contract",
-    "type": "section"
   },
   "rq-ce89d4a4": {
     "decl": "Scenario: Reject when masses has the wrong length",
@@ -27835,13 +27404,6 @@
     "title": "A pair-force slot honours ForcesOnly",
     "type": "scenario"
   },
-  "rq-d2cacf91": {
-    "decl": "- `PerParticleFragment` — see *Source-Fragment Contract* above.",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "PerParticleFragment",
-    "type": "api-item"
-  },
   "rq-d2d0fb5f": {
     "decl": "### `Integrator` trait overrides",
     "file": "integration/mtk-npt",
@@ -27957,16 +27519,11 @@
     "type": "section"
   },
   "rq-d46f59c6": {
-    "decl": "## Post-force composed kernel",
+    "decl": "## Trailing outer half-kick",
     "file": "integration/respa",
     "level": 2,
-    "refs": [
-      {
-        "file": "src/integrator/respa.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Post-force composed kernel",
+    "refs": [],
+    "title": "Trailing outer half-kick",
     "type": "section"
   },
   "rq-d4720f04": {
@@ -28250,17 +27807,22 @@
     "type": "scenario"
   },
   "rq-d638d799": {
-    "decl": "Scenario: No set_jit_composed_post_force_active trait method exists",
+    "decl": "Scenario: No composed post-force kernel or activation toggle exists",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "No set_jit_composed_post_force_active trait method exists",
+    "title": "No composed post-force kernel or activation toggle exists",
     "type": "scenario"
   },
   "rq-d64bc1c6": {
-    "decl": "Scenario: skip_substep_index skips the integrator's execute for that sub-step",
+    "decl": "Scenario: The trailing kick runs via execute in run_step's main walk",
     "file": "integration/framework",
-    "refs": [],
-    "title": "skip_substep_index skips the integrator's execute for that sub-step",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The trailing kick runs via execute in run_step's main walk",
     "type": "scenario"
   },
   "rq-d651a188": {
@@ -28333,13 +27895,6 @@
     "refs": [],
     "title": "Parameters",
     "type": "section"
-  },
-  "rq-d6d4f598": {
-    "decl": "Scenario: Composed-kernel output matches the separate launch sequence within f32 round-off",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "Composed-kernel output matches the separate launch sequence within f32 round-off",
-    "type": "scenario"
   },
   "rq-d6e10419": {
     "decl": "Scenario: minimum_image after set_lattice reflects the new lattice parameters",
@@ -28614,14 +28169,6 @@
     "refs": [],
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
-  },
-  "rq-d9290792": {
-    "decl": "### Interaction with the constraint slot",
-    "file": "integration/jit-composed-post-force",
-    "level": 3,
-    "refs": [],
-    "title": "Interaction with the constraint slot",
-    "type": "section"
   },
   "rq-d9344e8e": {
     "decl": "### Types",
@@ -29209,18 +28756,6 @@
     "title": "Implicit exclusion is added for a bond without explicit entry",
     "type": "scenario"
   },
-  "rq-dcd0d421": {
-    "decl": "Scenario: A non-participating integrator's trailing kick executes in the plan walk",
-    "file": "integration/jit-composed-post-force",
-    "refs": [
-      {
-        "file": "tests/post_force_composition.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A non-participating integrator's trailing kick executes in the plan walk",
-    "type": "scenario"
-  },
   "rq-dce6f4cf": {
     "decl": "Scenario: A thermostatted phase is graph-ineligible and runs on the per-step path",
     "file": "cuda-graphs",
@@ -29279,14 +28814,6 @@
     "refs": [],
     "title": "ParticleState fields are Vec<Real>",
     "type": "scenario"
-  },
-  "rq-dd480027": {
-    "decl": "### Composed-module name and entry point",
-    "file": "integration/jit-composed-post-force",
-    "level": 3,
-    "refs": [],
-    "title": "Composed-module name and entry point",
-    "type": "section"
   },
   "rq-dd6fe266": {
     "decl": "Scenario: Reject n_resp = 0",
@@ -29743,13 +29270,6 @@
     "title": "Downstream kernels launch over capacity and read the live count from the device",
     "type": "scenario"
   },
-  "rq-e12c2668": {
-    "decl": "Scenario: Slot bind methods are invoked once each in canonical order",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "Slot bind methods are invoked once each in canonical order",
-    "type": "scenario"
-  },
   "rq-e14fdc0d": {
     "decl": "- `PeriodicDihedralState` — implements `Potential` with `label() ==",
     "file": "forces/framework",
@@ -29900,13 +29420,6 @@
     ],
     "title": "PTX Module Loading",
     "type": "section"
-  },
-  "rq-e274d0d2": {
-    "decl": "Scenario: kernels/integrate.cu does not declare a vv_kick entry point",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "kernels/integrate.cu does not declare a vv_kick entry point",
-    "type": "scenario"
   },
   "rq-e2a31585": {
     "decl": "Scenario: Box-generation refresh handles tilt mutation",
@@ -31265,14 +30778,6 @@
     "title": "Reject RESPA with lossless mode",
     "type": "scenario"
   },
-  "rq-ece2a1ec": {
-    "decl": "## Parameter Binding and Launch",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Parameter Binding and Launch",
-    "type": "section"
-  },
   "rq-ece77047": {
     "decl": "Scenario: gpu_launch! wrappers emit no timing calls",
     "file": "build-pipeline",
@@ -31426,14 +30931,6 @@
     "refs": [],
     "title": "(j, k, l) plane about the j-k axis (IUPAC convention).",
     "type": "file"
-  },
-  "rq-edf9864f": {
-    "decl": "## Feature API",
-    "file": "integration/jit-composed-post-force",
-    "level": 2,
-    "refs": [],
-    "title": "Feature API",
-    "type": "section"
   },
   "rq-edfc2b75": {
     "decl": "- `DihedralTypeConfig` — open-shaped parsed entry for the",
@@ -32285,13 +31782,6 @@
     "title": "Output convention",
     "type": "section"
   },
-  "rq-f3373134": {
-    "decl": "Scenario: Two independent runs of the composed-kernel path are byte-identical",
-    "file": "integration/jit-composed-post-force",
-    "refs": [],
-    "title": "Two independent runs of the composed-kernel path are byte-identical",
-    "type": "scenario"
-  },
   "rq-f33ca120": {
     "decl": "Scenario: Angle wings are canonicalised so atom_i < atom_k",
     "file": "forces/topology",
@@ -32305,7 +31795,7 @@
     "type": "scenario"
   },
   "rq-f34598ae": {
-    "decl": "Scenario: ConstraintPoint markers dispatch to the constraint slot in the walk",
+    "decl": "Scenario: Constraint hooks fire in canonical order across the walk and the tail",
     "file": "integration/framework",
     "refs": [
       {
@@ -32313,7 +31803,7 @@
         "kind": "code"
       }
     ],
-    "title": "ConstraintPoint markers dispatch to the constraint slot in the walk",
+    "title": "Constraint hooks fire in canonical order across the walk and the tail",
     "type": "scenario"
   },
   "rq-f34a4f43": {
@@ -33090,10 +32580,10 @@
     "type": "scenario"
   },
   "rq-f917104b": {
-    "decl": "Scenario: Standalone post-force per-particle kernels are not declared",
+    "decl": "Scenario: Post-force per-particle work is ordinary standalone kernels",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Standalone post-force per-particle kernels are not declared",
+    "title": "Post-force per-particle work is ordinary standalone kernels",
     "type": "scenario"
   },
   "rq-f92cfcdf": {

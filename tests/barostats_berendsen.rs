@@ -381,12 +381,11 @@ fn apply_launches_expected_kernel_set() {
     assert_eq!(count_for(KernelStage::VIRIAL_SUM_REDUCE), 1);
     // The compute-mu + lattice-rescale scalar kernel is instrumented. rq-5f59fa80
     assert_eq!(count_for(KernelStage::BERENDSEN_BAROSTAT_COMPUTE_MU), 1);
-    // The per-particle position rescale is dispatched by the
-    // JIT-composed post-force per-particle kernel; the standalone
-    // stage is not recorded.
+    // The per-particle position rescale runs as a standalone launch
+    // inside apply (the reductions above are fusion barriers).
     assert_eq!(
         count_for(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS),
-        0
+        1
     );
     // The barostat does not launch the integrator's VV kernels.
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);

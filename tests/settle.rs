@@ -1127,15 +1127,13 @@ mode = "all-pairs"
 // =====================================================================
 // End-to-end runner integration: velocity-Verlet MD + SETTLE.
 //
-// These drive the full runner via run_simulation, which builds and
-// launches the JIT-composed post-force per-particle kernel. That path
-// absorbs velocity-Verlet's trailing half-kick into the composed kernel
-// and fires the deferred terminal RATTLE (`apply_after_kick`) *after*
-// the composed launch — the code path the direct step_with_constraint
-// unit tests do not cover. The load-bearing assertion is the velocity
-// manifold `(r_i - r_j) · (v_i - v_j) == 0`: had the projection run
-// before the composed kick (the pre-fix ordering) it would be violated
-// even though bond lengths look fine.
+// These drive the full runner via run_simulation, which walks the plan
+// and then fires the terminal RATTLE (`apply_after_kick`) in the
+// post-force tail, after velocity-Verlet's trailing half-kick. The
+// load-bearing assertion is the velocity manifold
+// `(r_i - r_j) · (v_i - v_j) == 0`: had the projection run before the
+// trailing kick it would be violated even though bond lengths look
+// fine.
 // =====================================================================
 
 // SI geometry (units = "si"): two rigid SPC/E waters, oxygens 5.0 Å

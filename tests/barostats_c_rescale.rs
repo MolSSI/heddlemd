@@ -228,14 +228,11 @@ fn apply_launches_expected_kernel_set() {
     assert_eq!(count_for(KernelStage::VIRIAL_SUM_REDUCE), 1);
     // The compute-mu + lattice-rescale scalar kernel is instrumented. rq-5f59fa80
     assert_eq!(count_for(KernelStage::C_RESCALE_COMPUTE_MU), 1);
-    // The per-particle position rescale is dispatched by the
-    // JIT-composed post-force per-particle kernel via c-rescale's
-    // source fragment, not by `apply`. The standalone
-    // `C_RESCALE_BAROSTAT_RESCALE_POSITIONS` stage is never
-    // recorded.
+    // The per-particle position rescale runs as a standalone launch
+    // inside apply (the reductions above are fusion barriers).
     assert_eq!(
         count_for(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS),
-        0
+        1
     );
     // The Berendsen-barostat label must not be touched.
     assert_eq!(
@@ -415,7 +412,6 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
 // rq-3b9e9550
 #[test]
 fn fractional_coordinates_invariant_under_apply() {
-    use heddle_md::gpu::rescale_positions_device_factor;
     let gpu = init_device().unwrap();
     let p_target = 1.0e6_f64;
     let (px, vx, masses, virials) = system_with_pressure(p_target / 2.0);
@@ -430,13 +426,11 @@ fn fractional_coordinates_invariant_under_apply() {
         n,
         &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1),
     ));
+    // apply performs the per-particle position rescale internally (as a
+    // standalone launch), so the fractional coordinates are preserved
+    // after apply alone.
     baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as Real), &mut timings)
         .unwrap();
-    // The composed post-force per-particle kernel applies the
-    // position rescale in production. Tests that bypass the composed
-    // kernel dispatch the standalone equivalent against
-    // `mu_device` to keep the post-apply state covered.
-    rescale_positions_device_factor(&mut buffers, &baro.mu_device).unwrap();
     sim_box.flush_from_device().unwrap();
     let lx_post = sim_box.lx();
     let (px_post, _, _) = buffers.download_positions().unwrap();

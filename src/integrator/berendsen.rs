@@ -49,10 +49,10 @@ pub struct BerendsenThermostat {
     pub cumulative_injection: f64,
     ke_scratch: CudaSlice<Real>,
     /// Single-element device buffer holding the per-step rescale
-    /// factor λ written by `berendsen_compute_factor`. The
-    /// JIT-composed post-force per-particle kernel reads it.
-    /// Public so tests that bypass the composed kernel can dispatch
-    /// the standalone `rescale_velocities_device_factor` against it.
+    /// factor λ written by `berendsen_compute_factor` and consumed by
+    /// the standalone `rescale_velocities_device_factor` launch in
+    /// `apply_post`. Public so tests can dispatch that rescale against
+    /// it directly.
     pub factor_device: CudaSlice<Real>,
     /// Single-element device buffer accumulating
     /// `K_old · (λ² − 1)` per step. `flush_pending_injection`

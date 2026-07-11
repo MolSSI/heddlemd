@@ -71,7 +71,7 @@ the post-step velocities. For each invocation with timestep `dt`, let
    and axis. CSVR contributes no composed post-force fragment — its
    kinetic-energy reduction reads the full-step (post-trailing-kick)
    velocities, a fusion barrier that keeps the rescale out of the
-   composed kernel (`framework.md`, `jit-composed-post-force.md`).
+   composed kernel (`framework.md`, `docs/architecture.md`).
 
 The CSVR Markov kernel is exact in the sense that repeated
 application from any non-zero initial `K` converges to the canonical
@@ -342,7 +342,7 @@ coupling step):
 
 The kinetic-energy reduction reads the full-step (post-trailing-kick)
 velocities, so it is a fusion barrier: CSVR contributes no composed
-post-force fragment and runs its own rescale (`jit-composed-post-force.md`).
+post-force fragment and runs its own rescale (`framework.md`).
 
 All launches go through the default stream of
 `ParticleBuffers::device`.

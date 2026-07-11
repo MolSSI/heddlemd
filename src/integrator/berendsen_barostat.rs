@@ -119,35 +119,6 @@ impl BerendsenBarostat {
 // (β · dt/τ · (P_target − P) > 1).
 const MU_MIN: f64 = 1.0e-6;
 
-impl crate::integrator::PostForcePerParticle for BerendsenBarostat {
-    fn post_force_per_particle_fragment(
-        &self,
-    ) -> crate::forces::PerParticleFragment {
-        crate::forces::PerParticleFragment {
-            label: "berendsen_barostat",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *berendsen_baro_mu_device,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real berendsen_baro_mu = berendsen_baro_mu_device[0];\n\
-                 \x20       Real4 pq = posq[i];\n\
-                 \x20       pq.x *= berendsen_baro_mu;\n\
-                 \x20       pq.y *= berendsen_baro_mu;\n\
-                 \x20       pq.z *= berendsen_baro_mu;\n\
-                 \x20       posq[i] = pq;",
-            ),
-        }
-    }
-
-    fn bind_post_force_per_particle_args(
-        &self,
-        _ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        builder.push_device_buffer(&self.mu_device);
-    }}
-
 impl Barostat for BerendsenBarostat {
     // rq-1179e42f rq-29dda250
     fn apply(
@@ -188,9 +159,13 @@ impl Barostat for BerendsenBarostat {
             MU_MIN * MU_MIN * MU_MIN,
         )?;
         timings.kernel_stop(KernelStage::BERENDSEN_BAROSTAT_COMPUTE_MU)?;
-        // The per-particle position rescale `x ← μ · x` is dispatched
-        // by the JIT-composed post-force per-particle kernel via this
-        // slot's source fragment.
+
+        // Per-particle position rescale `x ← μ · x` from `mu_device`,
+        // as a standalone launch (the reductions above are fusion
+        // barriers). rq-29dda250
+        timings.kernel_start(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS)?;
+        rescale_positions_device_factor(buffers, &self.mu_device)?;
+        timings.kernel_stop(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS)?;
 
         Ok(())
     }
@@ -200,27 +175,6 @@ impl Barostat for BerendsenBarostat {
         device: &std::sync::Arc<cudarc::driver::CudaDevice>,
     ) -> Result<(), BarostatError> {
         BerendsenBarostat::flush_pending_injection(self, device).map_err(BarostatError::from)
-    }
-
-    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
-        Some(self)
-    }
-
-    // rq-b85a38d6 — standalone position rescale for coupling steps, where
-    // the composed kernel is bypassed. Reads the `mu_device` scalar the
-    // preceding `apply` produced.
-    fn apply_post_force_rescale_eager(
-        &self,
-        buffers: &mut ParticleBuffers,
-        timings: &mut Timings,
-    ) -> Result<(), BarostatError> {
-        if buffers.particle_count() == 0 {
-            return Ok(());
-        }
-        timings.kernel_start(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS)?;
-        rescale_positions_device_factor(buffers, &self.mu_device)?;
-        timings.kernel_stop(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS)?;
-        Ok(())
     }
 
 

@@ -26,7 +26,9 @@
       "Bash(cp ethane.in.toml /tmp/eth3072.bak)",
       "Bash(sed -i 's/r_skin = 3.0e-10/r_skin = 5.0e-11/' ethane.in.toml)",
       "Bash(rm -f ethane.out.*)",
-      "Bash(../../target/release/heddlemd run *)"
+      "Bash(../../target/release/heddlemd run *)",
+      "Bash(git --no-pager diff HEAD -- src/integrator/mod.rs)",
+      "Bash(.claude/skills/plan-feature/rqm.sh show *)"
     ]
   }
 }

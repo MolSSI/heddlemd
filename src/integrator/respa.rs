@@ -93,8 +93,8 @@ impl Integrator for RespaIntegrator {
     }
 
     // Every RESPA sub-step is runner-dispatched (force evaluations,
-    // class-sourced kicks) or handled by the composed post-force
-    // kernel; `execute` receives nothing in normal operation.
+    // class-sourced kicks including the trailing outer kick); `execute`
+    // receives nothing in normal operation.
     fn execute(
         &mut self,
         substep: &SubStep,
@@ -107,46 +107,6 @@ impl Integrator for RespaIntegrator {
         })
     }
 
-    // rq-d46f59c6 — trailing outer half-kick via the composed
-    // post-force kernel, reading the slow-class accumulators.
-    fn post_force_per_particle(&self) -> Option<&dyn crate::integrator::PostForcePerParticle> {
-        Some(self)
-    }
-}
-
-// rq-d46f59c6
-impl crate::integrator::PostForcePerParticle for RespaIntegrator {
-    fn post_force_per_particle_fragment(&self) -> crate::forces::PerParticleFragment {
-        crate::forces::PerParticleFragment {
-            label: "respa",
-            helper_source: String::new(),
-            entry_point_args: String::from(
-                "    const Real *respa_slow_fx,\n\
-                 \x20   const Real *respa_slow_fy,\n\
-                 \x20   const Real *respa_slow_fz,\n\
-                 \x20   Real respa_dt,\n",
-            ),
-            per_thread_body: String::from(
-                "        Real m = masses[i];\n\
-                 \x20       Real half_dt = respa_dt * R(0.5);\n\
-                 \x20       velocities_x[i] += respa_slow_fx[i] / m * half_dt;\n\
-                 \x20       velocities_y[i] += respa_slow_fy[i] / m * half_dt;\n\
-                 \x20       velocities_z[i] += respa_slow_fz[i] / m * half_dt;",
-            ),
-        }
-    }
-
-    fn bind_post_force_per_particle_args(
-        &self,
-        ctx: &crate::forces::PostForceBindContext<'_>,
-        builder: &mut crate::forces::ForceLaunchBuilder,
-    ) {
-        let slow = ctx.force_field.class_forces(ForceClass::Slow);
-        builder.push_device_buffer(slow.force_x);
-        builder.push_device_buffer(slow.force_y);
-        builder.push_device_buffer(slow.force_z);
-        builder.push_scalar::<Real>(ctx.dt);
-    }
 }
 
 // rq-e8550f96

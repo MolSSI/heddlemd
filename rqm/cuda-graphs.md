@@ -32,32 +32,23 @@ hold:
 - Every active slot for the phase (integrator, optional thermostat,
   optional barostat, optional constraint) reports
   `graph_compatible(&params) == true`.
-- Every active integrator / thermostat slot, and every per-step
-  barostat (`Barostat::periodicity() == EveryStep`), returns
-  `Some(_)` from `post_force_per_particle()`. The
-  JIT-composed post-force per-particle kernel is part of the
-  captured sequence and the per-step loop alike; such a slot that
-  does not expose a fragment cannot participate. Every in-tree
-  integrator, thermostat, and per-step barostat satisfies this
-  (enforced by a registry lint test). User-registered slots that
-  return `None` are excluded from the composed kernel via the
-  suffix-selection rule in `integration/jit-composed-post-force.md`
-  and run their post-force work as standalone launches — which are
-  captured into the graph like any other launch, so partial or
-  absent composition does not affect graph eligibility. A
-  *periodic* barostat (`EveryNSteps`, the Monte-Carlo barostat) does
-  no per-step work and is exempt: it contributes no post-force
-  fragment, and its move runs on the host at batch boundaries (see
-  *Periodic-barostat moves* below).
+- No thermostat is configured. A thermostat couples on a cadence and
+  runs host-side arithmetic (chain integration, sampling) on coupling
+  steps that stream capture cannot record, so a thermostatted phase runs
+  on the per-step launch path (see *Batched Replay Loop*). Every
+  post-force per-particle operation — the integrator's trailing kick and
+  a per-step barostat's rescale — is a standalone kernel launch captured
+  into the graph like any other launch; there is no composed post-force
+  kernel and no per-slot fragment requirement.
 
 - The integrator's plan has no `ThermostatHalf` sub-step and no
   *interleaved* (non-terminal) `BarostatPoint`. Both dispatch host-side
   slot arithmetic mid-plan, which stream capture cannot record, so such
   plans run on the eager path. A *terminal* `BarostatPoint` (the
   canonical placement the built-in integrators emit) keeps the phase
-  eligible: the barostat's `apply` runs in the post-walk tail and its
-  per-particle rescale fuses into the composed kernel exactly as a
-  fixed post-step barostat, so the captured sequence is unchanged.
+  eligible: the barostat's `apply` — including its standalone
+  per-particle rescale — runs in the post-force tail and is captured
+  like any other launch.
 
 When any condition fails the phase runs the per-step launch loop
 described in `simulation-runner.md` step 17, with full per-kernel
@@ -68,34 +59,26 @@ opt-in: eligibility is the activation criterion.
 
 ### Slot eligibility <!-- rq-26c9b8cb -->
 
-Each in-tree slot's builder reports its `graph_compatible` value;
-every in-tree slot exposes a post-force per-particle fragment:
+Each in-tree slot's builder reports its `graph_compatible` value:
 
-| Kind        | Slot                    | `graph_compatible` | post-force fragment |
-|-------------|-------------------------|--------------------|---------------------|
-| Integrator  | `velocity-verlet`       | `true`             | yes (kick)          |
-| Integrator  | `langevin-baoab`        | `true`             | yes (B kick)        |
-| Integrator  | `mtk-npt`               | `false`            | yes (cell-coupled kick) |
-| Thermostat  | `csvr`                  | `true`             | yes (factor rescale) |
-| Thermostat  | `andersen`              | `true`             | yes (per-particle Bernoulli + MB) |
-| Thermostat  | `berendsen`             | `true`             | yes (factor rescale) |
-| Thermostat  | `nose-hoover-chain`     | `false`            | yes (cumulative factor rescale) |
-| Barostat    | `c-rescale`             | `true`             | yes (mu position rescale) |
-| Barostat    | `berendsen`             | `true`             | yes (mu position rescale) |
-| Barostat    | `monte-carlo`           | `true`             | none (periodic host move; no per-step node) |
-| Constraint  | `shake`                 | `true`             | n/a (constraints have their own hooks) |
-| Constraint  | `settle`                | `true`             | n/a                 |
+| Kind        | Slot                    | `graph_compatible` |
+|-------------|-------------------------|--------------------|
+| Integrator  | `velocity-verlet`       | `true`             |
+| Integrator  | `langevin-baoab`        | `true`             |
+| Integrator  | `mtk-npt`               | `false`            |
+| Barostat    | `c-rescale`             | `true`             |
+| Barostat    | `berendsen`             | `true`             |
+| Barostat    | `monte-carlo`           | `true`             |
+| Constraint  | `shake`                 | `true`             |
+| Constraint  | `settle`                | `true`             |
 
-`mtk-npt` and `nose-hoover-chain` carry host-side scalar arithmetic
-inside their per-step plan executors that runs **outside** the
-post-force composed kernel — MTK's chain variable `eps` is updated
-host-side during `apply_pre`-equivalent SubSteps; NHC's Yoshida
-chain integrates `xi` / `p_xi` host-side during `apply_pre` and
-the host portion of `apply_post`. A captured graph cannot reproduce
-those host steps. Both slots expose post-force fragments that
-contribute to the composed kernel and use it on the per-step
-launch path. They remain on the per-step launch path until their
-host arithmetic is ported to device kernels.
+Thermostats are absent from the table: a configured thermostat makes
+the phase graph-ineligible regardless of kind (its coupling-step
+arithmetic runs on the per-step path). `mtk-npt` reports
+`graph_compatible == false` because it carries host-side chain
+arithmetic (`eps`, `xi` / `p_xi`) inside its per-step plan executor
+that a captured graph cannot reproduce; it runs on the per-step launch
+path until that arithmetic is ported to device kernels.
 
 All in-tree potentials (`lennard_jones`, `coulomb`, `spme_real`,
 `spme_reciprocal`, `morse_bond`, `harmonic_angle`) report
@@ -136,112 +119,32 @@ by `flush_pending_injection` (alongside the conserved-quantity log
 columns it already drains). The host field is used only for
 diagnostic log columns; it is never an input to a kernel arg.
 
-## JIT-Composed Post-Force Kernel in the Captured Sequence <!-- rq-1db7cf2a -->
+## Post-Force Per-Particle Launches in the Captured Sequence <!-- rq-1db7cf2a -->
 
-The captured per-step sequence includes the JIT-composed post-force
-per-particle kernel
-(`heddle_jit_composed_post_force_per_particle`) as its final per-
-particle node. The composition mechanism and source-fragment
-contract are specified in
-`rqm/integration/jit-composed-post-force.md`. The captured graph
-folds the trailing per-particle work (integrator's final kick,
-thermostat's velocity rescale, barostat's position rescale) into
-one launch in place of the per-slot rescale kernels.
+An eligible phase has no thermostat (a thermostatted phase runs on the
+per-step path). Its post-force per-particle work is the integrator's
+trailing kick (`vv_kick` / `vv_kick_lossless`, or a class kick) and,
+when a per-step barostat is configured, the barostat's standalone
+position rescale (`rescale_positions_device_factor`). Each is an
+ordinary `cuLaunchKernel` recorded as its own node in the captured
+graph; replays re-issue them exactly once per physical step. There is
+no composed post-force kernel.
 
-Every built-in integrator, thermostat, and barostat exposes a
-post-force per-particle fragment. The runner gathers these
-fragments before `begin_stream_capture`, JIT-compiles the composed
-kernel, and binds the resulting `CudaFunction` to the phase. The
-captured iteration's `cuLaunchKernel` for the composed kernel
-becomes a node in the recorded graph; replays of the graph
-re-issue the composed kernel exactly once per physical step.
-
-The non-graph per-step launch loop (cuda_graphs_disable = true or
-graph-ineligible phase) uses the same composition mechanism: it
-JIT-compiles the composed kernel and launches it directly per
-step. Both paths produce byte-identical results.
-
-The standalone per-particle post-force kernels
-(`vv_kick`, `vv_kick_lossless`, `csvr_rescale_velocities`,
-`rescale_velocities_device_factor`, `andersen_resample`,
-`berendsen_rescale_velocities`,
-`rescale_positions_device_factor`,
-`berendsen_barostat_rescale_positions`) are not declared. The
-only entry point that performs per-particle post-force work is
-the composed kernel.
-
-`rescale_velocities` and the corresponding Rust launcher remain
-declared. The pre-force half-step rescales (the NHC `apply_pre`
-cumulative rescale and the MTK particle-chain pre-force rescale)
-still use it; there is no pre-force composed kernel.
-`mtk_velocity_half_kick` likewise remains declared for the MTK
-pre-force `vel_kick_pre` SubStep; only its post-force
-`vel_kick_post` invocation is folded into the composed kernel.
+The non-graph per-step launch loop (`cuda_graphs_disable = true` or a
+graph-ineligible phase) issues the identical launches directly per
+step; both paths produce byte-identical results.
 
 ### Slot apply-method contract <!-- rq-781966e6 -->
 
-Each slot's `apply_pre`, `apply_post`, and `apply` method runs
-only its **scalar-prep** work — the kinetic-energy reduction,
-virial reduction, sample-and-factor or compute-mu device kernel,
-box mutation, and per-step accumulator bookkeeping. None of them
-launches a per-particle kernel. The per-particle update is the
-JIT-composed kernel's sole responsibility.
-
-Per-slot scalar-prep details:
-
-- **CSVR thermostat**: `apply_post` runs `compute_kinetic_energy_on_device`
-  (writes `ke_scratch`) and `csvr_sample_and_factor` (writes
-  `factor_device`). The fragment's per-thread body reads
-  `factor_device[0]` and scales velocities.
-
-- **Berendsen thermostat**: `apply_post` runs
-  `compute_kinetic_energy_on_device` and a device kernel
-  `berendsen_compute_factor` that reads `ke_scratch` plus the
-  configured `(tau, kT_target, g_dof)` and writes `factor_device`.
-  No host-side λ computation. The fragment reads `factor_device[0]`
-  and scales velocities.
-
-- **Nose–Hoover-chain thermostat**: `apply_post` performs the
-  Yoshida × `n_resp` chain integration host-side, accumulating
-  the per-iteration rescale factors into a single
-  cumulative factor. The host writes the cumulative factor to
-  `factor_device` via one `htod_sync_copy_into` call at the end
-  of `apply_post`. No per-iteration `rescale_velocities` launch
-  occurs. The fragment reads `factor_device[0]` and scales
-  velocities. The mathematical equivalence is that
-  `v_final = v_initial · ∏_i f_i = v_initial · (∏_i f_i)`, and
-  the per-iteration `k *= f_i²` host update reads the running
-  product, not the device buffer.
-
-- **Andersen thermostat**: `apply_post` runs no scalar-prep
-  kernel; the per-particle Bernoulli draw + Maxwell-Boltzmann
-  resample happens inside the composed kernel. The fragment
-  declares the Andersen functor's `helper_source` containing a
-  `__device__` Philox draw routine (the standalone `andersen.cu`
-  helpers are referenced verbatim from the fragment string), and
-  the fragment's per-thread body draws the Bernoulli per-particle
-  sample, branches on `p < p_collision`, and writes new velocity
-  components. The bind method pushes `draw_counter_device`,
-  `seed`, `p_collision`, and `kT` onto the launch builder.
-
-- **c-rescale barostat**: `apply` runs `compute_kinetic_energy_on_device`,
-  `compute_total_virial_on_device`, `c_rescale_compute_mu`
-  (writes `mu_device`, mutates the device lattice, and writes
-  diagnostics), and increments the device draw counter. The
-  fragment reads `mu_device[0]` and scales positions.
-
-- **Berendsen barostat**: `apply` runs `compute_total_virial_on_device`,
-  a device kernel that reads `virial_scratch` + the configured
-  `(tau, P_target, compressibility, dt)` and writes `mu_device`,
-  and mutates the device lattice. The fragment reads `mu_device[0]`
-  and scales positions.
-
-The runner's `Integrator::set_jit_composed_post_force_active`,
-`Thermostat::set_jit_composed_post_force_active`, and
-`Barostat::set_jit_composed_post_force_active` trait methods do
-not exist. Slot behaviour is single-mode: `apply_pre` /
-`apply_post` / `apply` always do scalar prep only, regardless of
-whether the runner is in graph mode or per-step mode.
+Each slot's `apply_pre`, `apply_post`, and `apply` runs the slot's full
+per-step work as standalone launches — reductions, device scalar
+kernels, box mutation, per-step accumulator bookkeeping, and the
+per-particle rescale — with no composed kernel. A per-step barostat's
+`apply` therefore performs its own position rescale
+(`rescale_positions_device_factor`) as its final launch. A thermostat's
+`apply_post` performs its own velocity rescale, but only on the per-step
+path — a thermostatted phase is graph-ineligible, so no thermostat
+launch is ever captured.
 
 ## Capture Lifecycle <!-- rq-766c88fb -->
 
@@ -250,17 +153,7 @@ step 15 (warm-up force evaluation) and step 16 (step-0 outputs), and
 before step 17 (timestep loop). The capture happens in this
 sequence:
 
-1. The runner gathers the active integrator's, thermostat's (if
-   any), and barostat's (if any) post-force per-particle fragments,
-   JIT-compiles the composed kernel via
-   `JitComposedPostForcePerParticle::compile_and_load` over the
-   maximal participating suffix of the configured slots (see
-   `integration/jit-composed-post-force.md`, *Suffix-closed subset
-   selection*), and binds the resulting `CudaFunction` handle to
-   phase-local state. Slots outside the suffix run their post-force
-   work as standalone captured launches; an empty suffix means no
-   composed kernel for the phase.
-2. The runner calls `nl.pre_step(sim_box, buffers, timings)` once.
+1. The runner calls `nl.pre_step(sim_box, buffers, timings)` once.
    `pre_step` downloads the single-word
    `neighbor_status` and rebuilds the neighbor list when the flag
    is non-zero (see `forces/neighbor-list.md` *Displacement Check*).
@@ -269,11 +162,11 @@ sequence:
    the system's true interaction count before any device pointer is
    captured (see `forces/packed-neighbour-pair-force.md` *Capacity*).
    The call happens outside any graph capture and is not recorded.
-3. The runner captures the phase's executable graphs. Each graph is
+2. The runner captures the phase's executable graphs. Each graph is
    captured by calling
    `device.begin_stream_capture(CaptureMode::ThreadLocal)` on the
    default stream, recording one physical step's kernel sequence
-   (step 4), calling `device.end_stream_capture()` to obtain a
+   (step 3), calling `device.end_stream_capture()` to obtain a
    `CudaGraph`, and instantiating it with `CudaGraph::instantiate()`
    to obtain a `CudaGraphExec`. Stream capture records the kernel
    sequence without executing it, so capturing a graph advances no
@@ -289,7 +182,7 @@ sequence:
      unless a *per-step* barostat is active for the phase.
 
    A per-step barostat consumes the per-step scalar virial inside the
-   captured sequence (`barostat.apply` in step 4), so a per-step-barostat
+   captured sequence (`barostat.apply` in step 3), so a per-step-barostat
    phase evaluates scalars on every step and captures only the
    forces+scalars graph. A periodic (Monte-Carlo) barostat puts no node
    in the captured sequence and consumes no per-step virial, so its phase
@@ -300,56 +193,30 @@ sequence:
    reductions are diagnostic outputs that do not feed back into the
    dynamics — so replaying either graph for a given step produces the
    same trajectory.
-4. The recorded one-step kernel sequence, run under capture once per
+3. The recorded one-step kernel sequence, run under capture once per
    graph with `force_field.step_no_neighbor_check(...)` in place of the
-   ordinary `force_field.step(...)`, is:
-   - `thermostat.apply_pre(buffers, dt, timings)` if a thermostat is
-     active
+   ordinary `force_field.step(...)`, is (an eligible phase has no
+   thermostat, so no `apply_pre` / `apply_post` appears):
    - `run_step(integrator, buffers, sim_box, force_field, constraint,
-     thermostat, barostat, dt, timings, RunStepOptions {
-     run_neighbor_pre_step: false,
-     skip_substep_index: Some(integrator.post_force_substep_index(dt).unwrap()),
-     defer_terminal_velocity_projection, defer_terminal_barostat_point,
-     runner_needs_scalars })`, where
+     None, barostat, dt, timings, RunStepOptions {
+     run_neighbor_pre_step: false, runner_needs_scalars })`, where
      `runner_needs_scalars` is `true` while recording the
      forces+scalars graph and `false` while recording the forces-only
-     graph. The
-     `run_neighbor_pre_step: false` flag routes every internal
-     `force_field.step` call to `force_field.step_no_neighbor_check`,
-     and `skip_substep_index` skips the integrator's post-force SubStep
-     (the trailing `KickHalf` / `KickDrift` per
-     `Integrator::post_force_substep_index`) — the composed kernel
-     handles it. (When no composed post-force kernel is active,
-     `skip_substep_index` is `None`.) `run_step` dispatches the plan's
-     `ConstraintPoint` markers to the constraint slot (a no-op when the
-     slot is `None`); `defer_terminal_velocity_projection` is `true`
-     when the constraint slot is installed and the composed kernel
-     absorbs the trailing kick, so the trailing velocity projection is
-     fired after the composed launch (below). `defer_terminal_barostat_point`
-     is `true` when a per-step barostat is configured and the plan
-     carries a terminal `BarostatPoint`, so the barostat's `apply` fires
-     in the post-walk tail (below) rather than the walk. See
+     graph. `run_step` walks the plan's main region — routing every
+     `force_field.step` to `force_field.step_no_neighbor_check` — and
+     dispatches interleaved `ConstraintPoint` markers to the constraint
+     slot (a no-op when the slot is `None`). See
      `integration/framework.md` for `RunStepOptions`.
-   - `thermostat.apply_post(buffers, dt, timings)` if a thermostat
-     is active (scalar prep only — no per-particle rescale)
-   - `barostat.apply(buffers, sim_box, dt, timings)` when
-     `defer_terminal_barostat_point` was set (terminal `BarostatPoint`):
-     scalar prep + box mutation — no per-particle rescale (fused into
-     the composed kernel below)
-   - The composed JIT post-force per-particle kernel launch: the
-     runner pre-populates a `ForceLaunchBuilder` with the common
-     args (positions, images, velocities, forces, masses, device
-     lattice), then calls each active slot's
-     `bind_post_force_per_particle_args(...)` in canonical order
-     (integrator → thermostat → barostat), then pushes the
-     trailing `n` arg, then issues one `cuLaunchKernel`.
-   - `constraint.apply_after_kick(buffers, sim_box, dt, timings)` when
-     `defer_terminal_velocity_projection` was set: the deferred
-     terminal velocity projection, captured after the composed launch
-     so it follows the fused kick and any per-particle rescale. The
-     constraint kernels are pure launches (the SETTLE / SHAKE builders
-     report `graph_compatible == true`), so a constrained phase is
-     graph-eligible.
+   - The runner then dispatches the post-force tail explicitly, each op
+     a standalone captured launch: the integrator's trailing kick (via
+     `execute`); then `barostat.apply(buffers, sim_box, dt, timings)`
+     when the plan carries a terminal `BarostatPoint` (its reductions,
+     box mutation, and per-particle position rescale); then
+     `constraint.apply_after_kick(buffers, sim_box, dt, timings)` when
+     the plan ends with a velocity projection — the last per-particle
+     velocity operation. The constraint kernels are pure launches (the
+     SETTLE / SHAKE builders report `graph_compatible == true`), so a
+     constrained phase is graph-eligible.
    - The displacement-check kernel
      `neighbor_displacement_check_flag` launched by
      `force_field.step_no_neighbor_check` after the post-force
@@ -359,7 +226,7 @@ sequence:
      minimum-image displacement exceeds `r_skin / 2`. The flag is
      sticky across replays of the captured graph until cleared by
      the host between batches.
-5. Both instantiated graphs are stored in the phase's `GraphLoop`
+4. Both instantiated graphs are stored in the phase's `GraphLoop`
    (the forces-only graph as an `Option`, absent for per-step-barostat
    phases).
 
@@ -394,17 +261,17 @@ the run normally; the warning is informational.
 
 ## Batched Replay Loop <!-- rq-76db55bb -->
 
-A thermostat couples on a cadence, and on coupling steps the whole
-post-force region runs eagerly (the full-step kinetic-energy reduction
-is a fusion barrier, `framework.md`, `jit-composed-post-force.md`) with
-host-side thermostat work (e.g. NHC chain integration) that cannot be
-captured. A **thermostatted phase therefore runs on the per-step launch
-path**, not the batched graph loop — it is graph-ineligible. The
-coupling interval's benefit is still realised on that path: a
-non-coupling step (`step % coupling_interval != 0`) uses the composed
-post-force kernel and skips the thermostat's reduction and rescale,
-while a coupling step runs the full eager post-force region. Only a
-phase with no thermostat is eligible for the batched graph loop.
+A thermostat couples on a cadence, and on coupling steps runs host-side
+work (e.g. NHC chain integration) that cannot be captured; its full-step
+kinetic-energy reduction is a fusion barrier (`framework.md`,
+`docs/architecture.md`). A **thermostatted phase therefore runs on the
+per-step launch path**, not the batched graph loop — it is
+graph-ineligible. The coupling interval's benefit is still realised on
+that path: on a non-coupling step (`step % coupling_interval != 0`) the
+thermostat is inert (no reduction, no rescale) and only the integrator
+kick and any barostat rescale run, while a coupling step runs the full
+post-force region. Only a phase with no thermostat is eligible for the
+batched graph loop.
 
 For an eligible (thermostat-free) phase with
 `[simulation].graph_batch_size = K`, the per-phase loop has the shape:
@@ -889,8 +756,8 @@ Feature: CUDA graph capture and replay
     And an active thermostat with coupling_interval = 4
     When the timestep loop runs 8 steps
     Then the phase runs on the per-step launch path (no phase graph is replayed)
-    And the six non-coupling steps launch the composed post-force kernel
-      (the trailing kick fused, the thermostat inert)
+    And on the six non-coupling steps the thermostat is inert (no reduction,
+      no rescale) and the integrator's trailing kick runs standalone
     And the two coupling steps (4, 8) run the trailing kick standalone and
       the thermostat's reduction and rescale
 
@@ -899,7 +766,8 @@ Feature: CUDA graph capture and replay
     Given graph_batch_size = 50 and an active thermostat with coupling_interval = 1
     When the phase runs
     Then every step runs on the per-step launch path (no phase graph is replayed)
-    And every step is a coupling step, so no composed post-force kernel is launched
+    And every step is a coupling step; the thermostat's reduction and rescale
+      run standalone each step
 
   @rq-1c8a6d37
   Scenario: nl.pre_step is called once per batch boundary
@@ -1067,136 +935,63 @@ Feature: CUDA graph capture and replay
     When the builder overrides graph_compatible to return false
     Then phases using the slot run the per-step launch loop with full Timings
 
-  # --- JIT-composed post-force kernel in capture ---
-
-  @rq-0b8e5852
-  Scenario: Composed post-force kernel is compiled before capture begins
-    Given an eligible MD phase with VelocityVerlet + CSVR + c-rescale
-    When the runner enters the phase
-    Then JitComposedPostForcePerParticle::compile_and_load is invoked
-      before begin_stream_capture
-    And the composed kernel's CudaFunction handle is bound to phase-local state
+  # --- Post-force per-particle launches in capture ---
 
   @rq-8b964ce3
-  Scenario: Captured graph contains exactly one composed post-force launch per step
-    Given an eligible MD phase with VelocityVerlet + CSVR + c-rescale
+  Scenario: Captured graph contains the standalone post-force launches per step
+    Given an eligible MD phase with VelocityVerlet + c-rescale (no thermostat)
     When the captured graph is replayed N times
-    Then the device has issued exactly N cuLaunchKernel calls for
-      heddle_jit_composed_post_force_per_particle
-    And the device has issued zero cuLaunchKernel calls for
-      vv_kick, csvr_rescale_velocities, c_rescale_barostat_rescale_positions
+    Then the device has issued exactly N cuLaunchKernel calls for vv_kick
+    And exactly N for c_rescale_barostat_rescale_positions
+    And zero calls for any composed post-force kernel (none exists)
 
   @rq-f917104b
-  Scenario: Standalone post-force per-particle kernels are not declared
+  Scenario: Post-force per-particle work is ordinary standalone kernels
     Given the project's kernel source tree
     When the kernel symbols are enumerated
-    Then no extern "C" kernel named vv_kick exists
-    And no extern "C" kernel named vv_kick_lossless exists
-    And no extern "C" kernel named csvr_rescale_velocities exists
-    And no extern "C" kernel named rescale_velocities_device_factor exists
-    And no extern "C" kernel named rescale_positions_device_factor exists
-    And no extern "C" kernel named berendsen_rescale_velocities exists
-    And no extern "C" kernel named berendsen_barostat_rescale_positions exists
-    And no extern "C" kernel named andersen_resample exists
-    But extern "C" kernel named rescale_velocities continues to exist
-      (used by NHC apply_pre and MTK particle-chain pre-force rescale)
-    And extern "C" kernel named mtk_velocity_half_kick continues to exist
-      (used by MTK pre-force vel_kick_pre)
+    Then extern "C" kernels vv_kick, vv_kick_lossless, rescale_velocities,
+      rescale_positions_device_factor, and andersen_resample all exist
+    And no composed post-force per-particle entry point exists
 
   @rq-3d84a5b8
-  Scenario: A non-participating slot does not affect graph eligibility
-    Given an MD phase configured with a user-registered integrator
-      whose post_force_per_particle returns None
-    And whose builder reports graph_compatible = true
+  Scenario: A user integrator that is graph-compatible keeps the phase eligible
+    Given an MD phase with a user-registered integrator whose builder
+      reports graph_compatible = true, and no thermostat
     When the runner enters the phase
-    Then phase setup succeeds
-    And the phase remains eligible for graph capture
+    Then phase setup succeeds and the phase is eligible for graph capture
     And the integrator's trailing kick is captured as a standalone launch
 
   @rq-0bc3a66e
-  Scenario: Graph mode and per-step mode use the same composed kernel
-    Given a phase with VelocityVerlet + CSVR + c-rescale and seed S
+  Scenario: Graph mode and per-step mode issue the same launches
+    Given a phase with VelocityVerlet + c-rescale (no thermostat) and seed S
     When run A executes the phase in graph mode
     And run B executes the phase with cuda_graphs_disable = true
-    Then both runs invoke heddle_jit_composed_post_force_per_particle
-      with the same launch config and the same argument list per step
-    And both runs produce byte-identical phase log files
-    And both runs produce byte-identical phase trajectory files
-
-  @rq-b154f270
-  Scenario: NHC apply_post writes a single cumulative factor to factor_device
-    Given a phase with NHC thermostat configured with n_yoshida=3 and n_resp=2
-    When apply_post runs once
-    Then the NHC chain integrates host-side over 3*2 = 6 Yoshida × n_resp iterations
-    And exactly one htod_sync_copy_into writes to factor_device
-    And no rescale_velocities launch is issued from inside apply_post
-    And factor_device[0] equals the host-computed product of the 6 per-iteration factors
-
-  @rq-6bd00f49
-  Scenario: Berendsen thermostat apply_post writes factor_device via on-device compute
-    Given a phase with Berendsen thermostat
-    When apply_post runs once
-    Then compute_kinetic_energy_on_device writes ke_scratch
-    And berendsen_compute_factor reads ke_scratch and writes factor_device
-    And no host-side dtoh of kinetic energy occurs
-    And no rescale_velocities launch is issued from inside apply_post
-
-  @rq-6dc9fc6d
-  Scenario: Andersen fragment is self-contained for Philox draw
-    Given a phase with Andersen thermostat
-    When the composed kernel source is generated
-    Then the Andersen fragment's helper_source declares a __device__
-      Philox draw routine
-    And the per-thread body performs a Bernoulli draw against p_collision
-    And the per-thread body branches into a Maxwell-Boltzmann resample
-      when the Bernoulli draw selects the particle
-    And the bind method pushes draw_counter_device, seed, p_collision, kT
-      onto the launch builder
-
-  @rq-a50d8a1f
-  Scenario: Berendsen barostat apply writes mu_device via on-device compute
-    Given a phase with Berendsen barostat
-    When apply runs once
-    Then compute_total_virial_on_device writes virial_scratch
-    And a device kernel berendsen_barostat_compute_mu reads virial_scratch
-      and writes mu_device
-    And the lattice is mutated in-place on the device
-    And no rescale_positions launch is issued from inside apply
+    Then both runs issue the same standalone post-force launches per step
+    And both runs produce byte-identical phase log and trajectory files
 
   @rq-91c02dd8
-  Scenario: NHC phase falls back to per-step launches but still uses the composed kernel
-    Given an MD phase with NHC thermostat
+  Scenario: A thermostatted phase is graph-ineligible and runs per-step
+    Given an MD phase with any thermostat
     When the runner enters the phase
-    Then no graph is captured (graph_compatible = false)
+    Then no graph is captured
     And the per-step launch loop runs with full Timings
-    And the composed JIT post-force kernel is launched once per physical step
-    And no standalone per-particle post-force kernel is launched
+    And the thermostat's reduction and rescale run as standalone launches
+      on coupling steps
 
   @rq-c0548f4c
-  Scenario: MTK-NPT phase falls back to per-step launches but still uses the composed kernel
+  Scenario: MTK-NPT phase runs per-step with standalone launches
     Given an MD phase with MTK-NPT integrator
     When the runner enters the phase
     Then no graph is captured (graph_compatible = false)
     And the per-step launch loop runs with full Timings
-    And the composed JIT post-force kernel is launched once per physical step
-    And no standalone per-particle post-force kernel is launched
-
-  @rq-8a66232e
-  Scenario: Slot apply methods perform scalar prep only
-    Given an MD phase with CSVR thermostat and c-rescale barostat
-    When apply_post and apply each run once (in graph capture or per-step mode)
-    Then CSVR's apply_post launches compute_kinetic_energy_on_device
-      and csvr_sample_and_factor only
-    And c-rescale's apply launches compute_kinetic_energy_on_device,
-      compute_total_virial_on_device, and c_rescale_compute_mu only
-    And neither method launches any per-particle rescale kernel
+    And every post-force per-particle operation runs as a standalone launch
 
   @rq-d638d799
-  Scenario: No set_jit_composed_post_force_active trait method exists
+  Scenario: No composed post-force kernel or activation toggle exists
     Given the Thermostat / Barostat / Integrator trait surfaces
     When the runtime is inspected
-    Then no trait method named set_jit_composed_post_force_active is declared
-    And slot behaviour is single-mode: apply methods always do scalar prep only
+    Then there is no post_force_per_particle accessor and no composed
+      post-force kernel; every post-force pointwise op is a standalone launch
 
   # --- Forces-only / forces+scalars graph selection ---
 

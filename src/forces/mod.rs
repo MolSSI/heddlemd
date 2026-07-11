@@ -30,9 +30,9 @@ pub use jit_composed::{
     AngleForceFragment, AngleScratchView, ArgKind, BondedForceFragment, BondedScratchView,
     CutoffHandling, DihedralForceFragment, DihedralScratchView, ElemTy, ForceLaunchBuilder,
     ForceLaunchContext, JitComposedAngleForce, JitComposedBondedForce,
-    JitComposedDihedralForce, JitComposedPairForce, JitComposedPostForcePerParticle, KernelArg,
+    JitComposedDihedralForce, JitComposedPairForce, KernelArg,
     KernelArgBinder, KernelArgSchema, KernelArgType, KernelElem, PairForceBindContext,
-    PairForceFragment, PerParticleFragment, PostForceBindContext,
+    PairForceFragment,
     set_jit_fast_math,
 };
 pub use spme::{
@@ -1443,7 +1443,6 @@ crate::gpu_kernels! {
         JIT_COMPOSED_BONDED_FORCE   = "jit_composed_bonded_force",
         JIT_COMPOSED_ANGLE_FORCE    = "jit_composed_angle_force",
         JIT_COMPOSED_DIHEDRAL_FORCE = "jit_composed_dihedral_force",
-        JIT_COMPOSED_POST_FORCE     = "jit_composed_post_force",
         COMBINE_CLASS_TOTALS        = "combine_class_totals",
         CLASS_ACCUMULATOR_MEMSET    = "class_accumulator_memset",
     },

@@ -51,9 +51,9 @@ only periodically through `Barostat::periodicity()` (see *Feature API*):
 
 - A **per-step** barostat (`BarostatPeriodicity::EveryStep`; the
   Berendsen and C-rescale barostats) computes a rescale factor from the
-  current kinetic energy and virial inside the captured per-step
-  sequence. Its `apply` runs scalar-prep every step and its per-particle
-  rescale is folded into the JIT-composed post-force kernel.
+  current kinetic energy and virial every step. Its `apply` runs the
+  reductions, the scale-factor and box update, and the per-particle
+  rescale, each as its own standalone launch.
 - A **periodic** barostat (`BarostatPeriodicity::EveryNSteps(frequency)`;
   the Monte-Carlo barostat) performs no per-step work at all. Its `apply`
   hook is a no-op. The whole move is host-orchestrated and runs through
@@ -62,8 +62,7 @@ only periodically through `Barostat::periodicity()` (see *Feature API*):
 
 The Monte-Carlo barostat returns `BarostatPeriodicity::EveryNSteps(self.frequency)`
 and leaves `Barostat::apply` at the no-op default; it implements
-`apply_move`. It contributes no JIT-composed post-force fragment
-(`post_force_per_particle()` returns `None`): its per-particle work is the
+`apply_move`. Its per-particle work is the
 centre-of-mass scale kernel launched directly inside `apply_move`, not a
 per-step fragment.
 
@@ -528,8 +527,6 @@ and the periodic-move hook in addition to the per-step `apply`:
   evaluations. The `constraint` argument lets a future move re-project
   constraints after the scale; for the centre-of-mass move it is unused
   because rigid-molecule geometry is invariant under the scale.
-- `post_force_per_particle(&self) -> Option<&dyn PostForcePerParticle>` — <!-- rq-282850ad -->
-  `McBarostat` returns `None`.
 - `log_column_names(&self) -> &'static [(&'static str, Dimension)]` — <!-- rq-cf8948a8 -->
   returns `[("box_volume", Dimensionless), ("mc_acceptance",
   Dimensionless), ("mc_volume_step", Dimensionless), ("mc_conserved",

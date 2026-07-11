@@ -77,10 +77,10 @@ see `integration/langevin-baoab.md`):
 - `langevin_drift_half` — the A step (`lan_drift_half` kernel).
 - `langevin_ou_step` — the O step (`lan_ou_step` kernel).
 
-Thermostat / barostat scalar-prep stages (the device scalar kernels each
-active slot's `apply_*` launches; the per-particle rescale itself is
-folded into the JIT-composed post-force kernel and timed under
-`jit_composed_post_force` — see `cuda-graphs.md`):
+Thermostat / barostat stages (the kernels each active slot's `apply_*`
+launches, including the reductions, the device scalar kernels, and the
+per-particle rescale — every post-force pointwise operation runs as its
+own standalone launch, timed under its own stage):
 
 - `kinetic_energy_reduce` — kinetic-energy reduction (CSVR, Berendsen,
   Nosé-Hoover-chain thermostats; both barostats).

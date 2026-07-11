@@ -810,6 +810,87 @@ impl heddle_md::integrator::Constraint for DtRecordingConstraint {
     }
 }
 
+/// Barostat that appends a fixed marker to a shared ordered log on each
+/// `apply`, so a test can assert the cross-slot ordering of the
+/// post-force tail (kick, barostat, velocity projection).
+#[derive(Debug)]
+struct OrderRecordingBarostat {
+    log: CallLog,
+}
+
+impl Barostat for OrderRecordingBarostat {
+    fn periodicity(&self) -> BarostatPeriodicity {
+        BarostatPeriodicity::EveryStep
+    }
+    fn apply(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &mut SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        self.log.record("barostat_apply");
+        Ok(())
+    }
+}
+
+/// Mirrors the runner's single-timestep dispatch for the stub-based
+/// framework tests: `run_step`'s main walk, then the canonical
+/// post-force tail — the terminal barostat `apply` followed by the
+/// terminal velocity projection (`apply_after_kick`). The trailing kick
+/// is a non-marker sub-step, so it is dispatched inside `run_step`'s
+/// main walk, not the tail.
+// rq-277dbeb2
+fn run_timestep(
+    integrator: &mut dyn Integrator,
+    buffers: &mut ParticleBuffers,
+    sim_box: &mut SimulationBox,
+    ff: &mut ForceField,
+    mut constraint: Option<&mut dyn heddle_md::integrator::Constraint>,
+    mut barostat: Option<&mut dyn Barostat>,
+    dt: Real,
+    timings: &mut Timings,
+) -> Result<(), heddle_md::integrator::StepError> {
+    let plan = integrator.plan(dt);
+    let terminal_barostat_dt = plan.terminal_barostat_point_dt();
+    let terminal_projection_dt = plan.terminal_velocity_projection_dt();
+    // Short-lived reborrows so `constraint` / `barostat` remain usable in
+    // the tail after run_step returns.
+    let c_arg: Option<&mut dyn heddle_md::integrator::Constraint> = match constraint {
+        Some(ref mut c) => Some(&mut **c),
+        None => None,
+    };
+    let b_arg: Option<&mut dyn Barostat> = match barostat {
+        Some(ref mut b) => Some(&mut **b),
+        None => None,
+    };
+    run_step(
+        integrator,
+        buffers,
+        sim_box,
+        ff,
+        c_arg,
+        None,
+        b_arg,
+        dt,
+        timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+    )?;
+    if let Some(bdt) = terminal_barostat_dt {
+        if let Some(b) = barostat.as_deref_mut() {
+            b.apply(buffers, sim_box, bdt, timings)
+                .expect("terminal barostat apply in the post-force tail");
+        }
+    }
+    if let Some(pdt) = terminal_projection_dt {
+        if let Some(c) = constraint.as_deref_mut() {
+            c.apply_after_kick(buffers, sim_box, pdt, timings)
+                .expect("terminal velocity projection in the post-force tail");
+        }
+    }
+    Ok(())
+}
+
 fn fixture() -> (
     GpuContext,
     ParticleBuffers,
@@ -969,17 +1050,17 @@ fn constraint_point_markers_dispatch_to_matching_hooks() {
     let mut constraint = RecordingConstraint {
         log: CallLog { events: constraint_log.events.clone() },
     };
-    run_step(
+    // Canonical order across the walk (before/after_drift) and the
+    // post-force tail (the terminal after_kick projection).
+    run_timestep(
         &mut stub,
         &mut buffers,
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
         None,
-        None,
         0.1,
         &mut timings,
-        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1014,17 +1095,15 @@ fn repeated_markers_dispatch_once_each_in_plan_order() {
     let mut constraint = RecordingConstraint {
         log: CallLog { events: constraint_log.events.clone() },
     };
-    run_step(
+    run_timestep(
         &mut stub,
         &mut buffers,
         &mut sim_box,
         &mut ff,
         Some(&mut constraint),
         None,
-        None,
         0.1,
         &mut timings,
-        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1154,16 +1233,16 @@ fn plan_without_markers_fires_no_hooks_even_with_slot_present() {
 fn constraint_point_markers_dispatch_in_the_walk_or_no_op_without_slot() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
-    // With a slot: markers dispatch in walk order.
+    // With a slot: the interleaved before/after_drift markers dispatch
+    // in the walk; the terminal after_kick fires in the post-force tail.
     let mut stub = PlanStub { plan: marker_plan_vv(), log: CallLog::default() };
     let constraint_log = CallLog::default();
     let mut constraint = RecordingConstraint {
         log: CallLog { events: constraint_log.events.clone() },
     };
-    run_step(
+    run_timestep(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        Some(&mut constraint), None, None, 0.1, &mut timings,
-        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        Some(&mut constraint), None, 0.1, &mut timings,
     )
     .unwrap();
     assert_eq!(
@@ -1172,10 +1251,9 @@ fn constraint_point_markers_dispatch_in_the_walk_or_no_op_without_slot() {
     );
     // Same plan, no slot: completes Ok with no dispatch.
     let mut stub2 = PlanStub { plan: marker_plan_vv(), log: CallLog::default() };
-    run_step(
+    run_timestep(
         &mut stub2, &mut buffers, &mut sim_box, &mut ff,
-        None, None, None, 0.1, &mut timings,
-        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        None, None, 0.1, &mut timings,
     )
     .unwrap();
 }
@@ -1211,10 +1289,11 @@ fn constraint_point_hook_receives_the_markers_own_dt() {
     };
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
     let mut constraint = DtRecordingConstraint { seen: seen.clone() };
-    run_step(
+    // The terminal AfterKick fires in the post-force tail carrying its
+    // own marker dt.
+    run_timestep(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        Some(&mut constraint), None, None, 0.1, &mut timings,
-        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        Some(&mut constraint), None, 0.1, &mut timings,
     )
     .unwrap();
     assert_eq!(*seen.lock().unwrap(), vec![0.5 as Real]);
@@ -1222,38 +1301,69 @@ fn constraint_point_hook_receives_the_markers_own_dt() {
 
 // rq-195a6215
 #[test]
-fn defer_terminal_velocity_projection_skips_trailing_after_kick_in_walk() {
+fn terminal_velocity_projection_is_the_last_velocity_operation() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
-    // Plan ends in [KickHalf @ k, ConstraintPoint(AfterKick) @ k+1].
+    // One shared ordered log records the trailing kick (via the stub's
+    // execute), the barostat apply, and the terminal projection.
+    let order = CallLog::default();
+    // Plan ends in [KickHalf, BarostatPoint, ConstraintPoint(AfterKick)];
+    // the two markers form the trailing post-force run.
     let mut stub = PlanStub {
         plan: StepPlan {
             steps: vec![
                 SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
+                SubStep::BarostatPoint { dt: 0.1 },
                 SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt: 0.1 },
             ],
         },
-        log: CallLog::default(),
+        log: CallLog { events: order.events.clone() },
     };
-    let k = 1usize; // index of the trailing KickHalf
-    let constraint_log = CallLog::default();
+    let mut barostat = OrderRecordingBarostat {
+        log: CallLog { events: order.events.clone() },
+    };
     let mut constraint = RecordingConstraint {
-        log: CallLog { events: constraint_log.events.clone() },
+        log: CallLog { events: order.events.clone() },
+    };
+    run_timestep(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        Some(&mut constraint), Some(&mut barostat), 0.1, &mut timings,
+    )
+    .unwrap();
+    // Trailing kick (main walk), then barostat.apply, then apply_after_kick
+    // (both in the post-force tail) — RATTLE-last.
+    assert_eq!(
+        *order.events.lock().unwrap(),
+        vec!["exec_kick_half", "barostat_apply", "after_kick"]
+    );
+}
+
+// rq-d64bc1c6
+#[test]
+fn trailing_kick_runs_via_execute_in_the_main_walk() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    // A trailing Total-sourced KickHalf at index k followed only by a
+    // post-force marker. run_step's main walk dispatches the kick via
+    // integrator.execute (the composer that once absorbed it is gone).
+    let stub_log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
+                SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt: 0.1 },
+            ],
+        },
+        log: CallLog { events: stub_log.events.clone() },
     };
     run_step(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        Some(&mut constraint), None, None, 0.1, &mut timings,
-        RunStepOptions {
-            skip_substep_index: Some(k),
-            defer_terminal_velocity_projection: true,
-            runner_needs_scalars: true,
-            ..Default::default()
-        },
+        None, None, None, 0.1, &mut timings,
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
-    // The trailing AfterKick is not dispatched during the walk.
-    assert!(constraint_log.events.lock().unwrap().is_empty());
+    assert_eq!(*stub_log.events.lock().unwrap(), vec!["exec_kick_half"]);
 }
 
 // rq-2b7e8273
@@ -1292,12 +1402,11 @@ fn terminal_barostat_point_dispatches_apply_once() {
     };
     let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
     let mut baro = RecordingBarostat { applies: applies.clone(), periodic: false };
-    // No composed kernel / no deferral: the terminal BarostatPoint
-    // dispatches in the walk.
-    run_step(
+    // The terminal BarostatPoint fires in the runner's post-force tail,
+    // after the trailing kick.
+    run_timestep(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        None, None, Some(&mut baro), 0.3, &mut timings,
-        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        None, Some(&mut baro), 0.3, &mut timings,
     )
     .unwrap();
     assert_eq!(*applies.lock().unwrap(), vec![0.3 as Real]);
@@ -1331,13 +1440,14 @@ fn barostat_point_is_inert_for_a_periodic_barostat() {
     };
     let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
     let mut baro = RecordingBarostat { applies: applies.clone(), periodic: true };
-    run_step(
+    run_timestep(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        None, None, Some(&mut baro), 0.1, &mut timings,
-        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
+        None, Some(&mut baro), 0.1, &mut timings,
     )
     .unwrap();
-    // A periodic barostat's apply is a no-op; the marker records nothing.
+    // A periodic barostat's apply is the no-op default; the terminal
+    // BarostatPoint records nothing (its periodic move fires through
+    // apply_move at its own batch cadence, not through apply).
     assert!(applies.lock().unwrap().is_empty());
 }
 
@@ -1365,7 +1475,7 @@ fn has_barostat_points_and_terminal_dt_reflect_the_plan() {
 
 // rq-a2fbf61e
 #[test]
-fn defer_terminal_barostat_point_skips_it_in_the_walk() {
+fn run_step_main_walk_does_not_dispatch_terminal_barostat_point() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
     let mut stub = PlanStub {
@@ -1380,17 +1490,19 @@ fn defer_terminal_barostat_point_skips_it_in_the_walk() {
     };
     let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
     let mut baro = RecordingBarostat { applies: applies.clone(), periodic: false };
+    // run_step walks only the plan's main region (up to the trailing
+    // post-force marker run); the terminal BarostatPoint is not
+    // dispatched here — the runner fires it in the post-force tail.
     run_step(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
         None, None, Some(&mut baro), 0.1, &mut timings,
-        RunStepOptions {
-            defer_terminal_barostat_point: true,
-            runner_needs_scalars: true,
-            ..Default::default()
-        },
+        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
-    assert!(applies.lock().unwrap().is_empty(), "terminal BarostatPoint must not dispatch in the walk when deferred");
+    assert!(
+        applies.lock().unwrap().is_empty(),
+        "terminal BarostatPoint must not dispatch in run_step's main walk"
+    );
 }
 
 // rq-e043b064

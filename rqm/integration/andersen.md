@@ -48,12 +48,11 @@ the post-step velocities. For each invocation with timestep `dt`:
 
 The per-particle resampling runs as the standalone
 `andersen_resample` kernel launched from `apply_post`. Like every
-thermostat, Andersen contributes no fragment to the JIT-composed
-post-force per-particle kernel (`framework.md`,
-`jit-composed-post-force.md`): a thermostat couples on a cadence, on
-coupling steps only, and on those steps the composed kernel is
-bypassed, so all of the thermostat's work — including a resample that
-has no reduction dependency of its own — runs as its own launches. The
+thermostat, Andersen runs its post-force work as standalone launches on
+coupling steps (`framework.md`, `docs/architecture.md`); it is never
+part of a composed kernel. All of the thermostat's work — including a
+resample that has no reduction dependency of its own — runs as its own
+launches. The
 two surrounding kinetic-energy reductions (for the conserved-quantity
 accounting) each launch the shared `kinetic_energy_reduce` kernel from
 inside `apply_post`.

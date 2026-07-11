@@ -117,10 +117,6 @@ pub enum RunnerError {
          BarostatPoint in its plan; the barostat's coupling would never fire"
     )]
     BarostatPlacementMissing { integrator: String },
-    #[error("JIT-composed post-force per-particle kernel failed to compile: {log}")]
-    PostForceFragmentCompileFailed { log: String },
-    #[error("JIT-composed post-force per-particle kernel failed to load: {0}")]
-    PostForceFragmentLoadFailed(crate::gpu::GpuError),
 }
 
 // rq-5c1cfc93 rq-b00170c6
@@ -1346,126 +1342,17 @@ pub(crate) fn run_md_phase_inner(
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
 
-    // rq-8ac9773d rq-09306735 — JIT-composed post-force per-particle
-    // kernel setup runs once per phase, before the CUDA-graph
-    // eligibility check. Participation is optional per slot; the
-    // composed set is the maximal *suffix* of the eager order
-    // [integrator, thermostat, per-step barostat] in which every
-    // configured slot participates. Slots outside the suffix run
-    // their natural eager work (the integrator's trailing kick in
-    // the plan walk; the thermostat's / barostat's own launches in
-    // apply_post / apply), which the graph captures like any other
-    // launch — partial or absent composition does not affect graph
-    // eligibility.
+    // Each slot runs its own work as standalone launches: the
+    // integrator's trailing kick in the plan walk, and the thermostat's
+    // / barostat's launches in apply_post / apply. The CUDA graph
+    // captures these like any other launch.
     //
     // The plan shape is a pure function of `dt` and the integrator's
     // static configuration, so one probe serves every setup-time shape
-    // query (composed-set membership, thermostat/barostat/constraint
-    // marker topology, graph eligibility). Computing it once avoids
-    // redundant `plan()` allocations during phase setup.
+    // query (thermostat/barostat/constraint marker topology, graph
+    // eligibility). Computing it once avoids redundant `plan()`
+    // allocations during phase setup.
     let probe_plan = integrator.plan(phase.dt as Real);
-    let mut composed_post_force: Option<crate::forces::JitComposedPostForcePerParticle> =
-        None;
-    let mut post_force_substep_index: Option<usize> = None;
-    {
-        let int_frag = integrator
-            .post_force_per_particle()
-            .map(|p| p.post_force_per_particle_fragment());
-        // Only a per-step barostat contributes a post-force per-particle
-        // fragment; a periodic (Monte-Carlo) barostat does no per-step
-        // work and is absent from the composed ordering. Thermostats
-        // never participate — their rescale follows a full-step
-        // kinetic-energy reduction (a fusion barrier) and runs eagerly
-        // in `apply_post` (rq-b85a38d6, jit-composed-post-force.md).
-        let baro_active = barostat_couples_per_step(&barostat);
-        let baro_frag = barostat
-            .as_ref()
-            .and_then(|b| b.post_force_per_particle())
-            .map(|p| p.post_force_per_particle_fragment());
-        // Suffix-closed subset selection over the order
-        // `[integrator, barostat]`: a slot may compose only if every
-        // configured slot AFTER it in the eager order also composes (the
-        // composed launch runs last, so an eager slot after a composed
-        // one would invert the operation order).
-        // rq-dbbffa7d — a per-step barostat participates only at a
-        // terminal (canonical) BarostatPoint; an interleaved point runs
-        // its apply standalone during the walk and is not fused.
-        let has_terminal_barostat_point = probe_plan.terminal_barostat_point_dt().is_some();
-        let include_baro = baro_active && baro_frag.is_some() && has_terminal_barostat_point;
-        // rq-09306735 — an excluded integrator falls back to its plan-walk
-        // kick and an excluded barostat to its standalone apply rescale, so
-        // every configured combination has a valid execution order (no
-        // unsatisfiable topology).
-        let include_int = int_frag.is_some() && (!baro_active || include_baro);
-        // One explanatory stderr line when a configured slot is
-        // excluded, so an unexpected loss of fusion is diagnosable.
-        {
-            let mut excluded: Vec<&str> = Vec::new();
-            if !include_int {
-                excluded.push("integrator");
-            }
-            if baro_active && !include_baro {
-                excluded.push("barostat");
-            }
-            if !excluded.is_empty() {
-                let mut covered: Vec<&str> = Vec::new();
-                if include_int {
-                    covered.push("integrator");
-                }
-                if include_baro {
-                    covered.push("barostat");
-                }
-                eprintln!(
-                    "note: phase `{}`: [{}] outside the composed post-force kernel \
-                     (no fragment, or ordering excludes it); composed coverage: [{}]. \
-                     Excluded slots run standalone launches.",
-                    phase.name,
-                    excluded.join(", "),
-                    covered.join(", "),
-                );
-            }
-        }
-        let mut fragments: Vec<crate::forces::PerParticleFragment> = Vec::new();
-        if include_int {
-            fragments.push(int_frag.expect("include_int implies fragment"));
-        }
-        if include_baro {
-            fragments.push(baro_frag.expect("include_baro implies fragment"));
-        }
-        if !fragments.is_empty() {
-            match crate::forces::JitComposedPostForcePerParticle::compile_and_load(
-                &setup.gpu.device,
-                &fragments,
-            ) {
-                Ok(k) => {
-                    composed_post_force = Some(k);
-                    // rq-09306735 — the trailing-kick skip is derived
-                    // from participation: Some iff the integrator is in
-                    // the composed set, so a non-participating
-                    // integrator's kick is never silently skipped.
-                    post_force_substep_index = if include_int {
-                        integrator.post_force_substep_index(phase.dt as Real)
-                    } else {
-                        None
-                    };
-                }
-                Err(e) => {
-                    return Err((
-                        match e {
-                            crate::forces::ForceFieldError::FragmentCompileFailed { log } => {
-                                RunnerError::PostForceFragmentCompileFailed { log }
-                            }
-                            crate::forces::ForceFieldError::FragmentLoadFailed(g) => {
-                                RunnerError::PostForceFragmentLoadFailed(g)
-                            }
-                            other => RunnerError::ForceField(other),
-                        },
-                        ExitPhase::Setup,
-                    ));
-                }
-            }
-        }
-    }
 
     // Open per-phase output writers.
     let mut traj_writer: Option<TrajectoryWriter> = if phase.output.trajectory_every > 0 {
@@ -1599,22 +1486,14 @@ pub(crate) fn run_md_phase_inner(
     // region eagerly (the full-step KE reduction is a fusion barrier).
     let coupling_interval = phase.coupling_interval as u64;
 
-    // rq-277dbeb2 — when a constraint slot is installed and the composed
-    // post-force kernel absorbs the integrator's trailing kick, the
-    // plan's trailing velocity projection is displaced past the composed
-    // launch: `run_step` skips it (via
-    // `defer_terminal_velocity_projection`) and the runner fires it after
-    // the launch with the marker's dt. `None` when no such displaced
-    // projection exists (no constraint slot, no composed kernel over the
-    // integrator, or the plan does not end with a velocity projection).
-    // The value is a phase-level constant: the plan shape is static and
-    // the composed-set membership is fixed at phase setup.
-    // The dt of the plan's trailing velocity projection, available
-    // whenever a constraint slot is installed. Whether it is actually
-    // deferred past the composed launch is decided per step: it is
-    // deferred when the trailing kick is fused (a non-coupling composed
-    // step) or absorbed into the eager coupling-step tail; on a plain
-    // non-composed step with no thermostat it dispatches in the walk.
+    // rq-277dbeb2 — the dt of the plan's trailing velocity projection,
+    // available whenever a constraint slot is installed. `run_step`'s
+    // main walk excludes the trailing post-force marker run, so the
+    // runner fires this terminal projection (RATTLE-last) in its
+    // post-force tail with the marker's dt. `None` when no constraint
+    // slot is installed or the plan does not end with a velocity
+    // projection. The value is a phase-level constant: the plan shape is
+    // static.
     let deferred_terminal_projection_dt: Option<Real> = if constraint.is_some() {
         probe_plan.terminal_velocity_projection_dt()
     } else {
@@ -1625,10 +1504,10 @@ pub(crate) fn run_md_phase_inner(
     // to carry a BarostatPoint, or its `apply` would never fire. When
     // the barostat is present and the plan carries a terminal
     // BarostatPoint (the canonical placement), the runner fires `apply`
-    // in its post-walk tail with the rescale fused into the composed
-    // kernel; `run_step` skips the marker via
-    // `defer_terminal_barostat_point`. An interleaved BarostatPoint is
-    // dispatched by `run_step` in the walk instead (eager path).
+    // (which runs its rescale as a standalone launch) in its post-walk
+    // tail; `run_step`'s main walk excludes the terminal marker. An
+    // interleaved BarostatPoint is dispatched by `run_step` in the walk
+    // instead.
     if barostat_couples_per_step(&barostat) && !probe_plan.has_barostat_points() {
         return Err((
             RunnerError::BarostatPlacementMissing {
@@ -1657,7 +1536,8 @@ pub(crate) fn run_md_phase_inner(
     // rq-dbbffa7d — an interleaved (non-terminal) BarostatPoint runs
     // its `apply` mid-walk, whose host-side barostat arithmetic cannot
     // be captured; such plans run eager. A terminal BarostatPoint keeps
-    // the phase eligible (the barostat fuses into the composed kernel).
+    // the phase eligible (its `apply` runs in the captured post-force
+    // tail as standalone launches).
     let plan_has_interleaved_barostat = probe_plan.has_interleaved_barostat_point();
     // rq-ee10237d — a thermostat couples on a cadence, and on coupling
     // steps the whole post-force region runs eagerly (the full-step KE
@@ -1701,8 +1581,6 @@ pub(crate) fn run_md_phase_inner(
             plan_has_thermostat_points,
             coupling_interval,
             dt,
-            composed_post_force.as_ref(),
-            post_force_substep_index,
             &mut timings,
             &mut frame,
             &mut traj_writer,
@@ -1727,7 +1605,6 @@ pub(crate) fn run_md_phase_inner(
             &mut setup.sim_box,
             &mut setup.force_field,
             integrator.as_mut(),
-            &mut thermostat,
             &mut barostat,
             &mut constraint,
             deferred_terminal_projection_dt,
@@ -1735,8 +1612,6 @@ pub(crate) fn run_md_phase_inner(
             dt,
             &mut timings,
             &setup.gpu.device,
-            composed_post_force.as_ref(),
-            post_force_substep_index,
         ) {
             Ok(exec) => Some(exec),
             Err(e) => {
@@ -1770,8 +1645,6 @@ pub(crate) fn run_md_phase_inner(
             deferred_terminal_projection_dt,
             deferred_terminal_barostat_dt,
             dt,
-            composed_post_force.as_ref(),
-            post_force_substep_index,
             &mut timings,
             &mut frame,
             &mut traj_writer,
@@ -1802,8 +1675,6 @@ pub(crate) fn run_md_phase_inner(
                 plan_has_thermostat_points,
                 coupling_interval,
                 dt,
-                composed_post_force.as_ref(),
-                post_force_substep_index,
                 &mut timings,
                 &mut frame,
                 &mut traj_writer,
@@ -1840,8 +1711,6 @@ pub(crate) fn run_md_phase_inner(
             plan_has_thermostat_points,
             coupling_interval,
             dt,
-            composed_post_force.as_ref(),
-            post_force_substep_index,
             &mut timings,
             &mut frame,
             &mut traj_writer,
@@ -2313,90 +2182,6 @@ fn phase_slots_graph_compatible(
     true
 }
 
-/// Captures the per-step kernel sequence for a phase into an
-/// executable CUDA graph. The sequence is:
-///   1. `thermostat.apply_pre` (if any)
-///   2. `run_step` with `RunStepOptions { run_neighbor_pre_step: false, .. }`
-///   3. `thermostat.apply_post` (if any)
-///   4. `barostat.apply` (if any)
-///
-/// The captured iteration counts as physical step 1: the device state
-/// is left advanced by exactly one step after this call returns.
-/// Launches the JIT-composed post-force per-particle kernel for one
-/// physical step. Used both inside `capture_phase_graph` (where the
-/// launch becomes a node in the captured graph) and inside the
-/// per-step launch loop. Pre-populates the launch builder with the
-/// common args, invokes each active slot's `bind_post_force_per_particle_args`
-/// in canonical order, pushes the trailing `n` arg, then issues
-/// `cuLaunchKernel`. Returns any timing or launch error to the
-/// caller.
-fn launch_composed_post_force(
-    composed: &crate::forces::JitComposedPostForcePerParticle,
-    buffers: &crate::gpu::ParticleBuffers,
-    sim_box: &crate::pbc::SimulationBox,
-    force_field: &crate::forces::ForceField,
-    integrator: &dyn crate::integrator::Integrator,
-    barostat: &Option<Box<dyn crate::integrator::Barostat>>,
-    dt: Real,
-    timings: &mut Timings,
-) -> Result<(), RunnerError> {
-    if buffers.particle_count() == 0 {
-        return Ok(());
-    }
-    let mut builder = crate::forces::ForceLaunchBuilder::new();
-    builder.push_device_buffer(&buffers.posq);
-    builder.push_device_buffer(&buffers.images_x);
-    builder.push_device_buffer(&buffers.images_y);
-    builder.push_device_buffer(&buffers.images_z);
-    builder.push_device_buffer(&buffers.velocities_x);
-    builder.push_device_buffer(&buffers.velocities_y);
-    builder.push_device_buffer(&buffers.velocities_z);
-    builder.push_device_buffer(&buffers.forces_x);
-    builder.push_device_buffer(&buffers.forces_y);
-    builder.push_device_buffer(&buffers.forces_z);
-    builder.push_device_buffer(&buffers.masses);
-    builder.push_device_buffer(sim_box.lattice_device());
-    let bind_ctx = crate::forces::PostForceBindContext {
-        buffers,
-        sim_box,
-        force_field,
-        dt,
-    };
-    // rq-09306735 — bind exactly the slots whose fragments were
-    // compiled into this kernel (the suffix-closed composed set,
-    // recorded in `fragment_labels`). A participating slot excluded
-    // from the composed set by the suffix rule runs eagerly and must
-    // not push arguments here.
-    let covers = |p: &dyn crate::integrator::PostForcePerParticle| {
-        composed
-            .fragment_labels
-            .contains(&p.post_force_per_particle_fragment().label)
-    };
-    if let Some(p) = integrator.post_force_per_particle() {
-        if covers(p) {
-            p.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
-        }
-    }
-    if let Some(b) = barostat.as_ref().and_then(|b| b.post_force_per_particle()) {
-        if covers(b) {
-            b.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
-        }
-    }
-    let n_particles = buffers.particle_count() as u32;
-    builder.push_scalar::<u32>(n_particles);
-    timings
-        .kernel_start(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
-        .map_err(RunnerError::Timings)?;
-    unsafe {
-        composed
-            .launch(n_particles, builder)
-            .map_err(RunnerError::Gpu)?;
-    }
-    timings
-        .kernel_stop(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
-        .map_err(RunnerError::Timings)?;
-    Ok(())
-}
 
 /// See `cuda-graphs.md` for the capture lifecycle.
 // rq-76db55bb
@@ -2469,7 +2254,6 @@ fn capture_phase_graph(
     sim_box: &mut crate::pbc::SimulationBox,
     force_field: &mut crate::forces::ForceField,
     integrator: &mut dyn crate::integrator::Integrator,
-    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
     deferred_terminal_projection_dt: Option<Real>,
@@ -2477,15 +2261,12 @@ fn capture_phase_graph(
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
-    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
-    post_force_substep_index: Option<usize>,
 ) -> Result<crate::gpu::GraphLoop, crate::gpu::GraphError> {
     let forces_and_scalars = capture_one_graph(
         buffers,
         sim_box,
         force_field,
         integrator,
-        thermostat,
         barostat,
         constraint,
         deferred_terminal_projection_dt,
@@ -2493,8 +2274,6 @@ fn capture_phase_graph(
         dt,
         timings,
         device,
-        composed_post_force,
-        post_force_substep_index,
         true,
         GraphVariant::ForcesAndScalars,
     )?;
@@ -2507,7 +2286,6 @@ fn capture_phase_graph(
             sim_box,
             force_field,
             integrator,
-            thermostat,
             barostat,
             constraint,
             deferred_terminal_projection_dt,
@@ -2515,8 +2293,6 @@ fn capture_phase_graph(
             dt,
             timings,
             device,
-            composed_post_force,
-            post_force_substep_index,
             false,
             GraphVariant::ForcesOnly,
         )?)
@@ -2539,7 +2315,6 @@ fn capture_one_graph(
     sim_box: &mut crate::pbc::SimulationBox,
     force_field: &mut crate::forces::ForceField,
     integrator: &mut dyn crate::integrator::Integrator,
-    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
     deferred_terminal_projection_dt: Option<Real>,
@@ -2547,8 +2322,6 @@ fn capture_one_graph(
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
-    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
-    post_force_substep_index: Option<usize>,
     needs_scalars: bool,
     variant: GraphVariant,
 ) -> Result<crate::gpu::CudaGraphExec, crate::gpu::GraphError> {
@@ -2573,12 +2346,7 @@ fn capture_one_graph(
     // so the broader restrictions of `Global` are not needed.
     begin_stream_capture(device, CaptureMode::ThreadLocal)?;
     let mut inner_failure: Option<String> = None;
-    if let Some(t) = thermostat.as_mut() {
-        if let Err(e) = t.apply_pre(buffers, dt, timings) {
-            inner_failure = Some(format!("thermostat.apply_pre: {e}"));
-        }
-    }
-    if inner_failure.is_none() {
+    {
         let constraint_arg: Option<&mut dyn crate::integrator::Constraint> = match constraint
             .as_mut()
         {
@@ -2589,68 +2357,35 @@ fn capture_one_graph(
         // `true` records the forces+scalars (`_fev`) graph, `false` the
         // forces-only (`_f`) graph. The replay loop launches the
         // forces-only graph on steps that need no scalars (see
-        // `cuda-graphs.md` *Batched Replay Loop*).
-        let result = if let (Some(_), Some(skip_idx)) =
-            (composed_post_force, post_force_substep_index)
-        {
-            crate::integrator::run_step(
-                integrator,
-                buffers,
-                sim_box,
-                force_field,
-                constraint_arg,
-                // Marker-bearing plans are excluded from capture, so
-                // there is never a ThermostatHalf to dispatch here;
-                // the capture path wraps the thermostat explicitly. A
-                // captured plan has no interleaved BarostatPoint (those
-                // force the eager path), and its terminal BarostatPoint
-                // is deferred, so `run_step` needs no barostat here.
-                None,
-                None,
-                dt,
-                timings,
-                crate::integrator::RunStepOptions {
-                    run_neighbor_pre_step: false,
-                    skip_substep_index: Some(skip_idx),
-                    defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
-                    defer_terminal_barostat_point: deferred_terminal_barostat_dt.is_some(),
-                    runner_needs_scalars: needs_scalars,
-                },
-            )
-        } else {
-            crate::integrator::run_step(
-                integrator,
-                buffers,
-                sim_box,
-                force_field,
-                constraint_arg,
-                None,
-                None,
-                dt,
-                timings,
-                crate::integrator::RunStepOptions {
-                    run_neighbor_pre_step: false,
-                    defer_terminal_velocity_projection: deferred_terminal_projection_dt.is_some(),
-                    defer_terminal_barostat_point: deferred_terminal_barostat_dt.is_some(),
-                    runner_needs_scalars: needs_scalars,
-                    ..Default::default()
-                },
-            )
-        };
+        // `cuda-graphs.md` *Batched Replay Loop*). An eligible phase has
+        // no thermostat, so no `apply_pre` / `apply_post` is recorded;
+        // `run_step` walks the plan's main region (trailing kick
+        // included) and the terminal barostat / projection are dispatched
+        // below. Marker-bearing and interleaved-barostat plans never
+        // reach capture, so no thermostat or barostat is passed here.
+        let result = crate::integrator::run_step(
+            integrator,
+            buffers,
+            sim_box,
+            force_field,
+            constraint_arg,
+            None,
+            None,
+            dt,
+            timings,
+            crate::integrator::RunStepOptions {
+                run_neighbor_pre_step: false,
+                runner_needs_scalars: needs_scalars,
+            },
+        );
         if let Err(e) = result {
             inner_failure = Some(format!("run_step: {e:?}"));
         }
     }
-    if inner_failure.is_none() {
-        if let Some(t) = thermostat.as_mut() {
-            if let Err(e) = t.apply_post(buffers, dt, timings) {
-                inner_failure = Some(format!("thermostat.apply_post: {e}"));
-            }
-        }
-    }
-    // rq-dbbffa7d — a terminal BarostatPoint's apply fires in the
-    // post-walk tail (scalar prep + box mutation); the per-particle
-    // rescale fuses into the composed launch below.
+    // rq-dbbffa7d — a terminal BarostatPoint's `apply` performs the
+    // barostat's full work (reductions, scale factor, box mutation, and
+    // per-particle rescale) as standalone launches, captured into the
+    // graph.
     if inner_failure.is_none() {
         if let (Some(barostat_dt), Some(b)) = (deferred_terminal_barostat_dt, barostat.as_mut()) {
             if let Err(e) = b.apply(buffers, sim_box, barostat_dt, timings) {
@@ -2658,31 +2393,14 @@ fn capture_one_graph(
             }
         }
     }
-    if inner_failure.is_none() {
-        if let Some(composed) = composed_post_force {
-            if let Err(e) = launch_composed_post_force(
-                composed,
-                buffers,
-                sim_box,
-                force_field,
-                integrator,
-                barostat,
-                dt,
-                timings,
-            ) {
-                inner_failure = Some(format!("composed post-force launch: {e:?}"));
-            }
-        }
-    }
-    // rq-277dbeb2 — the displaced terminal velocity projection runs
-    // after the composed launch (its fused kick), so it is the last
-    // per-particle velocity operation of the step. Captured into the
-    // graph so replay reproduces it.
+    // rq-277dbeb2 — the terminal velocity projection runs last, after the
+    // trailing kick and any barostat rescale. Captured so replay
+    // reproduces it.
     if inner_failure.is_none() {
         if let Some(projection_dt) = deferred_terminal_projection_dt {
             if let Some(c) = constraint.as_mut() {
                 if let Err(e) = c.apply_after_kick(buffers, sim_box, projection_dt, timings) {
-                    inner_failure = Some(format!("deferred constraint.apply_after_kick: {e}"));
+                    inner_failure = Some(format!("terminal constraint.apply_after_kick: {e}"));
                 }
             }
         }
@@ -2722,8 +2440,6 @@ fn run_per_step_range(
     plan_owns_thermostat: bool,
     coupling_interval: u64,
     dt: Real,
-    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
-    post_force_substep_index: Option<usize>,
     timings: &mut Timings,
     frame: &mut ParticleState,
     traj_writer: &mut Option<TrajectoryWriter>,
@@ -2741,29 +2457,12 @@ fn run_per_step_range(
 ) -> Result<(), (RunnerError, ExitPhase)> {
     for step in start_step..=n_steps {
         // rq-ee10237d — a coupling step: the runner-wrapped thermostat
-        // acts this step (every `coupling_interval` steps). Its full-step
-        // KE reduction is a fusion barrier, so the composed kernel is
-        // bypassed and the whole post-force region runs eagerly in
-        // canonical order. `dt_couple` scales the coupling to the elapsed
-        // interval.
+        // acts this step (every `coupling_interval` steps). `dt_couple`
+        // scales the coupling to the elapsed interval.
         let couples = !plan_owns_thermostat
             && thermostat.is_some()
             && step % coupling_interval == 0;
         let dt_couple = coupling_interval as Real * dt;
-        let use_composed = composed_post_force.is_some() && !couples;
-        // The trailing kick is fused (skipped in the walk) only on a
-        // non-coupling composed step; a coupling step runs it in the walk.
-        let step_skip = if use_composed {
-            post_force_substep_index
-        } else {
-            None
-        };
-        // Defer the trailing velocity projection past the composed launch
-        // (non-coupling) or past the eager thermostat + barostat rescales
-        // (coupling); on a plain non-composed step with no thermostat it
-        // dispatches in the walk instead.
-        let step_defer_proj =
-            deferred_terminal_projection_dt.is_some() && (use_composed || couples);
         if couples {
             if let Some(t) = thermostat.as_mut() {
                 t.apply_pre(&mut setup.buffers, dt_couple, &mut *timings)
@@ -2817,9 +2516,6 @@ fn run_per_step_range(
                 dt,
                 &mut *timings,
                 crate::integrator::RunStepOptions {
-                    skip_substep_index: step_skip,
-                    defer_terminal_velocity_projection: step_defer_proj,
-                    defer_terminal_barostat_point: deferred_terminal_barostat_dt.is_some(),
                     runner_needs_scalars,
                     ..Default::default()
                 },
@@ -2832,12 +2528,6 @@ fn run_per_step_range(
                     crate::integrator::StepError::IntegratorRejectsConstraint { reason } => {
                         unreachable!("run_step returned IntegratorRejectsConstraint ({reason})")
                     }
-                    crate::integrator::StepError::PostForceFragmentCompileFailed { log } => {
-                        RunnerError::PostForceFragmentCompileFailed { log }
-                    }
-                    crate::integrator::StepError::PostForceFragmentLoadFailed(e) => {
-                        RunnerError::PostForceFragmentLoadFailed(e)
-                    }
                     crate::integrator::StepError::Gpu(e) => RunnerError::Gpu(e),
                     crate::integrator::StepError::Thermostat(e) => RunnerError::Thermostat(e),
                     crate::integrator::StepError::Barostat(e) => RunnerError::Barostat(e),
@@ -2846,67 +2536,42 @@ fn run_per_step_range(
                 (runner_err, ExitPhase::Loop)
             })?;
         }
-        // rq-7a124d43 — full-step coupling: on a coupling step apply_post
-        // reduces the KE of the post-trailing-kick velocities and applies
-        // the thermostat rescale as its own launch, before the barostat.
+        // Post-force tail — a fixed, explicit, canonical-order sequence.
+        // `run_step` walked the plan's main region (including the trailing
+        // kick); the runner fires the terminal thermostat, barostat, and
+        // velocity-projection here so ordering is
+        // integrator → thermostat → barostat → projection.
+        // rq-7a124d43 — full-step coupling: apply_post reduces the KE of
+        // the post-trailing-kick velocities and rescales.
         if couples {
             if let Some(t) = thermostat.as_mut() {
                 t.apply_post(&mut setup.buffers, dt_couple, &mut *timings)
                     .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
             }
         }
-        // rq-dbbffa7d — a terminal BarostatPoint's apply fires in the
-        // post-walk tail (scalar prep + box mutation), after the
-        // thermostat rescale. An interleaved BarostatPoint was already
-        // dispatched inside run_step's walk.
+        // rq-dbbffa7d — a terminal BarostatPoint's `apply` performs the
+        // barostat's full work (reductions, scale factor, box mutation,
+        // per-particle rescale) as standalone launches, after the
+        // thermostat rescale. An interleaved BarostatPoint already ran in
+        // run_step's walk.
         if let Some(barostat_dt) = deferred_terminal_barostat_dt {
             if let Some(b) = barostat.as_mut() {
                 b.apply(&mut setup.buffers, &mut setup.sim_box, barostat_dt, &mut *timings)
                     .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
             }
         }
-        if use_composed {
-            // Non-coupling composed step: the composed kernel performs the
-            // integrator's trailing kick and any barostat per-particle
-            // rescale in one launch.
-            let composed = composed_post_force.expect("use_composed implies Some");
-            launch_composed_post_force(
-                composed,
-                &setup.buffers,
-                &setup.sim_box,
-                &setup.force_field,
-                integrator.as_ref(),
-                barostat,
-                dt,
-                &mut *timings,
-            )
-            .map_err(|e| (e, ExitPhase::Loop))?;
-        } else if deferred_terminal_barostat_dt.is_some() {
-            // rq-b85a38d6 — coupling step: the composed kernel is bypassed,
-            // so a per-step barostat's per-particle rescale runs eagerly,
-            // after the thermostat rescale, preserving the canonical
-            // integrator → thermostat → barostat order (the integrator's
-            // trailing kick already ran in the plan walk).
-            if let Some(b) = barostat.as_ref() {
-                b.apply_post_force_rescale_eager(&mut setup.buffers, &mut *timings)
-                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
-            }
-        }
-        // rq-277dbeb2 — the displaced terminal velocity projection runs
-        // after every per-particle velocity update (the composed kick /
-        // eager rescales), so it is the last per-particle velocity
-        // operation of the step.
-        if step_defer_proj {
-            if let Some(projection_dt) = deferred_terminal_projection_dt {
-                if let Some(c) = constraint.as_mut() {
-                    c.apply_after_kick(
-                        &mut setup.buffers,
-                        &setup.sim_box,
-                        projection_dt,
-                        &mut *timings,
-                    )
-                    .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Loop))?;
-                }
+        // rq-277dbeb2 — the terminal velocity projection runs after every
+        // per-particle velocity update, so it is the last per-particle
+        // velocity operation of the step (RATTLE-last).
+        if let Some(projection_dt) = deferred_terminal_projection_dt {
+            if let Some(c) = constraint.as_mut() {
+                c.apply_after_kick(
+                    &mut setup.buffers,
+                    &setup.sim_box,
+                    projection_dt,
+                    &mut *timings,
+                )
+                .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Loop))?;
             }
         }
 
@@ -3039,8 +2704,6 @@ fn run_batched_graph_loop(
     deferred_terminal_projection_dt: Option<Real>,
     deferred_terminal_barostat_dt: Option<Real>,
     dt: Real,
-    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
-    post_force_substep_index: Option<usize>,
     timings: &mut Timings,
     frame: &mut ParticleState,
     traj_writer: &mut Option<TrajectoryWriter>,
@@ -3186,7 +2849,6 @@ fn run_batched_graph_loop(
                 &mut setup.sim_box,
                 &mut setup.force_field,
                 integrator,
-                thermostat,
                 barostat,
                 constraint,
                 deferred_terminal_projection_dt,
@@ -3194,8 +2856,6 @@ fn run_batched_graph_loop(
                 dt,
                 timings,
                 &device,
-                composed_post_force,
-                post_force_substep_index,
             ) {
                 Ok(new_loop) => {
                     *graph_loop = new_loop;

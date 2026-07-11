@@ -1,20 +1,18 @@
-//! Post-force composed-kernel participation and fallback tests.
-//! Implements the suffix-closed subset scenarios in
-//! `rqm/integration/jit-composed-post-force.md` and the graph-mode
-//! scenario in `rqm/cuda-graphs.md`.
+//! Post-force tail and thermostat-coupling integration tests.
+//! Covers the plan-declared barostat-placement guard and graph-mode
+//! scenarios in `rqm/integration/framework.md` and `rqm/cuda-graphs.md`,
+//! plus the full-step kinetic-energy coupling cadence.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cudarc::driver::CudaSlice;
-use heddle_md::gpu::{GpuContext, ParticleBuffers, compute_kinetic_energy, init_device};
+use heddle_md::gpu::{GpuContext, ParticleBuffers, compute_kinetic_energy};
 use heddle_md::integrator::{
-    Barostat, BarostatBuilder, BarostatError, BarostatRegistry, Integrator, IntegratorBuilder,
-    IntegratorError, IntegratorRegistry, KickSource, StepPlan, SubStep, Thermostat,
-    ThermostatBuilder, ThermostatError, ThermostatRegistry,
+    Integrator, IntegratorBuilder, IntegratorError, KickSource, StepPlan, SubStep, Thermostat,
+    ThermostatBuilder, ThermostatError,
 };
-use heddle_md::io::SlotConfig;
 use heddle_md::io::config::ConfigError;
 use heddle_md::pbc::SimulationBox;
 use heddle_md::precision::Real;
@@ -118,10 +116,10 @@ fn stage_count(counts: &[(String, u64)], stage: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// A non-participating integrator whose plan is velocity Verlet's
-/// shape; execute performs real kicks via the vv kernels, so the
-/// dynamics are identical to VV while post_force_per_particle()
-/// returns None (the trait default).
+/// A custom integrator whose plan is velocity Verlet's shape; execute
+/// performs real kicks via the vv kernels, so its dynamics are identical
+/// to the built-in velocity Verlet. Used to exercise the plan-walk and
+/// graph paths with a non-built-in integrator.
 #[derive(Debug)]
 struct EagerVvIntegrator {
     kick_execs: Arc<AtomicU64>,
@@ -163,8 +161,6 @@ impl Integrator for EagerVvIntegrator {
         }
         Ok(())
     }
-    // post_force_per_particle: trait default None — this integrator
-    // does not participate in the composed kernel.
 }
 
 #[derive(Debug, Clone)]
@@ -193,115 +189,9 @@ impl IntegratorBuilder for EagerVvBuilder {
     }
 }
 
-/// A non-participating thermostat that performs its full work inside
-/// apply_post (counts calls; physics-neutral).
-#[derive(Debug)]
-struct EagerThermostat {
-    post: Arc<AtomicU64>,
-}
-
-impl Thermostat for EagerThermostat {
-    fn apply_post(
-        &mut self,
-        _b: &mut ParticleBuffers,
-        _dt: Real,
-        _t: &mut Timings,
-    ) -> Result<(), ThermostatError> {
-        self.post.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-struct EagerThermostatBuilder {
-    post: Arc<AtomicU64>,
-}
-
-impl KindedBuilder for EagerThermostatBuilder {
-    fn kind_name(&self) -> &'static str {
-        "eager-thermostat"
-    }
-}
-
-impl ThermostatBuilder for EagerThermostatBuilder {
-    fn validate_params(&self, _params: &toml::Value) -> Result<(), ConfigError> {
-        Ok(())
-    }
-    fn graph_compatible(&self, _params: &toml::Value) -> bool {
-        false
-    }
-    fn build(
-        &self,
-        _gpu: &GpuContext,
-        _particle_count: usize,
-        _n_constraints: usize,
-        _params: &toml::Value,
-    ) -> Result<Box<dyn Thermostat>, ThermostatError> {
-        Ok(Box::new(EagerThermostat { post: self.post.clone() }))
-    }
-}
-
-/// A per-step barostat without a post-force fragment (no-op physics).
-#[derive(Debug)]
-struct FragmentlessBarostat;
-
-impl Barostat for FragmentlessBarostat {}
-
-#[derive(Debug, Clone)]
-struct FragmentlessBarostatBuilder;
-
-impl KindedBuilder for FragmentlessBarostatBuilder {
-    fn kind_name(&self) -> &'static str {
-        "fragmentless-barostat"
-    }
-}
-
-impl BarostatBuilder for FragmentlessBarostatBuilder {
-    fn validate_params(&self, _params: &toml::Value) -> Result<(), ConfigError> {
-        Ok(())
-    }
-    fn build(
-        &self,
-        _gpu: &GpuContext,
-        _particle_count: usize,
-        _n_constraints: usize,
-        _params: &toml::Value,
-    ) -> Result<Box<dyn Barostat>, BarostatError> {
-        Ok(Box::new(FragmentlessBarostat))
-    }
-}
-
 // =================================================================
 // Scenarios
 // =================================================================
-
-// rq-dcd0d421 — a non-participating integrator's trailing kick executes
-// in the plan walk. With a thermostat present and coupling every step,
-// no composed kernel is built at all (the integrator has no fragment and
-// the thermostat never participates), so the kick dispatches to execute()
-// each step and the composed stage records nothing.
-#[test]
-fn non_participating_integrator_kick_executes_in_plan_walk() {
-    let dir = tmp("eager_integrator");
-    write_lattice_init(&dir, 9, 4.4e-10);
-    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n";
-    std::fs::write(
-        dir.join("sim.in.toml"),
-        lj_config(3, "kind = \"eager-vv\"", extra, false),
-    )
-    .unwrap();
-    let kick_execs = Arc::new(AtomicU64::new(0));
-    let mut registries = Registries::with_builtins();
-    registries.register_integrator(Box::new(EagerVvBuilder { kick_execs: kick_execs.clone() }));
-    run_simulation_with_registries(&dir.join("sim.in.toml"), &registries).unwrap();
-    // The trailing KickHalf was dispatched to execute() every step —
-    // never skipped in favour of the composed kernel.
-    assert_eq!(kick_execs.load(Ordering::SeqCst), 3);
-    let counts = timings_counts(&dir.join("sim.out.run.timings"));
-    assert_eq!(stage_count(&counts, "jit_composed_post_force"), 0);
-    // The thermostat coupled (its rescale ran) every step.
-    assert_eq!(stage_count(&counts, "csvr_rescale_velocities"), 3);
-}
 
 // rq-1d9788b5 — a per-step barostat configured with an integrator whose
 // plan emits no BarostatPoint is rejected at phase setup. The eager-vv
@@ -330,143 +220,6 @@ fn barostat_without_placement_marker_is_rejected() {
         }
         other => panic!("expected BarostatPlacementMissing, got {other:?}"),
     }
-}
-
-// rq-79b8a246
-#[test]
-fn non_participating_thermostat_forces_integrator_out() {
-    let dir = tmp("eager_thermostat");
-    write_lattice_init(&dir, 9, 4.4e-10);
-    let extra = "[phase.thermostat]\nkind = \"eager-thermostat\"\n";
-    std::fs::write(
-        dir.join("sim.in.toml"),
-        lj_config(3, "kind = \"velocity-verlet\"\nlossless = false", extra, false),
-    )
-    .unwrap();
-    let post = Arc::new(AtomicU64::new(0));
-    let mut registries = Registries::with_builtins();
-    registries.register_thermostat(Box::new(EagerThermostatBuilder { post: post.clone() }));
-    run_simulation_with_registries(&dir.join("sim.in.toml"), &registries).unwrap();
-    let counts = timings_counts(&dir.join("sim.out.run.timings"));
-    // No composed kernel: the plan walk executed VV's trailing kick.
-    assert_eq!(stage_count(&counts, "jit_composed_post_force"), 0);
-    assert_eq!(stage_count(&counts, "vv_kick"), 3);
-    // The thermostat's own apply_post ran after the walk each step.
-    assert_eq!(post.load(Ordering::SeqCst), 3);
-}
-
-// rq-7bd422a5 — a non-coupling step keeps kick fusion; a coupling step
-// does not. With CSVR at coupling_interval = 4 over 8 steps, the six
-// non-coupling steps (1,2,3,5,6,7) launch the composed kernel with the
-// integrator's kick fused, and the two coupling steps (4,8) bypass the
-// composed kernel: the trailing kick runs in the plan walk (standalone
-// vv_kick) and CSVR's apply_post reduces the full-step KE and rescales.
-#[test]
-fn coupling_interval_fuses_non_coupling_steps_only() {
-    let dir = tmp("coupling_interval");
-    write_lattice_init(&dir, 9, 4.4e-10);
-    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n\
-                 coupling_interval = 4\n";
-    std::fs::write(
-        dir.join("sim.in.toml"),
-        lj_config(8, "kind = \"velocity-verlet\"\nlossless = false", extra, false),
-    )
-    .unwrap();
-    run_simulation(&dir.join("sim.in.toml")).unwrap();
-    let counts = timings_counts(&dir.join("sim.out.run.timings"));
-    // 6 non-coupling steps fuse the kick into the composed kernel.
-    assert_eq!(stage_count(&counts, "jit_composed_post_force"), 6);
-    // 2 coupling steps run the trailing kick standalone in the walk.
-    assert_eq!(stage_count(&counts, "vv_kick"), 2);
-    // The thermostat couples only on the 2 coupling steps.
-    assert_eq!(stage_count(&counts, "csvr_rescale_velocities"), 2);
-    assert_eq!(stage_count(&counts, "csvr_sample_and_factor"), 2);
-}
-
-// rq-609dc377
-#[test]
-fn every_builtin_slot_kind_exposes_a_post_force_fragment() {
-    let gpu = init_device().unwrap();
-    let integrators: &[(&str, &str)] = &[
-        ("velocity-verlet", "lossless = false\n"),
-        ("langevin-baoab", "friction = 1.0e12\ntemperature = 300.0\nseed = 1\n"),
-        (
-            "mtk-npt",
-            "temperature = 9.5e-4\npressure = 3.4e-9\ntau_t = 4.1e3\ntau_p = 4.1e4\n\
-             chain_length = 3\nyoshida_order = 3\nn_resp = 1\n",
-        ),
-        ("respa", "n_inner = 2\n"),
-    ];
-    for (kind, params) in integrators {
-        let built = IntegratorRegistry::with_builtins()
-            .build(&SlotConfig::from_params_str(kind, params), &gpu, 4, 0)
-            .unwrap();
-        assert!(
-            built.post_force_per_particle().is_some(),
-            "builtin integrator `{kind}` lost its fused post-force path"
-        );
-    }
-    let thermostats: &[(&str, &str)] = &[
-        (
-            "nose-hoover-chain",
-            "temperature = 9.5e-4\ntau = 4.1e3\nchain_length = 3\nyoshida_order = 3\nn_resp = 1\n",
-        ),
-        ("csvr", "temperature = 9.5e-4\ntau = 4.1e3\nseed = 1\n"),
-        ("andersen", "temperature = 9.5e-4\ncollision_rate = 1.0e-4\nseed = 1\n"),
-        ("berendsen", "temperature = 9.5e-4\ntau = 4.1e3\n"),
-    ];
-    for (kind, params) in thermostats {
-        // rq-609dc377 — a thermostat carries no post_force_per_particle
-        // accessor: its rescale follows a full-step kinetic-energy
-        // reduction (a fusion barrier) and runs eagerly in apply_post, so
-        // it is never part of the composed kernel. Confirm each still
-        // builds.
-        let _built = ThermostatRegistry::with_builtins()
-            .build_optional(Some(&SlotConfig::from_params_str(kind, params)), &gpu, 4, 0)
-            .unwrap()
-            .unwrap();
-    }
-    // Per-step barostats (the Monte-Carlo barostat is periodic and
-    // exempt from the composed ordering).
-    let barostats: &[(&str, &str)] = &[
-        ("berendsen", "pressure = 3.4e-9\ntau = 4.1e4\ncompressibility = 1.0e5\n"),
-        (
-            "c-rescale",
-            "pressure = 3.4e-9\ntemperature = 9.5e-4\ntau = 4.1e4\ncompressibility = 1.0e5\nseed = 1\n",
-        ),
-    ];
-    for (kind, params) in barostats {
-        let built = BarostatRegistry::with_builtins()
-            .build_optional(Some(&SlotConfig::from_params_str(kind, params)), &gpu, 4, 0)
-            .unwrap()
-            .unwrap();
-        assert!(
-            built.post_force_per_particle().is_some(),
-            "builtin barostat `{kind}` lost its fused post-force path"
-        );
-    }
-}
-
-// rq-5e904c5d — a thermostat contributes no composed fragment and always
-// runs eagerly, so a fragment-less per-step barostat paired with a
-// thermostat has a valid execution order: there is no
-// PostForceTopologyUnsatisfiable rejection and the phase runs to
-// completion.
-#[test] // rq-5e904c5d
-fn fragmentless_per_step_barostat_with_builtin_thermostat_runs() {
-    let dir = tmp("topology");
-    write_lattice_init(&dir, 9, 4.4e-10);
-    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n\
-                 [phase.barostat]\nkind = \"fragmentless-barostat\"\n";
-    std::fs::write(
-        dir.join("sim.in.toml"),
-        lj_config(2, "kind = \"velocity-verlet\"\nlossless = false", extra, false),
-    )
-    .unwrap();
-    let mut registries = Registries::with_builtins();
-    registries.register_barostat(Box::new(FragmentlessBarostatBuilder));
-    run_simulation_with_registries(&dir.join("sim.in.toml"), &registries)
-        .expect("thermostat + fragment-less per-step barostat should run without rejection");
 }
 
 // rq-3d84a5b8 — graph eligibility is preserved for a non-participating
@@ -665,9 +418,8 @@ fn thermostat_interval_gates_coupling_and_scales_dt() {
     }
 }
 
-// rq-f4d73396 rq-79b8a246 — a built-in thermostat's rescale runs as a
-// standalone launch every step (never in the composed kernel), and with
-// coupling every step no composed kernel is launched at all.
+// rq-f4d73396 — a built-in thermostat's rescale runs as a standalone
+// launch every step, following the trailing velocity-Verlet kick.
 #[test]
 fn builtin_thermostat_rescale_is_standalone_every_step() {
     let dir = tmp("standalone_rescale");
@@ -682,7 +434,6 @@ fn builtin_thermostat_rescale_is_standalone_every_step() {
     let counts = timings_counts(&dir.join("sim.out.run.timings"));
     assert_eq!(stage_count(&counts, "csvr_rescale_velocities"), 3);
     assert_eq!(stage_count(&counts, "vv_kick"), 3);
-    assert_eq!(stage_count(&counts, "jit_composed_post_force"), 0);
 }
 
 // rq-dce6f4cf rq-49f6bbfb — a thermostatted phase is graph-ineligible and
@@ -703,13 +454,12 @@ fn thermostatted_phase_runs_per_step_even_with_graphs_enabled() {
     // Coupling every step: the thermostat's standalone rescale ran each
     // step, which only happens on the per-step path.
     assert_eq!(stage_count(&counts, "csvr_rescale_velocities"), 4);
-    assert_eq!(stage_count(&counts, "jit_composed_post_force"), 0);
 }
 
 // rq-b85a38d6 — a thermostat + per-step barostat together: every step is
-// a coupling step (default interval), so the composed kernel is bypassed
-// and the barostat's per-particle position rescale runs eagerly as a
-// standalone launch, after the thermostat rescale.
+// a coupling step (default interval), so the barostat's per-particle
+// position rescale runs as a standalone launch, after the thermostat
+// rescale.
 #[test]
 fn thermostat_and_per_step_barostat_rescale_eagerly_on_coupling_steps() {
     let dir = tmp("thermostat_barostat_eager");
@@ -724,10 +474,8 @@ fn thermostat_and_per_step_barostat_rescale_eagerly_on_coupling_steps() {
     .unwrap();
     run_simulation(&dir.join("sim.in.toml")).unwrap();
     let counts = timings_counts(&dir.join("sim.out.run.timings"));
-    // Composed kernel bypassed on every (coupling) step.
-    assert_eq!(stage_count(&counts, "jit_composed_post_force"), 0);
-    // Thermostat rescale and barostat position rescale both ran eagerly
-    // every step.
+    // Thermostat rescale and barostat position rescale both ran as
+    // standalone launches every step.
     assert_eq!(stage_count(&counts, "csvr_rescale_velocities"), 3);
     assert_eq!(stage_count(&counts, "c_rescale_barostat_rescale_positions"), 3);
     // The trailing kick ran standalone in the walk.

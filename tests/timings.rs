@@ -212,10 +212,8 @@ fn timings_pre_flight_refuses_overwrite() {
 }
 
 // rq-a7fdf81f
-// The trailing `vv_kick` half-kick is folded into the JIT-composed
-// post-force per-particle kernel (`jit_composed_post_force`); the
-// standalone `vv_kick` stage no longer appears. The pre-force
-// `vv_kick_drift` SubStep still runs as a standalone kernel.
+// Both velocity-Verlet kicks run as standalone kernels: the pre-force
+// `vv_kick_drift` and the trailing `vv_kick` half-kick.
 #[test]
 fn lossy_includes_lossy_kick_rows() {
     let dir = tmp_path("lossy_kick");
@@ -223,17 +221,14 @@ fn lossy_includes_lossy_kick_rows() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     assert!(stage_row(&body, "vv_kick_drift").is_some());
-    assert!(stage_row(&body, "jit_composed_post_force").is_some());
-    assert!(stage_row(&body, "vv_kick").is_none());
+    assert!(stage_row(&body, "vv_kick").is_some());
     assert!(stage_row(&body, "vv_kick_drift_lossless").is_none());
     assert!(stage_row(&body, "vv_kick_lossless").is_none());
 }
 
 // rq-b2fa4a1f
-// Lossless mode is only available in the default (f32) build. The
-// trailing lossless half-kick is folded into the composed post-force
-// per-particle kernel; the standalone `vv_kick_lossless` stage no
-// longer appears.
+// Lossless mode is only available in the default (f32) build. Both
+// lossless kicks run as standalone kernels.
 #[cfg(not(feature = "f64"))]
 #[test]
 fn lossless_includes_lossless_kick_rows() {
@@ -242,8 +237,7 @@ fn lossless_includes_lossless_kick_rows() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     assert!(stage_row(&body, "vv_kick_drift_lossless").is_some());
-    assert!(stage_row(&body, "jit_composed_post_force").is_some());
-    assert!(stage_row(&body, "vv_kick_lossless").is_none());
+    assert!(stage_row(&body, "vv_kick_lossless").is_some());
     assert!(stage_row(&body, "vv_kick_drift").is_none());
     assert!(stage_row(&body, "vv_kick").is_none());
 }
@@ -317,19 +311,17 @@ fn langevin_includes_langevin_rows_excludes_vv() {
 }
 
 // rq-0c2265eb
-// The trailing langevin `B` half-kick is folded into the
-// `jit_composed_post_force` kernel — only the pre-force `B` SubStep
-// records under `langevin_kick_half` (one per step).
+// Both langevin `B` half-kicks run as standalone launches, so
+// `langevin_kick_half` records twice per step (2·N_steps).
 #[test]
 fn langevin_stage_counts_match() {
     let dir = tmp_path("langevin_counts");
     let path = write_langevin_config(&dir, 10);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    assert_eq!(stage_count(&body, "langevin_kick_half"), Some(10));
+    assert_eq!(stage_count(&body, "langevin_kick_half"), Some(20));
     assert_eq!(stage_count(&body, "langevin_drift_half"), Some(20));
     assert_eq!(stage_count(&body, "langevin_ou_step"), Some(10));
-    assert_eq!(stage_count(&body, "jit_composed_post_force"), Some(10));
 }
 
 // rq-bde625cf
@@ -378,10 +370,8 @@ fn kernel_counts_match_runner_launches() {
     let body = read_timings(&dir);
     assert_eq!(stage_count(&body, "jit_composed_pair_force"), Some(11));
     assert_eq!(stage_count(&body, "vv_kick_drift"), Some(10));
-    // The trailing VV half-kick is folded into the composed post-force
-    // per-particle kernel; the standalone `vv_kick` stage is absent.
-    assert_eq!(stage_count(&body, "jit_composed_post_force"), Some(10));
-    assert!(stage_row(&body, "vv_kick").is_none());
+    // Both VV kicks run as standalone launches, once per step.
+    assert_eq!(stage_count(&body, "vv_kick"), Some(10));
     // rq-62300a18: all-pairs records jit_composed_pair_force and
     // omits every neighbor-list-related row.
     assert!(stage_row(&body, "lj_pair_force_neighbor").is_none());
@@ -571,8 +561,8 @@ fn rows_appear_in_documented_order() {
     // `HostStage::ORDER`. See `KernelStage::ORDER`.
     let expected = vec![
         "vv_kick_drift",
+        "vv_kick",
         "jit_composed_pair_force",
-        "jit_composed_post_force",
         "combine_class_totals",
         "class_accumulator_memset",
         "scatter_positions_to_tile_order",

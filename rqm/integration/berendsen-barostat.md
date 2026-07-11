@@ -36,8 +36,8 @@ byte-identical trajectories across runs on the same GPU.
 The barostat is invoked through `apply(buffers, sim_box, dt,
 timings)`, dispatched at the plan's terminal `BarostatPoint` after the
 plan walk and after the thermostat's `apply_post` (when a thermostat is
-configured). Its per-particle position rescale fuses into the composed
-post-force kernel at this canonical placement. Both
+configured). `apply` performs its per-particle position rescale itself
+as a standalone launch at this canonical placement. Both
 `buffers.virials` (per-particle scalar virials populated by the
 in-step force evaluation) and `buffers.velocities_*` (post-step
 velocities, possibly rescaled by the thermostat) are read by this
@@ -99,14 +99,10 @@ For each invocation with timestep `dt`:
    inside the call (via `lattice_device_mut`); the host fields
    become stale until the next `sim_box.flush_from_device()`.
 
-4. The per-particle position rescale `x_i ← μ · x_i` is dispatched
-   by the JIT-composed post-force per-particle kernel, not by
-   `apply`. Berendsen barostat's
-   `post_force_per_particle_fragment()` carries the `x *=
-   berendsen_mu_device[0]` body that the composed kernel inlines
-   per thread. `apply` itself does not launch a per-particle
-   rescale. The rescale is applied about the box origin; fractional
-   coordinates relative to the new box are unchanged. No host
+4. `apply` launches the per-particle position rescale `x_i ← μ · x_i`
+   itself, as the standalone `rescale_positions_device_factor` kernel
+   reading `mu_device[0]`. The rescale is applied about the box origin;
+   fractional coordinates relative to the new box are unchanged. No host
    involvement; no per-step dtoh of `μ`.
 
 When `buffers.particle_count() == 0`, the entire hook is a no-op:
@@ -128,11 +124,10 @@ in fixed order:
 | 1     | KE reduce         | `kinetic_energy_reduce`                    | f32 scalar of `K` into `ke_scratch`                                                                                | `KineticEnergyReduce`                  |
 | 2     | Virial reduce     | `virial_sum_reduce`                        | f32 scalar of `W` into `virial_scratch`                                                                            | `VirialSumReduce`                      |
 | 3     | µ + lattice + diag | `berendsen_compute_mu_and_rescale_lattice` | reads `K`, `W`, lattice; computes µ + P in f64; mutates lattice; writes µ + diagnostics device buffers              | `BerendsenComputeMuAndRescaleLattice`  |
-| 4     | Position rescale  | composed post-force per-particle kernel    | reads `mu_device[0]`, scales every particle position by it                                                          | `JitComposedPostForce`                 |
+| 4     | Position rescale  | `rescale_positions_device_factor`          | reads `mu_device[0]`, scales every particle position by it                                                          | `BerendsenBarostatRescalePositions`    |
 
-Steps 1–3 run inside `apply`. Step 4 runs from the JIT-composed
-post-force per-particle kernel via Berendsen barostat's source
-fragment.
+All four kernels run inside `apply`; the reductions are fusion barriers,
+so the position rescale is a standalone launch.
 
 No per-step host download occurs. The host `sim_box`'s lattice
 mirror, `most_recent_pressure`, and `most_recent_volume` host

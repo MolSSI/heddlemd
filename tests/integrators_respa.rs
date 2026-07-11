@@ -176,10 +176,18 @@ fn plan_contains_no_thermostat_markers() {
 
 // rq-482921eb
 #[test]
-fn post_force_substep_index_is_the_trailing_outer_kick() {
+fn plan_ends_with_trailing_outer_half_kick() {
     let gpu = init_device().unwrap();
     let integrator = build_respa(&gpu, 4, 4);
-    assert_eq!(integrator.post_force_substep_index(0.4), Some(14));
+    let plan = integrator.plan(0.4);
+    match plan.steps.last().expect("plan is non-empty") {
+        SubStep::KickHalf { dt, label, source } => {
+            assert!(matches!(source, KickSource::Class(ForceClass::Slow)));
+            assert_eq!(*label, "respa_outer_kick");
+            assert_eq!(*dt, 0.4 as Real);
+        }
+        other => panic!("expected trailing KickHalf, got {}", other.variant_name()),
+    }
 }
 
 // =================================================================
@@ -626,9 +634,8 @@ impl Thermostat for CountingThermostat {
         self.post.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
-    // No post-force fragment: this thermostat is self-contained in
-    // apply_pre/apply_post and exercises the eager fallback
-    // (rq-09306735) — the runner excludes it from the composed set.
+    // This thermostat is self-contained in apply_pre/apply_post and
+    // performs its own standalone launches.
 }
 
 #[derive(Debug, Clone)]
@@ -689,9 +696,8 @@ impl Integrator for MarkerStubIntegrator {
     ) -> Result<(), IntegratorError> {
         Ok(())
     }
-    // No post-force fragment: exercises the eager fallback — the
-    // plan walk executes every sub-step and no composed kernel is
-    // built for this integrator (rq-09306735).
+    // The plan walk executes every sub-step as standalone launches;
+    // no post-force kernel is composed for this integrator.
 }
 
 #[derive(Debug, Clone)]

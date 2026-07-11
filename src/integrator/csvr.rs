@@ -61,11 +61,10 @@ pub struct CsvrThermostat {
     /// host on the per-step path.
     ke_scratch: CudaSlice<Real>,
     /// Single-element device buffer holding the rescale factor
-    /// computed by `csvr_sample_and_factor`. The JIT-composed
-    /// post-force per-particle kernel reads `factor_device[0]` in
-    /// CSVR's fragment body. Public so tests that bypass the
-    /// composed kernel can dispatch `rescale_velocities_device_factor`
-    /// against it.
+    /// computed by `csvr_sample_and_factor` and consumed by the
+    /// standalone `rescale_velocities_device_factor` launch in
+    /// `apply_post`. Public so tests can dispatch that rescale against
+    /// it directly.
     pub factor_device: CudaSlice<Real>,
     /// Single-element device buffer accumulating `(k_new - k_old)`
     /// across CSVR steps since the last `flush_pending_injection`.
@@ -216,9 +215,8 @@ impl Thermostat for CsvrThermostat {
         // 3. Per-particle rescale `v ← α · v`, reading `factor_device`
         //    on the device. Because the kinetic-energy reduction above
         //    reads the full-step (post-trailing-kick) velocities, it is a
-        //    fusion barrier: CSVR contributes no composed post-force
-        //    fragment and applies the rescale as its own launch here.
-        //    rq-86dea9a1
+        //    fusion barrier: CSVR applies the rescale as its own
+        //    standalone launch here. rq-86dea9a1
         timings.kernel_start(KernelStage::CSVR_RESCALE_VELOCITIES)?;
         rescale_velocities_device_factor(buffers, &self.factor_device)?;
         timings.kernel_stop(KernelStage::CSVR_RESCALE_VELOCITIES)?;

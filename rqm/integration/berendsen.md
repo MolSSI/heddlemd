@@ -64,7 +64,7 @@ never downloads `K_old`.
    and axis. Berendsen contributes no composed post-force fragment —
    its kinetic-energy reduction reads the full-step (post-trailing-kick)
    velocities, a fusion barrier that keeps the rescale out of the
-   composed kernel (`framework.md`, `jit-composed-post-force.md`).
+   composed kernel (`framework.md`, `docs/architecture.md`).
 
 4. Update the running
    `cumulative_injection += K_old · (λ² − 1)`. The accumulator

@@ -129,15 +129,13 @@ checks — the same exposure as a velocity-Verlet run with timestep
 `Δt`. The standard `r_skin` sizing guidance therefore applies with the
 outer timestep as the reference interval.
 
-## Post-force composed kernel <!-- rq-d46f59c6 -->
+## Trailing outer half-kick <!-- rq-d46f59c6 -->
 
-RESPA participates in the JIT-composed post-force per-particle kernel
-(`jit-composed-post-force.md`). Its fragment performs the trailing
-outer half-kick, `v ← v + (F_slow / m) · Δt/2`, reading the slow-class
-accumulator buffers bound by `bind_post_force_per_particle_args`. The
-default `post_force_substep_index` resolution (last `KickHalf` /
-`KickDrift` in the plan) selects exactly this sub-step, so the runner
-skips it in the plan walk when the composed kernel is active.
+RESPA's post-force operation is the trailing outer half-kick,
+`v ← v + (F_slow / m) · Δt/2`, a `Class`-sourced `KickHalf` that the
+runner dispatches through the framework-owned `class_kick_half` launch
+helper (reading the slow-class accumulator buffers). It is the plan's
+post-force tail and runs as a standalone launch.
 
 ## Empty State and degenerate cases <!-- rq-ca983738 -->
 
@@ -171,16 +169,13 @@ identical inputs on the same GPU produce byte-identical trajectories.
   under `kind_name() == "respa"`. Fields:
 
   - `n_inner: u32` — copied from the config, `>= 1`.
-  - The type holds no per-step mutable state beyond what
-    `PostForcePerParticle` binding requires; `plan` and
-    `post_force_substep_index` are pure.
+  - The type holds no per-step mutable state; `plan` is pure.
 
   `plan(dt)` returns the shape in *Plan shape*. `execute` receives no
   sub-steps in normal operation — every RESPA sub-step is either a
-  `ForceEval`, a `Class`-sourced kick, or skipped in favour of the
-  composed post-force kernel, all of which the runner dispatches — and
-  returns `IntegratorError::UnexpectedSubStep` for anything it is
-  handed.
+  `ForceEval` or a `Class`-sourced kick, both of which the runner
+  dispatches — and returns `IntegratorError::UnexpectedSubStep` for
+  anything it is handed.
 
 - `RespaBuilder` — implements `IntegratorBuilder` with <!-- rq-1c2c92b7 -->
   `kind_name() == "respa"`.
@@ -244,9 +239,11 @@ Feature: RESPA multiple-timestep integrator
     Then plan(dt).has_thermostat_points() is false
 
   @rq-482921eb
-  Scenario: post_force_substep_index selects the trailing outer kick
+  Scenario: Plan ends with the trailing outer half-kick
     Given a RESPA integrator with n_inner = 4
-    Then post_force_substep_index(dt) is Some(14)
+    Then the plan's last sub-step is a KickHalf sourced from Class(Slow)
+    And its label is "respa_outer_kick"
+    And its dt equals the outer timestep
 
   # --- Config validation ---
 
