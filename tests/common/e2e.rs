@@ -58,6 +58,8 @@ enum Preset {
     DisorderedLj { side: usize, spacing: f64 },
     // Two SPC/E water molecules with rigid-geometry constraint metadata.
     SpceWater,
+    // Simple-cubic lattice of alternating +1e / -1e ions (net-neutral).
+    IonicLattice { side: usize, spacing: f64 },
 }
 
 // rq-a5e72a70 — builder that writes a matched extended-XYZ initial-state
@@ -71,6 +73,7 @@ pub struct SystemBuilder {
     barostat: Option<String>,
     barostat_is_per_step: bool,
     constraint_kind: Option<String>,
+    spme: bool,
     dt: f64,
     n_steps: u64,
     log_every: u64,
@@ -89,6 +92,7 @@ impl SystemBuilder {
             barostat: None,
             barostat_is_per_step: false,
             constraint_kind: None,
+            spme: false,
             dt,
             n_steps: 100,
             log_every: 1,
@@ -113,6 +117,23 @@ impl SystemBuilder {
     // rq-a5e72a70
     pub fn spce_water() -> Self {
         Self::base(Preset::SpceWater, 1.0e-15, 300.0)
+    }
+
+    // rq-a5e72a70 — a simple-cubic lattice of alternating +1e/-1e ions.
+    // `side` must be even so the two species have equal population and the
+    // system is net-neutral. Spacing and side keep the box above the
+    // cell-list minimum width that SPME requires.
+    pub fn ionic_lattice(side: usize) -> Self {
+        assert!(side % 2 == 0, "ionic_lattice requires an even side for net neutrality");
+        Self::base(Preset::IonicLattice { side, spacing: 5.0e-10 }, 1.0e-15, 30.0)
+    }
+
+    // rq-a5e72a70 — enable SPME electrostatics. Only meaningful on a
+    // charged preset (`ionic_lattice`); charges come from the particle
+    // types. SPME requires the cell-list neighbour default.
+    pub fn with_spme(mut self) -> Self {
+        self.spme = true;
+        self
     }
 
     pub fn seed(mut self, seed: u64) -> Self {
@@ -196,6 +217,7 @@ impl SystemBuilder {
             Preset::ArgonLattice { side, spacing } => self.write_lj(case, side, spacing, false),
             Preset::DisorderedLj { side, spacing } => self.write_lj(case, side, spacing, true),
             Preset::SpceWater => self.write_water(case),
+            Preset::IonicLattice { side, spacing } => self.write_ionic(case, side, spacing),
         }
     }
 
@@ -382,6 +404,124 @@ mode = "all-pairs"
 "#,
             integrator = self.integrator,
             lossless = self.lossless,
+        );
+        let path = case.config_path();
+        std::fs::write(&path, cfg).unwrap();
+        path
+    }
+
+    // rq-a5e72a70 — an alternating +1e/-1e ionic lattice. Charges come
+    // from the two particle types; with SPME enabled the reciprocal
+    // pipeline handles long-range electrostatics. LJ cores keep the
+    // lattice from collapsing under the Coulomb attraction.
+    fn write_ionic(&self, case: &Case, side: usize, spacing: f64) -> PathBuf {
+        let n = side * side * side;
+        let l = side as f64 * spacing;
+        let c = (side as f64 - 1.0) / 2.0;
+        let mut body = format!("{n}\n");
+        body.push_str(&format!(
+            "Lattice=\"{l:.6e} 0 0 0 {l:.6e} 0 0 0 {l:.6e}\" Properties=species:S:1:pos:R:3\n"
+        ));
+        for i in 0..side {
+            for j in 0..side {
+                for k in 0..side {
+                    // Rock-salt checkerboard: parity of (i+j+k) selects the
+                    // species, giving equal populations for an even `side`.
+                    let species = if (i + j + k) % 2 == 0 { "Cat" } else { "An" };
+                    let px = (i as f64 - c) * spacing;
+                    let py = (j as f64 - c) * spacing;
+                    let pz = (k as f64 - c) * spacing;
+                    body.push_str(&format!("{species} {px:.9e} {py:.9e} {pz:.9e}\n"));
+                }
+            }
+        }
+        std::fs::write(case.dir().join("sim.in.xyz"), body).unwrap();
+
+        // rq-4fcc97ab rq-86bf63c3 — SPME parameters derived from the box
+        // and real-space cutoff: alpha ~ 3.5 / r_cut_real, ~1 grid point
+        // per angstrom of box width (>= 2*spline_order), spline order 4.
+        let r_cut_real = 6.0e-10_f64;
+        let spme_block = if self.spme {
+            let alpha = 3.5 / r_cut_real;
+            let mut g = (l * 1e10).round() as u32;
+            if g < 8 {
+                g = 8;
+            }
+            if g % 2 == 1 {
+                g += 1;
+            }
+            format!(
+                "[spme]\nalpha = {alpha:e}\nr_cut_real = {r_cut_real:e}\ngrid = [{g}, {g}, {g}]\nspline_order = 4\n\n"
+            )
+        } else {
+            String::new()
+        };
+
+        let SystemBuilder { dt, n_steps, log_every, trajectory_every, seed, temperature, .. } = *self;
+        let extra = self.phase_extra();
+        let e = 1.602176634e-19_f64;
+        let cfg = format!(
+            r#"schema_version = 1
+units = "si"
+init = "sim.in.xyz"
+
+[simulation]
+cuda_graphs_disable = true
+seed = {seed}
+temperature = {temperature}
+
+[[phase]]
+name = "run"
+n_steps = {n_steps}
+dt = {dt:e}
+
+[phase.integrator]
+kind = "{integrator}"
+lossless = {lossless}
+
+[phase.output]
+trajectory_every = {trajectory_every}
+log_every = {log_every}
+
+{extra}
+[[particle_types]]
+name = "Cat"
+mass = 3.8e-26
+charge = {e:e}
+
+[[particle_types]]
+name = "An"
+mass = 3.8e-26
+charge = {neg_e:e}
+
+[[pair_interactions]]
+between = ["Cat", "Cat"]
+kind = "lennard-jones"
+sigma = 3.30e-10
+epsilon = 3.0e-21
+cutoff = {r_cut_real:e}
+r_switch = 5.0e-10
+
+[[pair_interactions]]
+between = ["An", "An"]
+kind = "lennard-jones"
+sigma = 3.30e-10
+epsilon = 3.0e-21
+cutoff = {r_cut_real:e}
+r_switch = 5.0e-10
+
+[[pair_interactions]]
+between = ["Cat", "An"]
+kind = "lennard-jones"
+sigma = 3.30e-10
+epsilon = 3.0e-21
+cutoff = {r_cut_real:e}
+r_switch = 5.0e-10
+
+{spme_block}"#,
+            integrator = self.integrator,
+            lossless = self.lossless,
+            neg_e = -e,
         );
         let path = case.config_path();
         std::fs::write(&path, cfg).unwrap();

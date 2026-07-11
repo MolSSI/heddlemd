@@ -48,6 +48,13 @@ writes a runnable input set, and a set of assertions over the results of a run.
     - `SystemBuilder::spce_water(n_molecules)` — SPC/E water molecules, each
       carrying the intramolecular topology and rigid-geometry constraint
       metadata needed to drive SETTLE or SHAKE.
+    - `SystemBuilder::ionic_lattice(n_per_side)` — a simple-cubic lattice of
+      alternating cations (`+1 e`) and anions (`−1 e`), two particle types with
+      equal and opposite charge and a Lennard-Jones core to prevent collapse.
+      The total charge is zero (the preset requires an even total particle
+      count so the two species have equal population). The lattice spacing and
+      side are sized so the periodic box exceeds the cell-list minimum width,
+      which SPME requires. This is the charged preset for SPME runs.
   - Ensemble and run configuration (chainable, each returning `Self`):
     - `.integrator(kind)` — selects the integrator (default velocity-Verlet).
     - `.thermostat(kind, target_temperature)` — installs an external
@@ -56,8 +63,15 @@ writes a runnable input set, and a set of assertions over the results of a run.
       target pressure.
     - `.constraints(kind)` — installs a constraint slot (`settle`, `shake`,
       `rattle`, or `geometric`) over the preset's constraint metadata.
-    - `.with_spme()` — adds a charged model and an SPME long-range
-      electrostatics slot.
+    - `.with_spme()` — enables smooth particle-mesh Ewald electrostatics by
+      emitting an `[spme]` table (see `io/config-schema.md`). It selects the
+      Ewald splitting parameter, real-space cutoff, FFT grid, and spline order
+      from the preset's box and cutoff (a grid of roughly one point per
+      ångström of box width, `alpha ≈ 3.5 / r_cut_real`, spline order 4). SPME
+      requires the cell-list neighbour pipeline, so a builder with SPME enabled
+      leaves the neighbour mode at its cell-list default. Charges come from the
+      particle types, so `.with_spme()` is meaningful only on a charged preset
+      (`ionic_lattice`).
     - `.units(system)` — selects `atomic` (default) or `si` for the written
       input and output files.
     - `.dt(dt)`, `.n_steps(n)`, `.log_every(k)`, `.trajectory_every(k)`,
@@ -148,7 +162,12 @@ reduction order, and stream sequencing are determinism hazards:
 ### Energy conservation <!-- rq-f29e3f73 -->
 
 - a microcanonical (NVE) velocity-Verlet run conserves total energy: the
-  energy-drift slope over the trajectory is bounded.
+  energy-drift slope over the trajectory is bounded;
+- a microcanonical (NVE) run of a charged ionic lattice with SPME
+  electrostatics active conserves total energy over the trajectory, giving the
+  full SPME pipeline (real-space screening plus the reciprocal spread / FFT /
+  influence / IFFT / gather path) an end-to-end physics check rather than only
+  the component-level comparison against an Ewald reference.
 
 ### Pressure control <!-- rq-bb76b520 -->
 
@@ -241,7 +260,7 @@ Feature: End-to-end reproducibility of stochastic and long-range paths
 
   @rq-86bf63c3
   Scenario: An SPME electrostatics run is byte-identical across runs
-    Given a SystemBuilder from a charged preset with SPME enabled and a fixed seed
+    Given a SystemBuilder from the ionic_lattice preset with SPME enabled and a fixed seed
     When the same system is run 3 times into separate Cases
     Then the trajectory and log output files are byte-for-byte identical across all runs
 
@@ -256,6 +275,13 @@ Feature: End-to-end energy conservation
   @rq-d2cd8351
   Scenario: An NVE velocity-Verlet run conserves total energy
     Given a SystemBuilder from the argon_lattice preset with no thermostat and no barostat
+    And a run long enough to accumulate many log samples
+    When the simulation is run
+    Then the total-energy drift slope over the phase's physics samples is bounded within the NVE tolerance
+
+  @rq-4fcc97ab
+  Scenario: An NVE run with SPME electrostatics conserves total energy
+    Given a SystemBuilder from the ionic_lattice preset with SPME enabled and no thermostat and no barostat
     And a run long enough to accumulate many log samples
     When the simulation is run
     Then the total-energy drift slope over the phase's physics samples is bounded within the NVE tolerance

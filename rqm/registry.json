@@ -10795,6 +10795,22 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-4fcc97ab": {
+    "decl": "Scenario: An NVE run with SPME electrostatics conserves total energy",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/common/e2e.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An NVE run with SPME electrostatics conserves total energy",
+    "type": "scenario"
+  },
   "rq-4fe2658a": {
     "decl": "Scenario: λ² is clamped to zero when (K_target/K_old − 1) · dt/τ < −1",
     "file": "integration/berendsen",
@@ -17951,6 +17967,10 @@
     "decl": "Scenario: An SPME electrostatics run is byte-identical across runs",
     "file": "e2e-testing",
     "refs": [
+      {
+        "file": "tests/common/e2e.rs",
+        "kind": "code"
+      },
       {
         "file": "tests/e2e.rs",
         "kind": "code"

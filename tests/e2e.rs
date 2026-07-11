@@ -97,13 +97,11 @@ fn c_rescale_barostat_run_is_byte_identical() {
     assert_runs_reproducible(&builder, 3);
 }
 
-// rq-86bf63c3 — SPME reproducibility. Ignored pending a charged preset
-// with an SPME slot in the harness; the harness's presets are neutral LJ
-// systems, so SPME cannot yet be enabled through SystemBuilder. Tracked
-// as the deferred SPME work in rqm/e2e-testing.md's Out of Scope.
-#[test]
-#[ignore = "needs a charged preset + [spme] slot in SystemBuilder (deferred)"]
-fn spme_electrostatics_run_is_byte_identical() {}
+#[test] // rq-86bf63c3
+fn spme_electrostatics_run_is_byte_identical() {
+    let builder = SystemBuilder::ionic_lattice(6).with_spme().seed(17).n_steps(50);
+    assert_runs_reproducible(&builder, 3);
+}
 
 #[test] // rq-87307e49
 fn settle_constrained_run_is_byte_identical() {
@@ -126,6 +124,22 @@ fn nve_velocity_verlet_conserves_total_energy() {
     let e0 = phase.physics.first().unwrap().total_energy.abs().max(1e-30);
     let span = phase.physics.last().unwrap().time - phase.physics.first().unwrap().time;
     // Allow up to 5% of |E0| of drift across the whole trajectory.
+    let max_slope = 0.05 * e0 / span.max(1e-30);
+    assert_energy_drift_bounded(phase, max_slope);
+}
+
+#[test] // rq-4fcc97ab
+fn nve_run_with_spme_conserves_total_energy() {
+    let case = Case::new("nve_spme_energy");
+    let cfg = SystemBuilder::ionic_lattice(6)
+        .with_spme()
+        .n_steps(400)
+        .log_every(10)
+        .write(&case);
+    let summary = run_case(&cfg);
+    let phase = &summary.phases[0];
+    let e0 = phase.physics.first().unwrap().total_energy.abs().max(1e-30);
+    let span = phase.physics.last().unwrap().time - phase.physics.first().unwrap().time;
     let max_slope = 0.05 * e0 / span.max(1e-30);
     assert_energy_drift_bounded(phase, max_slope);
 }
