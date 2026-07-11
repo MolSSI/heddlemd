@@ -3613,7 +3613,7 @@
     "type": "scenario"
   },
   "rq-195a6215": {
-    "decl": "Scenario: The terminal velocity projection is the last per-particle velocity operation",
+    "decl": "Scenario: One run_step call produces the whole canonical post-force order",
     "file": "integration/framework",
     "refs": [
       {
@@ -3621,7 +3621,7 @@
         "kind": "code"
       }
     ],
-    "title": "The terminal velocity projection is the last per-particle velocity operation",
+    "title": "One run_step call produces the whole canonical post-force order",
     "type": "scenario"
   },
   "rq-1979ae5a": {
@@ -6325,18 +6325,6 @@
     "title": "AggregateLevel::ForcesAndScalars selects the _fev entry point",
     "type": "scenario"
   },
-  "rq-2b7e8273": {
-    "decl": "Scenario: ends_with_velocity_projection reflects the plan's final sub-step",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "tests/integrator_framework.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "ends_with_velocity_projection reflects the plan's final sub-step",
-    "type": "scenario"
-  },
   "rq-2bbc4121": {
     "decl": "Scenario: Construct with matching arrays and explicit unique IDs",
     "file": "particle-state",
@@ -7972,6 +7960,18 @@
     "refs": [],
     "title": "Schema",
     "type": "section"
+  },
+  "rq-38e9c3b5": {
+    "decl": "Scenario: coupling_dt Some is a no-op when no thermostat slot is passed",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "coupling_dt Some is a no-op when no thermostat slot is passed",
+    "type": "scenario"
   },
   "rq-38ebe278": {
     "decl": "Scenario: Load a two-particle file with no velocities",
@@ -16224,10 +16224,6 @@
       {
         "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
-      },
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
       }
     ],
     "title": "Thermostat",
@@ -17856,6 +17852,18 @@
       }
     ],
     "title": "A sigma = 0 pair contributes exactly zero force and energy",
+    "type": "scenario"
+  },
+  "rq-888952cd": {
+    "decl": "Scenario: coupling_dt None leaves the wrapped thermostat inert",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "coupling_dt None leaves the wrapped thermostat inert",
     "type": "scenario"
   },
   "rq-888ed181": {
@@ -21341,18 +21349,6 @@
     "title": "Fixed-Point Force Buffers",
     "type": "section"
   },
-  "rq-a2fbf61e": {
-    "decl": "Scenario: run_step's main walk does not dispatch the terminal BarostatPoint",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "tests/integrator_framework.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "run_step's main walk does not dispatch the terminal BarostatPoint",
-    "type": "scenario"
-  },
   "rq-a304e8cb": {
     "decl": "Scenario: A pair past the maximum slot cutoff contributes zero by bit-exact equality",
     "file": "forces/jit-composed-pair-force",
@@ -23171,7 +23167,7 @@
     "type": "scenario"
   },
   "rq-b167a309": {
-    "decl": "Scenario: A terminal BarostatPoint dispatches barostat.apply once in the tail",
+    "decl": "Scenario: A terminal BarostatPoint dispatches barostat.apply once in run_step's post-force tail",
     "file": "integration/framework",
     "refs": [
       {
@@ -23179,7 +23175,7 @@
         "kind": "code"
       }
     ],
-    "title": "A terminal BarostatPoint dispatches barostat.apply once in the tail",
+    "title": "A terminal BarostatPoint dispatches barostat.apply once in run_step's post-force tail",
     "type": "scenario"
   },
   "rq-b17e6de6": {
@@ -23999,6 +23995,38 @@
       }
     ],
     "title": "settle_velocities skips the velocity-level virial accumulation when dt <= 0",
+    "type": "scenario"
+  },
+  "rq-b7ef61f1": {
+    "decl": "Scenario: run_step ignores coupling_dt when the plan owns its thermostat",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "run_step ignores coupling_dt when the plan owns its thermostat",
+    "type": "scenario"
+  },
+  "rq-b7f9628d": {
+    "decl": "Scenario: coupling_dt Some fires the wrapped halves at their canonical positions",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "coupling_dt Some fires the wrapped halves at their canonical positions",
     "type": "scenario"
   },
   "rq-b7fe6425": {
@@ -29160,7 +29188,7 @@
     "type": "scenario"
   },
   "rq-e043b064": {
-    "decl": "Scenario: An interleaved BarostatPoint dispatches apply during the walk",
+    "decl": "Scenario: An interleaved BarostatPoint dispatches apply during the main-region walk",
     "file": "integration/framework",
     "refs": [
       {
@@ -29168,7 +29196,7 @@
         "kind": "code"
       }
     ],
-    "title": "An interleaved BarostatPoint dispatches apply during the walk",
+    "title": "An interleaved BarostatPoint dispatches apply during the main-region walk",
     "type": "scenario"
   },
   "rq-e06bcfb0": {
@@ -32649,7 +32677,7 @@
     "type": "scenario"
   },
   "rq-f9d0621d": {
-    "decl": "Scenario: has_barostat_points and terminal_barostat_point_dt reflect the plan",
+    "decl": "Scenario: has_barostat_points and trailing_post_force_start reflect the plan",
     "file": "integration/framework",
     "refs": [
       {
@@ -32657,7 +32685,7 @@
         "kind": "code"
       }
     ],
-    "title": "has_barostat_points and terminal_barostat_point_dt reflect the plan",
+    "title": "has_barostat_points and trailing_post_force_start reflect the plan",
     "type": "scenario"
   },
   "rq-f9e0aa11": {

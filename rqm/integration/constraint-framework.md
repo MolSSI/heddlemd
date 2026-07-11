@@ -47,14 +47,14 @@ of the run, dropped at end of run.
 
 ## Per-Step Interface <!-- rq-f08d7a33 -->
 
-The constraint slot's hooks are fired by the runner during its walk of
+The constraint slot's hooks are fired by `run_step` during its walk of
 the integrator's `StepPlan` (see `framework.md`). Hook placement is
 plan-declared: a constraint-capable integrator places
-`SubStep::ConstraintPoint { phase, dt }` markers in its plan, and the
-runner dispatches each marker to the corresponding hook with the
-marker's `dt`. The runner performs no structural inference from the
-plan's kick / drift shape. Integrators never reference the constraint
-slot; they only declare where the hooks belong.
+`SubStep::ConstraintPoint { phase, dt }` markers in its plan, and
+`run_step` dispatches each marker to the corresponding hook with the
+marker's `dt`. No structural inference is made from the plan's kick /
+drift shape. Integrators never reference the constraint slot; they only
+declare where the hooks belong.
 
 The three MD hooks map one-to-one to `ConstraintPhase` variants; a
 fourth hook is driven separately by the minimization runner:
@@ -77,23 +77,26 @@ For the registered `velocity-verlet` (lossy) integrator, whose plan is
 ForceEval, KickHalf, ConstraintPoint { AfterKick }]` (see
 `velocity-verlet.md`), the runner's sequence is:
 
+All of the following runs inside a single `run_step` call:
+
 ```text
-constraint.apply_before_drift(buffers, sim_box, dt, timings)   # main walk
+constraint.apply_before_drift(buffers, sim_box, dt, timings)   # main-region walk
 integrator.execute(SubStep::KickDrift { .. }, buffers, sim_box, timings)
 constraint.apply_after_drift(buffers, sim_box, dt, timings)
 force_field.step(buffers, sim_box, timings)
-# post-force tail (fixed order):
+# post-force tail (fixed order, still within the same run_step call):
 integrator.execute(SubStep::KickHalf { .. }, buffers, sim_box, timings)
 thermostat.apply_post(...)                                     # on a coupling step
 barostat.apply(...)                                            # if a terminal BarostatPoint
 constraint.apply_after_kick(buffers, sim_box, dt, timings)
 ```
 
-The `BeforeDrift` and `AfterDrift` hooks dispatch in `run_step`'s main
-walk; the trailing `AfterKick` projection runs in the runner's
-post-force tail, after the trailing kick and any thermostat / barostat
-velocity rescale, so it is the last per-particle velocity operation of
-the step (see *Ordering of the terminal velocity projection*).
+The `BeforeDrift` and `AfterDrift` hooks dispatch in `run_step`'s
+main-region walk; the trailing `AfterKick` projection dispatches in
+`run_step`'s post-force tail, after the trailing kick and any thermostat /
+barostat velocity rescale, so it is the last per-particle velocity
+operation of the step (see *Ordering of the terminal velocity
+projection*).
 
 When the constraint slot is `None`, or when the plan carries no
 `ConstraintPoint` markers, no hook fires and the plan walk reduces to
@@ -116,8 +119,8 @@ minimum-image distance evaluation; none mutates the box.
 ### Ordering of the terminal velocity projection <!-- rq-6b22e2c4 -->
 
 `apply_after_kick` is the last per-particle velocity operation of the
-timestep. The runner fires it at the end of the post-force tail — after
-the integrator's trailing kick and after any thermostat rescale and
+timestep. `run_step` dispatches it at the end of the post-force tail —
+after the integrator's trailing kick and after any thermostat rescale and
 per-step barostat rescale — so it always runs last, regardless of which
 slots are configured.
 
@@ -144,11 +147,11 @@ of a constraint slot.
 The runner walks an integrator's plan via the free function
 [`run_step`] (see `integration/framework.md`'s *Feature API* for the
 full signature), passing the constraint slot as the `constraint`
-argument; the runner fires the terminal velocity projection in its
-post-force tail. Tests and direct library consumers use a convenience
-layer instead. That layer is split into two
-traits so that the `&mut dyn Constraint` argument is reachable only
-from a type that has statically opted in to constraint-hook insertion:
+argument; `run_step` dispatches the terminal velocity projection as the
+final part of its whole-plan walk. Tests and direct library consumers
+use a convenience layer instead. That layer is split into two traits so
+that the `&mut dyn Constraint` argument is reachable only from a type
+that has statically opted in to constraint-hook insertion:
 
 - **`IntegratorStepExt`** — a blanket convenience trait implemented
   for every type that implements `Integrator`. Its single method
@@ -160,12 +163,12 @@ from a type that has statically opted in to constraint-hook insertion:
 - **`IntegratorStepWithConstraintExt`** — a convenience trait whose
   blanket impl is bounded on `Self: ConstraintCapableIntegrator`. Its
   single method `step_with_constraint(..., &mut dyn Constraint, ...)`
-  walks the plan with `constraint = Some(..)`, so the plan's
-  `ConstraintPoint` markers dispatch to the slot, and it fires the
-  terminal `AfterKick` projection in the post-force tail after the
-  trailing kick. Available only on types that statically declare
-  themselves constraint-capable; calling it on a non-marker type is a
-  compile error.
+  calls `run_step` with `constraint = Some(..)`, so the plan's
+  `ConstraintPoint` markers dispatch to the slot and the terminal
+  `AfterKick` projection runs in `run_step`'s post-force tail after the
+  trailing kick — no separate projection step is added by the method.
+  Available only on types that statically declare themselves
+  constraint-capable; calling it on a non-marker type is a compile error.
 
 The runner consumes `run_step` directly and bypasses both convenience
 traits, so its hook-dispatch behaviour is unaffected.

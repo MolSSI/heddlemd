@@ -199,24 +199,26 @@ sequence:
    thermostat, so no `apply_pre` / `apply_post` appears):
    - `run_step(integrator, buffers, sim_box, force_field, constraint,
      None, barostat, dt, timings, RunStepOptions {
-     run_neighbor_pre_step: false, runner_needs_scalars })`, where
-     `runner_needs_scalars` is `true` while recording the
-     forces+scalars graph and `false` while recording the forces-only
-     graph. `run_step` walks the plan's main region — routing every
-     `force_field.step` to `force_field.step_no_neighbor_check` — and
-     dispatches interleaved `ConstraintPoint` markers to the constraint
-     slot (a no-op when the slot is `None`). See
+     run_neighbor_pre_step: false, runner_needs_scalars,
+     coupling_dt: None })`, where `runner_needs_scalars` is `true` while
+     recording the forces+scalars graph and `false` while recording the
+     forces-only graph. `coupling_dt` is `None` because an eligible phase
+     has no thermostat. `run_step` walks the **entire** plan — routing
+     every `force_field.step` to `force_field.step_no_neighbor_check`,
+     dispatching interleaved `ConstraintPoint` markers to the constraint
+     slot (a no-op when the slot is `None`), the integrator's trailing
+     kick (via `execute`), and then the post-force tail. See
      `integration/framework.md` for `RunStepOptions`.
-   - The runner then dispatches the post-force tail explicitly, each op
-     a standalone captured launch: the integrator's trailing kick (via
-     `execute`); then `barostat.apply(buffers, sim_box, dt, timings)`
-     when the plan carries a terminal `BarostatPoint` (its reductions,
-     box mutation, and per-particle position rescale); then
-     `constraint.apply_after_kick(buffers, sim_box, dt, timings)` when
-     the plan ends with a velocity projection — the last per-particle
-     velocity operation. The constraint kernels are pure launches (the
-     SETTLE / SHAKE builders report `graph_compatible == true`), so a
-     constrained phase is graph-eligible.
+   - The post-force tail, dispatched by the same `run_step` call, records
+     each op as a standalone captured launch: `barostat.apply(buffers,
+     sim_box, dt, timings)` when the plan carries a terminal
+     `BarostatPoint` (its reductions, box mutation, and per-particle
+     position rescale); then `constraint.apply_after_kick(buffers,
+     sim_box, dt, timings)` when the plan ends with a velocity projection
+     — the last per-particle velocity operation. The constraint kernels
+     are pure launches (the SETTLE / SHAKE builders report
+     `graph_compatible == true`), so a constrained phase is
+     graph-eligible.
    - The displacement-check kernel
      `neighbor_displacement_check_flag` launched by
      `force_field.step_no_neighbor_check` after the post-force

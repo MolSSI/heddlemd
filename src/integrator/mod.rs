@@ -324,56 +324,14 @@ impl StepPlan {
     }
 
     // rq-9fbba3be
-    /// `true` iff the trailing post-force-marker run contains a
-    /// `ConstraintPoint { phase: AfterKick }`. The runner consults this
-    /// to decide whether to fire a trailing velocity projection in its
-    /// post-force tail (see `framework.md`).
-    /// `ConstraintPoint` markers dispatch pure kernel launches and never
-    /// disqualify a plan from CUDA-graph capture, so — unlike
-    /// `has_thermostat_points()` — this predicate does not affect graph
-    /// eligibility.
-    pub fn ends_with_velocity_projection(&self) -> bool {
-        self.terminal_velocity_projection_dt().is_some()
-    }
-
-    // rq-9fbba3be
-    /// The `dt` carried by the `ConstraintPoint { phase: AfterKick }` in
-    /// the trailing post-force-marker run, or `None` when there is none.
-    /// The runner passes the `Some` value to the `apply_after_kick`
-    /// fired in its post-force tail.
-    pub fn terminal_velocity_projection_dt(&self) -> Option<Real> {
-        self.steps[self.trailing_post_force_start()..]
-            .iter()
-            .find_map(|s| match s {
-                SubStep::ConstraintPoint {
-                    phase: ConstraintPhase::AfterKick,
-                    dt,
-                } => Some(*dt),
-                _ => None,
-            })
-    }
-
-    // rq-9fbba3be
-    /// `true` iff any sub-step is a `BarostatPoint`.
+    /// `true` iff any sub-step is a `BarostatPoint`. The runner consults
+    /// it at phase setup for the barostat-placement guard (a per-step
+    /// barostat paired with a plan that carries no `BarostatPoint` is
+    /// rejected).
     pub fn has_barostat_points(&self) -> bool {
         self.steps
             .iter()
             .any(|s| matches!(s, SubStep::BarostatPoint { .. }))
-    }
-
-    // rq-9fbba3be
-    /// The `dt` carried by the `BarostatPoint` in the trailing
-    /// post-force-marker run (the canonical placement), or `None` when
-    /// the plan has no terminal `BarostatPoint`. A
-    /// `BarostatPoint` outside the trailing run (interleaved) is not
-    /// reported here.
-    pub fn terminal_barostat_point_dt(&self) -> Option<Real> {
-        self.steps[self.trailing_post_force_start()..]
-            .iter()
-            .find_map(|s| match s {
-                SubStep::BarostatPoint { dt } => Some(*dt),
-                _ => None,
-            })
     }
 
     // rq-9fbba3be
@@ -422,9 +380,8 @@ pub trait Integrator: std::fmt::Debug + Send {
     }
 }
 
-/// Per-call options for [`run_step`], bundling the four flags that
-/// select among plan-walk modes. Plain `Copy` data; a caller overrides
-/// individual fields against `Default`. See
+/// Per-call options for [`run_step`]. Plain `Copy` data; a caller
+/// overrides individual fields against `Default`. See
 /// `rqm/integration/framework.md`.
 // rq-1d366b88
 #[derive(Debug, Clone, Copy)]
@@ -437,6 +394,18 @@ pub struct RunStepOptions {
     /// `true` resolves every `ForceEval` to
     /// `AggregateLevel::ForcesAndScalars`. Default `false`.
     pub runner_needs_scalars: bool,
+    /// The coupling-step decision for a runner-wrapped thermostat.
+    /// `Some(dt_couple)` marks this step as a coupling step: `run_step`
+    /// fires the wrapped thermostat's `apply_pre` before the walk and
+    /// `apply_post` at the post-force-marker boundary, both with
+    /// `dt_couple`. `None` leaves the wrapped thermostat inert this step.
+    /// The runner owns the step counter and computes it
+    /// (`coupling_interval · dt` on a coupling step, else `None`);
+    /// `run_step` owns the ordering. It applies only to the wrapped
+    /// topology — `run_step` ignores it when the plan carries
+    /// `ThermostatHalf` markers — and only when a thermostat slot is
+    /// passed. Default `None`.
+    pub coupling_dt: Option<Real>,
 }
 
 impl Default for RunStepOptions {
@@ -444,25 +413,43 @@ impl Default for RunStepOptions {
         RunStepOptions {
             run_neighbor_pre_step: true,
             runner_needs_scalars: false,
+            coupling_dt: None,
         }
     }
 }
 
-/// Walk an integrator's plan for one timestep — the single plan-walk
-/// entry point.
+/// Walk an integrator's entire plan for one timestep — the single
+/// plan-walk entry point and the only executor of a timestep's
+/// per-particle work.
 ///
 /// Executes the integrator's sub-steps and the force pipeline together.
 /// `ConstraintPoint` markers dispatch to the constraint slot (a no-op
 /// when `constraint` is `None`); the per-step variations (graph-capture
-/// neighbour handling, scalar-prep) are selected by `opts`; see
-/// [`RunStepOptions`].
+/// neighbour handling, scalar-prep, thermostat coupling) are selected by
+/// `opts`; see [`RunStepOptions`].
 ///
-/// The walk covers only the plan's main region
-/// (`steps[..trailing_post_force_start()]`), which includes the trailing
-/// kick. The trailing run of post-force markers (a terminal
-/// `BarostatPoint` and/or a terminal `ConstraintPoint { AfterKick }`) is
-/// dispatched by the caller's post-force tail, in canonical order after
-/// the trailing kick.
+/// `run_step` walks the **whole** plan and dispatches the one canonical
+/// per-step ordering:
+///
+/// 1. When `opts.coupling_dt` is `Some(dt_couple)` and the plan carries
+///    no `ThermostatHalf` markers, the wrapped thermostat's `apply_pre`
+///    fires before the walk.
+/// 2. The main region `steps[..trailing_post_force_start()]` is walked
+///    (force evaluations, class/total kicks including the trailing kick,
+///    interleaved thermostat / constraint / barostat markers).
+/// 3. The wrapped thermostat's `apply_post` fires at the
+///    post-force-marker boundary — after the trailing kick, before the
+///    terminal barostat / projection.
+/// 4. The post-force marker tail `steps[trailing_post_force_start()..]`
+///    is walked: a terminal `BarostatPoint` runs `barostat.apply`, then a
+///    plan-final `ConstraintPoint { AfterKick }` runs the velocity
+///    projection (RATTLE-last).
+///
+/// The wrapped-thermostat halves fire only for the default topology (no
+/// `ThermostatHalf` markers); a plan that owns its thermostat placement
+/// dispatches its `ThermostatHalf` markers during the walk in step 2 and
+/// receives no wrapping.
+// rq-277dbeb2
 #[allow(clippy::too_many_arguments)]
 pub fn run_step(
     integrator: &mut dyn Integrator,
@@ -479,17 +466,34 @@ pub fn run_step(
     let RunStepOptions {
         run_neighbor_pre_step,
         runner_needs_scalars,
+        coupling_dt,
     } = opts;
     let plan = integrator.plan(dt);
-    // rq-277dbeb2 — `run_step` walks the plan's main region only. The
-    // trailing run of post-force markers (a terminal velocity projection
-    // and/or a terminal barostat point) is dispatched by the runner's
-    // explicit post-force tail, after the trailing kick and any
-    // thermostat / barostat rescale, so the tail executes in canonical
-    // order. The trailing kick itself is a non-marker sub-step and so
-    // lies inside the main region and is dispatched here.
     let trailing_start = plan.trailing_post_force_start();
-    for sub in &plan.steps[..trailing_start] {
+    // rq-b7ef61f1 — the wrapped-thermostat halves apply only to the
+    // default topology (a plan with no `ThermostatHalf` markers); a
+    // plan that owns its thermostat placement dispatches those markers
+    // during the walk and receives no wrapping.
+    let wrap_dt = match coupling_dt {
+        Some(dt_couple) if !plan.has_thermostat_points() => Some(dt_couple),
+        _ => None,
+    };
+    // rq-b7f9628d — leading wrapped half, on v(t), before the walk.
+    if let Some(dt_couple) = wrap_dt {
+        if let Some(t) = thermostat.as_mut() {
+            t.apply_pre(buffers, dt_couple, timings)?;
+        }
+    }
+    for (idx, sub) in plan.steps.iter().enumerate() {
+        // rq-b7f9628d — trailing wrapped half, fired once at the
+        // main/tail boundary: after the trailing kick (the last
+        // main-region sub-step) and before the first terminal marker.
+        // It reduces the full-step (post-trailing-kick) kinetic energy.
+        if wrap_dt.is_some() && idx == trailing_start {
+            if let Some(t) = thermostat.as_mut() {
+                t.apply_post(buffers, wrap_dt.unwrap(), timings)?;
+            }
+        }
         match sub {
             SubStep::ForceEval { class: None, level } => {
                 let resolved = resolve_aggregate_level(*level, runner_needs_scalars);
@@ -569,12 +573,13 @@ pub fn run_step(
                     }
                 }
             }
-            // rq-dbbffa7d — plan-declared, interleaved (non-terminal)
-            // barostat point: a full standalone `apply` during the walk.
-            // A no-op when no per-step barostat is configured (and inert
-            // for a periodic barostat, whose `apply` is the no-op
-            // default). Terminal barostat points are deferred above and
-            // fired by the runner's post-walk tail.
+            // rq-dbbffa7d — plan-declared barostat point: a full
+            // standalone `apply`. A no-op when no per-step barostat is
+            // configured (and inert for a periodic barostat, whose
+            // `apply` is the no-op default). An interleaved point runs
+            // here during the main walk; a terminal point runs here in
+            // the post-force marker tail (`idx >= trailing_start`), after
+            // the wrapped thermostat's `apply_post`.
             SubStep::BarostatPoint { dt: sub_dt } => {
                 if let Some(b) = barostat.as_mut() {
                     b.apply(buffers, sim_box, *sub_dt, timings)?;
@@ -585,44 +590,14 @@ pub fn run_step(
             }
         }
     }
-    Ok(())
-}
-
-// rq-277dbeb2 — a single constrained step: run_step's main walk followed
-// by the plan's terminal velocity projection (RATTLE-last) in the
-// caller's post-force tail. run_step's main walk excludes the trailing
-// post-force marker run, so the terminal `ConstraintPoint { AfterKick }`
-// is dispatched here rather than inside the walk. This mirrors the
-// runner's own post-force tail for the constraint-only case.
-fn run_step_with_terminal_projection(
-    integrator: &mut dyn Integrator,
-    buffers: &mut ParticleBuffers,
-    sim_box: &mut SimulationBox,
-    force_field: &mut ForceField,
-    constraint: &mut dyn Constraint,
-    dt: Real,
-    timings: &mut Timings,
-) -> Result<(), StepError> {
-    let terminal_projection_dt = integrator.plan(dt).terminal_velocity_projection_dt();
-    run_step(
-        integrator,
-        buffers,
-        sim_box,
-        force_field,
-        Some(&mut *constraint),
-        None,
-        None,
-        dt,
-        timings,
-        RunStepOptions {
-            runner_needs_scalars: true,
-            ..Default::default()
-        },
-    )?;
-    if let Some(pdt) = terminal_projection_dt {
-        constraint
-            .apply_after_kick(buffers, sim_box, pdt, timings)
-            .map_err(StepError::Constraint)?;
+    // rq-b7f9628d — a plan with no trailing post-force markers has
+    // `trailing_start == steps.len()`, so the boundary is never reached
+    // inside the loop; fire the trailing wrapped half here, after the
+    // whole walk (which ended with the trailing kick).
+    if wrap_dt.is_some() && trailing_start == plan.steps.len() {
+        if let Some(t) = thermostat.as_mut() {
+            t.apply_post(buffers, wrap_dt.unwrap(), timings)?;
+        }
     }
     Ok(())
 }
@@ -789,8 +764,24 @@ impl IntegratorStepWithConstraintExt for dyn ConstraintCapableIntegrator + '_ {
         if let Err(reason) = self.check_accepts_constraints_now() {
             return Err(StepError::IntegratorRejectsConstraint { reason });
         }
-        run_step_with_terminal_projection(
-            self, buffers, sim_box, force_field, constraint, dt, timings,
+        // rq-0e26dde0 — `run_step` walks the whole plan, so it dispatches
+        // the plan's `ConstraintPoint` markers (including the terminal
+        // `AfterKick` velocity projection in the post-force tail); no
+        // separate projection step is needed here.
+        run_step(
+            self,
+            buffers,
+            sim_box,
+            force_field,
+            Some(constraint),
+            None,
+            None,
+            dt,
+            timings,
+            RunStepOptions {
+                runner_needs_scalars: true,
+                ..Default::default()
+            },
         )
     }
 }
@@ -810,8 +801,24 @@ impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
         if let Err(reason) = self.check_accepts_constraints_now() {
             return Err(StepError::IntegratorRejectsConstraint { reason });
         }
-        run_step_with_terminal_projection(
-            self, buffers, sim_box, force_field, constraint, dt, timings,
+        // rq-0e26dde0 — `run_step` walks the whole plan, so it dispatches
+        // the plan's `ConstraintPoint` markers (including the terminal
+        // `AfterKick` velocity projection in the post-force tail); no
+        // separate projection step is needed here.
+        run_step(
+            self,
+            buffers,
+            sim_box,
+            force_field,
+            Some(constraint),
+            None,
+            None,
+            dt,
+            timings,
+            RunStepOptions {
+                runner_needs_scalars: true,
+                ..Default::default()
+            },
         )
     }
 }

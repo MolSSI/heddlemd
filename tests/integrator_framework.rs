@@ -834,61 +834,34 @@ impl Barostat for OrderRecordingBarostat {
     }
 }
 
-/// Mirrors the runner's single-timestep dispatch for the stub-based
-/// framework tests: `run_step`'s main walk, then the canonical
-/// post-force tail — the terminal barostat `apply` followed by the
-/// terminal velocity projection (`apply_after_kick`). The trailing kick
-/// is a non-marker sub-step, so it is dispatched inside `run_step`'s
-/// main walk, not the tail.
+/// Thin wrapper over `run_step` (with `runner_needs_scalars: true` and
+/// no thermostat coupling) for the constraint / barostat stub tests.
+/// `run_step` walks the whole plan, so the terminal `BarostatPoint` and
+/// the terminal velocity projection are dispatched by this one call —
+/// the test needs no separate post-force tail.
 // rq-277dbeb2
 fn run_timestep(
     integrator: &mut dyn Integrator,
     buffers: &mut ParticleBuffers,
     sim_box: &mut SimulationBox,
     ff: &mut ForceField,
-    mut constraint: Option<&mut dyn heddle_md::integrator::Constraint>,
-    mut barostat: Option<&mut dyn Barostat>,
+    constraint: Option<&mut dyn heddle_md::integrator::Constraint>,
+    barostat: Option<&mut dyn Barostat>,
     dt: Real,
     timings: &mut Timings,
 ) -> Result<(), heddle_md::integrator::StepError> {
-    let plan = integrator.plan(dt);
-    let terminal_barostat_dt = plan.terminal_barostat_point_dt();
-    let terminal_projection_dt = plan.terminal_velocity_projection_dt();
-    // Short-lived reborrows so `constraint` / `barostat` remain usable in
-    // the tail after run_step returns.
-    let c_arg: Option<&mut dyn heddle_md::integrator::Constraint> = match constraint {
-        Some(ref mut c) => Some(&mut **c),
-        None => None,
-    };
-    let b_arg: Option<&mut dyn Barostat> = match barostat {
-        Some(ref mut b) => Some(&mut **b),
-        None => None,
-    };
     run_step(
         integrator,
         buffers,
         sim_box,
         ff,
-        c_arg,
+        constraint,
         None,
-        b_arg,
+        barostat,
         dt,
         timings,
         RunStepOptions { runner_needs_scalars: true, ..Default::default() },
-    )?;
-    if let Some(bdt) = terminal_barostat_dt {
-        if let Some(b) = barostat.as_deref_mut() {
-            b.apply(buffers, sim_box, bdt, timings)
-                .expect("terminal barostat apply in the post-force tail");
-        }
-    }
-    if let Some(pdt) = terminal_projection_dt {
-        if let Some(c) = constraint.as_deref_mut() {
-            c.apply_after_kick(buffers, sim_box, pdt, timings)
-                .expect("terminal velocity projection in the post-force tail");
-        }
-    }
-    Ok(())
+    )
 }
 
 fn fixture() -> (
@@ -1301,11 +1274,12 @@ fn constraint_point_hook_receives_the_markers_own_dt() {
 
 // rq-195a6215
 #[test]
-fn terminal_velocity_projection_is_the_last_velocity_operation() {
+fn one_run_step_call_produces_the_whole_canonical_post_force_order() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
     let _ = gpu;
-    // One shared ordered log records the trailing kick (via the stub's
-    // execute), the barostat apply, and the terminal projection.
+    // One shared ordered log records the wrapped thermostat's halves, the
+    // trailing kick (via the stub's execute), the barostat apply, and the
+    // terminal projection — all from a single run_step call.
     let order = CallLog::default();
     // Plan ends in [KickHalf, BarostatPoint, ConstraintPoint(AfterKick)];
     // the two markers form the trailing post-force run.
@@ -1320,22 +1294,28 @@ fn terminal_velocity_projection_is_the_last_velocity_operation() {
         },
         log: CallLog { events: order.events.clone() },
     };
+    let mut thermostat = RecordingThermostat {
+        log: CallLog { events: order.events.clone() },
+    };
     let mut barostat = OrderRecordingBarostat {
         log: CallLog { events: order.events.clone() },
     };
     let mut constraint = RecordingConstraint {
         log: CallLog { events: order.events.clone() },
     };
-    run_timestep(
+    run_step(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        Some(&mut constraint), Some(&mut barostat), 0.1, &mut timings,
+        Some(&mut constraint), Some(&mut thermostat), Some(&mut barostat),
+        0.1, &mut timings,
+        RunStepOptions { coupling_dt: Some(0.1 as Real), runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
-    // Trailing kick (main walk), then barostat.apply, then apply_after_kick
-    // (both in the post-force tail) — RATTLE-last.
+    // apply_pre (before walk) → trailing kick (main walk) → apply_post
+    // (post-force-marker boundary) → barostat.apply → apply_after_kick,
+    // all within the one run_step call. RATTLE-last.
     assert_eq!(
         *order.events.lock().unwrap(),
-        vec!["exec_kick_half", "barostat_apply", "after_kick"]
+        vec!["apply_pre", "exec_kick_half", "apply_post", "barostat_apply", "after_kick"]
     );
 }
 
@@ -1366,23 +1346,105 @@ fn trailing_kick_runs_via_execute_in_the_main_walk() {
     assert_eq!(*stub_log.events.lock().unwrap(), vec!["exec_kick_half"]);
 }
 
-// rq-2b7e8273
-#[test]
-fn ends_with_velocity_projection_reflects_final_substep() {
-    let ends = StepPlan {
-        steps: vec![
-            SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
-            SubStep::ConstraintPoint { phase: ConstraintPhase::AfterKick, dt: 0.1 },
-        ],
-    };
-    assert!(ends.ends_with_velocity_projection());
-    assert_eq!(ends.terminal_velocity_projection_dt(), Some(0.1 as Real));
+// --- Wrapped-thermostat coupling through run_step.coupling_dt ---
 
-    let no_ends = StepPlan {
-        steps: vec![SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total }],
+// A velocity-Verlet-shaped plan with no ThermostatHalf markers: the
+// default (runner-wrapped) thermostat topology.
+fn wrapped_plan() -> StepPlan {
+    StepPlan {
+        steps: vec![
+            SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
+            SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
+        ],
+    }
+}
+
+// rq-b7f9628d
+#[test]
+fn coupling_dt_some_fires_wrapped_halves_at_canonical_positions() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let order = CallLog::default();
+    let mut stub = PlanStub { plan: wrapped_plan(), log: CallLog { events: order.events.clone() } };
+    let mut thermostat = RecordingThermostat { log: CallLog { events: order.events.clone() } };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, Some(&mut thermostat), None, 0.1, &mut timings,
+        RunStepOptions { coupling_dt: Some(0.4 as Real), runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    // apply_pre before the walk, then the trailing kick, then apply_post.
+    assert_eq!(
+        *order.events.lock().unwrap(),
+        vec!["apply_pre", "exec_kick_half", "apply_post"]
+    );
+}
+
+// rq-888952cd
+#[test]
+fn coupling_dt_none_leaves_wrapped_thermostat_inert() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let order = CallLog::default();
+    let mut stub = PlanStub { plan: wrapped_plan(), log: CallLog { events: order.events.clone() } };
+    let mut thermostat = RecordingThermostat { log: CallLog { events: order.events.clone() } };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, Some(&mut thermostat), None, 0.1, &mut timings,
+        RunStepOptions { coupling_dt: None, runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    // Neither half fires; only the trailing kick runs.
+    assert_eq!(*order.events.lock().unwrap(), vec!["exec_kick_half"]);
+}
+
+// rq-b7ef61f1
+#[test]
+fn run_step_ignores_coupling_dt_when_plan_owns_thermostat() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let order = CallLog::default();
+    // Plan owns its thermostat placement via ThermostatHalf markers.
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::ThermostatHalf { dt: 0.1, phase: heddle_md::integrator::ThermostatPhase::Pre },
+                SubStep::KickHalf { dt: 0.1, label: "k", source: heddle_md::integrator::KickSource::Total },
+                SubStep::ThermostatHalf { dt: 0.1, phase: heddle_md::integrator::ThermostatPhase::Post },
+            ],
+        },
+        log: CallLog { events: order.events.clone() },
     };
-    assert!(!no_ends.ends_with_velocity_projection());
-    assert_eq!(no_ends.terminal_velocity_projection_dt(), None);
+    let mut thermostat = RecordingThermostat { log: CallLog { events: order.events.clone() } };
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, Some(&mut thermostat), None, 0.1, &mut timings,
+        RunStepOptions { coupling_dt: Some(0.4 as Real), runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
+    // The coupling_dt path is suppressed: apply_pre / apply_post fire
+    // exactly once each, dispatched at the ThermostatHalf markers (not
+    // doubled by a wrapped pre/post).
+    assert_eq!(
+        *order.events.lock().unwrap(),
+        vec!["apply_pre", "exec_kick_half", "apply_post"]
+    );
+}
+
+// rq-38e9c3b5
+#[test]
+fn coupling_dt_some_is_a_no_op_without_a_thermostat_slot() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let mut stub = PlanStub { plan: wrapped_plan(), log: CallLog::default() };
+    // coupling_dt is Some but thermostat is None: run_step completes with
+    // no thermostat method invoked.
+    run_step(
+        &mut stub, &mut buffers, &mut sim_box, &mut ff,
+        None, None, None, 0.1, &mut timings,
+        RunStepOptions { coupling_dt: Some(0.4 as Real), runner_needs_scalars: true, ..Default::default() },
+    )
+    .unwrap();
 }
 
 // --- Plan-declared barostat points ---
@@ -1402,8 +1464,8 @@ fn terminal_barostat_point_dispatches_apply_once() {
     };
     let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
     let mut baro = RecordingBarostat { applies: applies.clone(), periodic: false };
-    // The terminal BarostatPoint fires in the runner's post-force tail,
-    // after the trailing kick.
+    // run_step walks the whole plan, so the terminal BarostatPoint fires
+    // in run_step's own post-force tail, after the trailing kick.
     run_timestep(
         &mut stub, &mut buffers, &mut sim_box, &mut ff,
         None, Some(&mut baro), 0.3, &mut timings,
@@ -1453,14 +1515,18 @@ fn barostat_point_is_inert_for_a_periodic_barostat() {
 
 // rq-f9d0621d
 #[test]
-fn has_barostat_points_and_terminal_dt_reflect_the_plan() {
+fn has_barostat_points_and_trailing_start_reflect_the_plan() {
+    // A terminal BarostatPoint sits in the post-force tail:
+    // trailing_post_force_start < steps.len().
     let terminal = StepPlan {
         steps: vec![total_kick(0.5), SubStep::BarostatPoint { dt: 0.5 }],
     };
     assert!(terminal.has_barostat_points());
-    assert_eq!(terminal.terminal_barostat_point_dt(), Some(0.5 as Real));
+    assert!(terminal.trailing_post_force_start() < terminal.steps.len());
     assert!(!terminal.has_interleaved_barostat_point());
 
+    // An interleaved BarostatPoint is not in a trailing marker run:
+    // trailing_post_force_start == steps.len().
     let interleaved = StepPlan {
         steps: vec![
             SubStep::BarostatPoint { dt: 0.5 },
@@ -1469,40 +1535,8 @@ fn has_barostat_points_and_terminal_dt_reflect_the_plan() {
         ],
     };
     assert!(interleaved.has_barostat_points());
-    assert_eq!(interleaved.terminal_barostat_point_dt(), None);
+    assert_eq!(interleaved.trailing_post_force_start(), interleaved.steps.len());
     assert!(interleaved.has_interleaved_barostat_point());
-}
-
-// rq-a2fbf61e
-#[test]
-fn run_step_main_walk_does_not_dispatch_terminal_barostat_point() {
-    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
-    let _ = gpu;
-    let mut stub = PlanStub {
-        plan: StepPlan {
-            steps: vec![
-                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
-                total_kick(0.1),
-                SubStep::BarostatPoint { dt: 0.1 },
-            ],
-        },
-        log: CallLog::default(),
-    };
-    let applies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Real>::new()));
-    let mut baro = RecordingBarostat { applies: applies.clone(), periodic: false };
-    // run_step walks only the plan's main region (up to the trailing
-    // post-force marker run); the terminal BarostatPoint is not
-    // dispatched here — the runner fires it in the post-force tail.
-    run_step(
-        &mut stub, &mut buffers, &mut sim_box, &mut ff,
-        None, None, Some(&mut baro), 0.1, &mut timings,
-        RunStepOptions { runner_needs_scalars: true, ..Default::default() },
-    )
-    .unwrap();
-    assert!(
-        applies.lock().unwrap().is_empty(),
-        "terminal BarostatPoint must not dispatch in run_step's main walk"
-    );
 }
 
 // rq-e043b064

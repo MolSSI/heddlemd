@@ -121,137 +121,159 @@ contract). Integrators never reference the constraint slot directly;
 a constraint-capable integrator only declares where the slot's hooks
 belong by placing `SubStep::ConstraintPoint` markers in its plan.
 
-The runner drives the timestep loop in a fixed pattern. Every
-post-force per-particle operation — the integrator's trailing kick, the
-thermostat's velocity rescale, the barostat's position/velocity rescale,
-and the constraint slot's velocity projection — runs as its own
-standalone kernel launch. There is no composed post-force kernel; the
-runner executes the post-force region as a fixed, explicit, canonical
-sequence `integrator → thermostat → barostat → constraint projection`
+The runner drives the timestep loop by calling the free function
+`run_step` once per timestep. `run_step` walks the integrator's **entire**
+`StepPlan` — through its post-force tail — and is the single executor of
+a timestep's per-particle work. Every post-force per-particle operation —
+the integrator's trailing kick, the thermostat's velocity rescale, the
+barostat's position/velocity rescale, and the constraint slot's velocity
+projection — runs as its own standalone kernel launch. There is no
+composed post-force kernel; `run_step` executes the post-force region as
+a fixed, explicit, canonical sequence
+`integrator → thermostat → barostat → constraint projection`
 (`docs/architecture.md`, *Step orchestration and kernel fusion*: global
 reductions are fusion barriers, and the post-force pointwise operations
 are separated by the reductions they consume, so there is nothing to
-fuse).
+fuse). The plan, walked in full by `run_step`, is the single source of
+truth for this ordering; the runner supplies only the coupling-step
+decision (through `RunStepOptions.coupling_dt`, below) and never
+re-encodes the tail.
 
 Thermostat placement has two topologies, selected by the plan itself: a
-plan with no `ThermostatHalf` sub-steps is wrapped by the runner
-(`apply_pre` before the walk, `apply_post` in the post-force tail — the
-default topology every single-timestep integrator uses); a plan
-containing `ThermostatHalf` sub-steps owns its thermostat placement and
-receives no wrapping.
+plan with no `ThermostatHalf` sub-steps is **wrapped** by `run_step`
+(`apply_pre` before the walk, `apply_post` between the trailing kick and
+the terminal barostat / projection — the default topology every
+single-timestep integrator uses); a plan containing `ThermostatHalf`
+sub-steps owns its thermostat placement, dispatches those markers during
+the walk, and receives no wrapping.
 
-A runner-wrapped thermostat's `apply_pre` and `apply_post` fire only on
+A wrapped thermostat's `apply_pre` and `apply_post` fire only on
 **coupling steps** — steps where `step % coupling_interval == 0`
-(`io/config-schema.md`). On the intervening steps the thermostat is
-inert: neither half runs and velocities are untouched by it. On a
-coupling step both halves receive the **effective coupling timestep**
-`dt_couple = coupling_interval · dt`, so a thermostat's relaxation time
-`τ` keeps its physical meaning regardless of how often it couples.
-`apply_post` reduces the full-step kinetic energy — the velocities after
-the integrator's trailing kick — and applies its rescale from it.
+(`io/config-schema.md`). The runner owns the step counter and therefore
+computes the cadence: on a coupling step it passes
+`RunStepOptions.coupling_dt = Some(dt_couple)`, and `run_step` fires both
+wrapped halves with that `dt_couple`; on the intervening steps it passes
+`None` and the thermostat is inert (neither half runs and velocities are
+untouched by it). The **effective coupling timestep**
+`dt_couple = coupling_interval · dt` keeps a thermostat's relaxation time
+`τ` physically meaningful regardless of how often it couples. `apply_post`
+reduces the full-step kinetic energy — the velocities after the
+integrator's trailing kick — and applies its rescale from it.
 
-Constraint placement is fully plan-declared: the runner fires a
-constraint hook only where the plan carries a `SubStep::ConstraintPoint`
-marker (see `constraint-framework.md`). The runner performs no
-structural inference from `Drift` / `KickHalf` variants. A
-`ConstraintPoint` is a no-op when the run has no constraint slot, so a
-constraint-capable integrator emits the markers unconditionally and the
-same plan drives constrained and unconstrained runs. A plan-final
-`ConstraintPoint { phase: AfterKick }` velocity projection runs last in
-the post-force tail — after the trailing kick and any thermostat and
-barostat rescale — so it is the last per-particle velocity operation of
-the step (RATTLE-last).
+Constraint placement is fully plan-declared: a constraint hook fires
+only where the plan carries a `SubStep::ConstraintPoint` marker (see
+`constraint-framework.md`). No structural inference is made from
+`Drift` / `KickHalf` variants. A `ConstraintPoint` is a no-op when the
+run has no constraint slot, so a constraint-capable integrator emits the
+markers unconditionally and the same plan drives constrained and
+unconstrained runs. A plan-final `ConstraintPoint { phase: AfterKick }`
+velocity projection runs last in the post-force tail — after the
+trailing kick and any thermostat and barostat rescale — so it is the
+last per-particle velocity operation of the step (RATTLE-last).
 
-Barostat placement is likewise plan-declared: the runner runs a
-per-step barostat's `apply` only where the plan carries a
-`SubStep::BarostatPoint` marker, not at a fixed runner position. A
-`BarostatPoint` is a no-op when no per-step barostat is configured, so
-an integrator that hosts a barostat emits the marker unconditionally.
-`apply` performs the barostat's full per-step work — the kinetic-energy
-and virial reductions, the scale-factor and box-lattice update, and the
-per-particle position/velocity rescale — in one call. A **terminal**
-`BarostatPoint` (in the plan's trailing run of post-force markers,
-alongside any `AfterKick`) is the canonical placement: the runner fires
-`apply` in the post-force tail, after the thermostat's `apply_post` and
-before the terminal velocity projection. A **non-terminal**
-`BarostatPoint` (mid-plan) is dispatched during the walk, where `apply`
-runs the same full work.
+Barostat placement is likewise plan-declared: a per-step barostat's
+`apply` runs only where the plan carries a `SubStep::BarostatPoint`
+marker, not at a fixed position. A `BarostatPoint` is a no-op when no
+per-step barostat is configured, so an integrator that hosts a barostat
+emits the marker unconditionally. `apply` performs the barostat's full
+per-step work — the kinetic-energy and virial reductions, the
+scale-factor and box-lattice update, and the per-particle
+position/velocity rescale — in one call. A **terminal** `BarostatPoint`
+(in the plan's trailing run of post-force markers, alongside any
+`AfterKick`) is the canonical placement: `apply` runs in the post-force
+tail, after the thermostat's `apply_post` and before the terminal
+velocity projection. A **non-terminal** `BarostatPoint` (mid-plan) is
+dispatched during the walk, where `apply` runs the same full work.
 
 The plan's trailing run of the trailing kick, any `BarostatPoint`, and
-any `ConstraintPoint { phase: AfterKick }` is the **post-force tail**:
-the runner dispatches it as a fixed ordered sequence — trailing kick,
-then `thermostat.apply_post` (on a coupling step), then `barostat.apply`
-(for a terminal `BarostatPoint`), then `constraint.apply_after_kick`
-(for a plan-final velocity projection).
+any `ConstraintPoint { phase: AfterKick }` is the **post-force tail**.
+`run_step` dispatches it as a fixed ordered sequence — trailing kick,
+then `thermostat.apply_post` (on a coupling step, for a wrapped
+thermostat), then `barostat.apply` (for a terminal `BarostatPoint`), then
+`constraint.apply_after_kick` (for a plan-final velocity projection).
+`run_step` walks the whole plan, so the tail is part of that walk, not a
+separate sequence the runner re-encodes.
+
+The runner's timestep loop computes the cadence (it owns the step
+counter) and delegates the whole step to `run_step`:
 
 ```text
 loop step in 1..=n_steps:
     let plan = integrator.plan(dt)
-    let plan_owns_thermostat = plan.has_thermostat_points()
-    /* A coupling step: a runner-wrapped thermostat acts this step. */
-    let couples = thermostat.is_some() && !plan_owns_thermostat
+    /* Cadence is the runner's concern: a wrapped thermostat couples
+       every coupling_interval steps. dt_couple = coupling_interval · dt. */
+    let couples = thermostat.is_some() && !plan.has_thermostat_points()
         && step % coupling_interval == 0
-    let dt_couple = coupling_interval * dt
-    if couples {
-        thermostat.apply_pre(buffers, dt_couple, timings)  /* leading half, on v(t) */
-    }
-    /* Main walk: the plan up to its post-force tail (kick-drift, force
-       evaluation, interleaved thermostat / constraint / barostat
-       markers). `tail_start` = plan.trailing_post_force_start(). */
+    let coupling_dt = if couples { Some(coupling_interval * dt) } else { None }
+    run_step(integrator, buffers, sim_box, force_field,
+             constraint, thermostat, barostat, dt, timings,
+             RunStepOptions { coupling_dt, runner_needs_scalars, .. })
+    /* A periodic (Monte-Carlo) barostat runs its host-orchestrated volume
+       move at its own batch cadence, outside the dynamics step. */
+    if barostat.periodicity() == EveryNSteps(f) and step % f == 0:
+        barostat.apply_move(force_field, buffers, sim_box, constraint, dt, timings)
+    ...trajectory / log output...
+```
+
+`run_step` walks the entire plan and dispatches the one canonical
+per-step ordering — leading wrapped half, main walk (through the trailing
+kick), trailing wrapped half, then the post-force marker tail:
+
+```text
+run_step(.., opts):
+    let plan = integrator.plan(dt)
+    let tail_start = plan.trailing_post_force_start()
+    let wrap = opts.coupling_dt.is_some() && !plan.has_thermostat_points()
+    /* leading wrapped half (coupling step, plan owns no ThermostatHalf) */
+    if wrap: thermostat.apply_pre(buffers, opts.coupling_dt, timings)  /* on v(t) */
+    /* main region: everything up to the trailing post-force markers,
+       including the trailing kick and any interleaved thermostat /
+       constraint / barostat markers */
     for sub in plan.steps[0 .. tail_start]:
         match sub:
             SubStep::ForceEval { class: None, level } =>
-                force_field.step(buffers, sim_box, timings, runner.resolve_level(level))
+                force_field.step(buffers, sim_box, timings, resolve_level(level))
             SubStep::ForceEval { class: Some(c), level } =>
-                force_field.step_class(c, buffers, sim_box, timings, runner.resolve_level(level))
+                force_field.step_class(c, buffers, sim_box, timings, resolve_level(level))
             SubStep::ThermostatHalf { dt: sub_dt, phase } =>
                 /* plan-owned placement; no-op when thermostat is None */
                 match phase: Pre => thermostat.apply_pre(...); Post => thermostat.apply_post(...)
             SubStep::ConstraintPoint { phase, dt: sub_dt } =>
-                /* no-op when constraint is None */
-                constraint.dispatch(phase, buffers, sim_box, sub_dt, timings)
+                constraint.dispatch(phase, buffers, sim_box, sub_dt, timings)  /* no-op if None */
             SubStep::BarostatPoint { dt: sub_dt } =>
-                /* interleaved (non-terminal) placement: full apply */
-                barostat.apply(buffers, sim_box, sub_dt, timings)
+                barostat.apply(buffers, sim_box, sub_dt, timings)  /* interleaved: full apply */
             SubStep::KickHalf | KickDrift { source: Class(c), .. } =>
                 class_kick*(buffers, force_field.class_forces(c), sub_dt)
             other =>
-                integrator.execute(other, buffers, sim_box, timings)
-    /* Post-force tail: one fixed, explicit, canonical-order sequence.
-       No skip / defer flags — the walk above stopped before the tail. */
-    for sub in plan.steps[tail_start ..]:                   /* the trailing kick(s) */
-        if sub is a kick (KickHalf / KickDrift / Custom):
-            integrator.execute(sub, ...)  or  class_kick*(...)
-    if couples:
-        thermostat.apply_post(buffers, dt_couple, timings)  /* full-step KE reduce + rescale */
-    if barostat_couples_per_step and plan.terminal_barostat_point_dt().is_some():
-        barostat.apply(buffers, sim_box, plan.terminal_barostat_point_dt(), timings)
-        /* reduce + scale-factor + box mutation + per-particle rescale */
-    if constraint.is_some() and plan.terminal_velocity_projection_dt().is_some():
-        constraint.apply_after_kick(buffers, sim_box,
-                                    plan.terminal_velocity_projection_dt(), timings)
-    ...trajectory / log output...
+                integrator.execute(other, buffers, sim_box, timings)  /* incl. trailing kick */
+    /* trailing wrapped half (coupling step): full-step KE reduce + rescale,
+       after the trailing kick, before the terminal barostat / projection */
+    if wrap: thermostat.apply_post(buffers, opts.coupling_dt, timings)
+    /* post-force marker tail: terminal BarostatPoint then terminal AfterKick */
+    for sub in plan.steps[tail_start ..]:
+        match sub:
+            SubStep::BarostatPoint { dt: sub_dt } =>
+                barostat.apply(buffers, sim_box, sub_dt, timings)  /* no-op if None / periodic */
+            SubStep::ConstraintPoint { phase: AfterKick, dt: sub_dt } =>
+                constraint.apply_after_kick(buffers, sim_box, sub_dt, timings)  /* no-op if None */
 ```
 
-The plan-walk portion of this loop — the inner per-sub-step dispatch of
-the main walk, including the dispatch of interleaved `ConstraintPoint`
-and `BarostatPoint` markers — is the free function `run_step`,
-parameterised by a `RunStepOptions` value (see *Feature API*). The
-runner builds one `RunStepOptions` per step: `run_neighbor_pre_step`
+`run_step` is parameterised by a `RunStepOptions` value (see *Feature
+API*). The runner builds one `RunStepOptions` per step: `coupling_dt`
+carries the coupling-step decision (above); `run_neighbor_pre_step`
 toggles the `force_field.step_no_neighbor_check` path used during
 CUDA-graph capture, and `runner_needs_scalars` forces the
 scalar-aggregating force level. There is no `skip_substep_index` and no
-deferral flag: the main walk covers the plan up to the post-force tail,
-and the runner dispatches the tail explicitly in canonical order.
+deferral flag: `run_step` walks the whole plan and dispatches the
+post-force tail itself, in canonical order.
 
-The runner calls `integrator.plan(dt)` once per timestep, plus once
-per phase as a shape probe (`has_thermostat_points()` selects the
-thermostat topology and CUDA-graph eligibility;
-`ends_with_velocity_projection()` and `terminal_barostat_point_dt()`
-tell the runner which tail operations to fire). `plan(dt)` is a pure
-function of `dt` and the integrator's static configuration; it returns
-the same `StepPlan` shape every call with the same `dt` (no per-step
-branching on simulation state). Plans may contain zero or more
+The runner calls `integrator.plan(dt)` once per phase as a shape probe
+(`has_thermostat_points()` selects the thermostat topology and CUDA-graph
+eligibility; `has_barostat_points()` drives the barostat-placement
+guard), and `run_step` calls it once per timestep to walk. `plan(dt)` is
+a pure function of `dt` and the integrator's static configuration; it
+returns the same `StepPlan` shape every call with the same `dt` (no
+per-step branching on simulation state). Plans may contain zero or more
 sub-steps; an empty plan is a no-op for that timestep.
 
 `integrator.execute(sub, buffers, sim_box, timings)` runs one sub-step.
@@ -463,9 +485,9 @@ successfully.
       /// per-step barostat is configured (and inert for a periodic
       /// barostat, whose `apply` is the no-op default). An integrator
       /// that hosts a barostat places a single terminal `BarostatPoint`
-      /// (the canonical placement — the runner fires `apply` in the
+      /// (the canonical placement — `run_step` fires `apply` in the
       /// post-force tail) or a mid-plan `BarostatPoint` for interleaved
-      /// coupling (the runner fires `apply` during the walk). `dt` is the
+      /// coupling (`run_step` fires `apply` during the walk). `dt` is the
       /// sub-step timestep the coupling operates over.
       BarostatPoint { dt: f32 },
 
@@ -568,7 +590,7 @@ successfully.
       /// `constraint.apply_after_kick(buffers, sim_box, dt, timings)`
       /// — project velocities onto the constraint manifold. Placed
       /// after a velocity-updating sub-step. A plan-final `AfterKick`
-      /// marker is fired by the runner in the post-force tail, after the
+      /// marker is fired by `run_step` in the post-force tail, after the
       /// trailing kick and any thermostat / barostat rescale, so it is
       /// the last per-particle velocity operation (see *Per-Step
       /// Interface*).
@@ -630,32 +652,24 @@ successfully.
     thermostat arithmetic, which cannot be captured; such plans run
     on the eager path — see `cuda-graphs.md`).
   - The plan's **post-force tail** is the maximal trailing run of the
-    integrator's trailing kick sub-step(s),
-    `ConstraintPoint { phase: AfterKick }`, and `BarostatPoint`. The
-    runner executes it as a fixed ordered sequence after the main walk
-    (see *Per-Step Interface*). The query methods below inspect this run.
+    `ConstraintPoint { phase: AfterKick }` and `BarostatPoint` sub-steps
+    (the trailing kick, a non-marker, sits just before it in the main
+    region). `run_step` dispatches this run in canonical order as the
+    final part of its whole-plan walk (see *Per-Step Interface*).
   - `StepPlan::trailing_post_force_start() -> usize` — the index at which
-    the post-force tail begins; the main walk covers `steps[0..start]`.
-  - `StepPlan::ends_with_velocity_projection() -> bool` — `true` iff the
-    post-force tail contains a `ConstraintPoint { phase: AfterKick }`.
-    The runner consults this to decide whether to fire the terminal
-    velocity projection. `ConstraintPoint` markers dispatch pure kernel
-    launches and never disqualify a plan from CUDA-graph capture, so —
-    unlike `has_thermostat_points()` — this predicate does not affect
-    graph eligibility.
-  - `StepPlan::terminal_velocity_projection_dt() -> Option<f32>` — the
-    `dt` carried by the `ConstraintPoint { phase: AfterKick }` in the
-    post-force tail, or `None` when there is none. The runner passes the
-    `Some` value to the terminal `apply_after_kick`.
+    the post-force marker tail begins (the length of the maximal trailing
+    run of `ConstraintPoint { phase: AfterKick }` and `BarostatPoint`
+    subtracted from `steps.len()`; equals `steps.len()` when the last
+    sub-step is not a post-force marker). `run_step` walks
+    `steps[0..start]`, then fires the wrapped thermostat's `apply_post`,
+    then walks `steps[start..]` (the terminal barostat / projection).
   - `StepPlan::has_barostat_points() -> bool` — `true` iff any sub-step
-    is a `BarostatPoint`.
-  - `StepPlan::terminal_barostat_point_dt() -> Option<f32>` — the `dt`
-    carried by the `BarostatPoint` in the post-force tail (the canonical
-    placement), or `None` when the plan has no terminal `BarostatPoint`.
-    A `BarostatPoint` outside the tail (interleaved) is not reported
-    here; the runner dispatches it during the walk. A plan with an
-    interleaved `BarostatPoint` runs on the eager path (the mid-walk
-    barostat arithmetic cannot be captured).
+    is a `BarostatPoint`. The runner consults it at phase setup for the
+    barostat-placement guard (a per-step barostat paired with an
+    integrator whose plan carries no `BarostatPoint` is rejected). A plan
+    with an interleaved (non-terminal) `BarostatPoint` runs on the eager
+    path — the mid-walk barostat arithmetic cannot be captured (see
+    `cuda-graphs.md`).
 
 - `RunStepOptions` — per-call options for `run_step`. Plain `Copy` <!-- rq-1d366b88 -->
   data; a caller overrides individual fields against `Default`.
@@ -665,6 +679,7 @@ successfully.
   pub struct RunStepOptions {
       pub run_neighbor_pre_step: bool,
       pub runner_needs_scalars: bool,
+      pub coupling_dt: Option<Real>,
   }
   ```
 
@@ -677,16 +692,25 @@ successfully.
   - `runner_needs_scalars` — `true` resolves every `ForceEval` to
     `AggregateLevel::ForcesAndScalars` regardless of the sub-step's own
     preference (see `resolve_aggregate_level`).
+  - `coupling_dt` — the coupling-step decision for a runner-wrapped
+    thermostat. `Some(dt_couple)` marks this step as a coupling step:
+    `run_step` fires the wrapped thermostat's `apply_pre` before the walk
+    and `apply_post` at the post-force-marker boundary, both with
+    `dt_couple`. `None` leaves the wrapped thermostat inert this step.
+    The runner computes it (`coupling_interval · dt` on a coupling step,
+    else `None`); it owns the step counter, `run_step` owns the ordering.
+    It applies only to the wrapped topology — `run_step` ignores it when
+    the plan carries `ThermostatHalf` markers (those are dispatched
+    during the walk) — and only when a thermostat slot is passed.
 
-  `run_step` walks the plan up to its post-force tail
-  (`steps[0..trailing_post_force_start()]`), dispatching every
-  interleaved `ConstraintPoint` and `BarostatPoint` it encounters
-  whenever the corresponding slot is passed (no-ops when the slot is
-  absent). The post-force tail is dispatched explicitly by the runner in
-  canonical order, not by `run_step`; there is no skip or deferral flag.
+  `run_step` walks the **whole** plan. It dispatches every interleaved
+  `ConstraintPoint` and `BarostatPoint` it encounters, the trailing kick,
+  and the post-force tail (a terminal `BarostatPoint`, then a plan-final
+  `ConstraintPoint { phase: AfterKick }`), each a no-op when the
+  corresponding slot is absent. There is no skip or deferral flag.
 
   `RunStepOptions::default()` is
-  `{ run_neighbor_pre_step: true, runner_needs_scalars: false }`.
+  `{ run_neighbor_pre_step: true, runner_needs_scalars: false, coupling_dt: None }`.
 
 - `Integrator` — object-safe trait implemented by every concrete <!-- rq-78f484d9 -->
   integrator. Owns the core time-stepping algorithm.
@@ -842,8 +866,8 @@ successfully.
       /// periodic barostat leaves this at the no-op default.
       ///
       /// Dispatched at a `SubStep::BarostatPoint` marker (see
-      /// *Per-Step Interface*), not at a fixed runner position. At a
-      /// terminal (canonical) `BarostatPoint` the runner fires `apply`
+      /// *Per-Step Interface*), not at a fixed position. At a
+      /// terminal (canonical) `BarostatPoint` `run_step` fires `apply`
       /// in the post-force tail, after the thermostat's `apply_post`;
       /// at an interleaved (mid-plan) `BarostatPoint` it fires during
       /// the walk. `apply` performs the same full work in both cases.
@@ -1202,38 +1226,51 @@ successfully.
     every SubStep the plan contains.
 
 - `run_step(integrator: &mut dyn Integrator, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, thermostat: Option<&mut dyn Thermostat>, barostat: Option<&mut dyn Barostat>, dt: f32, timings: &mut Timings, opts: RunStepOptions) -> Result<(), StepError>` <!-- rq-277dbeb2 -->
-  - The single free-function plan walker: walks the plan's main region
-    (`steps[0..trailing_post_force_start()]`) for one timestep, then the
-    runner dispatches the post-force tail explicitly (see *Per-Step
-    Interface*). Calls `integrator.plan(dt)`, then dispatches each
-    sub-step of the main region:
-    - `SubStep::ForceEval` → `force_field.step{,_class}(...)` (or
-      their `_no_neighbor_check` variants when
-      `opts.run_neighbor_pre_step == false`).
-    - `SubStep::KickHalf` / `KickDrift` with
-      `source: KickSource::Class(c)` → the framework-owned
-      `class_kick_half` / `class_kick_drift` launch helpers, reading
-      class `c`'s accumulator buffers from `force_field`.
-    - `SubStep::ThermostatHalf { dt, phase }` →
-      `thermostat.apply_pre` / `apply_post`. A no-op when `thermostat`
-      is `None`.
-    - `SubStep::ConstraintPoint { phase, dt }` → the matching
-      `Constraint` hook, passing the marker's `dt`. A no-op when
-      `constraint` is `None`.
-    - `SubStep::BarostatPoint { dt }` → `barostat.apply(buffers,
-      sim_box, dt, timings)` (an interleaved point runs its full work
-      in the walk). A no-op when `barostat` is `None` or periodic.
-    - Every other sub-step (including `Total`-sourced kicks) →
-      `integrator.execute(...)`.
-  - `run_step` dispatches only the plan's explicit `ThermostatHalf`
-    sub-steps; the default wrapping topology for marker-free plans
-    (`apply_pre` before the walk, `apply_post` in the post-force tail)
-    belongs to the runner's timestep loop, which consults
-    `plan.has_thermostat_points()` (see *Per-Step Interface*).
-  - The post-force tail — the trailing kick, a terminal `BarostatPoint`,
-    and a plan-final `ConstraintPoint { phase: AfterKick }` — is not
-    dispatched by `run_step`; the runner runs it explicitly in canonical
-    order after `run_step` returns. There is no skip or deferral flag.
+  - The single free-function executor of one timestep: it walks the
+    integrator's **entire** plan, including the post-force tail, and is
+    the only plan walker in the crate. Calls `integrator.plan(dt)`, then:
+    1. When `opts.coupling_dt` is `Some(dt_couple)` and the plan carries
+       no `ThermostatHalf` markers, fires `thermostat.apply_pre(buffers,
+       dt_couple, timings)` (a no-op when `thermostat` is `None`).
+    2. Walks the main region `steps[0..trailing_post_force_start()]`,
+       dispatching each sub-step:
+       - `SubStep::ForceEval` → `force_field.step{,_class}(...)` (or
+         their `_no_neighbor_check` variants when
+         `opts.run_neighbor_pre_step == false`).
+       - `SubStep::KickHalf` / `KickDrift` with
+         `source: KickSource::Class(c)` → the framework-owned
+         `class_kick_half` / `class_kick_drift` launch helpers, reading
+         class `c`'s accumulator buffers from `force_field`.
+       - `SubStep::ThermostatHalf { dt, phase }` →
+         `thermostat.apply_pre` / `apply_post` (plan-owned placement; a
+         no-op when `thermostat` is `None`).
+       - `SubStep::ConstraintPoint { phase, dt }` → the matching
+         `Constraint` hook, passing the marker's `dt`. A no-op when
+         `constraint` is `None`.
+       - A non-terminal `SubStep::BarostatPoint { dt }` →
+         `barostat.apply(buffers, sim_box, dt, timings)` (interleaved:
+         full work in the walk). A no-op when `barostat` is `None` or
+         periodic.
+       - Every other sub-step (including `Total`-sourced kicks, i.e. the
+         trailing kick) → `integrator.execute(...)`.
+    3. When `opts.coupling_dt` is `Some(dt_couple)` and the plan carries
+       no `ThermostatHalf` markers, fires `thermostat.apply_post(buffers,
+       dt_couple, timings)` — after the trailing kick, before the
+       terminal barostat / projection (a no-op when `thermostat` is
+       `None`).
+    4. Walks the post-force marker tail `steps[trailing_post_force_start()..]`:
+       a terminal `SubStep::BarostatPoint { dt }` → `barostat.apply(...)`
+       (no-op when `barostat` is `None` or periodic); a plan-final
+       `SubStep::ConstraintPoint { phase: AfterKick, dt }` →
+       `constraint.apply_after_kick(...)` (no-op when `constraint` is
+       `None`), so the projection is the last per-particle velocity
+       operation (RATTLE-last).
+  - The wrapped-thermostat halves (steps 1 and 3) fire only for the
+    default topology (no `ThermostatHalf` markers). A plan that owns its
+    thermostat placement receives no wrapping; its `ThermostatHalf`
+    markers dispatch during the walk in step 2.
+  - There is no skip or deferral flag and no separate runner-owned tail:
+    the whole per-step ordering lives in `run_step`.
   - Each `ForceEval`'s aggregate level is
     `resolve_aggregate_level(sub_step_level, opts.runner_needs_scalars)`.
   - Returns `StepError` (see `constraint-framework.md`).
@@ -1576,6 +1613,36 @@ Feature: Pluggable integration framework
     Then apply_pre and apply_post are called on that step
     And each receives dt_couple = dt
 
+  # --- Wrapped-thermostat coupling through run_step.coupling_dt ---
+
+  @rq-b7f9628d
+  Scenario: coupling_dt Some fires the wrapped halves at their canonical positions
+    Given a recording thermostat and a velocity-Verlet plan (no ThermostatHalf markers)
+    When run_step is called with RunStepOptions { coupling_dt: Some(dt_couple), ..default }
+    Then thermostat.apply_pre is called once before the main-region walk with dt_couple
+    And thermostat.apply_post is called once after the trailing kick with dt_couple
+    And no other apply_pre / apply_post call occurs in that run_step call
+
+  @rq-888952cd
+  Scenario: coupling_dt None leaves the wrapped thermostat inert
+    Given a recording thermostat and a velocity-Verlet plan (no ThermostatHalf markers)
+    When run_step is called with RunStepOptions { coupling_dt: None, ..default }
+    Then neither apply_pre nor apply_post is called
+    And the trailing kick still runs
+
+  @rq-b7ef61f1
+  Scenario: run_step ignores coupling_dt when the plan owns its thermostat
+    Given a recording thermostat and a plan that contains ThermostatHalf markers
+    When run_step is called with RunStepOptions { coupling_dt: Some(dt_couple), ..default }
+    Then the wrapped apply_pre / apply_post are not fired by the coupling_dt path
+    And the thermostat is dispatched only at its ThermostatHalf markers with their own dt
+
+  @rq-38e9c3b5
+  Scenario: coupling_dt Some is a no-op when no thermostat slot is passed
+    Given a velocity-Verlet plan and thermostat = None
+    When run_step is called with RunStepOptions { coupling_dt: Some(dt_couple), ..default }
+    Then the step completes with Ok(()) and no thermostat method is invoked
+
   @rq-d3bd619e
   Scenario: Velocity-Verlet plan walk launches vv_kick_drift, force pipeline, and vv_kick
     Given a velocity-Verlet integrator (lossless=false) with particle_count=4
@@ -1779,6 +1846,7 @@ Feature: Pluggable integration framework
     When RunStepOptions::default() is constructed
     Then run_neighbor_pre_step is true
     And runner_needs_scalars is false
+    And coupling_dt is None
 
   @rq-d0240417
   Scenario: run_step with default options walks every sub-step via the neighbour-checked force path
@@ -1806,13 +1874,14 @@ Feature: Pluggable integration framework
     Given a recording constraint slot and an integrator whose plan is
       [ConstraintPoint { phase: BeforeDrift }, Drift, ConstraintPoint { phase: AfterDrift },
        ForceEval, KickHalf, ConstraintPoint { phase: AfterKick }]
-    When the runner executes one timestep with Some(constraint)
+    When run_step is called once with Some(constraint)
     Then the recorded hook order is exactly
       [apply_before_drift, apply_after_drift, apply_after_kick]
-    And apply_before_drift and apply_after_drift are dispatched by run_step's
-      main walk, while the trailing apply_after_kick is fired by the runner's
-      post-force tail after the trailing kick
-    When the runner executes one timestep with the same plan and constraint = None
+    And apply_before_drift and apply_after_drift are dispatched in run_step's
+      main-region walk, while the trailing apply_after_kick is dispatched in
+      run_step's post-force tail after the trailing kick — all within the one
+      run_step call
+    When run_step is called once with the same plan and constraint = None
     Then no constraint hook fires and the step completes with Ok(())
 
   @rq-43025b6a
@@ -1844,30 +1913,26 @@ Feature: Pluggable integration framework
     Then apply_after_kick is invoked with dt == 0.5
 
   @rq-195a6215
-  Scenario: The terminal velocity projection is the last per-particle velocity operation
-    Given a recording constraint slot and a recording per-step barostat
+  Scenario: One run_step call produces the whole canonical post-force order
+    Given a recording thermostat, a recording per-step barostat, and a
+      recording constraint slot, all writing to one shared ordered log
     And an integrator whose plan ends in [KickHalf, BarostatPoint, ConstraintPoint { phase: AfterKick }]
-    When the runner executes one timestep
-    Then the recorded order is: trailing kick, then barostat.apply, then apply_after_kick
-    And run_step's main walk dispatches the trailing kick but neither the
-      terminal BarostatPoint nor the AfterKick (those run in the post-force tail)
-
-  @rq-2b7e8273
-  Scenario: ends_with_velocity_projection reflects the plan's final sub-step
-    Given a plan whose final sub-step is ConstraintPoint { phase: AfterKick }
-    Then plan.ends_with_velocity_projection() is true
-    Given a plan whose final sub-step is KickHalf
-    Then plan.ends_with_velocity_projection() is false
+    When run_step is called once with all three slots and
+      RunStepOptions { coupling_dt: Some(dt_couple), ..default }
+    Then the recorded order is exactly
+      [apply_pre, trailing kick, apply_post, barostat.apply, apply_after_kick]
+    And no operation runs outside that single run_step call (the runner
+      dispatches no post-force tail of its own)
 
   # --- Plan-declared barostat points ---
 
   @rq-b167a309
-  Scenario: A terminal BarostatPoint dispatches barostat.apply once in the tail
+  Scenario: A terminal BarostatPoint dispatches barostat.apply once in run_step's post-force tail
     Given a recording per-step barostat
     And a stub integrator whose plan is [KickHalf, BarostatPoint { dt }]
-    When the runner executes one timestep
+    When run_step is called once with Some(barostat)
     Then barostat.apply is recorded exactly once with the marker's dt,
-      after the trailing kick, in the post-force tail
+      after the trailing kick, within that run_step call's post-force tail
 
   @rq-68061953
   Scenario: BarostatPoint is a no-op when no per-step barostat is configured
@@ -1885,28 +1950,23 @@ Feature: Pluggable integration framework
     And the periodic move still fires through apply_move at its batch cadence
 
   @rq-f9d0621d
-  Scenario: has_barostat_points and terminal_barostat_point_dt reflect the plan
+  Scenario: has_barostat_points and trailing_post_force_start reflect the plan
     Given a plan whose final sub-step is BarostatPoint { dt: 0.5 }
     Then plan.has_barostat_points() is true
-    And plan.terminal_barostat_point_dt() is Some(0.5)
+    And plan.trailing_post_force_start() is less than plan.steps.len()
+      (the terminal BarostatPoint is in the post-force tail)
     Given a plan with a BarostatPoint that is not in the trailing run
     Then plan.has_barostat_points() is true
-    And plan.terminal_barostat_point_dt() is None
-
-  @rq-a2fbf61e
-  Scenario: run_step's main walk does not dispatch the terminal BarostatPoint
-    Given a recording per-step barostat
-    And a stub integrator whose plan ends in [KickHalf, BarostatPoint]
-    When run_step walks the plan's main region (up to the post-force tail)
-    Then barostat.apply is not invoked during that walk
-      (the runner fires it in the post-force tail)
+    And plan.trailing_post_force_start() equals plan.steps.len()
+      (no trailing post-force marker; the BarostatPoint is interleaved)
 
   @rq-e043b064
-  Scenario: An interleaved BarostatPoint dispatches apply during the walk
+  Scenario: An interleaved BarostatPoint dispatches apply during the main-region walk
     Given a recording per-step barostat
     And a stub integrator whose plan is [BarostatPoint { dt }, ForceEval, KickHalf]
-    When run_step walks the plan's main region
-    Then barostat.apply is invoked once during the walk, before the ForceEval
+    When run_step is called once with Some(barostat)
+    Then barostat.apply is invoked once, before the ForceEval (the point is
+      interleaved, not in the post-force tail)
 
   @rq-1d9788b5
   Scenario: A per-step barostat with an integrator that emits no BarostatPoint is rejected at phase setup

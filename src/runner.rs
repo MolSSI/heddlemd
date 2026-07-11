@@ -1486,28 +1486,12 @@ pub(crate) fn run_md_phase_inner(
     // region eagerly (the full-step KE reduction is a fusion barrier).
     let coupling_interval = phase.coupling_interval as u64;
 
-    // rq-277dbeb2 — the dt of the plan's trailing velocity projection,
-    // available whenever a constraint slot is installed. `run_step`'s
-    // main walk excludes the trailing post-force marker run, so the
-    // runner fires this terminal projection (RATTLE-last) in its
-    // post-force tail with the marker's dt. `None` when no constraint
-    // slot is installed or the plan does not end with a velocity
-    // projection. The value is a phase-level constant: the plan shape is
-    // static.
-    let deferred_terminal_projection_dt: Option<Real> = if constraint.is_some() {
-        probe_plan.terminal_velocity_projection_dt()
-    } else {
-        None
-    };
-
     // rq-dbbffa7d — a per-step barostat requires the integrator's plan
-    // to carry a BarostatPoint, or its `apply` would never fire. When
-    // the barostat is present and the plan carries a terminal
-    // BarostatPoint (the canonical placement), the runner fires `apply`
-    // (which runs its rescale as a standalone launch) in its post-walk
-    // tail; `run_step`'s main walk excludes the terminal marker. An
-    // interleaved BarostatPoint is dispatched by `run_step` in the walk
-    // instead.
+    // to carry a BarostatPoint, or its `apply` would never fire.
+    // `run_step` dispatches a terminal BarostatPoint's `apply` (which
+    // runs its rescale as a standalone launch) in the post-force tail of
+    // its whole-plan walk, and an interleaved BarostatPoint during the
+    // walk; either way the plan must declare the marker.
     if barostat_couples_per_step(&barostat) && !probe_plan.has_barostat_points() {
         return Err((
             RunnerError::BarostatPlacementMissing {
@@ -1516,12 +1500,6 @@ pub(crate) fn run_md_phase_inner(
             ExitPhase::Setup,
         ));
     }
-    let deferred_terminal_barostat_dt: Option<Real> =
-        if barostat_couples_per_step(&barostat) {
-            probe_plan.terminal_barostat_point_dt()
-        } else {
-            None
-        };
 
     // Decide whether this phase is eligible for CUDA graph capture.
     // See `rqm/cuda-graphs.md` for the activation policy. Every
@@ -1575,10 +1553,7 @@ pub(crate) fn run_md_phase_inner(
             &mut integrator,
             &mut thermostat,
             &mut barostat,
-            &mut constraint,
-            deferred_terminal_projection_dt,
-            deferred_terminal_barostat_dt,
-            plan_has_thermostat_points,
+            &mut constraint,            plan_has_thermostat_points,
             coupling_interval,
             dt,
             &mut timings,
@@ -1606,10 +1581,7 @@ pub(crate) fn run_md_phase_inner(
             &mut setup.force_field,
             integrator.as_mut(),
             &mut barostat,
-            &mut constraint,
-            deferred_terminal_projection_dt,
-            deferred_terminal_barostat_dt,
-            dt,
+            &mut constraint,            dt,
             &mut timings,
             &setup.gpu.device,
         ) {
@@ -1641,10 +1613,7 @@ pub(crate) fn run_md_phase_inner(
             integrator.as_mut(),
             &mut thermostat,
             &mut barostat,
-            &mut constraint,
-            deferred_terminal_projection_dt,
-            deferred_terminal_barostat_dt,
-            dt,
+            &mut constraint,            dt,
             &mut timings,
             &mut frame,
             &mut traj_writer,
@@ -1669,10 +1638,7 @@ pub(crate) fn run_md_phase_inner(
                 &mut integrator,
                 &mut thermostat,
                 &mut barostat,
-                &mut constraint,
-                deferred_terminal_projection_dt,
-                deferred_terminal_barostat_dt,
-                plan_has_thermostat_points,
+                &mut constraint,                plan_has_thermostat_points,
                 coupling_interval,
                 dt,
                 &mut timings,
@@ -1705,10 +1671,7 @@ pub(crate) fn run_md_phase_inner(
             &mut integrator,
             &mut thermostat,
             &mut barostat,
-            &mut constraint,
-            deferred_terminal_projection_dt,
-            deferred_terminal_barostat_dt,
-            plan_has_thermostat_points,
+            &mut constraint,            plan_has_thermostat_points,
             coupling_interval,
             dt,
             &mut timings,
@@ -2256,8 +2219,6 @@ fn capture_phase_graph(
     integrator: &mut dyn crate::integrator::Integrator,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
-    deferred_terminal_projection_dt: Option<Real>,
-    deferred_terminal_barostat_dt: Option<Real>,
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
@@ -2269,8 +2230,6 @@ fn capture_phase_graph(
         integrator,
         barostat,
         constraint,
-        deferred_terminal_projection_dt,
-        deferred_terminal_barostat_dt,
         dt,
         timings,
         device,
@@ -2288,8 +2247,6 @@ fn capture_phase_graph(
             integrator,
             barostat,
             constraint,
-            deferred_terminal_projection_dt,
-            deferred_terminal_barostat_dt,
             dt,
             timings,
             device,
@@ -2317,8 +2274,6 @@ fn capture_one_graph(
     integrator: &mut dyn crate::integrator::Integrator,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
-    deferred_terminal_projection_dt: Option<Real>,
-    deferred_terminal_barostat_dt: Option<Real>,
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
@@ -2353,16 +2308,21 @@ fn capture_one_graph(
             Some(c) => Some(c.as_mut()),
             None => None,
         };
+        let barostat_arg: Option<&mut dyn crate::integrator::Barostat> = match barostat.as_mut() {
+            Some(b) => Some(b.as_mut()),
+            None => None,
+        };
         // `needs_scalars` selects the force evaluation's `AggregateLevel`:
         // `true` records the forces+scalars (`_fev`) graph, `false` the
         // forces-only (`_f`) graph. The replay loop launches the
         // forces-only graph on steps that need no scalars (see
         // `cuda-graphs.md` *Batched Replay Loop*). An eligible phase has
-        // no thermostat, so no `apply_pre` / `apply_post` is recorded;
-        // `run_step` walks the plan's main region (trailing kick
-        // included) and the terminal barostat / projection are dispatched
-        // below. Marker-bearing and interleaved-barostat plans never
-        // reach capture, so no thermostat or barostat is passed here.
+        // no thermostat (an eligible phase has none), so `coupling_dt` is
+        // `None` and no `apply_pre` / `apply_post` is recorded. `run_step`
+        // walks the whole plan — the trailing kick, a terminal
+        // BarostatPoint's `apply`, and the terminal velocity projection
+        // are all captured by this one call. Marker-bearing (thermostat)
+        // and interleaved-barostat plans never reach capture.
         let result = crate::integrator::run_step(
             integrator,
             buffers,
@@ -2370,39 +2330,17 @@ fn capture_one_graph(
             force_field,
             constraint_arg,
             None,
-            None,
+            barostat_arg,
             dt,
             timings,
             crate::integrator::RunStepOptions {
                 run_neighbor_pre_step: false,
                 runner_needs_scalars: needs_scalars,
+                coupling_dt: None,
             },
         );
         if let Err(e) = result {
             inner_failure = Some(format!("run_step: {e:?}"));
-        }
-    }
-    // rq-dbbffa7d — a terminal BarostatPoint's `apply` performs the
-    // barostat's full work (reductions, scale factor, box mutation, and
-    // per-particle rescale) as standalone launches, captured into the
-    // graph.
-    if inner_failure.is_none() {
-        if let (Some(barostat_dt), Some(b)) = (deferred_terminal_barostat_dt, barostat.as_mut()) {
-            if let Err(e) = b.apply(buffers, sim_box, barostat_dt, timings) {
-                inner_failure = Some(format!("barostat.apply: {e}"));
-            }
-        }
-    }
-    // rq-277dbeb2 — the terminal velocity projection runs last, after the
-    // trailing kick and any barostat rescale. Captured so replay
-    // reproduces it.
-    if inner_failure.is_none() {
-        if let Some(projection_dt) = deferred_terminal_projection_dt {
-            if let Some(c) = constraint.as_mut() {
-                if let Err(e) = c.apply_after_kick(buffers, sim_box, projection_dt, timings) {
-                    inner_failure = Some(format!("terminal constraint.apply_after_kick: {e}"));
-                }
-            }
         }
     }
     // Always end capture, even on inner failure — a captured stream
@@ -2435,8 +2373,6 @@ fn run_per_step_range(
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
-    deferred_terminal_projection_dt: Option<Real>,
-    deferred_terminal_barostat_dt: Option<Real>,
     plan_owns_thermostat: bool,
     coupling_interval: u64,
     dt: Real,
@@ -2457,18 +2393,15 @@ fn run_per_step_range(
 ) -> Result<(), (RunnerError, ExitPhase)> {
     for step in start_step..=n_steps {
         // rq-ee10237d — a coupling step: the runner-wrapped thermostat
-        // acts this step (every `coupling_interval` steps). `dt_couple`
-        // scales the coupling to the elapsed interval.
+        // couples this step (every `coupling_interval` steps). The runner
+        // owns the step counter and computes the cadence; `run_step` fires
+        // apply_pre / apply_post at their canonical positions when passed
+        // `coupling_dt = Some(dt_couple)`. `dt_couple = coupling_interval
+        // · dt` scales the coupling to the elapsed interval.
         let couples = !plan_owns_thermostat
             && thermostat.is_some()
             && step % coupling_interval == 0;
-        let dt_couple = coupling_interval as Real * dt;
-        if couples {
-            if let Some(t) = thermostat.as_mut() {
-                t.apply_pre(&mut setup.buffers, dt_couple, &mut *timings)
-                    .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
-            }
-        }
+        let coupling_dt = couples.then(|| coupling_interval as Real * dt);
         {
             let constraint_arg: Option<&mut dyn crate::integrator::Constraint> =
                 match constraint.as_mut() {
@@ -2517,6 +2450,7 @@ fn run_per_step_range(
                 &mut *timings,
                 crate::integrator::RunStepOptions {
                     runner_needs_scalars,
+                    coupling_dt,
                     ..Default::default()
                 },
             );
@@ -2536,44 +2470,11 @@ fn run_per_step_range(
                 (runner_err, ExitPhase::Loop)
             })?;
         }
-        // Post-force tail — a fixed, explicit, canonical-order sequence.
-        // `run_step` walked the plan's main region (including the trailing
-        // kick); the runner fires the terminal thermostat, barostat, and
-        // velocity-projection here so ordering is
-        // integrator → thermostat → barostat → projection.
-        // rq-7a124d43 — full-step coupling: apply_post reduces the KE of
-        // the post-trailing-kick velocities and rescales.
-        if couples {
-            if let Some(t) = thermostat.as_mut() {
-                t.apply_post(&mut setup.buffers, dt_couple, &mut *timings)
-                    .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
-            }
-        }
-        // rq-dbbffa7d — a terminal BarostatPoint's `apply` performs the
-        // barostat's full work (reductions, scale factor, box mutation,
-        // per-particle rescale) as standalone launches, after the
-        // thermostat rescale. An interleaved BarostatPoint already ran in
-        // run_step's walk.
-        if let Some(barostat_dt) = deferred_terminal_barostat_dt {
-            if let Some(b) = barostat.as_mut() {
-                b.apply(&mut setup.buffers, &mut setup.sim_box, barostat_dt, &mut *timings)
-                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
-            }
-        }
-        // rq-277dbeb2 — the terminal velocity projection runs after every
-        // per-particle velocity update, so it is the last per-particle
-        // velocity operation of the step (RATTLE-last).
-        if let Some(projection_dt) = deferred_terminal_projection_dt {
-            if let Some(c) = constraint.as_mut() {
-                c.apply_after_kick(
-                    &mut setup.buffers,
-                    &setup.sim_box,
-                    projection_dt,
-                    &mut *timings,
-                )
-                .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Loop))?;
-            }
-        }
+        // rq-277dbeb2 — `run_step` walked the whole plan and dispatched
+        // the entire post-force tail (the trailing kick, the wrapped
+        // thermostat's apply_post on a coupling step, a terminal
+        // BarostatPoint's apply, and the terminal velocity projection) in
+        // canonical order. The runner adds no post-force tail of its own.
 
         // rq-03a5a290 — a periodic (Monte-Carlo) barostat runs its
         // host-orchestrated move every `frequency` steps, after the
@@ -2701,8 +2602,6 @@ fn run_batched_graph_loop(
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
-    deferred_terminal_projection_dt: Option<Real>,
-    deferred_terminal_barostat_dt: Option<Real>,
     dt: Real,
     timings: &mut Timings,
     frame: &mut ParticleState,
@@ -2850,10 +2749,7 @@ fn run_batched_graph_loop(
                 &mut setup.force_field,
                 integrator,
                 barostat,
-                constraint,
-                deferred_terminal_projection_dt,
-                deferred_terminal_barostat_dt,
-                dt,
+                constraint,                dt,
                 timings,
                 &device,
             ) {
