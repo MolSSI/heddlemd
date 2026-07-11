@@ -12143,6 +12143,18 @@
     "title": "log_column_values",
     "type": "api-item"
   },
+  "rq-5a00037b": {
+    "decl": "Scenario: An NPT run with SPME electrostatics runs stably and the box responds",
+    "file": "e2e-testing",
+    "refs": [
+      {
+        "file": "tests/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An NPT run with SPME electrostatics runs stably and the box responds",
+    "type": "scenario"
+  },
   "rq-5a0f5c00": {
     "decl": "### Config filename convention",
     "file": "io/config-schema",

@@ -174,6 +174,11 @@ reduction order, and stream sequencing are determinism hazards:
 - a constant-pressure (NPT) run with a per-step barostat drives the mean
   pressure to the configured target, and the box volume responds (differs from
   its initial value).
+- a constant-pressure (NPT) run with SPME electrostatics active runs stably and
+  the box volume responds to the barostat, exercising the reciprocal pipeline
+  under a changing box: the influence function is recomputed every step from the
+  live lattice and the reciprocal-space virial feeds the barostat's pressure, so
+  the long-range electrostatics track the box the barostat mutates.
 
 ## Out of Scope <!-- rq-77a0c4d3 -->
 
@@ -188,12 +193,11 @@ reduction order, and stream sequencing are determinism hazards:
   I/O suite covers.
 - **The following combinations and invariants are not part of this e2e layer:**
   the Nose-Hoover-chain, Andersen, and Berendsen thermostats driven through the
-  runner beyond the reproducibility checks above; a barostat combined with SPME
-  (box change against reciprocal space); Langevin combined with a per-step
-  barostat; end-to-end time-reversibility with per-step force recomputation
-  (`pipeline-reversibility.md` covers the lossless round trip); a SHAKE-specific
-  constrained-trajectory run; and an SI-versus-atomic unit-system equivalence
-  run.
+  runner beyond the reproducibility checks above; Langevin combined with a
+  per-step barostat; end-to-end time-reversibility with per-step force
+  recomputation (`pipeline-reversibility.md` covers the lossless round trip); a
+  SHAKE-specific constrained-trajectory run; and an SI-versus-atomic unit-system
+  equivalence run.
 - **Combinations the runner forbids.** The compatibility guards
   (`integration/framework.md`) reject, and the config suite already covers the
   rejection of: Langevin with an external thermostat or constraints; RESPA with
@@ -300,4 +304,12 @@ Feature: End-to-end pressure control
     Given a SystemBuilder from the disordered_lj_liquid preset with a per-step barostat at a target pressure away from the system's initial pressure
     When the simulation is run
     Then the final physics sample's volume differs from the initial volume
+
+  @rq-5a00037b
+  Scenario: An NPT run with SPME electrostatics runs stably and the box responds
+    Given a SystemBuilder from the ionic_lattice preset with SPME enabled and a per-step barostat at a target pressure away from the system's initial pressure
+    When the simulation is run
+    Then the run completes without error
+    And the final physics sample's volume differs from the initial volume
+    And every energy and pressure sample is finite
 ```

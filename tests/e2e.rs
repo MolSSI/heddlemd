@@ -178,3 +178,28 @@ fn npt_run_box_volume_responds_to_barostat() {
         "box volume did not respond to the barostat (v0={v0:e}, vlast={vlast:e})"
     );
 }
+
+#[test] // rq-5a00037b
+fn npt_run_with_spme_runs_stably_and_box_responds() {
+    let case = Case::new("npt_spme");
+    let cfg = SystemBuilder::ionic_lattice(6)
+        .with_spme()
+        .barostat("c-rescale", 1.0e8)
+        .n_steps(200)
+        .log_every(10)
+        .write(&case);
+    let summary = run_case(&cfg);
+    let phys = &summary.phases[0].physics;
+    // The reciprocal pipeline tracks the box the barostat mutates: the
+    // run completes, the volume responds, and no sample goes non-finite.
+    let v0 = phys.first().unwrap().volume;
+    let vlast = phys.last().unwrap().volume;
+    assert!(
+        (vlast - v0).abs() > 0.0,
+        "box volume did not respond under SPME (v0={v0:e}, vlast={vlast:e})"
+    );
+    assert!(
+        phys.iter().all(|p| p.total_energy.is_finite() && p.pressure.is_finite()),
+        "a non-finite energy or pressure sample appeared during the SPME NPT run"
+    );
+}
