@@ -55,33 +55,25 @@ the generated PTX or the kernel's compiled SASS and break the bit-exact
 match. A reference trajectory is only meaningful when checked back
 against the binary that produced it.
 
-## How it works
+## Why it works, in one paragraph
 
-A short summary; for the full design, read `docs/architecture.md`.
-
-The non-trivial part is force reduction. Floating-point addition is not
-associative, so a naive `atomicAdd` over neighbor contributions
-produces a different sum on every run depending on which thread arrived
-first. Three invariants close this:
-
-1. **Deterministic neighbor lists.** Neighbor lists are sorted by
-   particle index, so every particle always sees its neighbors in the
-   same order.
-2. **No atomic float accumulation.** Pair forces are written to
-   pre-allocated buffer slots at fixed offsets; each slot is owned by
-   exactly one thread.
-3. **Fixed-topology reduction.** Per-particle force sums use a
-   segmented reduction whose tree shape depends only on the neighbor
-   count, not on thread scheduling.
-
-The host-side reductions that produce log values (`compute_kinetic_energy`)
-sum in particle-ID order for the same reason.
+Floating-point addition is not associative: `(a + b) + c` and
+`a + (b + c)` can differ in the last bits. On a GPU, many threads
+contribute to each atom's force in an order that varies run to run, so
+simply summing them as they arrive would give a slightly different result
+each time. HeddleMD avoids this by fixing the summation order — every run
+adds the same contributions in the same order, with no order-dependent
+atomic operations — and no precision is sacrificed to do it (there is no
+fixed-point quantization). The same discipline applies to the sums that
+produce log quantities such as kinetic energy. The mechanics of how this
+is arranged on the GPU are an implementation matter; they will be covered
+in the planned developer guide, and today live in `docs/architecture.md`.
 
 ### Fast math and the guarantee
 
 `[simulation].fast_math` (default `true`) builds the JIT kernels with
 `nvcc`'s `--use_fast_math`. It does **not** weaken the same-GPU
-guarantee: the deterministic fixed-point force accumulation above does
+guarantee: the deterministic force accumulation above does
 not depend on the per-pair division/transcendental precision, so a
 `fast_math` run is still byte-identical to itself run-to-run. What
 changes is *which* f32 trajectory you get — a `fast_math = true` run and

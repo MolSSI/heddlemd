@@ -1,258 +1,227 @@
 # Features
 
-## Core guarantees
+This chapter is a capability map: the ensembles, force-field terms, and
+methods HeddleMD supports today, and — at the end — what it does not yet
+do. Every method below is selected and parameterised in the TOML config;
+see the [Configuration Reference](guide/configuration.md) for the fields.
 
-- **Bit-wise reproducibility on the same GPU.** Two runs of the same
-  config produce byte-identical trajectory and log files. The
-  guarantee is load-bearing and explicit: see
-  [Reproducibility](guide/reproducibility.md).
-- **Deterministic reduction ordering.** Pair forces are written to
-  pre-indexed buffer slots; per-particle sums use a fixed-topology
-  segmented reduction with no `atomicAdd` on floats.
-- **Single-stream CUDA execution.** Every kernel launch goes through
-  one `CudaStream`, so submission order is the execution order.
-- **Lossless time-reversible integration (opt-in).** A compensated
-  `(f32, f64)` mode for velocity-Verlet whose `x += v · dt` and
-  `v += a · dt/2` updates are exactly invertible; runs in this mode
-  can be stepped backward to the bit-exact starting state.
-- **Deterministic Maxwell-Boltzmann velocity sampling.** ChaCha8 RNG,
-  centre-of-mass momentum subtracted, rescaled so the realised
-  flat-3N temperature equals the configured target.
+## Ensembles and integrators
 
-## Hardware
+Choose an ensemble by composing an integrator with an optional
+thermostat and barostat in the phase's config.
 
-- **NVIDIA GPU only.** No CPU fallback, no non-NVIDIA backend.
-- **CUDA Toolkit 11.8 or newer.** Kernels are compiled to PTX at
-  build time and embedded in the binary.
-- **f32 storage and compute throughout.** An `f64` build path is
-  reserved as a future compile-time feature flag.
+- `velocity-verlet` — symplectic **NVE** time-stepping. Add a
+  `[phase.thermostat]` for **NVT** and/or a `[phase.barostat]` for
+  **NPT**.
+  - `lossless = true` — an opt-in variant whose position and velocity
+    updates are exactly invertible, so a run can be stepped backward to
+    its exact starting state. Incompatible with constraint groups. See
+    [Reproducibility](guide/reproducibility.md).
+- `langevin-baoab` — stochastic **NVT** via the Leimkuhler-Matthews
+  BAOAB splitting. Thermostats through the friction term; needs no
+  separate `[phase.thermostat]`.
+- `mtk-npt` — deterministic extended-system **NPT** (Martyna-Tobias-Klein,
+  isotropic). Integrates its own Nosé-Hoover chains and cell degree of
+  freedom, so it needs neither a separate thermostat nor barostat.
 
-## Integrators
+Initial velocities, when the starting-structure file omits them, are
+drawn from a **Maxwell-Boltzmann distribution** at the configured
+temperature, with centre-of-mass momentum removed and the ensemble
+rescaled to hit the target temperature exactly.
 
-- `velocity-verlet` — symplectic NVE core. Compose with
-  `[phase.thermostat]` and/or `[phase.barostat]` for NVT / NpT.
-  - `lossless = true` — opt-in compensated-summation variant; enables
-    bit-exact time reversal. Incompatible with constraint groups.
-- `langevin-baoab` — stochastic NVT via the Leimkuhler-Matthews BAOAB
-  splitting. Owns its own thermostat.
-- `mtk-npt` — deterministic extended-system NpT (Martyna-Tobias-Klein,
-  isotropic). Owns both its thermostat (Nosé-Hoover chains on
-  particles and cell) and its barostat (extended-system cell).
+## Thermostats
 
-## Thermostats (compose with `velocity-verlet`)
+Compose any of these with `velocity-verlet` to sample the canonical
+ensemble (or to equilibrate).
 
-- `nose-hoover-chain` — deterministic NVT (Martyna-Klein-Tuckerman
-  1992); configurable chain length, Suzuki-Yoshida sub-stepping, RESP
-  sub-cycling. Adds a `nhc_conserved` column to the log.
-- `csvr` — stochastic canonical sampling velocity rescaling
+- `nose-hoover-chain` — deterministic canonical sampling
+  (Martyna-Klein-Tuckerman 1992). Configurable chain length,
+  Suzuki-Yoshida sub-stepping, and RESPA sub-cycling; reports a
+  conserved-quantity column (`nhc_conserved`) you can watch for drift.
+- `csvr` — stochastic canonical-sampling velocity rescaling
   (Bussi-Donadio-Parrinello 2007).
-- `andersen` — per-particle stochastic Maxwell-Boltzmann resampling
-  (Andersen 1980); per-step collision probability
-  `clamp(ν · dt, 0, 1)`.
-- `berendsen` — deterministic weak-coupling. **Equilibration only** —
-  does not sample the canonical ensemble.
+- `andersen` — stochastic per-particle Maxwell-Boltzmann resampling
+  (Andersen 1980), with a configurable collision rate.
+- `berendsen` — weak-coupling temperature control. **Equilibration
+  only** — it relaxes to the target temperature quickly but does not
+  sample the canonical ensemble.
 
-## Barostats (compose with `velocity-verlet`)
+## Barostats
 
-- `c-rescale` — stochastic isotropic cell-rescaling barostat
-  (Bernetti-Bussi 2020). Samples the canonical NpT distribution exactly.
-- `monte-carlo` — Metropolis Monte-Carlo barostat: periodic isotropic
-  trial volume moves that rigidly scale molecular centres of mass and
-  accept/reject against the NpT weight. Samples the canonical NpT
-  distribution, needs no per-step virial, and (because it scales whole
-  molecules) composes cleanly with rigid-water constraints.
-- `berendsen` — deterministic isotropic weak-coupling barostat.
-  **Equilibration only.**
+Compose with `velocity-verlet` (and a thermostat) for NPT.
+
+- `c-rescale` — stochastic isotropic cell-rescaling (Bernetti-Bussi
+  2020). Samples the NPT distribution exactly.
+- `monte-carlo` — Metropolis Monte-Carlo barostat: periodic trial volume
+  moves that rigidly scale molecular centres of mass and accept/reject
+  against the NPT weight. Needs no instantaneous virial, and because it
+  scales whole molecules it composes cleanly with rigid-water
+  constraints.
+- `berendsen` — weak-coupling pressure control. **Equilibration only.**
 
 ## Energy minimization
 
-- `steepest-descent` — adaptive-step steepest descent (GROMACS-style):
-  per-iteration trial `x_new = x + step · F / F_max`, then accept and
-  grow `step` on energy decrease or reject and shrink `step` on
-  increase. Convergence criteria are configurable (max-force-per-atom,
-  relative energy-change tolerance, max-iterations); non-convergence
-  is a hard error (exit code `2`). Configured via a `[[minimization]]`
-  phase, freely interleavable with `[[phase]]` blocks. Particle
-  velocities and the simulation box pass through the phase
-  untouched. Writes a per-iteration `.minlog` CSV with `iter, energy,
-  max_force, step, accepted` columns.
-- **Constraint-aware.** When the topology declares constraint groups,
-  the minimizer projects every trial position back onto the constraint
-  manifold before evaluating the trial energy.
+- `steepest-descent` — adaptive-step steepest descent:
+  each iteration takes a trial step down the force, accepting and
+  growing the step on an energy decrease or rejecting and shrinking it
+  on an increase. Convergence criteria (max force per atom, relative
+  energy change, iteration cap) are all configurable. Declared as a
+  `[[minimization]]` phase that interleaves freely with MD `[[phase]]`
+  blocks; velocities and the box pass through untouched, so a subsequent
+  MD phase starts from a relaxed configuration. Writes a per-iteration
+  log (energy, max force, step size, accept/reject).
+- **Constraint-aware.** When the topology declares rigid groups, every
+  trial configuration is projected back onto the constraint manifold
+  before its energy is evaluated.
 
-## Pair potentials (short-range, non-bonded)
+## Non-bonded interactions
 
-- **Lennard-Jones** — per type-pair `(σ, ε)`, cutoff with CHARMM-style
-  C¹ switching function over `[r_switch, cutoff]` (or hard cutoff when
-  `r_switch = cutoff`). This is the only `[[pair_interactions]]`
-  potential; electrostatics is configured globally through SPME (below),
-  not per type pair.
+### Van der Waals
 
-## Electrostatics
+- **Lennard-Jones** — per type-pair `(σ, ε)`, with a switching function
+  that ramps the interaction smoothly to zero over `[r_switch, cutoff]`
+  (continuous in value and first derivative, so energy and forces have no
+  discontinuity at the cutoff), or a hard cutoff when
+  `r_switch = cutoff`.
 
-- **Smooth Particle-Mesh Ewald (`[spme]`)** — real-space `erfc`-screened
-  pair force plus reciprocal-space spread / FFT / multiply / IFFT /
-  gather pipeline. Per-particle charges come from
-  `[[particle_types]].charge`. Configurable splitting parameter `α`,
-  real-space cutoff, FFT grid, and B-spline order (`4, 5, 6, 7, 8`).
-  Requires the `cell-list` neighbor mode. (The earlier top-level
-  `[coulomb]` truncated-Coulomb slot has been retired; a config that
-  declares it is rejected at load time — use `[spme]`.)
-- **cuFFT determinism smoke test** at startup when SPME is configured,
-  surfaces a `CuFftNonDeterministic` error before any integration step
-  if the FFT library would break bit-exactness on the current GPU.
+### Electrostatics
+
+- **Smooth particle-mesh Ewald (SPME)** — the full long-range treatment:
+  a real-space screened-Coulomb term plus a reciprocal-space mesh
+  contribution. Per-particle charges come from
+  `[[particle_types]].charge`. You control the Ewald splitting parameter
+  `α`, the real-space cutoff, the FFT grid, and the B-spline
+  interpolation order (`4`–`8`). Requires the cell-list neighbor mode.
+
+  A short determinism self-test runs at startup when SPME is configured,
+  so a GPU whose FFT library would break reproducibility is caught
+  before any dynamics run rather than after.
 
 ## Bonded interactions
 
-- **Bonds: harmonic** — `U = ½ k (r − r₀)²`; `(k, r₀)` per
-  `[[bond_types]]` entry with `potential = "harmonic"`. The stiff-spring
-  form used by the AMBER and CHARMM force fields.
-- **Bonds: Morse** — `(D_e, a, r_e)` per `[[bond_types]]` entry with
-  `potential = "morse"`. Harmonic and Morse bonds may coexist in one
-  system; each bond is routed to the matching potential by its bond type.
-- **Angles: harmonic** — `(k_θ, θ_0)` per `[[angle_types]]` entry.
-- **Dihedrals: periodic** — `U = k_φ · (1 + cos(n·φ − φ₀))`;
-  `(k_φ, n, φ₀)` per `[[dihedral_types]]` entry with
-  `potential = "periodic"` (multiplicity `n ∈ [1, 6]`). A multi-term
-  torsion is expressed by naming the same `(i, j, k, l)` quadruple once
-  per Fourier term.
-- **Per-bond / per-angle exclusions** auto-derived (1-2 and 1-3) from
-  the topology file, with optional explicit overrides.
-- **Long-range / 1-4 LJ + Coulomb scaling** in the four-column
-  exclusion form; periodic dihedrals additionally derive scaled 1-4
-  exclusions from their per-type `scale_lj_14` / `scale_coul_14`.
+Bonded terms are declared in an optional topology file and parameterised
+by named type entries in the config.
+
+- **Bonds** — harmonic (`U = ½ k (r − r₀)²`, the usual stiff-spring
+  bond) and Morse (`U = D_e (1 − e^{−a(r−r_e)})²`). A system may mix
+  both; each bond is routed to its potential by type.
+- **Angles** — harmonic (`U = ½ k_θ (θ − θ₀)²`).
+- **Dihedrals** — periodic torsions (`U = k_φ (1 + cos(n·φ − φ₀))`,
+  multiplicity `n ∈ [1, 6]`). Express a multi-term torsion by naming the
+  same quadruple once per Fourier term.
+- **Exclusions** — 1-2 and 1-3 neighbours are excluded automatically
+  from the non-bonded interaction, with explicit per-pair overrides
+  available. Periodic dihedrals additionally introduce scaled **1-4 LJ
+  and Coulomb** interactions with per-type scale factors.
 
 ## Rigid constraints
 
-Constraint groups are declared per `[[constraint_types]]` entry (its
-`kind` field selects the algorithm) and instantiated by `[constraints]`
-rows in the topology file.
+Constraint groups let you hold selected internal coordinates rigid — the
+standard way to run rigid-water models and to take the longer timesteps
+that come with removing the fastest bond vibrations.
 
-- `settle` — analytical (non-iterative) constraint for a symmetric
-  three-atom rigid water molecule (Miyamoto & Kollman 1992). Holds the
-  three intramolecular distances (`O–H₁`, `O–H₂`, `H₁–H₂`) rigid with a
-  closed-form position reset and a direct 3×3 velocity solve — one thread
-  per molecule, no iteration, no tolerance. The fast path for rigid
-  SPC/E, TIP3P, and similar water. A constraint type carries `d_OH` and
-  `d_HH` (with `d_HH < 2·d_OH`); each `[constraints]` row lists the three
-  atoms in canonical order (oxygen, then the two hydrogens). See
-  `rqm/integration/settle.md`.
-- `shake` — iterative SHAKE (Gauss-Seidel position projection) paired
-  with iterative RATTLE for the matching velocity projection. The
-  general fallback for arbitrary rigid clusters up to 8 atoms / 12
-  constraint pairs per group, with per-pair target distances declared on
-  the constraint type. A constraint type carries `atoms = <N>` and a
-  `constraints = [{ i, j, d }, ...]` array; each `[constraints]`
-  topology row then lists the global atom indices for one group of
-  that type. See `rqm/integration/shake.md`.
-- Both algorithms are compatible with the lossy `velocity-verlet`
-  integrator and with the `steepest-descent` minimizer (position-only
-  projection in the latter). Langevin BAOAB, MTK NpT, and the lossless
-  velocity-Verlet variant reject topologies that declare any constraint
-  group.
+- `settle` — analytic (non-iterative) constraint for a symmetric
+  three-atom rigid water molecule (Miyamoto & Kollman 1992). The fast
+  path for the common rigid three-site water models (such as SPC/E and
+  TIP3P): it holds the three intramolecular distances rigid with a
+  closed-form solve, no iteration, no tolerance.
+- `shake` — iterative SHAKE (position) paired with RATTLE (velocity) for
+  arbitrary rigid clusters up to 8 atoms / 12 constraint pairs per
+  group, with per-pair target distances on the constraint type.
 
-## Neighbor lists
-
-- `cell-list` (default) — spatial hashing with skin distance, periodic
-  rebuild triggered by a per-step max-displacement check. Configurable
-  `r_skin`. The packed-neighbour buffers size themselves to the actual
-  interaction count plus a growth margin, so there is no per-particle
-  `max_neighbors` cap to configure.
-- `all-pairs` — O(N²) kernel, no neighbor list. Useful for small
-  systems and as a reference.
-- **Pre-flight box-vs-cutoff sanity check.** The runner verifies
-  `min_perpendicular_width ≥ 3 · (cutoff_max + r_skin)` before any
-  integration step.
+Both work with the standard `velocity-verlet` integrator and the
+`steepest-descent` minimizer. The Langevin, MTK-NPT, and lossless
+velocity-Verlet integrators do not currently accept constraint groups.
 
 ## Boundary conditions
 
-- **Orthorhombic periodic boxes.**
-- **Triclinic periodic boxes** (lower-triangular lattice matrix; six
-  free parameters `lx, ly, lz, xy, xz, yz`).
-- **Minimum-image convention** for pair distance evaluation.
-- **Wrapped positions in trajectory output**, plus an optional
-  per-particle integer image triple `(image_a, image_b, image_c)` so
-  consumers can reconstruct unwrapped trajectories exactly.
+- **Orthorhombic and triclinic** periodic boxes (the triclinic box takes
+  the six lower-triangular lattice parameters `lx, ly, lz, xy, xz, yz`).
+- **Minimum-image convention** for pair distances.
+- **Wrapped positions in the trajectory**, with an optional per-particle
+  integer image triple so you can reconstruct unwrapped coordinates
+  exactly for diffusion and other unwrapped analyses.
 
-## I/O
+## Finding neighbours
 
-- **Inputs**: TOML config (`*.in.toml`), extended-XYZ init file
-  (`*.in.xyz`), optional `.in.topology` file. Config-filename
-  convention enforced at load time; defaults for output paths derive
-  from the config root (see
-  [Configuration Reference](guide/configuration.md#config-filename-convention)).
-- **Outputs** (one set per `[[phase]]`):
-  - `*.out.<phase>.xyz` — extended-XYZ trajectory, self-describing
-    per frame, re-loadable as an init file.
-  - `*.out.<phase>.log` — CSV with
-    `step,time,kinetic_energy,temperature`, plus any
-    integrator-supplied extras (e.g. `nhc_conserved`).
-  - `*.out.<phase>.timings` — fixed-width per-stage performance
-    summary (kernel + host).
-- **Pre-flight overwrite refusal.** The runner refuses to start when
-  any output file (across all phases) already exists.
-- **Restart from any trajectory frame.** Trajectory frames are valid
-  init files; lift one out and point a fresh config at it.
+Two schemes enumerate the short-range non-bonded pairs:
 
-## Configuration and ergonomics
+- `cell-list` (default) — spatial cell list with a skin distance, rebuilt
+  only when an atom has drifted far enough to need it. The `r_skin`
+  margin trades rebuild frequency against pairs-per-step and is
+  configurable. Buffers size themselves to the actual pair count, so
+  there is no per-particle neighbour cap to tune.
+- `all-pairs` — the O(N²) direct sum, with no neighbor list. Convenient
+  for small systems and as a reference.
 
-- **TOML config** with a top-level `units = "si" | "atomic"` selector
-  (SI by default; `atomic` accepts and emits Hartree atomic units for
-  the config, init file, and every output). Strict per-field validation.
-- **Tagged-enum selection** for integrator / thermostat / barostat /
-  constraint kinds; per-kind parameter validation via builder traits.
-- **Execution knobs** under `[simulation]`: `fast_math` (default `true` —
-  builds JIT kernels with `--use_fast_math`; stays bit-reproducible
-  run-to-run), `graph_batch_size` (CUDA-graph step-replay batch, default
-  `5`), and `cuda_graphs_disable` (per-step launch loop with full
-  per-kernel timings, for diagnostics).
-- **Open registries.** Custom integrator, thermostat, barostat,
-  constraint, potential, and **analysis** builders can be registered
-  alongside the built-ins via `Registries::register_*`.
-- **Three CLI subcommands**: `heddlemd run <config>` to execute,
-  `heddlemd lint <config> [--with-gpu]` to validate inputs without
-  running, and `heddlemd analyze <analysis-path>` to post-process a
-  trajectory. See [CLI Reference](reference/cli.md). No environment
-  variables — every parameter affecting the trajectory lives in the
-  config.
-- **Input linter** for HPC contexts. `heddlemd lint` runs the
-  setup-phase checks (TOML parse, filename convention, init-file
-  load, topology load, pre-existing-output detection, box-vs-cutoff
-  geometry) without touching the GPU; an optional `--with-gpu` flag
-  extends the lint through `init_device`, slot construction, and
-  force-field allocation. Catches input errors on a login node before
-  a long submission queue runs the job. Dispatches on file extension:
-  `.in.toml` runs the simulation lint, `.in.analysis` runs the
-  analyze lint.
-- **In-tree post-processing**: `heddlemd analyze` reads a
-  `<root>.in.analysis` file, walks the trajectory frame-by-frame
-  with `first_frame`/`last_frame`/`stride` selection, and writes one
-  CSV per declared analysis. CPU-only in v1; outputs are byte-
-  identical across runs. Ships the radial distribution function
-  (`rdf`) as the first built-in kind; see
-  [Analysis](guide/analysis.md).
+Before any dynamics run, the engine checks that the box is large enough
+for the chosen cutoff (minimum perpendicular width ≥ 3 · (cutoff +
+`r_skin`)), so a too-small box is reported up front.
 
-## Diagnostics
+## Input and output
 
-- **Always-on per-stage timings.** Kernel launches timed with CUDA
-  events on the default stream; host stages timed with
-  `std::time::Instant`. ~1 µs overhead per CUDA event.
-- **Structured error reporting** via `thiserror`. Every error type has
-  a `Display` rendering, a `Debug` rendering, and a walkable cause
-  chain via `source()`.
+- **Inputs**: a TOML config (`*.in.toml`), an extended-XYZ
+  starting-structure file (`*.in.xyz`), and an optional topology file.
+  Output filenames default from the config's name, so a directory
+  listing cleanly separates inputs (`*.in.*`) from generated outputs
+  (`*.out.*`).
+- **Trajectory** (`*.out.<phase>.xyz`) — self-describing extended-XYZ
+  frames, each a valid starting-structure file, so any frame can be
+  lifted out to **restart** a run.
+- **Log** (`*.out.<phase>.log`) — a CSV of step, time, kinetic energy,
+  and temperature, plus any conserved-quantity columns the chosen
+  thermostat or barostat contributes. Loads directly into pandas.
+- **Timings** (`*.out.<phase>.timings`) — a per-stage wall-clock
+  performance summary.
+- **Overwrite protection** — the runner refuses to start if any output
+  file already exists, so a run never silently clobbers previous
+  results.
+- **Units** — SI by default; set `units = "atomic"` to work in Hartree
+  atomic units. The choice applies uniformly to the config, the
+  starting structure, and every output file.
 
-## Out of scope (today)
+## Trajectory analysis
 
-The following are **not** part of the engine in its current form:
+- `heddlemd analyze` post-processes a trajectory in place, driven by a
+  small `.in.analysis` file. It is CPU-only, cheap enough to run on a
+  login node, and its output is byte-identical across runs.
+- The **radial distribution function** (`rdf`) between any two particle
+  types ships built-in; see [Analysis](guide/analysis.md). Custom
+  builds can register additional analyses alongside it.
 
-- f64 storage / f64 force kernels (reserved for a future feature flag).
-- Buckingham, FENE, Coulomb-Wolf, or other pair/bond potentials beyond
-  those listed above.
+## Reproducibility
+
+- **Bit-wise reproducibility on the same GPU.** Two runs of the same
+  config produce byte-identical trajectory and log files. This covers
+  the trajectory, the log, initial-velocity generation, and any
+  stochastic thermostat or barostat (each seeded explicitly in the
+  config). The full scope and its limits — cross-hardware differences,
+  the intentionally non-deterministic timings file — are in
+  [Reproducibility](guide/reproducibility.md).
+
+## Requirements
+
+- **NVIDIA GPU**, with the CUDA Toolkit 11.8 or newer available at build
+  time. The engine is GPU-only: there is no CPU or non-NVIDIA execution
+  path.
+- **Single precision (`f32`)** for positions, velocities, and forces
+  throughout. This is well suited to short-range condensed-phase
+  workloads and maximises throughput; a double-precision build path is
+  reserved for the future.
+- **Built from source.** See [Installation](getting-started/installation.md).
+
+## Not yet supported
+
+The following are outside the engine's current scope:
+
+- Double-precision storage and force kernels (reserved for a future
+  build option).
+- Pair and bond potentials beyond those above (e.g. Buckingham, FENE,
+  Coulomb-Wolf).
 - Ryckaert-Bellemans and improper dihedrals (only the periodic torsion
-  form is implemented today).
-- Anisotropic / flexible-cell NpT.
-- Cross-hardware bit-wise reproducibility (CUDA permits FMA
-  contraction differences between GPUs; only same-GPU runs match
-  byte-for-byte).
-- Binary trajectory formats (NetCDF, HDF5), gzip/xz compression.
+  form exists today).
+- Anisotropic or fully flexible-cell NPT.
+- Bit-wise reproducibility *across different hardware* — the guarantee is
+  same-GPU only (see [Reproducibility](guide/reproducibility.md)).
+- Binary trajectory formats (NetCDF, HDF5) and compressed output.
 - CPU or non-NVIDIA execution.

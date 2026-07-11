@@ -1,3 +1,12 @@
+<!--
+Staged for the planned developer guide, not part of the user-facing book.
+This page documents GPU kernel launch/occupancy internals — material for
+developers building or tuning the engine, not for users running
+simulations. It was moved out of book/src when the user guide was refocused
+on capabilities; fold it into the developer documentation when that is
+written.
+-->
+
 # Compile-Time Tuning Constants
 
 A handful of constants that govern GPU kernel launch configuration and

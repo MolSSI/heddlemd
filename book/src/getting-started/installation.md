@@ -7,16 +7,14 @@ HeddleMD is built from source. There are no pre-built binaries.
 - **NVIDIA GPU** with a recent driver. The engine is CUDA-only; there is no
   CPU or non-NVIDIA fallback.
 - **CUDA Toolkit 11.8 or newer.** `nvcc` must be on `PATH` so the build
-  script can compile the kernel sources under `kernels/` to PTX. Verify
-  with:
+  can compile the engine's CUDA kernels. Verify with:
   ```
   nvcc --version
   ```
 - **Rust** (Cargo edition 2024). Install via [rustup](https://rustup.rs/).
 
-The build script invokes `nvcc` once per `.cu` file at `cargo build` time
-and embeds the resulting PTX into the binary; nothing extra needs to be
-installed at runtime.
+The kernels are compiled once at `cargo build` time and embedded in the
+binary; nothing extra needs to be installed at runtime.
 
 ## Build
 

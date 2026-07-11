@@ -20,4 +20,3 @@
 # Reference
 
 - [Command-Line Interface](./reference/cli.md)
-- [Compile-Time Tuning Constants](./reference/compile-time-constants.md)

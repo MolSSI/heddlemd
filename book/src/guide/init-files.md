@@ -6,9 +6,9 @@ type names, positions, and (optionally) velocities and integer image
 flags. Per-type properties such as mass and charge live in the
 [TOML config](configuration.md), not the init file.
 
-The format is a restricted subset of the extended-XYZ convention used by
-ASE, OVITO, and VMD — restricted because the runner is strict about what
-it will accept.
+The format is a restricted subset of the widely-used extended-XYZ
+convention — restricted because the runner is strict about what it will
+accept.
 
 ## File structure
 

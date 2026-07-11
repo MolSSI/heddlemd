@@ -376,7 +376,7 @@ optional with documented defaults.
 
 ##### `kind = "steepest-descent"`
 
-Adaptive-step steepest descent (GROMACS-style). Each iteration
+Adaptive-step steepest descent. Each iteration
 proposes a trial position `x_trial = x + step · F / F_max`, where
 `F_max = max_i ||F_i||`; if the trial energy is lower, the step is
 accepted and `step` is multiplied by `step_increase` (capped at
@@ -435,7 +435,7 @@ Common fields:
 | `between`   | [string; 2] | yes      | —              | Unordered pair of type names. |
 | `potential` | string      | yes      | —              | Currently only `"lennard-jones"`. |
 | `cutoff`    | f64         | yes      | —              | Cutoff distance in m. |
-| `r_switch`  | f64         | no       | `0.9 · cutoff` | Inner radius of the CHARMM-style C¹ switching function applied over `[r_switch, cutoff]`. `r_switch = cutoff` selects the hard-cutoff degenerate case. |
+| `r_switch`  | f64         | no       | `0.9 · cutoff` | Inner radius of the switching function applied over `[r_switch, cutoff]` (continuous in value and first derivative, so there is no force discontinuity at the cutoff). `r_switch = cutoff` selects the hard-cutoff degenerate case. |
 
 Fields for `potential = "lennard-jones"`:
 
@@ -477,7 +477,7 @@ by default; declared-but-unused entries are permitted. Every entry has a
 Two-atom bonded potentials. A system may freely mix bond potentials;
 each bond is routed to the matching slot by its type.
 
-`potential = "harmonic"` — `U = ½ k (r − r₀)²` (AMBER/CHARMM stiff
+`potential = "harmonic"` — `U = ½ k (r − r₀)²` (harmonic stiff
 spring):
 
 | Field | Type | Required | Notes |
