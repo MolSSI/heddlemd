@@ -214,7 +214,7 @@ constructed.
 `BondedForceFragment` whose functor implements the per-bond Morse
 contribution. The fragment defines a `__device__` functor
 `MorsePairFunctor` whose member function `evaluate(r2, r,
-bond_type_index, dx, dy, dz, fmag, u_k, w_k)` computes:
+bond_type_index, dx, dy, dz, fmag, u_k)` computes:
 
 1. Reads `De = bond_de[bond_type_index]`,
    `a = bond_a[bond_type_index]`, `re = bond_re[bond_type_index]`
@@ -223,13 +223,14 @@ bond_type_index, dx, dy, dz, fmag, u_k, w_k)` computes:
    `fmag = 2 * De * a * (1 - e) * e / r` (the trailing `/ r`
    produces the per-component factor when multiplied by
    `(dx, dy, dz)` in the composed kernel's outer-loop body).
-3. Writes `u_k = De * (1 - e)^2` and
-   `w_k = fmag * r2` (the bond's full potential energy and scalar
-   virial; the outer-loop body distributes the `0.5` symmetry
-   factor when writing to the scratch buffer).
+3. Writes `u_k = De * (1 - e)^2` (the bond's full potential energy).
+   The functor emits no scalar virial; the outer-loop body derives
+   the bond virial as `W_k = fmag · r²` and distributes the `0.5`
+   symmetry factor when writing energy and virial to the scratch
+   buffer.
 
 When `r == 0` exactly (degenerate overlapping atoms), the functor
-writes `fmag = 0`, `u_k = 0`, `w_k = 0` rather than producing
+writes `fmag = 0`, `u_k = 0` rather than producing
 NaN. This is a defensive guard; physical Morse simulations never
 reach `r == 0` because the exponential blows up at small `r`. The
 outer-loop body then writes zeros to all ten scratch-buffer slots

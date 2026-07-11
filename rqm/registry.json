@@ -17134,6 +17134,18 @@
     "title": "apply_position_projection_only is a bit-exact identity on the manifold",
     "type": "scenario"
   },
+  "rq-7d64da58": {
+    "decl": "Scenario: Composer derives the per-pair scalar virial from the force factor",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Composer derives the per-pair scalar virial from the force factor",
+    "type": "scenario"
+  },
   "rq-7d831804": {
     "decl": "Scenario: Temperature uses k_B = 1 and N_thermal_dof as divisor",
     "file": "io/log-output",
@@ -19842,6 +19854,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-932d37a2": {
+    "decl": "Scenario: A dihedral functor emits no virial and the composer derives it from the forces",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A dihedral functor emits no virial and the composer derives it from the forces",
+    "type": "scenario"
   },
   "rq-9331ede2": {
     "decl": "- `IntegratorBuilder::supports_constraints(&self, params: &toml::Value) -> bool`",
@@ -22815,6 +22839,18 @@
     "refs": [],
     "title": "- The C2R inverse transform `rho_hat → V` is invoked via",
     "type": "anchor"
+  },
+  "rq-a997a963": {
+    "decl": "Scenario: An angle functor emits no virial and the composer derives it from the forces",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An angle functor emits no virial and the composer derives it from the forces",
+    "type": "scenario"
   },
   "rq-a99ca751": {
     "decl": "Scenario: Cell index of a position outside the primary cell wraps before binning",
@@ -32139,6 +32175,18 @@
     "title": "Two identical constrained velocity-Verlet runs are byte-identical",
     "type": "scenario"
   },
+  "rq-ef17db0f": {
+    "decl": "Scenario: A multi-fragment per-pair virial is the sum of the fragments' virials",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A multi-fragment per-pair virial is the sum of the fragments' virials",
+    "type": "scenario"
+  },
   "rq-ef1feb38": {
     "decl": "### Types",
     "file": "integration/berendsen",
@@ -34532,6 +34580,18 @@
     ],
     "title": "LintStatus",
     "type": "api-item"
+  },
+  "rq-ff5a04bc": {
+    "decl": "Scenario: A bonded functor emits no virial and the composer derives it",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A bonded functor emits no virial and the composer derives it",
+    "type": "scenario"
   },
   "rq-ff707382": {
     "decl": "Scenario: n_steps = 0 writes only step-0 outputs",

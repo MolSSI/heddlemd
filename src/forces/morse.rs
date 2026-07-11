@@ -329,7 +329,7 @@ fn is_morse(bond_types: &[BondTypeConfig], ti: u32) -> bool {
 
 /// Morse per-bond force fragment for the JIT-composed bonded module.
 /// The functor exposes `evaluate(r2, r, bond_type_index, dx, dy, dz,
-/// fmag, u_k, w_k)` per the contract in
+/// fmag, u_k)` per the contract in
 /// `rqm/forces/jit-composed-intramolecular.md`.
 pub fn morse_bonded_force_fragment() -> BondedForceFragment {
     let functor_source = r#"
@@ -343,10 +343,9 @@ struct MorsePairFunctor {
         unsigned int bond_type_index,
         Real dx, Real dy, Real dz,
         Real &fmag,
-        Real &u_k,
-        Real &w_k) const
+        Real &u_k) const
     {
-        (void) dx; (void) dy; (void) dz;
+        (void) dx; (void) dy; (void) dz; (void) r2;
         Real de = bond_de[bond_type_index];
         Real a  = bond_a[bond_type_index];
         Real re = bond_re[bond_type_index];
@@ -355,10 +354,10 @@ struct MorsePairFunctor {
         // F_radial = -dU/dr = -2*De*a*(1 - e)*e. fmag here is the
         // per-component factor produced by dividing by r (so that
         // the outer-loop body multiplying by (dx, dy, dz) gives the
-        // Cartesian force on atom_i).
+        // Cartesian force on atom_i). The scalar virial W_k = fmag * r2
+        // is derived by the composed kernel, not the functor.
         fmag = -R(2.0) * de * a * one_minus_e * e / r;
         u_k  = de * one_minus_e * one_minus_e;
-        w_k  = fmag * r2;
     }
 };
 "#;

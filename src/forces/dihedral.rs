@@ -456,8 +456,7 @@ struct PeriodicDihedralFunctor {
         Real &fjx, Real &fjy, Real &fjz,
         Real &fkx, Real &fky, Real &fkz,
         Real &flx, Real &fly, Real &flz,
-        Real &u_m,
-        Real &w_m) const
+        Real &u_m) const
     {
         // m = b1 x b2, n_vec = b2 x b3 with b3 = r_k - r_l (dx_kl).
         Real mx = dy_ij * dz_kj - dz_ij * dy_kj;
@@ -475,7 +474,7 @@ struct PeriodicDihedralFunctor {
             fjx = R(0.0); fjy = R(0.0); fjz = R(0.0);
             fkx = R(0.0); fky = R(0.0); fkz = R(0.0);
             flx = R(0.0); fly = R(0.0); flz = R(0.0);
-            u_m = R(0.0); w_m = R(0.0);
+            u_m = R(0.0);
             return;
         }
 
@@ -516,15 +515,9 @@ struct PeriodicDihedralFunctor {
         fkz = -s * fiz + (t - R(1.0)) * flz;
 
         u_m = k * (R(1.0) + cos_d);
-        // Virial with j as reference: W = Σ_a (r_a − r_j)·F_a, i.e.
-        //   W = b1·F_i + 0·F_j + b2·F_k + (b2 − b3)·F_l
-        // (where r_l − r_j = (r_l − r_k) + (r_k − r_j) = −b3 + b2).
-        Real b2_minus_b3_x = dx_kj - dx_kl;
-        Real b2_minus_b3_y = dy_kj - dy_kl;
-        Real b2_minus_b3_z = dz_kj - dz_kl;
-        w_m = (dx_ij * fix + dy_ij * fiy + dz_ij * fiz)
-            + (dx_kj * fkx + dy_kj * fky + dz_kj * fkz)
-            + (b2_minus_b3_x * flx + b2_minus_b3_y * fly + b2_minus_b3_z * flz);
+        // The scalar virial W_m = b1·F_i + b2·F_k + (b2 − b3)·F_l (with
+        // b3 = r_k − r_l = dx_kl) is derived by the composed kernel from
+        // these forces and the bond displacements, not the functor.
     }
 };
 "#;

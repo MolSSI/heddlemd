@@ -122,8 +122,7 @@ functor plus identifying metadata. The snippet:
            unsigned int bond_type_index,
            Real dx, Real dy, Real dz,
            Real &fmag,
-           Real &u_k,
-           Real &w_k) const;
+           Real &u_k) const;
    };
    ```
 
@@ -139,11 +138,12 @@ functor plus identifying metadata. The snippet:
    - `fmag` — the scalar force factor along the displacement
      direction (so that `F_on_i = fmag · (dx, dy, dz)`).
    - `u_k` — the bond's full potential energy `U_k`.
-   - `w_k` — the bond's scalar virial `W_k = fmag · r²`.
 
-   The outer-loop body computes the per-atom triples
-   `± fmag · (dx, dy, dz)` and writes them along with `0.5 · u_k` /
-   `0.5 · w_k` into the slot's scratch buffer.
+   The functor does not compute a scalar virial. The outer-loop body
+   computes the per-atom triples `± fmag · (dx, dy, dz)`, derives the
+   bond's scalar virial as `W_k = fmag · r²` from the force factor and
+   the separation, and writes `± fmag · (dx, dy, dz)` along with
+   `0.5 · u_k` / `0.5 · W_k` into the slot's scratch buffer.
 
 2. Uses only the precision-policy shims from `precision.cuh`
    (`Real`, `R(x)`, `Real_sqrt`, `Real_exp`, etc.). A fragment
@@ -151,7 +151,7 @@ functor plus identifying metadata. The snippet:
 
 3. Carries no static state. The functor is a pure function from
    `(r2, r, bond_type_index, dx, dy, dz, parameters)` to
-   `(fmag, u_k, w_k)`.
+   `(fmag, u_k)`.
 
 The fragment also carries `entry_point_args` and `functor_init_source`,
 both generated from the slot's `KernelArgSchema` (see *Argument
@@ -173,8 +173,7 @@ struct <functor_struct_name> {
         unsigned int angle_type_index,
         Real &fix, Real &fiy, Real &fiz,
         Real &fkx, Real &fky, Real &fkz,
-        Real &u_m,
-        Real &w_m) const;
+        Real &u_m) const;
 };
 ```
 
@@ -191,13 +190,13 @@ Outputs:
   Force on atom `j` is computed by the outer-loop body as
   `-(F_i + F_k)`.
 - `u_m` — the angle's full potential energy `U_m`.
-- `w_m` — the angle's scalar virial
-  `W_m = r_ij · F_i + r_kj · F_k`.
 
-The outer-loop body writes the three per-atom triples (one each
-for `i`, `j`, `k`) along with `u_m / 3` / `w_m / 3` (one-third
-shares; see `harmonic-angle.md`'s *Force Accumulation*) into the
-slot's scratch buffer.
+The functor does not compute a scalar virial. The outer-loop body
+derives the angle's scalar virial from the functor's forces and the
+leg displacements as `W_m = r_ij · F_i + r_kj · F_k`, and writes the
+three per-atom triples (one each for `i`, `j`, `k`) along with
+`u_m / 3` / `W_m / 3` (one-third shares; see `harmonic-angle.md`'s
+*Force Accumulation*) into the slot's scratch buffer.
 
 The fragment's `entry_point_args` and `functor_init_source` are
 generated from the slot's `KernelArgSchema` exactly as in the bonded
@@ -218,8 +217,7 @@ struct <functor_struct_name> {
         Real &fjx, Real &fjy, Real &fjz,
         Real &fkx, Real &fky, Real &fkz,
         Real &flx, Real &fly, Real &flz,
-        Real &u_m,
-        Real &w_m) const;
+        Real &u_m) const;
 };
 ```
 
@@ -242,11 +240,12 @@ Outputs:
   uses the explicit per-atom gradients of the torsion angle, all
   four of which the functor knows).
 - `u_m` — the dihedral's full potential energy `U_m`.
-- `w_m` — the dihedral's scalar virial
-  `W_m = b1 · F_i + b2 · F_k + (b2 + b3) · F_l`.
 
-The outer-loop body writes the four per-atom triples (one each for
-`i`, `j`, `k`, `l`) along with `u_m / 4` / `w_m / 4` (one-quarter
+The functor does not compute a scalar virial. The outer-loop body
+derives the dihedral's scalar virial from the functor's forces and the
+bond displacements as `W_m = b1 · F_i + b2 · F_k + (b2 + b3) · F_l`,
+and writes the four per-atom triples (one each for
+`i`, `j`, `k`, `l`) along with `u_m / 4` / `W_m / 4` (one-quarter
 shares; see `periodic-dihedral.md`'s *Force Accumulation*) into the
 slot's scratch buffer at indices `4·m`, `4·m + 1`, `4·m + 2`, and
 `4·m + 3`.
@@ -337,20 +336,28 @@ Each shape's composed module contains:
    angle / dihedral list, scratch buffer slices, n_bonds /
    n_angles / n_dihedrals) plus the slot's per-fragment args.
 
-The bonded entry point's per-thread body reads the bond, computes
+Each entry point derives the interaction's scalar virial from the
+per-atom forces the functor returns and the displacement vectors the
+entry point already computed; the functor supplies no virial. The
+bonded entry point's per-thread body reads the bond, computes
 the minimum-image displacement, computes `r2` and `r`, calls the
-slot's `evaluate(...)`, and writes the per-atom contributions to
-slots `2·k` and `2·k + 1` of the scratch buffer. The angle entry
+slot's `evaluate(...)` for `fmag` and `u_k`, derives
+`W_k = fmag · r²`, and writes the per-atom contributions to
+slots `2·k` and `2·k + 1` of the scratch buffer (with `u_k / 2` and
+`W_k / 2` half-shares on each). The angle entry
 point's body is the analogous three-atom shape, reading the angle
 quadruple, computing the two displacements `r_ij` and `r_kj`,
-calling the slot's `evaluate(...)`, and writing per-atom
-contributions to slots `3·m`, `3·m + 1`, and `3·m + 2`. The
+calling the slot's `evaluate(...)` for the per-atom forces and `u_m`,
+deriving `W_m = r_ij · F_i + r_kj · F_k`, and writing per-atom
+contributions to slots `3·m`, `3·m + 1`, and `3·m + 2` (with
+`u_m / 3` and `W_m / 3` third-shares on each). The
 dihedral entry point's body reads the dihedral quintuple, computes
 the three displacements `b1 = r_i − r_j`, `b2 = r_k − r_j`, and
 `b3 = r_l − r_k`, calls the slot's `evaluate(...)` for the four
-per-atom forces and the scalar `u_m` / `w_m`, and writes per-atom
+per-atom forces and the scalar `u_m`, derives
+`W_m = b1 · F_i + b2 · F_k + (b2 + b3) · F_l`, and writes per-atom
 contributions to slots `4·m`, `4·m + 1`, `4·m + 2`, and
-`4·m + 3` of the scratch buffer (with `u_m / 4` and `w_m / 4`
+`4·m + 3` of the scratch buffer (with `u_m / 4` and `W_m / 4`
 quarter-shares on each).
 
 When zero fast-class bonded slots are active, the bonded module is
@@ -775,6 +782,27 @@ Feature: JIT-composed intramolecular kernels
     When force_field.step(...) is called
     Then forces_x[0] equals f_morse_x_on_0 within a relative tolerance of 1e-5
     And forces_x[1] equals -f_morse_x_on_0 within a relative tolerance of 1e-5
+
+  @rq-ff5a04bc
+  Scenario: A bonded functor emits no virial and the composer derives it
+    Given a bonded fragment functor's evaluate signature
+    Then the signature declares out-parameters fmag and u_k and no virial out-parameter
+    And the bonded entry point derives the bond virial as fmag * r2
+    And it writes 0.5 * fmag * r2 into each of the bond's two per-atom virial slots
+
+  @rq-a997a963
+  Scenario: An angle functor emits no virial and the composer derives it from the forces
+    Given an angle fragment functor's evaluate signature
+    Then the signature declares per-atom force out-parameters and u_m and no virial out-parameter
+    And the angle entry point derives the angle virial as r_ij * F_i + r_kj * F_k
+    And it writes one-third of that virial into each of the angle's three per-atom virial slots
+
+  @rq-932d37a2
+  Scenario: A dihedral functor emits no virial and the composer derives it from the forces
+    Given a dihedral fragment functor's evaluate signature
+    Then the signature declares four per-atom force out-parameters and u_m and no virial out-parameter
+    And the dihedral entry point derives the dihedral virial as b1 * F_i + b2 * F_k + (b2 + b3) * F_l
+    And it writes one-quarter of that virial into each of the dihedral's four per-atom virial slots
 
   @rq-3ad303e1
   Scenario: Two independent runs of the bonded composed kernel on identical inputs are byte-identical

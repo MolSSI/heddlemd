@@ -244,7 +244,7 @@ constructed.
 `BondedForceFragment` whose functor implements the per-bond harmonic
 contribution. The fragment defines a `__device__` functor
 `HarmonicPairFunctor` whose member function `evaluate(r2, r,
-bond_type_index, dx, dy, dz, fmag, u_k, w_k)` computes:
+bond_type_index, dx, dy, dz, fmag, u_k)` computes:
 
 1. Reads `k = bond_k[bond_type_index]` and `r0 = bond_r0[bond_type_index]`
    from device-buffer pointers held as members of the functor.
@@ -252,13 +252,13 @@ bond_type_index, dx, dy, dz, fmag, u_k, w_k)` computes:
    `fmag = -k * dr / r` (the trailing `/ r` produces the per-component
    factor when multiplied by `(dx, dy, dz)` in the composed kernel's
    outer-loop body).
-3. Writes `u_k = 0.5f * k * dr * dr` and `w_k = fmag * r2` (the bond's
-   full potential energy and scalar virial; the outer-loop body
-   distributes the `0.5` symmetry factor when writing to the scratch
-   buffer).
+3. Writes `u_k = 0.5f * k * dr * dr` (the bond's full potential energy).
+   The functor emits no scalar virial; the outer-loop body derives the
+   bond virial as `W_k = fmag · r²` and distributes the `0.5` symmetry
+   factor when writing energy and virial to the scratch buffer.
 
 When `r < 1.0e-7f` (degenerate overlapping atoms) the functor writes
-`fmag = 0`, `u_k = 0`, `w_k = 0` rather than producing a division by a
+`fmag = 0`, `u_k = 0` rather than producing a division by a
 near-zero length. This is a defensive guard; physical harmonic-bond
 simulations never reach `r == 0`. Note that the true potential energy at
 `r == 0` is `½ k r_0²` (finite and non-zero), but the guard drops it
@@ -271,8 +271,9 @@ The composed kernel's outer-loop body (in the JIT-composed bonded module —
 see `jit-composed-intramolecular.md`) handles the common-args reading:
 reads the bond triple `(atom_i, atom_j, bond_type_index)`, computes the
 minimum-image displacement `(dx, dy, dz) = (r_i - r_j)`, computes `r2` and
-`r`, calls the functor's `evaluate`, then writes the per-atom force triples
-`±fmag · (dx, dy, dz)` along with `u_k · 0.5` and `w_k · 0.5` into the
+`r`, calls the functor's `evaluate`, derives the bond virial
+`W_k = fmag · r²`, then writes the per-atom force triples
+`±fmag · (dx, dy, dz)` along with `u_k · 0.5` and `W_k · 0.5` into the
 slot's bond-pair scratch buffer at indices `2·k` and `2·k + 1`. See
 `jit-composed-intramolecular.md`'s *Composed-Module Structure* for the full
 outer-loop body specification.

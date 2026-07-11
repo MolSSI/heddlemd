@@ -350,7 +350,7 @@ impl PotentialBuilder for HarmonicAngleBuilder {
 
 /// Harmonic angle force fragment for the JIT-composed angle module.
 /// The functor exposes `evaluate(dx_ij, dy_ij, dz_ij, dx_kj, dy_kj,
-/// dz_kj, angle_type_index, fix, fiy, fiz, fkx, fky, fkz, u_m, w_m)`
+/// dz_kj, angle_type_index, fix, fiy, fiz, fkx, fky, fkz, u_m)`
 /// per the contract in `rqm/forces/jit-composed-intramolecular.md`.
 pub fn harmonic_angle_force_fragment() -> AngleForceFragment {
     let functor_source = r#"
@@ -364,15 +364,14 @@ struct HarmonicAngleFunctor {
         unsigned int angle_type_index,
         Real &fix, Real &fiy, Real &fiz,
         Real &fkx, Real &fky, Real &fkz,
-        Real &u_m,
-        Real &w_m) const
+        Real &u_m) const
     {
         Real dij2 = dx_ij * dx_ij + dy_ij * dy_ij + dz_ij * dz_ij;
         Real dkj2 = dx_kj * dx_kj + dy_kj * dy_kj + dz_kj * dz_kj;
         if (dij2 == R(0.0) || dkj2 == R(0.0)) {
             fix = R(0.0); fiy = R(0.0); fiz = R(0.0);
             fkx = R(0.0); fky = R(0.0); fkz = R(0.0);
-            u_m = R(0.0); w_m = R(0.0);
+            u_m = R(0.0);
             return;
         }
         Real dij = Real_sqrt(dij2);
@@ -387,7 +386,7 @@ struct HarmonicAngleFunctor {
         if (sin_theta < R(1.0e-7)) {
             fix = R(0.0); fiy = R(0.0); fiz = R(0.0);
             fkx = R(0.0); fky = R(0.0); fkz = R(0.0);
-            u_m = R(0.0); w_m = R(0.0);
+            u_m = R(0.0);
             return;
         }
         Real theta = Real_atan2(dij * dkj * sin_theta, dot);
@@ -404,8 +403,8 @@ struct HarmonicAngleFunctor {
         fky = g * (cos_theta * inv_dkj2 * dy_kj - inv_dij_dkj * dy_ij);
         fkz = g * (cos_theta * inv_dkj2 * dz_kj - inv_dij_dkj * dz_ij);
         u_m = R(0.5) * k * dtheta * dtheta;
-        w_m = (dx_ij * fix + dy_ij * fiy + dz_ij * fiz)
-            + (dx_kj * fkx + dy_kj * fky + dz_kj * fkz);
+        // The scalar virial W_m = r_ij·F_i + r_kj·F_k is derived by the
+        // composed kernel from these forces, not the functor.
     }
 };
 "#;

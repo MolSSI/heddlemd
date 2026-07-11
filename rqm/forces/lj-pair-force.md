@@ -180,18 +180,21 @@ the packed list yields, where `j` is a neighbour atom distinct from `i`:
    bound.
 
 6. Compute the per-component contribution `(fx, fy, fz) = factor *
-   (dx, dy, dz)` using the post-switching `factor`, and the scalar pair
-   virial `w = fx * dx + fy * dy + fz * dz`. Apply the per-pair
+   (dx, dy, dz)` using the post-switching `factor`. Apply the per-pair
    exclusion scale `scale = exclusion_scale(i, j, ...,
-   atom_excl_lj_scales)` to `fx`, `fy`, `fz`, and to the post-switching
-   `energy` and `w`. Switching is always applied before the exclusion
-   scale.
+   atom_excl_lj_scales)` to `factor` (and hence `fx`, `fy`, `fz`) and
+   to the post-switching `energy`. Switching is always applied before
+   the exclusion scale. The scalar pair virial is not computed by the
+   fragment: the composed kernel derives it as `w = factor * r²` from
+   the masked, exclusion-scaled `factor` (equivalently
+   `fx * dx + fy * dy + fz * dz`).
 7. Add `(fx, fy, fz)` to the lane's `(p_x, p_y, p_z)` register
    accumulators. The `_fev` variant additionally adds `energy * 0.5f` to
-   `p_e` and `w * 0.5f` to `p_w`. The `0.5f` factor distributes each
-   unordered pair's energy and virial across the two ordered
-   contributions `(i, j)` and `(j, i)` so the framework's combiner
-   counts each pair exactly once when summing over all particles.
+   `p_e` and the derived `factor * r² * 0.5f` to `p_w`. The `0.5f`
+   factor distributes each unordered pair's energy and virial across
+   the two ordered contributions `(i, j)` and `(j, i)` so the
+   framework's combiner counts each pair exactly once when summing over
+   all particles.
 
 After every lane has processed every assigned neighbour, the warp-tree
 butterfly reduction collapses the 32 lane accumulators to lane 0, which
@@ -223,8 +226,8 @@ neighbour list yields. The functor specialises the per-pair recipe of
    `evaluate` signature is
    `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj,
    unsigned int i_type, unsigned int j_type,
-   unsigned int i, unsigned int j, Real &factor, Real &energy,
-   Real &virial)`. `inv_r = rsqrtf(r²)` and `r = r² · inv_r` are
+   unsigned int i, unsigned int j, Real &factor, Real &energy)`.
+   `inv_r = rsqrtf(r²)` and `r = r² · inv_r` are
    computed once per pair; `qi` / `qj` (charges) and `i_type` /
    `j_type` (per-atom particle-type indices) are loaded once per
    atom by the composer's outer loop and threaded into every active
@@ -1014,7 +1017,7 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: LJ JIT fragment uses the composer-supplied inv_r and r
     Given a ForceField with at least one [[pair_interactions]] entry and the JIT-composed kernel active
     And the composed kernel source captured for inspection
-    Then the LJ fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    Then the LJ fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy)`
     And the LJ fragment body does not contain `1.0 / r2`, `1.0f / r2`, `R(1.0) / r2`, or any other expression that computes inv_r2 from r2
 
   @rq-6060a744

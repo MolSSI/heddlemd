@@ -315,7 +315,7 @@ impl PotentialBuilder for HarmonicBondBuilder {
 
 /// Harmonic per-bond force fragment for the JIT-composed bonded module.
 /// The functor exposes `evaluate(r2, r, bond_type_index, dx, dy, dz,
-/// fmag, u_k, w_k)` per the contract in
+/// fmag, u_k)` per the contract in
 /// `rqm/forces/jit-composed-intramolecular.md`.
 // rq-ca10a975
 pub fn harmonic_bonded_force_fragment() -> BondedForceFragment {
@@ -329,17 +329,15 @@ struct HarmonicPairFunctor {
         unsigned int bond_type_index,
         Real dx, Real dy, Real dz,
         Real &fmag,
-        Real &u_k,
-        Real &w_k) const
+        Real &u_k) const
     {
-        (void) dx; (void) dy; (void) dz;
+        (void) dx; (void) dy; (void) dz; (void) r2;
         // Defensive guard for a near-degenerate bond length; the force
         // direction is undefined as r -> 0. (The composed outer loop
         // already returns early on r2 == 0.)
         if (r < R(1.0e-7)) {
             fmag = R(0.0);
             u_k  = R(0.0);
-            w_k  = R(0.0);
             return;
         }
         Real k  = bond_k[bond_type_index];
@@ -353,7 +351,8 @@ struct HarmonicPairFunctor {
         // only as the 0.5 literal in the energy term below.
         fmag = -k * dr / r;
         u_k  = R(0.5) * k * dr * dr;
-        w_k  = fmag * r2;
+        // The scalar virial W_k = fmag * r2 is derived by the composed
+        // kernel, not the functor.
     }
 };
 "#;

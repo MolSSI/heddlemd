@@ -95,10 +95,10 @@ identifying metadata. The snippet:
            Real qi, Real qj,
            unsigned int i_type, unsigned int j_type,
            unsigned int i, unsigned int j,
-           Real &factor, Real &energy, Real &virial) const;
+           Real &factor, Real &energy) const;
 
        // Per-pair exclusion-scale lookup. The composed kernel
-       // multiplies factor / energy / virial by this scale before
+       // multiplies factor / energy by this scale before
        // adding the contribution to the per-particle accumulator.
        __device__ inline Real exclusion_scale(unsigned int i, unsigned int j) const;
 
@@ -112,7 +112,7 @@ identifying metadata. The snippet:
    `evaluate` is invoked unconditionally for every pair the outer
    loop visits, including pairs whose `r²` exceeds
    `HEDDLE_JIT_MAX_CUTOFF_SQUARED`. The outer loop multiplies the
-   fragment's `(factor, energy, virial)` by a max-cutoff mask
+   fragment's `(factor, energy)` by a max-cutoff mask
    before accumulating, so out-of-cutoff pairs contribute exactly
    zero by bit-exact equality. Fragments must therefore tolerate
    any `r² > 0` without dividing by zero, taking the square root of
@@ -143,9 +143,18 @@ identifying metadata. The snippet:
    `--features f64`).
 
 4. Carries no static state. The fragment must be a pure function
-   from `(r2, i, j, parameters)` to `(factor, energy, virial)`. A
+   from `(r2, i, j, parameters)` to `(factor, energy)`. A
    functor that reads or writes mutable globals — beyond the slot's
    read-only parameter buffers — is malformed.
+
+A fragment does not compute a scalar virial. The composer derives the
+per-pair scalar virial as `factor · r²` from the fragment's force factor
+and the pair separation. For a central pair force `F = factor · r_vec`,
+the pairwise virial is `r_vec · F = factor · r²` identically, so the
+derived virial is exact and cannot disagree with the force the fragment
+applies. When several pair-force fragments are active, the composer sums
+their factors before forming the virial, so the derived per-pair virial
+is the sum of the individual fragments' virials.
 
 The framework supplies the rest of the composed kernel — the
 warp-per-particle outer loop, the sweep iteration, the minimum-image
@@ -246,7 +255,7 @@ into the same per-particle fixed-point accumulators (see
   `interacting_tiles` / `sorted_interacting_atoms`, runs the
   32-iteration diagonal shuffle, and invokes the composer's
   `heddle_jit_eval_pair_sum` evaluator for each pair. The
-  evaluator multiplies each fragment's `(factor, energy, virial)`
+  evaluator multiplies each fragment's `(factor, energy)`
   by that fragment's `exclusion_scale(i, j)` inline, so no
   separate cancellation pass is required. Non-excluded pairs see
   a multiply-by-1.0 (a no-op); fully excluded pairs
@@ -314,11 +323,11 @@ The lane:
    the warp keeps full SM utilization through the fragment math
    regardless of which pairs are in cutoff.
 4. Initialises a per-pair accumulator
-   `factor = 0`, `energy = 0`, `virial = 0`.
+   `factor = 0`, `energy = 0`.
 5. For each active fragment, in canonical slot order:
    - The functor's
      `evaluate(r², inv_r, r, qi, qj, i_type, j_type, i, j, …)`
-     produces its `(factor_slot, energy_slot, virial_slot)`.
+     produces its `(factor_slot, energy_slot)`.
      `evaluate` is called unconditionally for every pair;
      out-of-cutoff contributions are zeroed by the mask at step 7.
    - When the fragment's cutoff handling
@@ -336,17 +345,17 @@ The lane:
      only adds the fragment's contribution when the test passes.
    - The packed-neighbour pass and the single-pair pass invoke
      each fragment's `evaluate` to produce
-     `(factor_slot, energy_slot, virial_slot)`, then load that
+     `(factor_slot, energy_slot)`, then load that
      fragment's `exclusion_scale(i, j)` and multiply
-     `(factor_slot · scale, energy_slot · scale · 0.5,
-     virial_slot · scale · 0.5)` into the pair accumulator. The
-     `0.5` distributes each unordered pair's energy and virial
+     `(factor_slot · scale, energy_slot · scale · 0.5)` into the
+     pair accumulator. The
+     `0.5` distributes each unordered pair's energy
      across the two ordered slots. For non-excluded pairs the
      scale is `1.0` and the multiply is a no-op; for excluded
      pairs the scale is applied inline so no separate
      cancellation pass is required.
-6. The lane multiplies the pair accumulator's `(factor, energy,
-   virial)` by the max-cutoff `mask`. Pairs with `r² >
+6. The lane multiplies the pair accumulator's `(factor, energy)`
+   by the max-cutoff `mask`. Pairs with `r² >
    HEDDLE_JIT_MAX_CUTOFF_SQUARED` contribute zero by bit-exact
    equality (multiplying any finite value by `0.0f` yields `+0.0f`
    in IEEE-754, and subsequent adds with `+0.0f` are identity).
@@ -354,8 +363,12 @@ The lane:
    them to per-lane, per-entry `i_*` accumulators; it also subtracts
    `(fx, fy, fz)` from per-lane, per-entry `j_*` accumulators
    (Newton's 3rd, both directions computed inside the same
-   iteration). The `_fev` variant additionally adds `energy` and
-   `virial` to per-scalar accumulators on both sides.
+   iteration). The `_fev` variant additionally forms the per-pair
+   scalar virial `virial = factor · r²` from the masked, scaled
+   `factor` and adds `energy` and `0.5 · virial` to the per-scalar
+   accumulators on both sides (the `0.5` distributes the pair's
+   virial across the two ordered slots, matching the energy split
+   applied at step 5).
 
 The per-entry accumulators are floating-point and are summed over
 the entry's fixed 32-iteration diagonal-shuffle order, which is
@@ -523,7 +536,7 @@ slot list has been determined and displacement resolution has run:
       member of each fragment's functor type, plus a generated
       outer-loop kernel body that calls each functor in canonical
       slot order under its own `cutoff_squared` gate, accumulates
-      into the per-pair `(factor, energy, virial)`, and feeds into
+      into the per-pair `(factor, energy)`, and feeds into
       the warp-per-particle outer loop described in *Composed-
       Kernel Structure*.
    4. The two `extern "C"` entry points
@@ -622,8 +635,8 @@ follows directly from the per-potential argument:
 
 4. *Per-fragment evaluation order is deterministic.* Within a pair
    visit, fragments are evaluated in canonical slot order. The
-   sequence of adds into the lane's per-pair `(factor, energy,
-   virial)` accumulator is fixed by the slot order, not by thread
+   sequence of adds into the lane's per-pair `(factor, energy)`
+   accumulator is fixed by the slot order, not by thread
    scheduling.
 
 Cross-configuration equality is not a property: a JIT-composed run
@@ -1261,7 +1274,7 @@ Feature: JIT-composed pair-force kernel
     And the composed kernel source captured for inspection
     Then the inner loop computes inv_r = rsqrtf(r2) and r = r2 * inv_r exactly once per pair
     And the inner loop extracts qi = posq_i.w and qj = posq_j.w exactly once per pair
-    And every fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    And every fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy)`
     And no fragment's evaluate body contains a call to Real_sqrt(r2) or computes 1.0 / r2
     And no fragment's evaluate body reads from a per-fragment `charges` array (charges flow through qi/qj only)
 
@@ -1328,7 +1341,22 @@ Feature: JIT-composed pair-force kernel
   Scenario: Composer emits an exclusion-scaled evaluator
     Given a ForceField with at least one fast-class pair-force fragment
     And the composed kernel source captured for inspection
-    Then the source contains a function `heddle_jit_eval_pair_sum` whose body calls every fragment's `exclusion_scale(i, j)` once per pair and multiplies each fragment's `(factor, energy, virial)` by that scale
+    Then the source contains a function `heddle_jit_eval_pair_sum` whose body calls every fragment's `exclusion_scale(i, j)` once per pair and multiplies each fragment's `(factor, energy)` by that scale
+
+  @rq-7d64da58
+  Scenario: Composer derives the per-pair scalar virial from the force factor
+    Given a ForceField with at least one fast-class pair-force fragment
+    And the composed kernel source captured for inspection
+    Then no fragment's evaluate signature declares a virial out-parameter
+    And the _fev evaluator forms the per-pair scalar virial as factor * r2 from the masked, exclusion-scaled factor
+    And it distributes 0.5 * factor * r2 to each of the two ordered per-atom virial slots
+
+  @rq-ef17db0f
+  Scenario: A multi-fragment per-pair virial is the sum of the fragments' virials
+    Given a ForceField with Lennard-Jones and SPME-real both active
+    When the composed _fev kernel evaluates a pair inside both cutoffs
+    Then the per-pair scalar virial equals (factor_lj + factor_spme) * r2
+    And this equals the sum of each fragment's individual factor * r2
 
   @rq-54aec894
   Scenario: Packed-neighbour pass dispatches to the exclusion-scaled evaluator

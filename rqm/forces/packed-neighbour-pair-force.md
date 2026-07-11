@@ -523,7 +523,7 @@ follows inside the inner loop of the force kernel:
 // per-pair contribution to atom i and atom j:
 delta_fx, delta_fy, delta_fz = (factor * dx, factor * dy, factor * dz)
 delta_energy = energy_share
-delta_virial = virial_share
+delta_virial = factor * r2      // composer-derived pair virial (factor is masked, exclusion-scaled)
 
 // per-lane registers accumulate over the 32 inner iterations;
 // no atomic in the inner loop:
@@ -605,7 +605,8 @@ for t in 0..32:
     if (i_atom_id_at(i_lane) != j_atom_id_at(tj)
         && j_atom_id_at(tj) < N) {
         // evaluate pair (i_atom = lane, j_atom_lane = tj):
-        compute delta, factor, energy, virial
+        compute delta, factor, energy
+        virial = factor * r2   // composer-derived pair virial
         i_fx += factor * dx;   i_fy += factor * dy;   i_fz += factor * dz
         j_fx -= factor * dx;   j_fy -= factor * dy;   j_fz -= factor * dz
         i_e  += energy * 0.5;  j_e  += energy * 0.5
@@ -776,15 +777,17 @@ The per-slot `PairForceFragment` source contract is documented in
 declaration. The functor's interface is
 `cutoff_squared(i_type, j_type, i, j) -> Real`,
 `evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, factor,
-energy, virial)`, and `exclusion_scale(i, j) -> Real`. The composer
+energy)`, and `exclusion_scale(i, j) -> Real`. The composer
 emits one per-pair evaluator:
 
 - `heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r, i,
-  j, factor, energy, virial)` — sums each fragment's
-  contribution and multiplies the fragment's `(factor, energy,
-  virial)` by that fragment's `exclusion_scale(i, j)` inline.
+  j, factor, energy)` — sums each fragment's
+  contribution and multiplies the fragment's `(factor, energy)`
+  by that fragment's `exclusion_scale(i, j)` inline.
   Used by the packed-neighbour pass's diagonal-shuffle inner
-  loop and by the single-pair pass's per-thread evaluation.
+  loop and by the single-pair pass's per-thread evaluation. The
+  caller derives the per-pair scalar virial as `factor * r²` from
+  the summed, exclusion-scaled `factor`.
 
 The evaluator applies the cutoff handling described in
 `jit-composed-pair-force.md` (the per-fragment cutoff guard,
@@ -1465,7 +1468,7 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Given a ForceField with at least one fast-class pair-force fragment
     And the JIT-composed packed-neighbour kernel source captured for inspection
     Then the packed-neighbour pass's inner loop dispatches to heddle_jit_eval_pair_sum
-    And every fragment's exclusion_scale(i, j) is loaded and multiplied into that fragment's (factor, energy, virial) exactly once per pair inside heddle_jit_eval_pair_sum
+    And every fragment's exclusion_scale(i, j) is loaded and multiplied into that fragment's (factor, energy) exactly once per pair inside heddle_jit_eval_pair_sum
 
   @rq-80c6a964
   Scenario: Fully-excluded pair nets to zero on the fixed-point accumulator

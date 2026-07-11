@@ -229,7 +229,7 @@ not constructed.
 harmonic contribution. The fragment defines a `__device__` functor
 `HarmonicAngleFunctor` whose member function `evaluate(dx_ij,
 dy_ij, dz_ij, dx_kj, dy_kj, dz_kj, angle_type_index, fix, fiy, fiz,
-fkx, fky, fkz, u_m, w_m)` computes:
+fkx, fky, fkz, u_m)` computes:
 
 1. Computes `d_ij²`, `d_kj²`, `d_ij`, `d_kj`, `cosθ`, `sinθ`, and
    `θ` using `atan2(d_ij · d_kj · sinθ, r_ij · r_kj)`.
@@ -241,10 +241,11 @@ fkx, fky, fkz, u_m, w_m)` computes:
    in *Algorithm* and writes them to `(fix, fiy, fiz)` and
    `(fkx, fky, fkz)`.
 5. Writes the angle's full potential energy
-   `u_m = 0.5 · k · dθ²` and scalar virial
-   `w_m = r_ij · F_i + r_kj · F_k` (the outer-loop body
-   distributes the `1/3` symmetry factor when writing to the
-   scratch buffer).
+   `u_m = 0.5 · k · dθ²`. The functor emits no scalar virial; the
+   outer-loop body derives the angle virial
+   `W_m = r_ij · F_i + r_kj · F_k` from the returned forces and the
+   leg displacements, and distributes the `1/3` symmetry factor when
+   writing energy and virial to the scratch buffer.
 
 When the functor's defensive guards trigger (`d_ij == 0`,
 `d_kj == 0`, or `sinθ < 1e-7f`), it writes zero to every output
@@ -256,9 +257,10 @@ module — see `jit-composed-intramolecular.md`) handles the
 common-args reading: reads the angle list `(atom_i, atom_j, atom_k,
 angle_type_index)`, computes the minimum-image displacements
 `r_ij = r_i − r_j` and `r_kj = r_k − r_j`, calls the functor's
-`evaluate`, then writes the three per-atom force triples (the
+`evaluate`, derives the angle virial `W_m = r_ij · F_i + r_kj · F_k`,
+then writes the three per-atom force triples (the
 functor returns `F_i` and `F_k`; the outer-loop body computes
-`F_j = -(F_i + F_k)`) along with `u_m / 3` and `w_m / 3` into the
+`F_j = -(F_i + F_k)`) along with `u_m / 3` and `W_m / 3` into the
 slot's angle-triple scratch buffer at indices `3·m`, `3·m + 1`,
 and `3·m + 2`. See `jit-composed-intramolecular.md`'s
 *Composed-Module Structure* for the full outer-loop body

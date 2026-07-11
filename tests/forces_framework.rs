@@ -279,8 +279,8 @@ impl PairForcePotential for StubPotential {
 struct {n} {{
     __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const {{ return R(0.0); }}
     __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
-                                     Real &factor, Real &energy, Real &virial) const {{
-        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+                                     Real &factor, Real &energy) const {{
+        factor = R(0.0); energy = R(0.0);
     }}
     __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
 }};
@@ -1510,8 +1510,8 @@ impl PairForcePotential for CutoffInspectingPotential {
 struct CutoffInspectorFunctor {
     __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const { return R(0.0); }
     __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
-                                     Real &factor, Real &energy, Real &virial) const {
-        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+                                     Real &factor, Real &energy) const {
+        factor = R(0.0); energy = R(0.0);
     }
     __device__ inline Real exclusion_scale(unsigned int, unsigned int) const { return R(1.0); }
 };

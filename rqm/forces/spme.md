@@ -125,15 +125,15 @@ For a pair `(i, j)` with `j` not equal to `i`:
 
 5. Apply the per-pair Coulomb exclusion scale (see `topology.md`):
    `scale = exclusion_scale(i, j, atom_excl_offsets, atom_excl_partners,
-   atom_excl_coul_scales)`. Multiply `factor` and `energy` by `scale`,
-   and compute the scalar virial `w = factor · r²`.
-6. The functor returns `(factor, energy, w)`; the composed kernel adds
+   atom_excl_coul_scales)`. Multiply `factor` and `energy` by `scale`.
+6. The functor returns `(factor, energy)`; the composed kernel adds
    `(factor * dx, factor * dy, factor * dz)` to the warp lane's
    `(p_x, p_y, p_z)` register accumulators. On a `ForcesAndScalars`
-   evaluation it additionally adds `energy * 0.5f` to `p_e` and
-   `w * 0.5f` to `p_w`. The `0.5` factor distributes each unordered
-   pair's energy and virial across the two ordered contributions
-   `(i, j)` and `(j, i)`.
+   evaluation it derives the scalar virial `w = factor · r²` from the
+   masked, exclusion-scaled `factor` and additionally adds
+   `energy * 0.5f` to `p_e` and `w * 0.5f` to `p_w`. The `0.5` factor
+   distributes each unordered pair's energy and virial across the two
+   ordered contributions `(i, j)` and `(j, i)`.
 
 After every lane has processed every assigned neighbour, the warp-tree
 butterfly reduction collapses the 32 lane accumulators to lane 0, which
@@ -160,8 +160,8 @@ implementation specifics:
    `evaluate` signature is
    `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj,
    unsigned int i_type, unsigned int j_type,
-   unsigned int i, unsigned int j, Real &factor, Real &energy,
-   Real &virial)`. `inv_r = rsqrtf(r²)`, `r = r² · inv_r`,
+   unsigned int i, unsigned int j, Real &factor, Real &energy)`.
+   `inv_r = rsqrtf(r²)`, `r = r² · inv_r`,
    `qi = posq[i].w`, and `qj = posq[j].w` are computed once per
    pair by the composer's outer loop and threaded into every
    active fragment. The SPME-real fragment does not call
@@ -1417,7 +1417,7 @@ Feature: Smooth particle-mesh Ewald (SPME)
   Scenario: SPME-real JIT fragment uses the composer-supplied inv_r and r
     Given a ForceField with [spme] configured and the JIT-composed kernel active
     And the composed kernel source captured for inspection
-    Then the SPME-real fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    Then the SPME-real fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j, Real &factor, Real &energy)`
     And the SPME-real fragment body does not contain any of: `Real_sqrt(`, `sqrt(r2)`, `sqrtf(r2)`, `1.0 / r2`, `1.0 / inv_r`
 
   @rq-2a1f2043

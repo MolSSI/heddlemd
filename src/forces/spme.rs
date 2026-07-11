@@ -728,7 +728,7 @@ struct SpmeRealPairFunctor {
         Real qi, Real qj,
         unsigned int /*i_type*/, unsigned int /*j_type*/,
         unsigned int i, unsigned int j,
-        Real &factor, Real &energy, Real &virial) const
+        Real &factor, Real &energy) const
     {
         Real qq = qi * qj;
         Real inv_r2 = inv_r * inv_r;
@@ -751,7 +751,6 @@ struct SpmeRealPairFunctor {
         energy = k_coulomb * qq * erfc_ar * inv_r;
         factor = k_coulomb * qq * inv_r2
                  * (erfc_ar * inv_r + R(2.0) * alpha * one_over_sqrt_pi * gauss);
-        virial = factor * r2;
     }
 
     __device__ inline Real exclusion_scale(unsigned int i, unsigned int j) const {

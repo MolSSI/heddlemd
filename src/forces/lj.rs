@@ -375,7 +375,6 @@ pub fn lj_pair_force_fragment(
         Real sr12 = sr6 * sr6;
         factor = R(24.0) * epsilon * inv_r2 * (R(2.0) * sr12 - sr6);
         energy = R(4.0) * epsilon * (sr12 - sr6);
-        virial = factor * r2;
 "#
     } else {
         r#"        unsigned int p = slot(i_type, j_type);
@@ -410,7 +409,6 @@ pub fn lj_pair_force_fragment(
             factor = s * factor + chain_coeff * energy;
             energy = s * energy;
         }
-        virial = factor * r2;
 "#
     };
     let functor_source = format!(
@@ -444,7 +442,7 @@ struct LjPairFunctor {{
         Real /*qi*/, Real /*qj*/,
         unsigned int i_type, unsigned int j_type,
         unsigned int /*i*/, unsigned int /*j*/,
-        Real &factor, Real &energy, Real &virial) const
+        Real &factor, Real &energy) const
     {{
 {eval_body}    }}
 

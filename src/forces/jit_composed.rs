@@ -937,7 +937,7 @@ fn compose_source(
     // are emitted here according to each fragment's CutoffHandling.
     //
     // Each fragment's `exclusion_scale(i, j)` is called and its
-    // scale multiplied into the fragment's `(factor, energy, virial)`
+    // scale multiplied into the fragment's `(factor, energy)`
     // inline. Non-excluded pairs get a multiply-by-1.0; excluded
     // pairs contribute `scale × evaluate` directly.
     s.push_str("\ntemplate <bool WriteEv>\n");
@@ -946,9 +946,9 @@ fn compose_source(
     s.push_str(
         "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j,\n",
     );
-    s.push_str("    Real &factor, Real &energy, Real &virial)\n");
+    s.push_str("    Real &factor, Real &energy)\n");
     s.push_str("{\n");
-    s.push_str("    factor = R(0.0); energy = R(0.0); virial = R(0.0);\n");
+    s.push_str("    factor = R(0.0); energy = R(0.0);\n");
     for f in fragments {
         let field = functor_field_name(f.label);
         // Each fragment's contribution is scaled by its own
@@ -964,12 +964,14 @@ fn compose_source(
         // still be over-counted by the duplicate-emit defect —
         // that fix belongs in the neighbour-list construction and
         // is tracked as an open item.
+        // rq-7d64da58 — the functor emits only (factor, energy); the
+        // per-pair scalar virial is derived by the caller as factor * r2.
         let body = format!(
-            "Real s_factor, s_energy, s_virial;\n            \
-             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy, s_virial);\n            \
+            "Real s_factor, s_energy;\n            \
+             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
              Real ex_scale = composite.{f}.exclusion_scale(i, j);\n            \
              factor += s_factor * ex_scale;\n            \
-             if (WriteEv) {{ energy += s_energy * ex_scale; virial += s_virial * ex_scale; }}",
+             if (WriteEv) {{ energy += s_energy * ex_scale; }}",
             f = field
         );
         match f.cutoff {
@@ -1532,16 +1534,15 @@ __device__ static inline void heddle_jit_outer_loop(
         // are bit-exact zero for out-of-cutoff pairs.
         Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
 
-        Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
+        Real factor = R(0.0), energy = R(0.0);
         heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r,
                                            qi, qj,
                                            i_type, j_type,
                                            i_atom_id, j_atom_id,
-                                           factor, energy, virial);
+                                           factor, energy);
         factor *= cutoff_mask;
         if (WriteEv) {
           energy *= cutoff_mask;
-          virial *= cutoff_mask;
         }
         Real fx = factor * dx;
         Real fy = factor * dy;
@@ -1556,7 +1557,9 @@ __device__ static inline void heddle_jit_outer_loop(
         }
         if (WriteEv) {
           Real he = energy * R(0.5);
-          Real hw = virial * R(0.5);
+          // rq-7d64da58 — derive the per-pair scalar virial from the
+          // masked, exclusion-scaled force factor: W = factor * r2.
+          Real hw = (factor * r2) * R(0.5);
           ei_e += he;  ei_w += hw;
           if (my_j_in_iblock == 0u) {
             j_e += he;  j_w += hw;
@@ -1701,13 +1704,12 @@ __device__ static inline void heddle_jit_single_pair_loop(
 
   Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
 
-  Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
+  Real factor = R(0.0), energy = R(0.0);
   heddle_jit_eval_pair_sum<WriteEv>(
-      composite, r2, inv_r, r, qi, qj, i_type, j_type, atom_i, atom_j, factor, energy, virial);
+      composite, r2, inv_r, r, qi, qj, i_type, j_type, atom_i, atom_j, factor, energy);
   factor *= cutoff_mask;
   if (WriteEv) {
     energy *= cutoff_mask;
-    virial *= cutoff_mask;
   }
 
   Real fx = factor * dx;
@@ -1723,7 +1725,8 @@ __device__ static inline void heddle_jit_single_pair_loop(
 
   if (WriteEv) {
     Real he = energy * R(0.5);
-    Real hw = virial * R(0.5);
+    // rq-7d64da58 — derive the per-pair scalar virial: W = factor * r2.
+    Real hw = (factor * r2) * R(0.5);
     heddle_jit_atomic_add_fp(fast_energy_fp, atom_i, he);
     heddle_jit_atomic_add_fp(fast_energy_fp, atom_j, he);
     heddle_jit_atomic_add_fp(fast_virial_fp, atom_i, hw);
@@ -1925,8 +1928,11 @@ fn emit_bonded_entry_point(
     s.push_str("        return;\n");
     s.push_str("    }\n");
     s.push_str("    Real r = Real_sqrt(r2);\n");
-    s.push_str("    Real fmag, u_k, w_k;\n");
-    s.push_str("    functor.evaluate(r2, r, type_idx, dx, dy, dz, fmag, u_k, w_k);\n");
+    s.push_str("    Real fmag, u_k;\n");
+    s.push_str("    functor.evaluate(r2, r, type_idx, dx, dy, dz, fmag, u_k);\n");
+    // rq-ff5a04bc — the functor emits no virial; derive the bond virial
+    // W_k = fmag * r2 from the force factor and the separation.
+    s.push_str("    Real w_k = fmag * r2;\n");
     s.push_str("    bond_pair_x[2u * k]      =  fmag * dx;\n");
     s.push_str("    bond_pair_y[2u * k]      =  fmag * dy;\n");
     s.push_str("    bond_pair_z[2u * k]      =  fmag * dz;\n");
@@ -2129,9 +2135,9 @@ fn emit_angle_entry_point(
     s.push_str("    Real dz_kj = pq_k.z - pq_j.z;\n");
     s.push_str("    heddle_jit_triclinic_min_image(dx_ij, dy_ij, dz_ij, lx, ly, lz, xy, xz, yz);\n");
     s.push_str("    heddle_jit_triclinic_min_image(dx_kj, dy_kj, dz_kj, lx, ly, lz, xy, xz, yz);\n");
-    s.push_str("    Real fix, fiy, fiz, fkx, fky, fkz, u_m, w_m;\n");
+    s.push_str("    Real fix, fiy, fiz, fkx, fky, fkz, u_m;\n");
     s.push_str("    functor.evaluate(dx_ij, dy_ij, dz_ij, dx_kj, dy_kj, dz_kj, type_idx,\n");
-    s.push_str("                     fix, fiy, fiz, fkx, fky, fkz, u_m, w_m);\n");
+    s.push_str("                     fix, fiy, fiz, fkx, fky, fkz, u_m);\n");
     s.push_str("    Real fjx = -(fix + fkx);\n");
     s.push_str("    Real fjy = -(fiy + fky);\n");
     s.push_str("    Real fjz = -(fiz + fkz);\n");
@@ -2146,6 +2152,11 @@ fn emit_angle_entry_point(
     s.push_str("    angle_triple_z[3u * m + 2u] = fkz;\n");
     if write_ev {
         s.push_str("    Real e_share = u_m * (R(1.0) / R(3.0));\n");
+        // rq-a997a963 — the functor emits no virial; derive the angle
+        // virial W_m = r_ij·F_i + r_kj·F_k from the returned forces and
+        // the leg displacements.
+        s.push_str("    Real w_m = dx_ij * fix + dy_ij * fiy + dz_ij * fiz\n");
+        s.push_str("             + dx_kj * fkx + dy_kj * fky + dz_kj * fkz;\n");
         s.push_str("    Real w_share = w_m * (R(1.0) / R(3.0));\n");
         s.push_str("    angle_triple_energy[3u * m + 0u] = e_share;\n");
         s.push_str("    angle_triple_energy[3u * m + 1u] = e_share;\n");
@@ -2350,9 +2361,9 @@ fn emit_dihedral_entry_point(
     s.push_str("    heddle_jit_triclinic_min_image(dx_ij, dy_ij, dz_ij, lx, ly, lz, xy, xz, yz);\n");
     s.push_str("    heddle_jit_triclinic_min_image(dx_kj, dy_kj, dz_kj, lx, ly, lz, xy, xz, yz);\n");
     s.push_str("    heddle_jit_triclinic_min_image(dx_kl, dy_kl, dz_kl, lx, ly, lz, xy, xz, yz);\n");
-    s.push_str("    Real fix, fiy, fiz, fjx, fjy, fjz, fkx, fky, fkz, flx, fly, flz, u_m, w_m;\n");
+    s.push_str("    Real fix, fiy, fiz, fjx, fjy, fjz, fkx, fky, fkz, flx, fly, flz, u_m;\n");
     s.push_str("    functor.evaluate(dx_ij, dy_ij, dz_ij, dx_kj, dy_kj, dz_kj, dx_kl, dy_kl, dz_kl, type_idx,\n");
-    s.push_str("                     fix, fiy, fiz, fjx, fjy, fjz, fkx, fky, fkz, flx, fly, flz, u_m, w_m);\n");
+    s.push_str("                     fix, fiy, fiz, fjx, fjy, fjz, fkx, fky, fkz, flx, fly, flz, u_m);\n");
     s.push_str("    dihedral_quadruple_x[4u * m + 0u] = fix;\n");
     s.push_str("    dihedral_quadruple_y[4u * m + 0u] = fiy;\n");
     s.push_str("    dihedral_quadruple_z[4u * m + 0u] = fiz;\n");
@@ -2367,6 +2378,16 @@ fn emit_dihedral_entry_point(
     s.push_str("    dihedral_quadruple_z[4u * m + 3u] = flz;\n");
     if write_ev {
         s.push_str("    Real e_share = u_m * R(0.25);\n");
+        // rq-932d37a2 — the functor emits no virial; derive the dihedral
+        // virial W_m = Σ_a (r_a − r_j)·F_a from the returned forces and
+        // the bond displacements. r_l − r_j = (r_k − r_j) − (r_k − r_l)
+        // = dx_kj − dx_kl.
+        s.push_str("    Real dx_lj = dx_kj - dx_kl;\n");
+        s.push_str("    Real dy_lj = dy_kj - dy_kl;\n");
+        s.push_str("    Real dz_lj = dz_kj - dz_kl;\n");
+        s.push_str("    Real w_m = dx_ij * fix + dy_ij * fiy + dz_ij * fiz\n");
+        s.push_str("             + dx_kj * fkx + dy_kj * fky + dz_kj * fkz\n");
+        s.push_str("             + dx_lj * flx + dy_lj * fly + dz_lj * flz;\n");
         s.push_str("    Real w_share = w_m * R(0.25);\n");
         s.push_str("    dihedral_quadruple_energy[4u * m + 0u] = e_share;\n");
         s.push_str("    dihedral_quadruple_energy[4u * m + 1u] = e_share;\n");
@@ -2543,8 +2564,8 @@ mod launch_bounds_tests {
 struct {n} {{
     __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const {{ return R(0.0); }}
     __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
-                                     Real &factor, Real &energy, Real &virial) const {{
-        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+                                     Real &factor, Real &energy) const {{
+        factor = R(0.0); energy = R(0.0);
     }}
     __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
 }};
@@ -2567,7 +2588,7 @@ struct {n} {{
     fn composer_emits_exclusion_scaled_evaluator() {
         // The composed source contains a per-pair evaluator that calls
         // every fragment's `exclusion_scale(i, j)` and multiplies its
-        // `(factor, energy, virial)` by that scale inline. A single
+        // `(factor, energy)` by that scale inline. A single
         // fragment is enough to observe one such call.
         let src = compose_source(&[minimal_fragment("a")], 1.0 as Real);
         assert!(
@@ -2639,7 +2660,7 @@ struct {n} {{
     // rq-c406ffcd
     #[test]
     fn book_documents_launch_configuration_constants() {
-        let doc = std::fs::read_to_string("book/src/reference/compile-time-constants.md")
+        let doc = std::fs::read_to_string("book/dev-notes/compile-time-constants.md")
             .expect("compile-time-constants book page exists");
         for needle in ["PACKED_MIN_BLOCKS_PER_SM", "BLOCK_SIZE", "WARPS_PER_BLOCK"] {
             assert!(doc.contains(needle), "book page must document {needle}");
@@ -2671,8 +2692,8 @@ mod type_index_amortization_tests {
 struct {n} {{
     __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const {{ return R(0.0); }}
     __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
-                                     Real &factor, Real &energy, Real &virial) const {{
-        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+                                     Real &factor, Real &energy) const {{
+        factor = R(0.0); energy = R(0.0);
     }}
     __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
 }};
@@ -2759,5 +2780,173 @@ struct {n} {{
         // It is a common argument regardless of whether a fragment
         // consumes it — the count does not depend on consumption.
         assert_eq!(n_consuming, n_inert);
+    }
+}
+
+#[cfg(test)]
+mod virial_derivation_tests {
+    use super::*;
+
+    fn pair_frag(label: &'static str, name: &'static str) -> PairForceFragment {
+        let functor_source = format!(
+            r#"
+struct {name} {{
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int, unsigned int, unsigned int) const {{ return R(0.0); }}
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, unsigned int, unsigned int, unsigned int, unsigned int,
+                                     Real &factor, Real &energy) const {{ factor = R(0.0); energy = R(0.0); }}
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
+}};
+"#
+        );
+        PairForceFragment {
+            label,
+            functor_struct_name: name,
+            functor_source,
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+            cutoff: CutoffHandling::Uniform(1.0 as Real),
+            consumes_type_index: false,
+        }
+    }
+
+    // rq-7d64da58 — the pair composer derives the per-pair scalar virial
+    // from the force factor; the functor emits only (factor, energy).
+    #[test] // rq-7d64da58
+    fn pair_composer_derives_virial_from_factor_and_r2() {
+        let src = compose_source(&[pair_frag("a", "VFa")], 1.0 as Real);
+        // The per-pair evaluator takes only (factor, energy) — no virial
+        // out-parameter anywhere in the composed source.
+        assert!(
+            !src.contains("Real &virial"),
+            "no fragment/evaluator may declare a virial out-parameter"
+        );
+        assert!(
+            src.contains("Real &factor, Real &energy)"),
+            "the per-pair evaluator must take (factor, energy)"
+        );
+        // The _fev accumulation derives the per-pair scalar virial as
+        // factor * r2 from the masked, exclusion-scaled factor.
+        assert!(
+            src.contains("(factor * r2)"),
+            "composer must derive the per-pair virial as factor * r2"
+        );
+    }
+
+    // rq-ef17db0f — with several fragments, each adds into the shared
+    // factor and the virial is derived once from the summed factor, so it
+    // is the sum of the fragments' individual virials.
+    #[test] // rq-ef17db0f
+    fn pair_virial_is_derived_once_from_summed_factor() {
+        let src = compose_source(&[pair_frag("a", "VFa"), pair_frag("b", "VFb")], 1.0 as Real);
+        assert!(
+            src.matches("factor += s_factor * ex_scale;").count() >= 2,
+            "each active fragment must add its factor into the shared per-pair factor"
+        );
+        assert!(
+            src.contains("(factor * r2)"),
+            "the per-pair virial is derived once from the summed factor"
+        );
+    }
+
+    fn bonded_frag() -> BondedForceFragment {
+        BondedForceFragment {
+            label: "bf",
+            functor_struct_name: "BF",
+            functor_source: r#"
+struct BF {
+    __device__ inline void evaluate(Real, Real, unsigned int, Real, Real, Real, Real &fmag, Real &u_k) const { fmag = R(0.0); u_k = R(0.0); }
+};
+"#
+            .to_string(),
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+        }
+    }
+
+    // rq-ff5a04bc — a bonded functor emits no virial; the composer derives
+    // W_k = fmag * r2.
+    #[test] // rq-ff5a04bc
+    fn bonded_composer_derives_virial_from_fmag_and_r2() {
+        let src = compose_bonded_source(&[bonded_frag()]);
+        assert!(
+            src.contains("functor.evaluate(r2, r, type_idx, dx, dy, dz, fmag, u_k);"),
+            "the bonded functor call must take (fmag, u_k) with no virial out-parameter"
+        );
+        assert!(
+            src.contains("Real w_k = fmag * r2;"),
+            "the composer must derive the bond virial W_k = fmag * r2"
+        );
+    }
+
+    fn angle_frag() -> AngleForceFragment {
+        AngleForceFragment {
+            label: "af",
+            functor_struct_name: "AF",
+            functor_source: r#"
+struct AF {
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, Real, unsigned int,
+        Real &fix, Real &fiy, Real &fiz, Real &fkx, Real &fky, Real &fkz, Real &u_m) const {
+        fix = R(0.0); fiy = R(0.0); fiz = R(0.0); fkx = R(0.0); fky = R(0.0); fkz = R(0.0); u_m = R(0.0);
+    }
+};
+"#
+            .to_string(),
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+        }
+    }
+
+    // rq-a997a963 — an angle functor emits no virial; the composer derives
+    // W_m = r_ij·F_i + r_kj·F_k from the returned forces.
+    #[test] // rq-a997a963
+    fn angle_composer_derives_virial_from_forces() {
+        let src = compose_angle_source(&[angle_frag()]);
+        assert!(
+            !src.contains(", u_m, w_m);"),
+            "the angle functor call must take u_m with no virial out-parameter"
+        );
+        assert!(
+            src.contains("Real w_m = dx_ij * fix + dy_ij * fiy + dz_ij * fiz"),
+            "the composer must derive the angle virial from the leg displacements and forces"
+        );
+    }
+
+    fn dihedral_frag() -> DihedralForceFragment {
+        DihedralForceFragment {
+            label: "df",
+            functor_struct_name: "DF",
+            functor_source: r#"
+struct DF {
+    __device__ inline void evaluate(Real, Real, Real, Real, Real, Real, Real, Real, Real, unsigned int,
+        Real &fix, Real &fiy, Real &fiz, Real &fjx, Real &fjy, Real &fjz,
+        Real &fkx, Real &fky, Real &fkz, Real &flx, Real &fly, Real &flz, Real &u_m) const {
+        fix = R(0.0); fiy = R(0.0); fiz = R(0.0); fjx = R(0.0); fjy = R(0.0); fjz = R(0.0);
+        fkx = R(0.0); fky = R(0.0); fkz = R(0.0); flx = R(0.0); fly = R(0.0); flz = R(0.0); u_m = R(0.0);
+    }
+};
+"#
+            .to_string(),
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+        }
+    }
+
+    // rq-932d37a2 — a dihedral functor emits no virial; the composer
+    // derives W_m from the four forces and the bond displacements.
+    #[test] // rq-932d37a2
+    fn dihedral_composer_derives_virial_from_forces() {
+        let src = compose_dihedral_source(&[dihedral_frag()]);
+        assert!(
+            !src.contains(", u_m, w_m);"),
+            "the dihedral functor call must take u_m with no virial out-parameter"
+        );
+        assert!(
+            src.contains("Real dx_lj = dx_kj - dx_kl;"),
+            "the composer must form r_l - r_j = dx_kj - dx_kl"
+        );
+        assert!(
+            src.contains("Real w_m = dx_ij * fix + dy_ij * fiy + dz_ij * fiz"),
+            "the composer must derive the dihedral virial from forces and displacements"
+        );
     }
 }

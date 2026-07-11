@@ -305,7 +305,7 @@ periodic contribution. The fragment defines a `__device__` functor
 `PeriodicDihedralFunctor` whose member function `evaluate(dx_ij,
 dy_ij, dz_ij, dx_kj, dy_kj, dz_kj, dx_lk, dy_lk, dz_lk,
 dihedral_type_index, fix, fiy, fiz, fjx, fjy, fjz, fkx, fky, fkz,
-flx, fly, flz, u_m, w_m)` computes:
+flx, fly, flz, u_m)` computes:
 
 1. Computes the geometric scalars `|b2|`, `|m|²`, `|n_vec|²`, the
    cross products `m = b1 × b2` and `n_vec = b2 × b3` (with `b1 =
@@ -321,10 +321,12 @@ flx, fly, flz, u_m, w_m)` computes:
 4. Computes the per-atom forces per the formulas in *Algorithm* and
    writes them to `(fix, fiy, fiz)`, `(fjx, fjy, fjz)`,
    `(fkx, fky, fkz)`, and `(flx, fly, flz)`.
-5. Writes the dihedral's full potential energy `u_m` and scalar
-   virial `w_m = b1 · F_i + b2 · F_k + (b2 + b3) · F_l` (the
-   outer-loop body distributes the `1/4` symmetry factor when
-   writing to the scratch buffer).
+5. Writes the dihedral's full potential energy `u_m`. The functor
+   emits no scalar virial; the outer-loop body derives the dihedral
+   virial `W_m = b1 · F_i + b2 · F_k + (b2 + b3) · F_l` from the
+   returned forces and the bond displacements, and distributes the
+   `1/4` symmetry factor when writing energy and virial to the
+   scratch buffer.
 
 When the functor's defensive guards trigger (`|m|²`, `|n_vec|²`, or
 `|b2|²` below the threshold given in *Algorithm*), it writes zero to
@@ -337,8 +339,9 @@ module — see `jit-composed-intramolecular.md`) handles the
 common-args reading: reads the dihedral list `(atom_i, atom_j,
 atom_k, atom_l, dihedral_type_index)`, computes the minimum-image
 displacements `b1 = r_i − r_j`, `b2 = r_k − r_j`, `b3 = r_l − r_k`,
-calls the functor's `evaluate`, then writes the four per-atom force
-triples along with `u_m / 4` and `w_m / 4` into the slot's
+calls the functor's `evaluate`, derives the dihedral virial
+`W_m = b1 · F_i + b2 · F_k + (b2 + b3) · F_l`, then writes the four
+per-atom force triples along with `u_m / 4` and `W_m / 4` into the slot's
 dihedral-quadruple scratch buffer at indices `4·m`, `4·m + 1`,
 `4·m + 2`, and `4·m + 3`. See
 `jit-composed-intramolecular.md`'s *Composed-Module Structure* for
