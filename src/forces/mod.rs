@@ -651,7 +651,7 @@ impl ForceField {
             .iter()
             .filter_map(|s| s.max_cutoff())
             .fold(None::<Real>, |acc, c| Some(acc.map_or(c, |a| a.max(c))));
-        let neighbor_list = if let Some(r_cut) = aggregated_cutoff {
+        let mut neighbor_list = if let Some(r_cut) = aggregated_cutoff {
             match neighbor_list_config {
                 NeighborListConfig::CellList { r_skin } => Some(
                     NeighborListState::new_cell_list(
@@ -671,6 +671,25 @@ impl ForceField {
         } else {
             None
         };
+
+        // Capture the fully-excluded canonical pairs (both fragment scales
+        // 0) for the per-rebuild exclusion-tile builder. Exclusions are
+        // binary and full, so a not-excluded (scale 1) entry contributes
+        // no tile bit. rq-8945395f
+        if let Some(nl) = neighbor_list.as_mut() {
+            let mut excluded_pairs: Vec<(u32, u32)> = exclusion_list
+                .entries
+                .iter()
+                .filter(|e| e.scale_lj == 0.0 && e.scale_coul == 0.0)
+                .map(|e| {
+                    let (a, b) = (e.atom_i.min(e.atom_j), e.atom_i.max(e.atom_j));
+                    (a, b)
+                })
+                .collect();
+            excluded_pairs.sort_unstable();
+            excluded_pairs.dedup();
+            nl.set_excluded_pairs(excluded_pairs);
+        }
 
         // Collect each shape's participants from `jit_participant`. A
         // slot's single `JitParticipant` variant determines its shape
@@ -716,10 +735,17 @@ impl ForceField {
             // as `HEDDLE_JIT_MAX_CUTOFF_SQUARED` for the per-pair prune.
             let jit_max_cutoff = aggregated_cutoff
                 .expect("aggregated_cutoff is Some when jit_fragments is non-empty");
+            // CellList mode handles exclusions through the per-tile
+            // bitmask (compose the exclusion-free evaluator + exclusion-
+            // tile pass); all-pairs mode folds the per-pair exclusion
+            // scale into the evaluator. rq-fa0b3d10
+            let use_exclusion_bitmask =
+                matches!(neighbor_list_config, NeighborListConfig::CellList { .. });
             Some(JitComposedPairForce::compile_and_load(
                 &device,
                 &jit_fragments,
                 jit_max_cutoff,
+                use_exclusion_bitmask,
             )?)
         };
         // JIT compose the fast-class bonded module.
@@ -1130,7 +1156,6 @@ impl ForceField {
             unsafe {
                 jit.launch(n_iblocks, write_scalars, launch_builder)?;
             }
-            timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
 
             // Sparse-tile single-pair pass. The neighbour-list builder
             // routes (i-block, j-block) candidates with
@@ -1173,6 +1198,51 @@ impl ForceField {
                     }
                 }
             }
+
+            // Exclusion-tile pass. Processes the block pairs that contain
+            // a fully-excluded atom pair (routed out of the bulk /
+            // single-pair lists by find_blocks), applying the per-tile
+            // exclusion bitmask so those two passes do zero exclusion
+            // work. Compiled and launched only in CellList mode (all-pairs
+            // folds the scale into the evaluator). Grid covers
+            // `exclusion_tiles_capacity` warps; each warp reads the live
+            // tile count from `interaction_count[2]`. rq-fa0b3d10
+            if jit.excl_tile_f.is_some() {
+                if let Some(packed) =
+                    self.neighbor_list.as_ref().and_then(|nl| nl.packed.as_ref())
+                {
+                    if packed.exclusion_tiles_capacity > 0 {
+                        let mut excl_builder = ForceLaunchBuilder::new();
+                        excl_builder.push_device_buffer(&packed.exclusion_tile_iblocks);
+                        excl_builder.push_device_buffer(&packed.exclusion_tile_jblocks);
+                        excl_builder.push_device_buffer(&packed.exclusion_tile_masks);
+                        excl_builder.push_device_buffer(&packed.interaction_count);
+                        excl_builder.push_device_buffer(&packed.tile_sorted_posq);
+                        excl_builder.push_device_buffer(sorted_view);
+                        excl_builder.push_device_buffer(&buffers.type_indices);
+                        excl_builder.push_device_buffer(sim_box.lattice_device());
+                        excl_builder.push_device_buffer(&self.fast_total_forces_fp_x);
+                        excl_builder.push_device_buffer(&self.fast_total_forces_fp_y);
+                        excl_builder.push_device_buffer(&self.fast_total_forces_fp_z);
+                        excl_builder
+                            .push_device_buffer(&self.fast_total_potential_energies_fp);
+                        excl_builder.push_device_buffer(&self.fast_total_virials_fp);
+                        for &slot_idx in &self.jit_slot_indices {
+                            self.pair_force_participant(slot_idx)
+                                .bind_pair_force_args(&bind_ctx, &mut excl_builder);
+                        }
+                        excl_builder.push_scalar(n as u32);
+                        let cap = packed.exclusion_tiles_capacity;
+                        unsafe {
+                            jit.launch_excl_tile(cap, write_scalars, excl_builder)?;
+                        }
+                    }
+                }
+            }
+            // The JIT_COMPOSED_PAIR_FORCE stage spans all three fast-class
+            // pair-force passes (bulk, single-pair, exclusion-tile), so it
+            // reflects the whole pair-force cost per step.
+            timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
 
             // Finalize: convert fixed-point sums to Real and add into
             // the existing fast-class Real accumulator buffers.

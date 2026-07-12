@@ -399,6 +399,27 @@ pub enum TopologyFileError {
     UnknownDihedralType { line_number: usize, name: String },
     #[error("line {line_number}: exclusion scale {scale} is out of the range [0, 1]")]
     ScaleOutOfRange { line_number: usize, scale: Real },
+    // rq-03faaf24 — exclusions are binary and full in the packed-neighbour
+    // architecture; a fractional scale (e.g. OPLS/AMBER 1-4) is unsupported.
+    #[error(
+        "exclusion for atom pair ({atom_i}, {atom_j}) has fractional scale \
+         {scale}; only full exclusions (scale 0 or 1) are supported"
+    )]
+    FractionalExclusionScale { atom_i: u32, atom_j: u32, scale: Real },
+    // rq-03faaf24 — a single per-pair exclusion bit means "contributes
+    // nothing to any fast slot", so the two fragment scales must agree:
+    // a partial exclusion (e.g. LJ off, Coulomb on) is unsupported.
+    #[error(
+        "exclusion for atom pair ({atom_i}, {atom_j}) has mismatched fragment \
+         scales (LJ {scale_lj}, Coulomb {scale_coul}); a pair must be either \
+         fully excluded (0, 0) or not excluded (1, 1)"
+    )]
+    PartialExclusionScale {
+        atom_i: u32,
+        atom_j: u32,
+        scale_lj: Real,
+        scale_coul: Real,
+    },
     #[error("line {line_number}: invalid constraint row: {reason}")]
     InvalidConstraintRow { line_number: usize, reason: String },
     #[error("line {line_number}: atom {atom} appears more than once in this constraint row")]
@@ -1359,6 +1380,29 @@ pub(crate) fn parse_topology_file(
     let mut atom_excl_lj_scales: Vec<Real> = vec![0.0; total_partner_entries];
     let mut atom_excl_coul_scales: Vec<Real> = vec![0.0; total_partner_entries];
     let mut cursor_e: Vec<u32> = atom_excl_offsets[..particle_count].to_vec();
+    // rq-03faaf24 — exclusions are binary and full. Each fragment scale
+    // must be exactly 0 or 1 (no fractional 1-4), and the two fragments
+    // must agree (no partial LJ-only / Coulomb-only exclusion), because a
+    // single per-pair bit encodes "excluded from every fast slot".
+    for e in &effective {
+        for scale in [e.scale_lj, e.scale_coul] {
+            if scale != 0.0 && scale != 1.0 {
+                return Err(TopologyFileError::FractionalExclusionScale {
+                    atom_i: e.atom_i,
+                    atom_j: e.atom_j,
+                    scale,
+                });
+            }
+        }
+        if e.scale_lj != e.scale_coul {
+            return Err(TopologyFileError::PartialExclusionScale {
+                atom_i: e.atom_i,
+                atom_j: e.atom_j,
+                scale_lj: e.scale_lj,
+                scale_coul: e.scale_coul,
+            });
+        }
+    }
     for e in &effective {
         let pi = e.atom_i as usize;
         let pj = e.atom_j as usize;

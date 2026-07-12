@@ -288,3 +288,177 @@ fn steady_state_rebuild_produces_a_correct_list_from_device_counts() {
         .unwrap();
     assert_eq!(status[0], 0, "a build within capacity leaves the status word clean");
 }
+
+// --- Exclusion-tile build ---
+
+/// Read the live exclusion tiles off the device: `(count, [(bi, bj)],
+/// [mask row])` where each tile contributes 32 consecutive mask words.
+fn read_exclusion_tiles(
+    device: &Arc<CudaDevice>,
+    nl: &NeighborListState,
+) -> (u32, Vec<(u32, u32)>, Vec<u32>) {
+    let packed = nl.packed.as_ref().unwrap();
+    let count = packed.exclusion_tiles_count;
+    let ib = device.dtoh_sync_copy(&packed.exclusion_tile_iblocks).unwrap();
+    let jb = device.dtoh_sync_copy(&packed.exclusion_tile_jblocks).unwrap();
+    let masks = device.dtoh_sync_copy(&packed.exclusion_tile_masks).unwrap();
+    let pairs: Vec<(u32, u32)> = (0..count as usize).map(|t| (ib[t], jb[t])).collect();
+    let mask_rows = masks[..count as usize * 32].to_vec();
+    (count, pairs, mask_rows)
+}
+
+#[test]
+fn exclusion_tiles_empty_when_no_exclusions() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 4); // 64 atoms, 2 blocks
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    // No excluded pairs set.
+    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+    let (count, _, _) = read_exclusion_tiles(&gpu.device, &nl);
+    assert_eq!(count, 0, "no exclusions => no exclusion tiles");
+    // interaction_count[2] mirrors the host count.
+    let ic = gpu
+        .device
+        .dtoh_sync_copy(&nl.packed.as_ref().unwrap().interaction_count)
+        .unwrap();
+    assert_eq!(ic[2], 0);
+    // The skip-list CSR is all zero (no block pair is skipped).
+    let offs = gpu
+        .device
+        .dtoh_sync_copy(&nl.packed.as_ref().unwrap().excl_jblock_offsets)
+        .unwrap();
+    assert!(offs.iter().all(|&o| o == 0));
+}
+
+// rq-acfb3375 (tile-presence half; the "routed away from the bulk list"
+// half is covered once find_blocks skips exclusion block pairs).
+#[test]
+fn exclusion_tile_appears_for_excluded_block_pair() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 4); // 64 atoms, 2 blocks
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    let excluded = vec![(0u32, 1u32), (2u32, 3u32), (10u32, 40u32)];
+    nl.set_excluded_pairs(excluded.clone());
+    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+
+    // Replicate the inversion to know each pair's expected block pair.
+    let sorted = gpu
+        .device
+        .dtoh_sync_copy(nl.sorted_particle_ids_for_packed().unwrap())
+        .unwrap();
+    let mut atom_slot = vec![u32::MAX; n];
+    for (slot, &pid) in sorted.iter().take(n).enumerate() {
+        atom_slot[pid as usize] = slot as u32;
+    }
+    let (count, tiles, masks) = read_exclusion_tiles(&gpu.device, &nl);
+    assert!(count > 0, "excluded pairs must produce tiles");
+    for &(a, b) in &excluded {
+        let (sa, sb2) = (atom_slot[a as usize], atom_slot[b as usize]);
+        let (si, sj) = if sa <= sb2 { (sa, sb2) } else { (sb2, sa) };
+        let (bi, bj) = (si / 32, sj / 32);
+        let (il, jl) = (si % 32, sj % 32);
+        let t = tiles
+            .iter()
+            .position(|&(x, y)| x == bi && y == bj)
+            .unwrap_or_else(|| panic!("no exclusion tile for block pair ({bi},{bj})"));
+        let bit = masks[t * 32 + il as usize] & (1u32 << jl);
+        assert!(bit != 0, "excluded pair ({a},{b}) bit not set in tile ({bi},{bj})");
+    }
+}
+
+// rq-10443d06
+#[test]
+fn exclusion_tiles_byte_identical_across_rebuilds() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 4);
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.set_excluded_pairs(vec![(0u32, 1u32), (5u32, 33u32), (20u32, 21u32)]);
+
+    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+    let (c1, tiles1, masks1) = read_exclusion_tiles(&gpu.device, &nl);
+    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+    let (c2, tiles2, masks2) = read_exclusion_tiles(&gpu.device, &nl);
+
+    assert_eq!(c1, c2, "exclusion-tile count must be identical across rebuilds");
+    assert_eq!(tiles1, tiles2, "tile (bi, bj) list must be byte-identical");
+    assert_eq!(masks1, masks2, "tile bitmasks must be byte-identical");
+    // Tiles are emitted in ascending (bi, bj) order.
+    assert!(tiles1.windows(2).all(|w| w[0] < w[1]), "tiles must be sorted and unique");
+}
+
+// rq-acfb3375 — construction routes an exclusion block pair away from
+// the bulk list: after a rebuild, no packed or single-pair entry pairs
+// an atom of bi with an atom of bj for any exclusion tile (bi, bj).
+#[test]
+fn exclusion_block_pair_absent_from_bulk_list() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 8); // 512 atoms, 16 blocks
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    // Exclude a spread of pairs so several block pairs become exclusion
+    // tiles (including at least one cross-block pair).
+    nl.set_excluded_pairs(vec![
+        (0u32, 1u32),
+        (2u32, 3u32),
+        (5u32, 40u32),
+        (33u32, 130u32),
+        (200u32, 201u32),
+    ]);
+    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+
+    // slot(atom) -> block via the inverse sort.
+    let sorted = gpu
+        .device
+        .dtoh_sync_copy(nl.sorted_particle_ids_for_packed().unwrap())
+        .unwrap();
+    let mut block_of = vec![u32::MAX; n];
+    for (slot, &pid) in sorted.iter().take(n).enumerate() {
+        block_of[pid as usize] = (slot / 32) as u32;
+    }
+
+    let (n_tiles, tiles, _masks) = read_exclusion_tiles(&gpu.device, &nl);
+    assert!(n_tiles > 0, "excluded pairs must produce tiles");
+    let excl_set: std::collections::HashSet<(u32, u32)> = tiles.into_iter().collect();
+
+    let packed = nl.packed.as_ref().unwrap();
+    let counts = read_counts(&gpu.device, &nl);
+    let (n_bulk, n_single) = (counts[0] as usize, counts[1] as usize);
+
+    // Bulk packed entries: i-block = interacting_tiles[pos]; each
+    // interacting_atoms[pos*32 + lane] is a j-atom id.
+    let itiles = gpu.device.dtoh_sync_copy(&packed.interacting_tiles).unwrap();
+    let iatoms = gpu.device.dtoh_sync_copy(&packed.interacting_atoms).unwrap();
+    for pos in 0..n_bulk {
+        let bi = itiles[pos];
+        for lane in 0..32usize {
+            let ja = iatoms[pos * 32 + lane];
+            if (ja as usize) >= n {
+                continue; // padding sentinel
+            }
+            let bj = block_of[ja as usize];
+            let key = if bi <= bj { (bi, bj) } else { (bj, bi) };
+            assert!(
+                !excl_set.contains(&key),
+                "bulk entry pos {pos} pairs blocks {bi},{bj} which form exclusion tile {key:?}"
+            );
+        }
+    }
+
+    // Single-pair entries: (single_pair_atoms[2k], [2k+1]).
+    let sp = gpu.device.dtoh_sync_copy(&packed.single_pair_atoms).unwrap();
+    for k in 0..n_single {
+        let (ai, aj) = (sp[2 * k], sp[2 * k + 1]);
+        if (ai as usize) >= n || (aj as usize) >= n {
+            continue;
+        }
+        let (bi, bj) = (block_of[ai as usize], block_of[aj as usize]);
+        let key = if bi <= bj { (bi, bj) } else { (bj, bi) };
+        assert!(
+            !excl_set.contains(&key),
+            "single pair ({ai},{aj}) sits in exclusion tile {key:?}"
+        );
+    }
+}

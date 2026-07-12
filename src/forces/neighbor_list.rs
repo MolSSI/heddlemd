@@ -164,6 +164,34 @@ pub struct PackedNeighborData {
     /// Live single-pair count after the most recent rebuild
     /// (`interaction_count[1]` on the device).
     pub single_pairs_count: u32,
+    // rq-03faaf24 — exclusion-tile list. A block pair (bi <= bj) with any
+    // fully-excluded atom pair under the current block membership; the
+    // bulk/single-pair passes omit it and the exclusion-tile pass
+    // computes it with the per-tile bitmask.
+    /// Per-exclusion-tile i-block index. Length `exclusion_tiles_capacity`.
+    pub exclusion_tile_iblocks: CudaSlice<u32>,
+    /// Per-exclusion-tile j-block index (`>= iblock`). Length
+    /// `exclusion_tiles_capacity`.
+    pub exclusion_tile_jblocks: CudaSlice<u32>,
+    /// 1024-bit-per-tile exclusion bitmask, 32 `u32` rows per tile:
+    /// `exclusion_tile_masks[t*32 + i_lane]` bit `j_lane` set = the two
+    /// atoms are fully excluded. Length `exclusion_tiles_capacity * 32`.
+    pub exclusion_tile_masks: CudaSlice<u32>,
+    /// Allocated capacity of the exclusion-tile buffers, in tiles.
+    pub exclusion_tiles_capacity: u32,
+    /// Live exclusion-tile count after the most recent rebuild
+    /// (`interaction_count[2]` on the device).
+    pub exclusion_tiles_count: u32,
+    /// Per-i-block CSR of excluded j-blocks used by
+    /// `find_blocks_with_interactions` to skip exclusion block pairs.
+    /// `excl_jblock_offsets` has length `n_blocks + 1`; the sorted j-block
+    /// indices for i-block `b` are `excl_jblocks[excl_jblock_offsets[b] ..
+    /// excl_jblock_offsets[b+1]]`. Rebuilt each neighbour-list rebuild.
+    pub excl_jblock_offsets: CudaSlice<u32>,
+    /// Flat sorted excluded-j-block indices; see `excl_jblock_offsets`.
+    /// Length `exclusion_tiles_capacity` (each exclusion tile contributes
+    /// one `(bi, bj)` entry to bi's row).
+    pub excl_jblocks: CudaSlice<u32>,
 }
 
 /// Outcome of a `NeighborListState::pre_step` call. `rebuilt` is `true`
@@ -230,6 +258,12 @@ pub struct NeighborListState {
     /// dtoh-free and relies on the per-batch status read for growth.
     /// rq-67a09135
     has_probed: bool,
+    /// Fully-excluded canonical atom pairs `(a, b)` with `a < b`, captured
+    /// once at construction from the exclusion topology. The per-rebuild
+    /// host builder maps these through the current `sorted_particle_ids`
+    /// into the exclusion tiles / bitmask. Empty when no slot consumes
+    /// exclusions. rq-8945395f
+    excluded_pairs: Vec<(u32, u32)>,
 }
 
 /// Default fraction of a packed-neighbour capacity at which a build is
@@ -342,7 +376,9 @@ fn alloc_packed_neighbor_data(
     let interacting_atoms = device
         .alloc_zeros::<u32>(cap_alloc * 32)
         .map_err(GpuError::from)?;
-    let interaction_count = device.alloc_zeros::<u32>(2).map_err(GpuError::from)?;
+    // [0] = tile count, [1] = single-pair count, [2] = exclusion-tile
+    // count. rq-03faaf24
+    let interaction_count = device.alloc_zeros::<u32>(3).map_err(GpuError::from)?;
     let neighbor_status = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
     let iblock_count = device
         .alloc_zeros::<u32>(n_blocks_alloc)
@@ -369,6 +405,25 @@ fn alloc_packed_neighbor_data(
     let single_pair_atoms = device
         .alloc_zeros::<u32>(2 * single_pairs_capacity as usize)
         .map_err(GpuError::from)?;
+    // rq-03faaf24 — exclusion-tile buffers. Seeded O(N); grown on demand
+    // like the tile list (exclusions are intramolecular, so their count is
+    // a small multiple of n_blocks).
+    let exclusion_tiles_capacity = default_interacting_tiles_capacity(n_blocks).max(1);
+    let exclusion_tile_iblocks = device
+        .alloc_zeros::<u32>(exclusion_tiles_capacity as usize)
+        .map_err(GpuError::from)?;
+    let exclusion_tile_jblocks = device
+        .alloc_zeros::<u32>(exclusion_tiles_capacity as usize)
+        .map_err(GpuError::from)?;
+    let exclusion_tile_masks = device
+        .alloc_zeros::<u32>(exclusion_tiles_capacity as usize * 32)
+        .map_err(GpuError::from)?;
+    let excl_jblock_offsets = device
+        .alloc_zeros::<u32>(n_blocks_alloc + 1)
+        .map_err(GpuError::from)?;
+    let excl_jblocks = device
+        .alloc_zeros::<u32>(exclusion_tiles_capacity as usize)
+        .map_err(GpuError::from)?;
 
     Ok(PackedNeighborData {
         n_blocks,
@@ -394,7 +449,160 @@ fn alloc_packed_neighbor_data(
         single_pair_atoms,
         single_pairs_capacity,
         single_pairs_count: 0,
+        exclusion_tile_iblocks,
+        exclusion_tile_jblocks,
+        exclusion_tile_masks,
+        exclusion_tiles_capacity,
+        exclusion_tiles_count: 0,
+        excl_jblock_offsets,
+        excl_jblocks,
     })
+}
+
+/// Build the exclusion tiles for the current sort and upload them, with
+/// their 1024-bit masks and the `find_blocks` skip-list CSR, into
+/// `packed`. Returns `true` when the exclusion-tile buffers were grown
+/// (reallocated) this rebuild, so the caller can trigger CUDA-graph
+/// re-capture (the captured excl-tile launch binds the old pointers).
+///
+/// The build runs on the host each rebuild: the excluded canonical pairs
+/// are mapped through `sorted_particle_ids` into `(bi, bj)` block pairs
+/// (`bi <= bj`) whose 1024-bit masks are accumulated in an ordered map,
+/// so the tile set, its order, and the masks are a deterministic function
+/// of the exclusion topology and the sort. `interaction_count[2]` is not
+/// written here — `find_blocks_with_interactions` zeroes the counter, so
+/// the caller writes the exclusion-tile count after that kernel.
+/// rq-8945395f rq-dbffee81
+fn build_and_upload_exclusion_tiles(
+    device: &Arc<CudaDevice>,
+    packed: &mut PackedNeighborData,
+    sorted_particle_ids: &CudaSlice<u32>,
+    excluded_pairs: &[(u32, u32)],
+    n_blocks: u32,
+    particle_count: usize,
+) -> Result<bool, NeighborListError> {
+    use std::collections::BTreeMap;
+
+    // The skip-list CSR is always sized `n_blocks + 1`; an all-zero
+    // offsets array means "no block pair is skipped".
+    let mut excl_jblock_offsets = vec![0u32; n_blocks as usize + 1];
+
+    if excluded_pairs.is_empty() || particle_count == 0 {
+        packed.exclusion_tiles_count = 0;
+        device
+            .htod_sync_copy_into(&excl_jblock_offsets, &mut packed.excl_jblock_offsets)
+            .map_err(GpuError::from)?;
+        return Ok(false);
+    }
+
+    // Invert the sort: atom_slot[particle_id] = slot. rq-5f871bd5
+    let sorted_host = device
+        .dtoh_sync_copy(sorted_particle_ids)
+        .map_err(GpuError::from)?;
+    let mut atom_slot = vec![u32::MAX; particle_count];
+    for (slot, &pid) in sorted_host.iter().take(particle_count).enumerate() {
+        if (pid as usize) < particle_count {
+            atom_slot[pid as usize] = slot as u32;
+        }
+    }
+
+    // Accumulate each excluded pair's bit into its (bi, bj) tile mask.
+    // Keyed by the ordered block pair so iteration is deterministic.
+    let mut tiles: BTreeMap<(u32, u32), [u32; 32]> = BTreeMap::new();
+    for &(a, b) in excluded_pairs {
+        let (sa, sb) = (atom_slot[a as usize], atom_slot[b as usize]);
+        // A pair whose atoms fell outside the sorted range cannot be
+        // placed; skip defensively (should not happen for a valid sort).
+        if sa == u32::MAX || sb == u32::MAX {
+            continue;
+        }
+        // Order the pair so the tile's i-block <= j-block.
+        let (si, sj) = if sa <= sb { (sa, sb) } else { (sb, sa) };
+        let (bi, bj) = (si / 32, sj / 32);
+        let (il, jl) = (si % 32, sj % 32);
+        let mask = tiles.entry((bi, bj)).or_insert([0u32; 32]);
+        mask[il as usize] |= 1u32 << jl;
+        if bi == bj {
+            // Self-block tile: the 32x32 sweep visits both orderings, so
+            // set the symmetric bit too.
+            mask[jl as usize] |= 1u32 << il;
+        }
+    }
+
+    let n_tiles = tiles.len() as u32;
+
+    // Grow the exclusion-tile buffers if this rebuild produced more tiles
+    // than the current capacity (geometric, with the tile growth factor).
+    let mut reallocated = false;
+    if n_tiles > packed.exclusion_tiles_capacity {
+        reallocated = true;
+        let mut new_cap = packed.exclusion_tiles_capacity.max(1);
+        while new_cap < n_tiles {
+            new_cap = ((new_cap as f64) * packed.tile_pair_growth_factor).ceil() as u32;
+        }
+        packed.exclusion_tile_iblocks = device
+            .alloc_zeros::<u32>(new_cap as usize)
+            .map_err(GpuError::from)?;
+        packed.exclusion_tile_jblocks = device
+            .alloc_zeros::<u32>(new_cap as usize)
+            .map_err(GpuError::from)?;
+        packed.exclusion_tile_masks = device
+            .alloc_zeros::<u32>(new_cap as usize * 32)
+            .map_err(GpuError::from)?;
+        packed.excl_jblocks = device
+            .alloc_zeros::<u32>(new_cap as usize)
+            .map_err(GpuError::from)?;
+        packed.exclusion_tiles_capacity = new_cap;
+    }
+
+    // Flatten the ordered tiles into upload buffers and build the CSR
+    // skip-list keyed by i-block (BTreeMap order => per-bi bj lists are
+    // already ascending).
+    let mut iblocks_host = Vec::with_capacity(n_tiles as usize);
+    let mut jblocks_host = Vec::with_capacity(n_tiles as usize);
+    let mut masks_host = Vec::with_capacity(n_tiles as usize * 32);
+    let mut jblocks_csr = Vec::with_capacity(n_tiles as usize);
+    for (&(bi, bj), mask) in &tiles {
+        iblocks_host.push(bi);
+        jblocks_host.push(bj);
+        masks_host.extend_from_slice(mask);
+        jblocks_csr.push(bj);
+        excl_jblock_offsets[bi as usize + 1] += 1;
+    }
+    for b in 0..n_blocks as usize {
+        excl_jblock_offsets[b + 1] += excl_jblock_offsets[b];
+    }
+
+    device
+        .htod_sync_copy_into(
+            &iblocks_host,
+            &mut packed.exclusion_tile_iblocks.slice_mut(0..n_tiles as usize),
+        )
+        .map_err(GpuError::from)?;
+    device
+        .htod_sync_copy_into(
+            &jblocks_host,
+            &mut packed.exclusion_tile_jblocks.slice_mut(0..n_tiles as usize),
+        )
+        .map_err(GpuError::from)?;
+    device
+        .htod_sync_copy_into(
+            &masks_host,
+            &mut packed.exclusion_tile_masks.slice_mut(0..masks_host.len()),
+        )
+        .map_err(GpuError::from)?;
+    device
+        .htod_sync_copy_into(
+            &jblocks_csr,
+            &mut packed.excl_jblocks.slice_mut(0..n_tiles as usize),
+        )
+        .map_err(GpuError::from)?;
+    device
+        .htod_sync_copy_into(&excl_jblock_offsets, &mut packed.excl_jblock_offsets)
+        .map_err(GpuError::from)?;
+
+    packed.exclusion_tiles_count = n_tiles;
+    Ok(reallocated)
 }
 
 impl PackedNeighborData {
@@ -567,6 +775,7 @@ impl NeighborListState {
             }),
             rebuild_generation: 0,
             has_probed: false,
+            excluded_pairs: Vec::new(),
         })
     }
 
@@ -652,6 +861,7 @@ impl NeighborListState {
             }),
             rebuild_generation: 0,
             has_probed: false,
+            excluded_pairs: Vec::new(),
         })
     }
 
@@ -725,7 +935,7 @@ impl NeighborListState {
             // The JIT pair-force kernel reads the entry count from device
             // memory (so a captured CUDA graph picks up the live value);
             // mirror the host-side count to interaction_count[0].
-            let count_host = [packed.interacting_tiles_count, 0u32];
+            let count_host = [packed.interacting_tiles_count, 0u32, 0u32];
             device
                 .htod_sync_copy_into(&count_host, &mut packed.interaction_count)
                 .map_err(GpuError::from)?;
@@ -778,7 +988,16 @@ impl NeighborListState {
             // Trivial mode pre-populates the packed list on the host and
             // never runs the construction probe.
             has_probed: true,
+            excluded_pairs: Vec::new(),
         })
+    }
+
+    /// Records the fully-excluded canonical atom pairs `(a, b)` (`a < b`)
+    /// that the per-rebuild exclusion-tile builder maps into the bitmask.
+    /// Called once after construction by the force field; a slot that
+    /// consumes no exclusions leaves this empty. rq-8945395f
+    pub fn set_excluded_pairs(&mut self, pairs: Vec<(u32, u32)>) {
+        self.excluded_pairs = pairs;
     }
 
     /// Returns the sorted-particle-ids buffer the packed-neighbour
@@ -1105,6 +1324,9 @@ impl NeighborListState {
             NeighborListMode::CellList(cl) => &cl.sorted_particle_ids,
             _ => unreachable!("rebuild_packed_neighbour is for CellList only"),
         };
+        // Disjoint field: the excluded-pair list, read by the host
+        // exclusion-tile build below.
+        let excluded_view: *const Vec<(u32, u32)> = &self.excluded_pairs;
         let packed = self.packed.as_mut().expect("packed data present");
 
         // 1. Scatter positions into tile-sorted view (block order).
@@ -1135,6 +1357,20 @@ impl NeighborListState {
             n_blocks,
         )?;
 
+        // 3b. Build the exclusion tiles for the current sort and upload
+        //     them with their bitmasks + the find_blocks skip-list CSR.
+        //     Runs once per rebuild (independent of the probe loop's
+        //     capacity growth, which does not affect exclusion tiles).
+        //     rq-8945395f
+        let excl_reallocated = build_and_upload_exclusion_tiles(
+            &device,
+            packed,
+            unsafe { &*sorted_view },
+            unsafe { &*excluded_view },
+            n_blocks,
+            particle_count,
+        )?;
+
         // 4. Find blocks with interactions, then record the high-water /
         //    overflow state in `neighbor_status` from the device-resident
         //    counts. No interaction count is copied to the host.
@@ -1148,7 +1384,9 @@ impl NeighborListState {
         //    overflow bit is set, sizing capacity with headroom. Runs once
         //    per state, before CUDA-graph capture.
         //    rq-67a09135
-        let mut reallocated = false;
+        // Seed with the exclusion-tile build's own reallocation so a grown
+        // exclusion buffer also triggers CUDA-graph re-capture. rq-8945395f
+        let mut reallocated = excl_reallocated;
         loop {
             device
                 .memset_zeros(&mut packed.interaction_count)
@@ -1180,6 +1418,8 @@ impl NeighborListState {
                 &mut packed.interacting_atoms,
                 &mut packed.single_pair_atoms,
                 &mut packed.interaction_count,
+                &packed.excl_jblock_offsets,
+                &packed.excl_jblocks,
             )?;
             // rq-67a09135 — set bits 1-4 of neighbor_status on the device.
             let tiles_hw = packed.tiles_high_water_mark();
@@ -1218,6 +1458,16 @@ impl NeighborListState {
                     .map_err(NeighborListError::Gpu)?;
                 reallocated = true;
             }
+        }
+
+        // The find_blocks loop zeroes `interaction_count` each iteration
+        // and writes [0]/[1]; publish the host-known exclusion-tile count
+        // into [2] for the exclusion-tile force pass to read. rq-8945395f
+        {
+            let count = [packed.exclusion_tiles_count];
+            device
+                .htod_sync_copy_into(&count, &mut packed.interaction_count.slice_mut(2..3))
+                .map_err(GpuError::from)?;
         }
 
         // 5. Sort entries by i-block so the force kernel can process

@@ -606,7 +606,20 @@
     "decl": "## Exclusion Handling",
     "file": "forces/packed-neighbour-pair-force",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Exclusion Handling",
     "type": "section"
   },
@@ -2347,6 +2360,18 @@
     "refs": [],
     "title": "Slot Participation",
     "type": "section"
+  },
+  "rq-10443d06": {
+    "decl": "Scenario: Two GPU runs build byte-identical exclusion tiles",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two GPU runs build byte-identical exclusion tiles",
+    "type": "scenario"
   },
   "rq-105afb1d": {
     "decl": "Scenario: min <= mean <= max for every row",
@@ -13019,6 +13044,18 @@
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
+  "rq-5f871bd5": {
+    "decl": "- `invert_sorted_particle_ids(sorted_particle_ids) -> atom_slot` —",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "invert_sorted_particle_ids",
+    "type": "api-item"
+  },
   "rq-5f8f7d00": {
     "decl": "Scenario: Registries::with_builtins() pre-populates every inner registry",
     "file": "simulation-runner",
@@ -17535,10 +17572,15 @@
     "type": "scenario"
   },
   "rq-80c6a964": {
-    "decl": "Scenario: Fully-excluded pair nets to zero on the fixed-point accumulator",
+    "decl": "Scenario: A fully-excluded pair is masked out by the exclusion-tile pass",
     "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Fully-excluded pair nets to zero on the fixed-point accumulator",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fully-excluded pair is masked out by the exclusion-tile pass",
     "type": "scenario"
   },
   "rq-80d00b52": {
@@ -18414,10 +18456,15 @@
     "type": "scenario"
   },
   "rq-8840662f": {
-    "decl": "Scenario: Per-fragment exclusion scale yields per-fragment net contribution",
+    "decl": "Scenario: A non-excluded pair inside an exclusion tile is still computed",
     "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Per-fragment exclusion scale yields per-fragment net contribution",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A non-excluded pair inside an exclusion tile is still computed",
     "type": "scenario"
   },
   "rq-884b5cd6": {
@@ -18588,6 +18635,22 @@
     "refs": [],
     "title": "Source-Fragment Contract — Bonded Shape",
     "type": "section"
+  },
+  "rq-8945395f": {
+    "decl": "- `build_exclusion_tiles(excluded_pairs, atom_slot, n_blocks) ->",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "build_exclusion_tiles",
+    "type": "api-item"
   },
   "rq-894c16c4": {
     "decl": "Scenario: Defaults populate the output section when [output] is omitted",
@@ -21174,6 +21237,13 @@
     "title": "Two runs of spme_recip_reduce_partials on identical inputs are byte-identical",
     "type": "scenario"
   },
+  "rq-9d34c158": {
+    "decl": "- `heddle_jit_composed_pair_force_excl_f` /",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "heddle_jit_composed_pair_force_excl_f",
+    "type": "api-item"
+  },
   "rq-9d523d38": {
     "decl": "Scenario: SI-mode .xyz lattice and positions are converted to Bohr",
     "file": "io/unit-system",
@@ -22249,7 +22319,12 @@
     "decl": "### Packed-Neighbour Pass",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Packed-Neighbour Pass",
     "type": "section"
   },
@@ -23326,6 +23401,18 @@
     "title": "Per-kernel timings are populated in graph mode",
     "type": "scenario"
   },
+  "rq-acfb3375": {
+    "decl": "Scenario: Construction routes an exclusion block pair away from the bulk list",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construction routes an exclusion block pair away from the bulk list",
+    "type": "scenario"
+  },
   "rq-acfda5d4": {
     "decl": "## Compatibility Rules",
     "file": "integration/constraint-framework",
@@ -24099,7 +24186,12 @@
     "decl": "### Single-Pair Pass",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Single-Pair Pass",
     "type": "section"
   },
@@ -24371,10 +24463,10 @@
     "type": "section"
   },
   "rq-b49bfdff": {
-    "decl": "Scenario: Packed-neighbour pass applies exclusion_scale inline",
+    "decl": "Scenario: Bulk and single-pair passes do no exclusion work",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Packed-neighbour pass applies exclusion_scale inline",
+    "title": "Bulk and single-pair passes do no exclusion work",
     "type": "scenario"
   },
   "rq-b4bb7096": {
@@ -24921,6 +25013,18 @@
       }
     ],
     "title": "Reject non-positive temperature",
+    "type": "scenario"
+  },
+  "rq-b8c58d4d": {
+    "decl": "Scenario: A fractional exclusion scale is rejected at load",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fractional exclusion scale is rejected at load",
     "type": "scenario"
   },
   "rq-b8e6dfb3": {
@@ -25773,6 +25877,13 @@
     "refs": [],
     "title": "BarostatPeriodicity",
     "type": "api-item"
+  },
+  "rq-bfe82d37": {
+    "decl": "Scenario: A partial (mixed-binary) exclusion is rejected at load",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "A partial (mixed-binary) exclusion is rejected at load",
+    "type": "scenario"
   },
   "rq-c00689e6": {
     "decl": "- `Builtins` — the per-trait built-in roster.",
@@ -29604,7 +29715,12 @@
     "decl": "## Construction Pipeline",
     "file": "forces/packed-neighbour-pair-force",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construction Pipeline",
     "type": "section"
   },
@@ -33832,6 +33948,23 @@
     "level": 3,
     "refs": [],
     "title": "PTX Module Loading",
+    "type": "section"
+  },
+  "rq-fa0b3d10": {
+    "decl": "### Exclusion-Tile Pass",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Exclusion-Tile Pass",
     "type": "section"
   },
   "rq-fa14a87f": {

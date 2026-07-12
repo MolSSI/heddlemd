@@ -413,6 +413,23 @@ __device__ static inline Real packed_block_bbox_dist_sq(
 #define MAX_BITS_FOR_PAIRS 3
 #endif
 
+// True when block pair (bi, bj) is an exclusion tile: bj appears in the
+// CSR skip-list slice excl_jblocks[excl_jblock_offsets[bi] ..
+// excl_jblock_offsets[bi + 1]]. The per-i-block list is tiny
+// (intramolecular), so a linear scan is cheap. rq-fa0b3d10
+__device__ inline bool heddle_is_exclusion_block_pair(
+    unsigned int bi, unsigned int bj,
+    const unsigned int *excl_jblock_offsets,
+    const unsigned int *excl_jblocks)
+{
+  unsigned int start = excl_jblock_offsets[bi];
+  unsigned int end = excl_jblock_offsets[bi + 1u];
+  for (unsigned int k = start; k < end; ++k) {
+    if (excl_jblocks[k] == bj) return true;
+  }
+  return false;
+}
+
 extern "C" __global__ void find_blocks_with_interactions(
     const Real4 *tile_sorted_posq,
     const unsigned int *sorted_particle_ids,
@@ -427,7 +444,9 @@ extern "C" __global__ void find_blocks_with_interactions(
     unsigned int *interacting_tiles,
     unsigned int *interacting_atoms,
     unsigned int *single_pair_atoms,
-    unsigned int *interaction_count)
+    unsigned int *interaction_count,
+    const unsigned int *excl_jblock_offsets,
+    const unsigned int *excl_jblocks)
 {
   __shared__ Real warp_ix[PACKED_NL_WARPS_PER_BLOCK][TILE_SIZE];
   __shared__ Real warp_iy[PACKED_NL_WARPS_PER_BLOCK][TILE_SIZE];
@@ -473,6 +492,15 @@ extern "C" __global__ void find_blocks_with_interactions(
   for (unsigned int j_base = b; j_base < n_blocks; j_base += 32u) {
     unsigned int j_block = j_base + lane;
     bool j_in_range = j_block < n_blocks;
+    // Skip exclusion block pairs entirely: the exclusion-tile pass
+    // computes all of (b, j_block)'s interactions (excluded and
+    // non-excluded), so omitting them here keeps every bulk and
+    // single-pair output exclusion-free without dropping or
+    // double-counting a pair. rq-fa0b3d10 rq-acfb3375
+    if (j_in_range &&
+        heddle_is_exclusion_block_pair(b, j_block, excl_jblock_offsets, excl_jblocks)) {
+      j_in_range = false;
+    }
     bool prune_pass = false;
     if (j_in_range) {
       Real cx_j = block_centre[j_block * 4u + 0u];

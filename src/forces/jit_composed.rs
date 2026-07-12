@@ -85,6 +85,9 @@ const F_ENTRY: &str = "heddle_jit_composed_pair_force_f";
 const FEV_ENTRY: &str = "heddle_jit_composed_pair_force_fev";
 const F_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_f";
 const FEV_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_fev";
+// Exclusion-tile pass entry points (CellList mode only). rq-fa0b3d10
+const F_EXCL_ENTRY: &str = "heddle_jit_composed_pair_force_excl_f";
+const FEV_EXCL_ENTRY: &str = "heddle_jit_composed_pair_force_excl_fev";
 
 const WARPS_PER_BLOCK: u32 = 8;
 const BLOCK_SIZE: u32 = WARPS_PER_BLOCK * 32;
@@ -656,6 +659,12 @@ pub struct JitComposedPairForce {
     pub single_pair_f: CudaFunction,
     /// `AggregateLevel::ForcesAndScalars` variant of `single_pair_f`.
     pub single_pair_fev: CudaFunction,
+    /// Exclusion-tile pass entry points, present only when the kernel was
+    /// composed with the per-tile exclusion bitmask (CellList mode). In
+    /// all-pairs mode exclusions fold into the evaluator's per-pair scale
+    /// and there is no separate pass. rq-fa0b3d10
+    pub excl_tile_f: Option<CudaFunction>,
+    pub excl_tile_fev: Option<CudaFunction>,
 }
 
 impl JitComposedPairForce {
@@ -666,8 +675,9 @@ impl JitComposedPairForce {
         device: &Arc<CudaDevice>,
         fragments: &[PairForceFragment],
         max_cutoff: crate::precision::Real,
+        use_exclusion_bitmask: bool,
     ) -> Result<Self, ForceFieldError> {
-        let source = compose_source(fragments, max_cutoff);
+        let source = compose_source(fragments, max_cutoff, use_exclusion_bitmask);
 
         let arch_arg = detect_arch_option(device);
         let mut options = vec!["--std=c++17".to_string()];
@@ -694,17 +704,13 @@ impl JitComposedPairForce {
             }
         })?;
 
+        let mut entry_points = vec![F_ENTRY, FEV_ENTRY, F_SINGLE_ENTRY, FEV_SINGLE_ENTRY];
+        if use_exclusion_bitmask {
+            entry_points.push(F_EXCL_ENTRY);
+            entry_points.push(FEV_EXCL_ENTRY);
+        }
         device
-            .load_ptx(
-                ptx,
-                MODULE_NAME,
-                &[
-                    F_ENTRY,
-                    FEV_ENTRY,
-                    F_SINGLE_ENTRY,
-                    FEV_SINGLE_ENTRY,
-                ],
-            )
+            .load_ptx(ptx, MODULE_NAME, &entry_points)
             .map_err(|e| ForceFieldError::FragmentLoadFailed(GpuError::from(e)))?;
         let pair_force_f = device
             .get_func(MODULE_NAME, F_ENTRY)
@@ -718,6 +724,22 @@ impl JitComposedPairForce {
         let single_pair_fev = device
             .get_func(MODULE_NAME, FEV_SINGLE_ENTRY)
             .expect("composed pair-force single-pair _fev entry was just loaded");
+        let (excl_tile_f, excl_tile_fev) = if use_exclusion_bitmask {
+            (
+                Some(
+                    device
+                        .get_func(MODULE_NAME, F_EXCL_ENTRY)
+                        .expect("composed pair-force excl-tile _f entry was just loaded"),
+                ),
+                Some(
+                    device
+                        .get_func(MODULE_NAME, FEV_EXCL_ENTRY)
+                        .expect("composed pair-force excl-tile _fev entry was just loaded"),
+                ),
+            )
+        } else {
+            (None, None)
+        };
 
         Ok(JitComposedPairForce {
             fragment_labels: fragments.iter().map(|f| f.label).collect(),
@@ -725,6 +747,8 @@ impl JitComposedPairForce {
             pair_force_fev,
             single_pair_f,
             single_pair_fev,
+            excl_tile_f,
+            excl_tile_fev,
         })
     }
 
@@ -811,6 +835,56 @@ impl JitComposedPairForce {
         drop(builder.storage);
         Ok(())
     }
+
+    /// Launch the exclusion-tile pass (one warp per tile). The grid is
+    /// sized to `exclusion_tiles_capacity` warps so the captured kernel
+    /// covers any post-rebuild tile count; each warp reads the live count
+    /// from `interaction_count[2]` (via the pointer in the builder) and
+    /// returns early past the live boundary. `builder` must be
+    /// pre-populated with the exclusion-tile common args (exclusion-tile
+    /// buffers, `interaction_count`, `tile_sorted_posq`,
+    /// `sorted_particle_ids`, `type_indices`, `lattice`, and the
+    /// fixed-point accumulators), the per-fragment args in canonical slot
+    /// order, and the trailing `n`.
+    ///
+    /// # Safety
+    /// `builder`'s argument list must match the exclusion-tile entry
+    /// point's signature exactly. rq-fa0b3d10
+    pub unsafe fn launch_excl_tile(
+        &self,
+        exclusion_tiles_capacity: u32,
+        use_fev: bool,
+        mut builder: ForceLaunchBuilder,
+    ) -> Result<(), GpuError> {
+        let func = if use_fev {
+            self.excl_tile_fev.as_ref()
+        } else {
+            self.excl_tile_f.as_ref()
+        };
+        let func = match func {
+            Some(f) if exclusion_tiles_capacity > 0 => f.clone(),
+            // No bitmask pass compiled (all-pairs mode) or empty capacity:
+            // nothing to launch.
+            _ => {
+                drop(builder.storage);
+                return Ok(());
+            }
+        };
+        // 8 warps per block (256 threads); one warp per tile.
+        const WARPS_PER_BLOCK: u32 = 8;
+        let block_size: u32 = WARPS_PER_BLOCK * 32;
+        let cfg = LaunchConfig {
+            grid_dim: (exclusion_tiles_capacity.div_ceil(WARPS_PER_BLOCK), 1, 1),
+            block_dim: (block_size, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe {
+            func.launch(cfg, &mut builder.kernel_params)
+                .map_err(GpuError::from)?;
+        }
+        drop(builder.storage);
+        Ok(())
+    }
 }
 
 pub(crate) fn detect_arch_option(device: &Arc<CudaDevice>) -> Option<String> {
@@ -888,6 +962,7 @@ fn functor_field_name(label: &str) -> String {
 fn compose_source(
     fragments: &[PairForceFragment],
     max_cutoff: Real,
+    use_exclusion_bitmask: bool,
 ) -> String {
     let mut s = String::with_capacity(
         8192 + fragments.iter().map(|f| f.functor_source.len()).sum::<usize>(),
@@ -966,14 +1041,31 @@ fn compose_source(
         // is tracked as an open item.
         // rq-7d64da58 — the functor emits only (factor, energy); the
         // per-pair scalar virial is derived by the caller as factor * r2.
-        let body = format!(
-            "Real s_factor, s_energy;\n            \
-             composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
-             Real ex_scale = composite.{f}.exclusion_scale(i, j);\n            \
-             factor += s_factor * ex_scale;\n            \
-             if (WriteEv) {{ energy += s_energy * ex_scale; }}",
-            f = field
-        );
+        //
+        // rq-a4b9e702 rq-fa0b3d10 — with the per-tile exclusion bitmask
+        // active (CellList mode), no bulk or single-pair entry contains an
+        // excluded pair and the exclusion-tile pass masks its own pairs, so
+        // the evaluator applies no per-pair exclusion scale. In all-pairs
+        // (Trivial) mode there is no bitmask, so each fragment's
+        // `exclusion_scale(i, j)` is still folded in inline.
+        let body = if use_exclusion_bitmask {
+            format!(
+                "Real s_factor, s_energy;\n            \
+                 composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
+                 factor += s_factor;\n            \
+                 if (WriteEv) {{ energy += s_energy; }}",
+                f = field
+            )
+        } else {
+            format!(
+                "Real s_factor, s_energy;\n            \
+                 composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
+                 Real ex_scale = composite.{f}.exclusion_scale(i, j);\n            \
+                 factor += s_factor * ex_scale;\n            \
+                 if (WriteEv) {{ energy += s_energy * ex_scale; }}",
+                f = field
+            )
+        };
         match f.cutoff {
             // Uniform cutoff matching the outer max: the outer mask
             // already covers it; omit the per-fragment guard.
@@ -1010,6 +1102,9 @@ fn compose_source(
 
     s.push_str(OUTER_LOOP_TEMPLATE);
     s.push_str(SINGLE_PAIR_LOOP_TEMPLATE);
+    if use_exclusion_bitmask {
+        s.push_str(EXCL_TILE_LOOP_TEMPLATE);
+    }
 
     // _f / _fev entry points. Each evaluates the single-periodic-copy
     // eligibility once per i-block at runtime and branches inside the
@@ -1022,6 +1117,11 @@ fn compose_source(
     // Per-pair single-pair entry points
     emit_single_pair_entry_point(&mut s, fragments, F_SINGLE_ENTRY, false);
     emit_single_pair_entry_point(&mut s, fragments, FEV_SINGLE_ENTRY, true);
+    // Exclusion-tile pass entry points (CellList mode only). rq-fa0b3d10
+    if use_exclusion_bitmask {
+        emit_excl_tile_entry_point(&mut s, fragments, F_EXCL_ENTRY, false);
+        emit_excl_tile_entry_point(&mut s, fragments, FEV_EXCL_ENTRY, true);
+    }
 
     // Resolve the per-atom type-index load markers left in the loop
     // templates. The per-atom `type_indices` buffer is always a common
@@ -1151,6 +1251,58 @@ fn emit_entry_point(
     s.push_str(
         "        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n",
     );
+    s.push_str("        fast_energy_fp, fast_virial_fp,\n");
+    s.push_str("        n);\n");
+    s.push_str("}\n");
+}
+
+// rq-fa0b3d10 — exclusion-tile pass entry point. Common args are the
+// exclusion-tile buffers + interaction_count (for the live tile count),
+// the tile-sorted positions, sorted ids, type indices, lattice, and the
+// fixed-point accumulators; per-fragment args follow in canonical slot
+// order (the functor still needs its parameter buffers even though no
+// exclusion scale is applied here). One warp per tile.
+fn emit_excl_tile_entry_point(
+    s: &mut String,
+    fragments: &[PairForceFragment],
+    entry_name: &str,
+    write_ev: bool,
+) {
+    s.push_str("\nextern \"C\" __global__ void ");
+    s.push_str(entry_name);
+    s.push_str("(\n");
+    s.push_str("    const unsigned int *exclusion_tile_iblocks,\n");
+    s.push_str("    const unsigned int *exclusion_tile_jblocks,\n");
+    s.push_str("    const unsigned int *exclusion_tile_masks,\n");
+    s.push_str("    const unsigned int *interaction_count,\n");
+    s.push_str("    const Real4 *tile_sorted_posq,\n");
+    s.push_str("    const unsigned int *sorted_particle_ids,\n");
+    s.push_str("    const unsigned int *type_indices,\n");
+    s.push_str("    const Real *lattice,\n");
+    s.push_str("    unsigned long long *fast_force_x_fp,\n");
+    s.push_str("    unsigned long long *fast_force_y_fp,\n");
+    s.push_str("    unsigned long long *fast_force_z_fp,\n");
+    s.push_str("    unsigned long long *fast_energy_fp,\n");
+    s.push_str("    unsigned long long *fast_virial_fp,\n");
+    for f in fragments {
+        s.push_str(&f.entry_point_args);
+    }
+    s.push_str("    unsigned int n)\n");
+    s.push_str("{\n");
+    s.push_str("    HeddleJitComposedPairFunc composite;\n");
+    for f in fragments {
+        s.push_str(&f.functor_init_source);
+    }
+    s.push_str("    heddle_jit_excl_tile_loop<");
+    s.push_str(if write_ev { "true" } else { "false" });
+    s.push_str(">(\n");
+    s.push_str("        composite, exclusion_tile_iblocks, exclusion_tile_jblocks,\n");
+    s.push_str("        exclusion_tile_masks, interaction_count,\n");
+    s.push_str("        tile_sorted_posq,\n");
+    s.push_str("        sorted_particle_ids,\n");
+    s.push_str("        type_indices,\n");
+    s.push_str("        lattice,\n");
+    s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
     s.push_str("        fast_energy_fp, fast_virial_fp,\n");
     s.push_str("        n);\n");
     s.push_str("}\n");
@@ -1731,6 +1883,158 @@ __device__ static inline void heddle_jit_single_pair_loop(
     heddle_jit_atomic_add_fp(fast_energy_fp, atom_j, he);
     heddle_jit_atomic_add_fp(fast_virial_fp, atom_i, hw);
     heddle_jit_atomic_add_fp(fast_virial_fp, atom_j, hw);
+  }
+}
+"#;
+
+// Exclusion-tile pair-force pass. One warp per exclusion tile — a block
+// pair (bi <= bj) that contains at least one fully-excluded atom pair.
+// The whole block pair (excluded and non-excluded pairs alike) is
+// computed here so the bulk and single-pair passes can skip it and do
+// zero exclusion work. Lane `l` owns i-atom slot bi*32+l and initially
+// j-atom slot bj*32+l; the 32-iteration diagonal shuffle visits every
+// (i_lane, j_lane) pair. A pair is evaluated only when its
+// exclusion-bitmask bit is clear and the two atoms are distinct. A
+// self-block tile (bi==bj) applies the i-side only — each intra-block
+// pair is visited from both orderings and the bitmask is symmetric — and
+// a cross-block tile applies both sides (Newton's 3rd). The j-side
+// diagonal-shuffle bookkeeping mirrors the packed-neighbour pass.
+// Accumulation is i64 fixed-point, so it is order-independent and
+// bit-exact run to run. rq-fa0b3d10
+const EXCL_TILE_LOOP_TEMPLATE: &str = r#"
+template <bool WriteEv>
+__device__ static inline void heddle_jit_excl_tile_loop(
+    const HeddleJitComposedPairFunc &composite,
+    const unsigned int *exclusion_tile_iblocks,
+    const unsigned int *exclusion_tile_jblocks,
+    const unsigned int *exclusion_tile_masks,
+    const unsigned int *interaction_count_ptr,
+    const Real4 *tile_sorted_posq,
+    const unsigned int *sorted_particle_ids,
+    const unsigned int *type_indices,
+    const Real *lattice,
+    unsigned long long *fast_force_x_fp,
+    unsigned long long *fast_force_y_fp,
+    unsigned long long *fast_force_z_fp,
+    unsigned long long *fast_energy_fp,
+    unsigned long long *fast_virial_fp,
+    unsigned int n)
+{
+  // Live exclusion-tile count read from device memory (graph-capture
+  // safe: the host rebuild refreshes interaction_count[2] in place).
+  unsigned int n_excl_tiles = interaction_count_ptr[2];
+  unsigned int warp_global =
+      (blockIdx.x * blockDim.x + threadIdx.x) / HEDDLE_JIT_WARP_SIZE;
+  if (warp_global >= n_excl_tiles) return;
+  unsigned int lane = threadIdx.x & (HEDDLE_JIT_WARP_SIZE - 1u);
+  unsigned int t = warp_global;
+
+  unsigned int bi = exclusion_tile_iblocks[t];
+  unsigned int bj = exclusion_tile_jblocks[t];
+  bool self_block = (bi == bj);
+
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
+
+  // i-atom: this lane owns slot bi*32 + lane.
+  unsigned int i_slot = bi * 32u + lane;
+  bool i_valid = i_slot < n;
+  unsigned int i_atom_id = i_valid ? sorted_particle_ids[i_slot] : n;
+  Real4 pq_i = tile_sorted_posq[i_slot];
+  Real pi_x = pq_i.x, pi_y = pq_i.y, pi_z = pq_i.z, qi = pq_i.w;
+  unsigned int i_type = 0u;
+  /*HEDDLE_JIT_ITYPE_LOAD*/
+
+  // j-atom: this lane owns slot bj*32 + lane initially; it rotates.
+  unsigned int j_slot = bj * 32u + lane;
+  bool j_valid = j_slot < n;
+  unsigned int j_atom_id = j_valid ? sorted_particle_ids[j_slot] : n;
+  Real4 pq_j = tile_sorted_posq[j_slot];
+  Real pj_x = pq_j.x, pj_y = pq_j.y, pj_z = pq_j.z, qj = pq_j.w;
+  unsigned int j_type = 0u;
+  /*HEDDLE_JIT_JTYPE_LOAD*/
+
+  // This lane's exclusion-mask row (i_lane == lane): bit j_lane set =>
+  // pair (lane, j_lane) is excluded. The mask row is fixed for this
+  // lane, so no rotation is needed — at iteration tt the partner is
+  // j_lane = (lane + tt) mod 32.
+  unsigned int my_mask_row = exclusion_tile_masks[t * 32u + lane];
+
+  // i-side accumulator (this lane's i-atom, fixed). j-side accumulator
+  // travels with the j-atom currently held by this lane.
+  Real i_fx = R(0.0), i_fy = R(0.0), i_fz = R(0.0);
+  Real i_e  = R(0.0), i_w  = R(0.0);
+  Real j_fx = R(0.0), j_fy = R(0.0), j_fz = R(0.0);
+  Real j_e  = R(0.0), j_w  = R(0.0);
+
+  for (unsigned int tt = 0u; tt < 32u; ++tt) {
+    unsigned int j_lane = (lane + tt) & 31u;
+    bool excluded = ((my_mask_row >> j_lane) & 1u) != 0u;
+    if (i_valid && j_valid && !excluded && i_atom_id != j_atom_id) {
+      Real dx = pi_x - pj_x;
+      Real dy = pi_y - pj_y;
+      Real dz = pi_z - pj_z;
+      heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+      Real r2 = dx * dx + dy * dy + dz * dz;
+      Real inv_r = Real_rsqrt(r2);
+      Real r = r2 * inv_r;
+      Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
+      Real factor = R(0.0), energy = R(0.0);
+      heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r,
+                                         qi, qj, i_type, j_type,
+                                         i_atom_id, j_atom_id,
+                                         factor, energy);
+      factor *= cutoff_mask;
+      if (WriteEv) energy *= cutoff_mask;
+      Real fx = factor * dx, fy = factor * dy, fz = factor * dz;
+      i_fx += fx; i_fy += fy; i_fz += fz;
+      if (!self_block) { j_fx -= fx; j_fy -= fy; j_fz -= fz; }
+      if (WriteEv) {
+        Real he = energy * R(0.5);
+        // rq-7d64da58 — per-pair scalar virial: W = factor * r2.
+        Real hw = (factor * r2) * R(0.5);
+        i_e += he; i_w += hw;
+        if (!self_block) { j_e += he; j_w += hw; }
+      }
+    }
+    unsigned int src_lane = (lane + 1u) & 31u;
+    pj_x = __shfl_sync(0xFFFFFFFFu, pj_x, src_lane);
+    pj_y = __shfl_sync(0xFFFFFFFFu, pj_y, src_lane);
+    pj_z = __shfl_sync(0xFFFFFFFFu, pj_z, src_lane);
+    qj   = __shfl_sync(0xFFFFFFFFu, qj,   src_lane);
+    j_atom_id = __shfl_sync(0xFFFFFFFFu, j_atom_id, src_lane);
+    j_valid = j_atom_id < n;
+    /*HEDDLE_JIT_JTYPE_SHUFFLE*/
+    j_fx = __shfl_sync(0xFFFFFFFFu, j_fx, src_lane);
+    j_fy = __shfl_sync(0xFFFFFFFFu, j_fy, src_lane);
+    j_fz = __shfl_sync(0xFFFFFFFFu, j_fz, src_lane);
+    if (WriteEv) {
+      j_e = __shfl_sync(0xFFFFFFFFu, j_e, src_lane);
+      j_w = __shfl_sync(0xFFFFFFFFu, j_w, src_lane);
+    }
+  }
+
+  // Flush: i-side always; j-side only for cross-block tiles (a
+  // self-block tile's Newton's-3rd contributions are already covered by
+  // the symmetric sweep). After 32 rotations the j-side registers and
+  // j_atom_id have returned to their starting lane.
+  if (i_valid) {
+    heddle_jit_atomic_add_fp(fast_force_x_fp, i_atom_id, i_fx);
+    heddle_jit_atomic_add_fp(fast_force_y_fp, i_atom_id, i_fy);
+    heddle_jit_atomic_add_fp(fast_force_z_fp, i_atom_id, i_fz);
+    if (WriteEv) {
+      heddle_jit_atomic_add_fp(fast_energy_fp, i_atom_id, i_e);
+      heddle_jit_atomic_add_fp(fast_virial_fp, i_atom_id, i_w);
+    }
+  }
+  if (!self_block && j_valid) {
+    heddle_jit_atomic_add_fp(fast_force_x_fp, j_atom_id, j_fx);
+    heddle_jit_atomic_add_fp(fast_force_y_fp, j_atom_id, j_fy);
+    heddle_jit_atomic_add_fp(fast_force_z_fp, j_atom_id, j_fz);
+    if (WriteEv) {
+      heddle_jit_atomic_add_fp(fast_energy_fp, j_atom_id, j_e);
+      heddle_jit_atomic_add_fp(fast_virial_fp, j_atom_id, j_w);
+    }
   }
 }
 "#;
@@ -2469,7 +2773,7 @@ mod launch_bounds_tests {
     // regardless of the fragment list, so a fragment-free composed source
     // is sufficient to inspect the kernel declarations.
     fn composed_source_for_inspection() -> String {
-        compose_source(&[], 1.0 as Real)
+        compose_source(&[], 1.0 as Real, false)
     }
 
     // rq-20febc65
@@ -2586,11 +2890,11 @@ struct {n} {{
     // rq-b099ff28
     #[test]
     fn composer_emits_exclusion_scaled_evaluator() {
-        // The composed source contains a per-pair evaluator that calls
-        // every fragment's `exclusion_scale(i, j)` and multiplies its
-        // `(factor, energy)` by that scale inline. A single
-        // fragment is enough to observe one such call.
-        let src = compose_source(&[minimal_fragment("a")], 1.0 as Real);
+        // In all-pairs (Trivial) mode — no per-tile bitmask — the
+        // per-pair evaluator calls every fragment's `exclusion_scale(i,
+        // j)` and multiplies its `(factor, energy)` by that scale inline.
+        // A single fragment is enough to observe one such call.
+        let src = compose_source(&[minimal_fragment("a")], 1.0 as Real, false);
         assert!(
             src.contains("heddle_jit_eval_pair_sum"),
             "composer must emit the `heddle_jit_eval_pair_sum` evaluator"
@@ -2602,6 +2906,47 @@ struct {n} {{
         assert!(
             src.contains("ex_scale"),
             "evaluator must multiply the fragment's contribution by the returned scale"
+        );
+    }
+
+    // rq-a4b9e702 rq-b28a6d96 — with the per-tile exclusion bitmask
+    // (CellList mode) the bulk and single-pair passes do zero exclusion
+    // work: the composed evaluator applies no per-pair exclusion scale.
+    #[test]
+    fn bitmask_evaluator_omits_exclusion_scale() {
+        let src = compose_source(&[minimal_fragment("a")], 1.0 as Real, true);
+        assert!(
+            src.contains("heddle_jit_eval_pair_sum"),
+            "composer still emits the `heddle_jit_eval_pair_sum` evaluator"
+        );
+        assert!(
+            !src.contains(".exclusion_scale("),
+            "bitmask-mode evaluator must NOT call `.exclusion_scale(i, j)`"
+        );
+        assert!(
+            !src.contains("ex_scale"),
+            "bitmask-mode evaluator must not multiply by a per-pair scale"
+        );
+    }
+
+    // rq-fa0b3d10 — the exclusion-tile pass and its entry points are
+    // emitted only when the bitmask is active (CellList mode).
+    #[test]
+    fn excl_tile_pass_emitted_only_with_bitmask() {
+        let with_mask = compose_source(&[minimal_fragment("a")], 1.0 as Real, true);
+        assert!(
+            with_mask.contains("heddle_jit_excl_tile_loop"),
+            "bitmask mode must emit the exclusion-tile loop"
+        );
+        assert!(
+            with_mask.contains("heddle_jit_composed_pair_force_excl_f")
+                && with_mask.contains("heddle_jit_composed_pair_force_excl_fev"),
+            "bitmask mode must emit both exclusion-tile entry points"
+        );
+        let without = compose_source(&[minimal_fragment("a")], 1.0 as Real, false);
+        assert!(
+            !without.contains("heddle_jit_excl_tile_loop"),
+            "all-pairs mode must not emit the exclusion-tile loop"
         );
     }
 
@@ -2714,7 +3059,7 @@ struct {n} {{
     // rq-b125bd5c
     #[test]
     fn evaluate_signature_carries_per_atom_types() {
-        let src = compose_source(&[frag("a", true)], 1.0 as Real);
+        let src = compose_source(&[frag("a", true)], 1.0 as Real, false);
         // The shared evaluator helpers take i_type / j_type alongside qi / qj.
         assert!(src.contains(
             "Real qi, Real qj, unsigned int i_type, unsigned int j_type, \
@@ -2727,7 +3072,7 @@ struct {n} {{
     // rq-b10f28d7
     #[test]
     fn consuming_fragment_loads_type_index_once_per_atom() {
-        let src = compose_source(&[frag("a", true)], 1.0 as Real);
+        let src = compose_source(&[frag("a", true)], 1.0 as Real, false);
         // Outer loop loads both atoms' type index from the common buffer.
         assert!(src.contains("type_indices[i_atom_id]"));
         assert!(src.contains("type_indices[j_atom_id]"));
@@ -2747,7 +3092,7 @@ struct {n} {{
     // rq-61fa8b93
     #[test]
     fn type_index_load_elided_when_unconsumed() {
-        let src = compose_source(&[frag("a", false)], 1.0 as Real);
+        let src = compose_source(&[frag("a", false)], 1.0 as Real, false);
         // No dereference of type_indices anywhere when no fragment consumes it.
         assert!(
             !src.contains("type_indices["),
@@ -2766,8 +3111,8 @@ struct {n} {{
     fn type_indices_is_a_common_argument() {
         // Present in the entry-point signatures whether or not a
         // fragment consumes it (it is a framework common argument).
-        let consuming = compose_source(&[frag("a", true)], 1.0 as Real);
-        let inert = compose_source(&[frag("a", false)], 1.0 as Real);
+        let consuming = compose_source(&[frag("a", true)], 1.0 as Real, false);
+        let inert = compose_source(&[frag("a", false)], 1.0 as Real, false);
         let n_consuming = consuming.matches("const unsigned int *type_indices,").count();
         let n_inert = inert.matches("const unsigned int *type_indices,").count();
         // Four entry-point signatures (packed / single-pair, each _f
@@ -2813,7 +3158,7 @@ struct {name} {{
     // from the force factor; the functor emits only (factor, energy).
     #[test] // rq-7d64da58
     fn pair_composer_derives_virial_from_factor_and_r2() {
-        let src = compose_source(&[pair_frag("a", "VFa")], 1.0 as Real);
+        let src = compose_source(&[pair_frag("a", "VFa")], 1.0 as Real, false);
         // The per-pair evaluator takes only (factor, energy) — no virial
         // out-parameter anywhere in the composed source.
         assert!(
@@ -2837,7 +3182,7 @@ struct {name} {{
     // is the sum of the fragments' individual virials.
     #[test] // rq-ef17db0f
     fn pair_virial_is_derived_once_from_summed_factor() {
-        let src = compose_source(&[pair_frag("a", "VFa"), pair_frag("b", "VFb")], 1.0 as Real);
+        let src = compose_source(&[pair_frag("a", "VFa"), pair_frag("b", "VFb")], 1.0 as Real, false);
         assert!(
             src.matches("factor += s_factor * ex_scale;").count() >= 2,
             "each active fragment must add its factor into the shared per-pair factor"
