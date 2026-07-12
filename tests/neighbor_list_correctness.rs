@@ -15,12 +15,13 @@
 //! the two modes.
 //!
 //! Tests pass against the current build. Note that "F_max at
-//! equilibrium reference geometry" is NOT thermal-scale: the H-H 1-4
-//! pairs sit at ~2.48 Å, just below `σ_HH = 2.5 Å`. They are fully
-//! excluded (binary exclusions), so a correct build produces a near-zero
-//! residual there; a broken exclusion path would leave the full
-//! unshielded LJ force, which the F_max check catches. See the test's
-//! rationale comment.
+//! equilibrium reference geometry" is NOT thermal-scale — the
+//! `scale = 0.5` 1-4 dihedral pairs sit at H-H distance ~2.48 Å,
+//! just below `σ_HH = 2.5 Å`, so half of a real LJ pair force
+//! there is a physical residual of ~3 × 10⁻⁴ atomic-unit force.
+//! The equilibrium F_max check accepts anything below the
+//! unshielded-bond magnitude while still catching a broken
+//! exclusion path; see the test's rationale comment.
 //!
 //! The `#[ignore]`-marked scenarios in this file are diagnostics
 //! only (they print stats to stdout rather than assert against a
@@ -201,8 +202,9 @@ fn eth_dihedral_types() -> Vec<DihedralTypeConfig> {
 /// Build BondList / AngleList / DihedralList / ExclusionList for an
 /// ethane lattice of `n_mol` molecules (each 8 atoms, indexed by
 /// `8m + local` per `ethane_local_atoms`). Exclusions are AMBER-style:
-/// 1-2 (bond), 1-3 (angle), and 1-4 (dihedral) are all fully excluded
-/// — exclusions are binary in the packed-neighbour architecture.
+/// 1-2 (bond) and 1-3 (angle) fully excluded, 1-4 (dihedral) scaled to
+/// `(scale_lj_14, scale_coul_14) = (0.5, 1/1.2)` — per-fragment scaled
+/// exclusions handled by the exclusion-tile pass.
 fn ethane_topology(
     n_mol: usize,
 ) -> (BondList, AngleList, DihedralList, ExclusionList) {
@@ -283,7 +285,7 @@ fn ethane_topology(
         // Exclusions:
         //   1-2 (bond) — scale 0
         //   1-3 (angle) — scale 0
-        //   1-4 (dihedral) — scale 0 (binary exclusions)
+        //   1-4 (dihedral) — scale (0.5, 1/1.2)
         let mut add_excl = |a: u32, b: u32, sl: Real, sc: Real| {
             let (i, j) = if a < b { (a, b) } else { (b, a) };
             exclusions.push(Exclusion {
@@ -312,14 +314,14 @@ fn ethane_topology(
         for &h in &h2 {
             add_excl(c1, h, 0.0, 0.0);
         }
-        // 1-4 (dihedral) — full exclusion. Exclusions are binary in the
-        // packed-neighbour architecture (see
-        // `rqm/forces/packed-neighbour-pair-force.md` *Exclusion
-        // Handling*), so the H-H 1-4 pairs are fully excluded rather than
-        // fractionally scaled.
+        // 1-4 (dihedral) — fractional per-fragment scaling (AMBER/OPLS
+        // style): the H-H 1-4 Lennard-Jones is scaled by 0.5 and the
+        // Coulomb by 1/1.2. These modified pairs are handled by the
+        // exclusion-tile pass (see
+        // `rqm/forces/packed-neighbour-pair-force.md` *Exclusion Handling*).
         for &hi in &h1 {
             for &hj in &h2 {
-                add_excl(hi, hj, 0.0, 0.0);
+                add_excl(hi, hj, 0.5, 1.0 / 1.2);
             }
         }
     }
@@ -674,10 +676,12 @@ fn small_multi_mol_state(rot_seed: u64) -> (ParticleState, f64, f64, f64) {
 /// rq-6eca8f0e — cell-list matches all-pairs on a multi-molecule
 /// intramolecular-exclusion system. This oracle also covers the
 /// exclusion-tile force behaviour end to end: a fully-excluded pair is
-/// masked out (rq-80c6a964) and a non-excluded pair sharing an exclusion
-/// block pair is still computed (rq-8840662f) — a fault in either would
-/// make the cell-list (bitmask) forces diverge from the all-pairs oracle.
-// rq-80c6a964 rq-8840662f
+/// masked out (rq-80c6a964), a non-excluded pair sharing an exclusion
+/// block pair is still computed (rq-8840662f), and the fractional 1-4
+/// pairs (LJ scale 0.5) contribute a scaled force (rq-4aad39c8) — a fault
+/// in any would make the cell-list (bitmask) forces diverge from the
+/// all-pairs oracle, which applies the same per-fragment scales.
+// rq-80c6a964 rq-8840662f rq-4aad39c8
 #[test]
 fn cell_list_matches_all_pairs_on_multi_molecule_system() {
     let gpu = init_device().unwrap();

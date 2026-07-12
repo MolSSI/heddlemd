@@ -608,15 +608,15 @@
     "level": 2,
     "refs": [
       {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/forces/neighbor_list.rs",
         "kind": "code"
       },
       {
         "file": "src/forces/topology.rs",
-        "kind": "code"
-      },
-      {
-        "file": "tests/topology.rs",
         "kind": "code"
       }
     ],
@@ -5984,6 +5984,18 @@
     "title": "run_step",
     "type": "api-item"
   },
+  "rq-27add068": {
+    "decl": "Scenario: A per-fragment exclusion applies each fragment's scale independently",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A per-fragment exclusion applies each fragment's scale independently",
+    "type": "scenario"
+  },
   "rq-27b28332": {
     "decl": "Scenario: entry_point_args are generated from the slot's argument schema",
     "file": "forces/jit-composed-pair-force",
@@ -10384,6 +10396,18 @@
     "title": "ParticleBuffers",
     "type": "api-item"
   },
+  "rq-4aad39c8": {
+    "decl": "Scenario: A fractional 1-4 pair contributes a scaled force",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fractional 1-4 pair contributes a scaled force",
+    "type": "scenario"
+  },
   "rq-4ab1c94e": {
     "decl": "Scenario: A Custom operation reading only base resources always validates",
     "file": "integration/op-model",
@@ -11589,7 +11613,7 @@
     "type": "section"
   },
   "rq-54aec894": {
-    "decl": "Scenario: Packed-neighbour pass dispatches to the exclusion-scaled evaluator",
+    "decl": "Scenario: Packed-neighbour pass dispatches to the composer's evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -11597,7 +11621,7 @@
         "kind": "code"
       }
     ],
-    "title": "Packed-neighbour pass dispatches to the exclusion-scaled evaluator",
+    "title": "Packed-neighbour pass dispatches to the composer's evaluator",
     "type": "scenario"
   },
   "rq-54b99519": {
@@ -17572,7 +17596,7 @@
     "type": "scenario"
   },
   "rq-80c6a964": {
-    "decl": "Scenario: A fully-excluded pair is masked out by the exclusion-tile pass",
+    "decl": "Scenario: A fully-excluded pair contributes nothing via the exclusion-tile pass",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -17580,7 +17604,7 @@
         "kind": "code"
       }
     ],
-    "title": "A fully-excluded pair is masked out by the exclusion-tile pass",
+    "title": "A fully-excluded pair contributes nothing via the exclusion-tile pass",
     "type": "scenario"
   },
   "rq-80d00b52": {
@@ -18456,7 +18480,7 @@
     "type": "scenario"
   },
   "rq-8840662f": {
-    "decl": "Scenario: A non-excluded pair inside an exclusion tile is still computed",
+    "decl": "Scenario: A non-modified pair inside an exclusion tile is computed at full strength",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -18464,7 +18488,7 @@
         "kind": "code"
       }
     ],
-    "title": "A non-excluded pair inside an exclusion tile is still computed",
+    "title": "A non-modified pair inside an exclusion tile is computed at full strength",
     "type": "scenario"
   },
   "rq-884b5cd6": {
@@ -18637,7 +18661,7 @@
     "type": "section"
   },
   "rq-8945395f": {
-    "decl": "- `build_exclusion_tiles(excluded_pairs, atom_slot, n_blocks) ->",
+    "decl": "- `build_exclusion_tiles(modified_pairs, atom_slot, n_blocks) ->",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -18866,6 +18890,18 @@
       }
     ],
     "title": "check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths",
+    "type": "scenario"
+  },
+  "rq-8ae4a9f1": {
+    "decl": "Scenario: Composer emits a scale-free evaluator in CellList mode",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Composer emits a scale-free evaluator in CellList mode",
     "type": "scenario"
   },
   "rq-8b1827a9": {
@@ -20294,7 +20330,7 @@
     "type": "scenario"
   },
   "rq-95f0812c": {
-    "decl": "Scenario: Single-pair pass dispatches to the exclusion-scaled evaluator",
+    "decl": "Scenario: Single-pair pass dispatches to the composer's evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -20302,7 +20338,7 @@
         "kind": "code"
       }
     ],
-    "title": "Single-pair pass dispatches to the exclusion-scaled evaluator",
+    "title": "Single-pair pass dispatches to the composer's evaluator",
     "type": "scenario"
   },
   "rq-963604a4": {
@@ -23402,7 +23438,7 @@
     "type": "scenario"
   },
   "rq-acfb3375": {
-    "decl": "Scenario: Construction routes an exclusion block pair away from the bulk list",
+    "decl": "Scenario: Construction routes a modified-pair block pair away from the bulk list",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -23410,7 +23446,7 @@
         "kind": "code"
       }
     ],
-    "title": "Construction routes an exclusion block pair away from the bulk list",
+    "title": "Construction routes a modified-pair block pair away from the bulk list",
     "type": "scenario"
   },
   "rq-acfda5d4": {
@@ -23884,7 +23920,7 @@
     "type": "api-item"
   },
   "rq-b099ff28": {
-    "decl": "Scenario: Composer emits an exclusion-scaled evaluator",
+    "decl": "Scenario: Composer emits a scale-aware evaluator in all-pairs mode",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -23892,7 +23928,7 @@
         "kind": "code"
       }
     ],
-    "title": "Composer emits an exclusion-scaled evaluator",
+    "title": "Composer emits a scale-aware evaluator in all-pairs mode",
     "type": "scenario"
   },
   "rq-b0a520ac": {
@@ -25015,18 +25051,6 @@
     "title": "Reject non-positive temperature",
     "type": "scenario"
   },
-  "rq-b8c58d4d": {
-    "decl": "Scenario: A fractional exclusion scale is rejected at load",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/topology.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A fractional exclusion scale is rejected at load",
-    "type": "scenario"
-  },
   "rq-b8e6dfb3": {
     "decl": "- `log_column_names() -> &'static [\"pressure\", \"box_volume\",",
     "file": "integration/c-rescale-barostat",
@@ -25877,13 +25901,6 @@
     "refs": [],
     "title": "BarostatPeriodicity",
     "type": "api-item"
-  },
-  "rq-bfe82d37": {
-    "decl": "Scenario: A partial (mixed-binary) exclusion is rejected at load",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "A partial (mixed-binary) exclusion is rejected at load",
-    "type": "scenario"
   },
   "rq-c00689e6": {
     "decl": "- `Builtins` — the per-trait built-in roster.",
@@ -31297,7 +31314,12 @@
   "rq-e7fc1920": {
     "decl": "Scenario: Per-fragment exclusion tables apply independently to that fragment's contribution",
     "file": "forces/jit-composed-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-fragment exclusion tables apply independently to that fragment's contribution",
     "type": "scenario"
   },
@@ -31695,6 +31717,18 @@
       }
     ],
     "title": "cuFFT smoke test is skipped when SPME is not configured",
+    "type": "scenario"
+  },
+  "rq-ea4617e1": {
+    "decl": "Scenario: A fractional exclusion scale loads without error",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fractional exclusion scale loads without error",
     "type": "scenario"
   },
   "rq-ea67c26b": {

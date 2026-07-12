@@ -254,32 +254,40 @@ into the same per-particle fixed-point accumulators (see
   warp iterates the entries assigned to its i-block from
   `interacting_tiles` / `sorted_interacting_atoms`, runs the
   32-iteration diagonal shuffle, and invokes the composer's
-  `heddle_jit_eval_pair_sum` evaluator for each pair. The
-  evaluator multiplies each fragment's `(factor, energy)`
-  by that fragment's `exclusion_scale(i, j)` inline, so no
-  separate cancellation pass is required. Non-excluded pairs see
-  a multiply-by-1.0 (a no-op); fully excluded pairs
-  (`scale = 0`) contribute zero; OPLS-style fractional pairs
-  (`scale = 0.5`) contribute half.
+  `heddle_jit_eval_pair_sum` evaluator for each pair. In CellList
+  mode this evaluator is scale-free (the pass contains no modified
+  pair); in all-pairs mode it multiplies each fragment's
+  `(factor, energy)` by that fragment's `exclusion_scale(i, j)`
+  inline (see *Exclusion Handling*).
 - **Single-pair pass**
   (`heddle_jit_composed_pair_force_single_f` / `_single_fev`).
   One thread per `single_pair_atoms` entry. Loads the pair's
   positions, invokes the same `heddle_jit_eval_pair_sum`
   evaluator, atomicAdds the per-pair `±factor·(dx, dy, dz)` to
-  both atoms' fixed-point slots. Same exclusion-scaled semantics
-  as the packed-neighbour pass.
+  both atoms' fixed-point slots. Same exclusion semantics as the
+  packed-neighbour pass.
+- **Exclusion-tile pass**
+  (`heddle_jit_composed_pair_force_excl_f` / `_excl_fev`, CellList
+  mode only). One warp per exclusion tile. Loads both blocks'
+  atoms, runs the 32-iteration diagonal shuffle over all 32×32 lane
+  pairs, and for each bitmask-flagged pair invokes a scale-aware
+  evaluator that applies each fragment's `exclusion_scale(i, j)`;
+  unflagged pairs are evaluated at full strength (see
+  `packed-neighbour-pair-force.md` *Exclusion-Tile Pass*).
 
 The packed-neighbour pass is launched unconditionally when at
 least one fast-class pair-force slot is active. The single-pair
-pass is launched only when its pair count is non-zero.
+pass is launched only when its pair count is non-zero. The
+exclusion-tile pass is launched (CellList mode) over the
+exclusion-tile capacity, reading its live count from the device.
 
 Inside each inner iteration the per-pair scaffolding runs
 unconditionally — there is no warp-divergent branch on the cutoff.
 The lane:
 
 1. Computes `(dx, dy, dz, r²)` once via the minimum-image
-   displacement, and (for exclusion-tile entries) the per-pair
-   exclusion scale once.
+   displacement, and (in the scale-aware evaluator, for a flagged
+   pair) the per-pair exclusion scale once.
 2. Computes the shared scalar intermediates once. The outer
    loop has already loaded `posq_i` and `posq_j` once each (one
    16-byte coalesced `Real4` load per warp per atom, replacing
@@ -343,17 +351,15 @@ The lane:
      `CutoffHandling::PerPair`, the composer emits
      `if (r² <= functor.cutoff_squared(i_type, j_type, i, j))` and
      only adds the fragment's contribution when the test passes.
-   - The packed-neighbour pass and the single-pair pass invoke
-     each fragment's `evaluate` to produce
-     `(factor_slot, energy_slot)`, then load that
-     fragment's `exclusion_scale(i, j)` and multiply
-     `(factor_slot · scale, energy_slot · scale · 0.5)` into the
-     pair accumulator. The
-     `0.5` distributes each unordered pair's energy
-     across the two ordered slots. For non-excluded pairs the
-     scale is `1.0` and the multiply is a no-op; for excluded
-     pairs the scale is applied inline so no separate
-     cancellation pass is required.
+   - Each fragment's `evaluate` produces `(factor_slot, energy_slot)`,
+     which fold into the pair accumulator as
+     `(factor_slot · scale, energy_slot · scale · 0.5)`. The `0.5`
+     distributes each unordered pair's energy across the two ordered
+     slots. `scale` is that fragment's `exclusion_scale(i, j)` in the
+     scale-aware evaluator (the exclusion-tile pass, and every pass in
+     all-pairs mode) and a compile-time `1.0` in the scale-free evaluator
+     (the packed-neighbour and single-pair passes in CellList mode),
+     where the multiply is elided (see *Exclusion Handling*).
 6. The lane multiplies the pair accumulator's `(factor, energy)`
    by the max-cutoff `mask`. Pairs with `r² >
    HEDDLE_JIT_MAX_CUTOFF_SQUARED` contribute zero by bit-exact
@@ -475,23 +481,34 @@ byte-identical per-particle output.
 
 ### Exclusion Handling <!-- rq-dbf9c9cf -->
 
-Every excluded pair is handled inline by the packed-neighbour and
-single-pair passes: each fragment's `evaluate` output is scaled
-by that fragment's `exclusion_scale(i, j)` before being folded
-into the pair accumulator. Fully-excluded pairs contribute zero;
-OPLS-style fractional 1-4 pairs (`scale = 0.5`) contribute half
-of the unshielded value.
+A pair's per-fragment exclusion scale is applied by whichever pass owns
+that pair; the routing policy lives in `packed-neighbour-pair-force.md`
+*Exclusion Handling* and its effect on the composed kernel is as follows.
 
-The scale itself lives in the per-atom exclusion table
-(`atom_excl_offsets`, `atom_excl_partners`, `atom_excl_scales`;
-see `framework.md` *Exclusion Tables*), which is a common kernel
-argument threaded through both passes. `exclusion_scale(i, j)`
-returns `R(1.0)` for pairs not present in the table, so the same
-inline multiply applies uniformly to every pair the passes visit
-without a per-pair branch. The framework carries no separate
-`excluded_pair_atoms` list and issues no per-excluded-pair
-launches; the correction pattern that would need such a list
-does not exist.
+In CellList mode the composer emits the packed-neighbour and single-pair
+passes with a **scale-free** evaluator: the construction routes every
+modified pair (any pair whose scale differs from `1` in some fragment) to
+the exclusion-tile pass, so these two passes visit no modified pair and
+apply no `exclusion_scale` and read no exclusion table. The
+exclusion-tile pass uses a **scale-aware** evaluator that, for the pairs
+its bitmask flags, multiplies each fragment's `evaluate` output by that
+fragment's `exclusion_scale(i, j)` — fully-excluded pairs (`scale = 0`)
+contribute zero, OPLS-style fractional 1-4 pairs (`scale = 0.5`)
+contribute half of the unshielded value, and per-fragment combinations
+(e.g. Lennard-Jones `0` with Coulomb `1`) apply independently per
+fragment.
+
+In all-pairs mode there is no exclusion-tile pass; the packed-neighbour
+and single-pair passes use the scale-aware evaluator and apply
+`exclusion_scale(i, j)` inline to every pair.
+
+The scale lives in the per-atom exclusion table (`atom_excl_offsets`,
+`atom_excl_partners`, and the per-fragment scale arrays; see
+`framework.md` *Exclusion Tables*). `exclusion_scale(i, j)` returns
+`R(1.0)` for pairs not present in the table. The framework carries no
+separate `excluded_pair_atoms` list and issues no per-excluded-pair
+launches; the correction pattern that would need such a list does not
+exist.
 
 ## displaces() Under JIT Composition <!-- rq-11f45908 -->
 
@@ -1338,17 +1355,24 @@ Feature: JIT-composed pair-force kernel
   # --- Two-pass structure ---
 
   @rq-b099ff28
-  Scenario: Composer emits an exclusion-scaled evaluator
-    Given a ForceField with at least one fast-class pair-force fragment
+  Scenario: Composer emits a scale-aware evaluator in all-pairs mode
+    Given a ForceField composed in all-pairs mode with at least one fast-class pair-force fragment
     And the composed kernel source captured for inspection
     Then the source contains a function `heddle_jit_eval_pair_sum` whose body calls every fragment's `exclusion_scale(i, j)` once per pair and multiplies each fragment's `(factor, energy)` by that scale
+
+  @rq-8ae4a9f1
+  Scenario: Composer emits a scale-free evaluator in CellList mode
+    Given a ForceField composed in CellList mode with at least one fast-class pair-force fragment
+    And the composed kernel source captured for inspection
+    Then the bulk/single-pair evaluator `heddle_jit_eval_pair_sum` contains no call to `exclusion_scale`
+    And the source additionally emits the exclusion-tile pass, which applies the per-fragment scale to its flagged pairs
 
   @rq-7d64da58
   Scenario: Composer derives the per-pair scalar virial from the force factor
     Given a ForceField with at least one fast-class pair-force fragment
     And the composed kernel source captured for inspection
     Then no fragment's evaluate signature declares a virial out-parameter
-    And the _fev evaluator forms the per-pair scalar virial as factor * r2 from the masked, exclusion-scaled factor
+    And the _fev evaluator forms the per-pair scalar virial as factor * r2 from the masked factor (after any per-fragment exclusion scale the evaluator applied)
     And it distributes 0.5 * factor * r2 to each of the two ordered per-atom virial slots
 
   @rq-ef17db0f
@@ -1359,18 +1383,18 @@ Feature: JIT-composed pair-force kernel
     And this equals the sum of each fragment's individual factor * r2
 
   @rq-54aec894
-  Scenario: Packed-neighbour pass dispatches to the exclusion-scaled evaluator
+  Scenario: Packed-neighbour pass dispatches to the composer's evaluator
     Given a ForceField with at least one fast-class pair-force fragment
     And the composed kernel source captured for inspection
     Then the packed-neighbour outer loop's inner body dispatches to `heddle_jit_eval_pair_sum<WriteEv>`
-    And every fragment's `exclusion_scale(i, j)` is loaded exactly once inside that evaluator per pair
+    And in CellList mode that evaluator applies no per-pair exclusion scale, while in all-pairs mode it loads each fragment's `exclusion_scale(i, j)` exactly once per pair
 
   @rq-95f0812c
-  Scenario: Single-pair pass dispatches to the exclusion-scaled evaluator
+  Scenario: Single-pair pass dispatches to the composer's evaluator
     Given a ForceField with at least one fast-class pair-force fragment
     And the composed kernel source captured for inspection
     Then the single-pair kernel's per-thread body dispatches to `heddle_jit_eval_pair_sum<WriteEv>`
-    And every fragment's `exclusion_scale(i, j)` is loaded exactly once inside that evaluator per pair
+    And in CellList mode that evaluator applies no per-pair exclusion scale, while in all-pairs mode it loads each fragment's `exclusion_scale(i, j)` exactly once per pair
 
   @rq-5214bef3
   Scenario: Composer emits no exclusion-correction entry points
@@ -1378,7 +1402,7 @@ Feature: JIT-composed pair-force kernel
     And the composed kernel source captured for inspection
     Then the source contains no `extern "C"` function whose name ends in `_correct_f` or `_correct_fev`
     And the source contains no `heddle_jit_eval_pair_correction` function
-    And the composed CUDA module loaded from the source exposes exactly four `extern "C"` entry points: `heddle_jit_composed_pair_force_f`, `_fev`, `_single_f`, and `_single_fev`
+    And the composed CUDA module exposes the base entry points `heddle_jit_composed_pair_force_f`, `_fev`, `_single_f`, and `_single_fev`, plus `_excl_f` and `_excl_fev` when composed in CellList mode
 
   @rq-44385733
   Scenario: ForceField carries no per-excluded-pair state

@@ -25,24 +25,25 @@ the same fixed-point accumulators:
 
 - The **packed-neighbour pass** (the main pair-force kernel) walks
   every entry of `interacting_tiles` / `interacting_atoms` and
-  evaluates each pair at full strength. It contains no excluded pairs
+  evaluates each pair at full strength. It contains no modified pairs
   (the construction routes them elsewhere), so it does no exclusion
   work at all.
 - The **single-pair pass** walks `single_pairs` — individual
   (atom_i, atom_j) pairs extracted at neighbour-list build time from
   sparse (i-block, j-block) candidates. One thread per pair; also
-  exclusion-free by construction.
+  free of modified pairs by construction.
 - The **exclusion-tile pass** walks the small set of block pairs that
-  contain excluded atoms. Each such tile carries a 1024-bit exclusion
-  bitmask; the pass computes the full 32×32 block-pair interaction and
-  skips the lane pairs whose bit is set.
+  contain modified pairs. Each such tile carries a 1024-bit
+  modified-pair bitmask; the pass computes the full 32×32 block-pair
+  interaction and, for each flagged lane pair, multiplies each
+  fragment's contribution by that fragment's per-pair scale.
 
-Exclusions are **binary** — an excluded pair contributes nothing — and
-are applied through the per-tile bitmask rather than a per-pair lookup:
-the exclusion table is read only when the bitmask is (re)built each
-rebuild, never in the bulk pass. See *Exclusion Handling*. Fractional
-per-pair scaling (e.g. OPLS 1-4) is not supported; the loader rejects
-any non-`{0, 1}` exclusion scale.
+Exclusion scales are **per fragment**: each fragment's contribution to a
+pair is scaled by a value in `[0, 1]` (`0` a full exclusion, `1` full
+strength, intermediate for OPLS/AMBER 1-4). Scaling is applied only in
+the exclusion-tile pass, through the per-tile bitmask plus a per-pair
+scale lookup confined to the flagged pairs; the bulk and single-pair
+passes never read the exclusion tables. See *Exclusion Handling*.
 
 This file specifies the data model, the block layout, the
 neighbour-list construction pipeline, the force kernel, the
@@ -229,7 +230,7 @@ single-pair pass amortises a full 32×32 = 1024-pair tile loop over
 just a handful of true interactions; above it the packed-
 neighbour pass is cheaper.
 
-The bulk list never contains an excluded pair; excluded pairs are
+The bulk list never contains a modified pair; modified pairs are
 carried by a parallel **exclusion-tile** list (see *Exclusion
 Handling*):
 
@@ -240,7 +241,9 @@ Handling*):
 - `exclusion_tile_masks: CudaSlice<u32>` of length
   `exclusion_tiles_capacity · 32` — `exclusion_tile_masks[t·32 + ℓ]` is
   the 32-bit row of tile `t`'s 1024-bit bitmask for i-lane `ℓ`; bit
-  `j_lane` is set when the two atoms are fully excluded.
+  `j_lane` is set when the two atoms are a modified pair (some fragment
+  scale differs from `1`), and the force pass reads that pair's
+  per-fragment scale at evaluation time.
 
 The interaction counts are held on a small device counter array:
 
@@ -256,33 +259,33 @@ rebuild.
 
 ## Exclusion Handling <!-- rq-03faaf24 -->
 
-Exclusions are **binary and full**: an excluded atom pair contributes
-nothing to any fast-class pair-force slot. A single per-pair exclusion
-bit encodes "excluded from every fast-class slot", so an exclusion is
-all-or-nothing across fragments — a pair is either fully excluded (every
-fragment scale `0`) or not excluded (every fragment scale `1`). The
-loader rejects, with an explicit error naming the offending pair, both:
+Nonbonded interactions between certain intramolecular atom pairs are
+**scaled per fragment**. Every exclusion topology entry carries a scale
+in `[0, 1]` for each fast-class fragment independently (a Lennard-Jones
+scale and a Coulomb scale): `0` removes that fragment's contribution
+entirely (a full exclusion, as for 1-2 bonded and 1-3 angle pairs), `1`
+leaves it at full strength, and an intermediate value scales it (as for
+OPLS/AMBER 1-4 pairs — typically a Lennard-Jones scale of `0.5` and a
+Coulomb scale of `0.833`). The two fragment scales are independent, so a
+pair may, for example, drop its Lennard-Jones contribution (scale `0`)
+while keeping its Coulomb contribution (scale `1`).
 
-- a **fractional** scale — any fragment scale strictly between `0` and
-  `1` (e.g. OPLS/AMBER 1-4 with a Lennard-Jones scale of `0.5` and a
-  Coulomb scale of `0.833`); and
-- a **partial** exclusion — fragment scales that disagree (e.g. a
-  Lennard-Jones scale of `0` with a Coulomb scale of `1`), which a single
-  per-pair bit cannot represent.
-
-Exclusions are applied through a **per-tile exclusion bitmask** rather
-than a per-pair lookup. Because every fully-excluded atom pair is
-short-range (intramolecular), the excluded pairs concentrate in a small
-set of block pairs. That set is materialised each rebuild as the
-**exclusion tiles**:
+A **modified pair** is an atom pair whose scale differs from `1` in at
+least one fragment. A pair whose every fragment scale is `1` is not
+modified and carries no exclusion entry. Modified pairs are handled
+entirely by a dedicated exclusion-tile pass; the bulk neighbour-list and
+single-pair passes apply no per-pair scale and read no exclusion data.
+Because every modified pair is short-range (intramolecular), modified
+pairs concentrate in a small set of block pairs, materialised each
+rebuild as the **exclusion tiles**:
 
 - An **exclusion tile** is an ordered block pair `(bi, bj)` with
-  `bi ≤ bj` such that at least one atom of block `bi` is fully excluded
-  from at least one atom of block `bj` under the current block
-  membership (`sorted_particle_ids`). It carries a 1024-bit
-  interaction bitmask (32 `u32` words, one per i-lane): bit
-  `(i_lane, j_lane)` is set when the atom at slot `bi·32 + i_lane` is
-  fully excluded from the atom at slot `bj·32 + j_lane`.
+  `bi ≤ bj` such that at least one atom of block `bi` is a modified pair
+  with at least one atom of block `bj` under the current block
+  membership (`sorted_particle_ids`). It carries a 1024-bit modified-pair
+  bitmask (32 `u32` words, one per i-lane): bit `(i_lane, j_lane)` is set
+  when the atom at slot `bi·32 + i_lane` is a modified pair with the atom
+  at slot `bj·32 + j_lane`.
 - The set of exclusion tiles and their bitmasks is a deterministic
   function of the exclusion topology and the current
   `sorted_particle_ids`, recomputed at every neighbour-list rebuild
@@ -294,31 +297,37 @@ consults exclusion data:
 
 - The **exclusion-tile pass** walks the exclusion tiles. It loads the
   full 32 atoms of `bi` and the full 32 atoms of `bj` from
-  `tile_sorted_posq` (two coalesced loads), runs the 32-iteration
-  diagonal shuffle over all 32×32 lane pairs, and skips a lane pair
-  when its exclusion-bitmask bit is set (or when it is the self-block
-  diagonal). Surviving pairs are evaluated with **no per-pair exclusion
-  lookup** — the bitmask has already removed the excluded ones.
+  `tile_sorted_posq` (two coalesced loads) and runs the 32-iteration
+  diagonal shuffle over all 32×32 lane pairs. For a lane pair whose
+  modified-pair bit is set, it looks up each fragment's per-pair scale
+  (`exclusion_scale(i, j)`) and multiplies that fragment's contribution
+  by it — a full exclusion's `0` contributes nothing, a 1-4 pair's
+  fraction contributes a scaled force. A lane pair whose bit is clear
+  (and is not the self-block diagonal) is evaluated at full strength with
+  **no scale lookup**. The scale lookup is thus confined to the flagged
+  pairs of the (few) exclusion tiles.
 - The **bulk neighbour-list pass** and the **single-pair pass** do
   **zero** exclusion work: they carry no `exclusion_scale` call, no
   `atom_excl_*` reads, and no per-pair scale multiply. The construction
-  guarantees they never contain an excluded pair (below).
+  guarantees they never contain a modified pair (below).
 
-The neighbour-list construction keeps excluded pairs out of the bulk
+The neighbour-list construction keeps modified pairs out of the bulk
 list by **skipping exclusion-tile block pairs**: when the construction
 sweeps candidate j-blocks for i-block `bi`, any candidate `bj` for which
 `(bi, bj)` is an exclusion tile is skipped entirely — all of that block
-pair's interactions (excluded and non-excluded alike) are computed by
-the exclusion-tile pass instead. Because an excluded pair's two atoms
-always share such a block pair, no excluded pair can reach the bulk or
-single-pair outputs, and no non-excluded pair is dropped or
-double-counted (each block pair is processed by exactly one pass).
+pair's interactions (modified and unmodified alike) are computed by the
+exclusion-tile pass instead. Because a modified pair's two atoms always
+share such a block pair, no modified pair can reach the bulk or
+single-pair outputs, and no unmodified pair is dropped or double-counted
+(each block pair is processed by exactly one pass).
 
-This trades a per-rebuild bitmask build for the elimination of the
-per-pair, per-fragment exclusion scan that would otherwise run on every
-bulk pair. The exclusion table `atom_excl_offsets` / `atom_excl_partners`
-(see `topology.md`) is read only by the per-rebuild bitmask builder, not
-by the force kernel.
+This confines the per-pair, per-fragment exclusion scan to the small set
+of flagged pairs inside the exclusion tiles; the bulk pass — the vast
+majority of pair evaluations — carries no exclusion cost at all. The
+per-fragment scale tables `atom_excl_offsets` / `atom_excl_partners` and
+the per-fragment scale arrays (see `topology.md`) are read by the
+per-rebuild bitmask builder and by the exclusion-tile force pass; the
+bulk and single-pair passes never read them.
 
 ## Construction Pipeline <!-- rq-dbffee81 -->
 
@@ -356,25 +365,27 @@ produced `sorted_particle_ids`:
    conversion happens here.
 6. **`build_exclusion_tiles`** — materialise the exclusion tiles and
    their bitmasks from the exclusion topology under the current block
-   membership. Because the exclusion set is `O(N)` and rebuilds are
+   membership. Because the modified-pair set is `O(N)` and rebuilds are
    amortised over many steps, the tiles are built on the host: the
    rebuild copies `sorted_particle_ids` to the host, inverts it to a
-   slot-for-each-atom permutation, and walks each fully-excluded
-   canonical pair `(a, b)` (`a < b`, taken from the host exclusion
-   topology captured at neighbour-list construction). Each pair maps to
-   slots `(sa, sb)`, blocks `(bi, bj) = (sa/32, sb/32)` with the pair
-   ordered so `bi ≤ bj`, and lanes `(sa%32, sb%32)`. Pairs are grouped
-   by block pair in an ordered map keyed by `(bi, bj)`; each block pair
-   becomes one exclusion tile whose 1024-bit mask has bit
-   `(i_lane, j_lane)` — and, for a self-block tile, the symmetric bit
-   `(j_lane, i_lane)` — set. The tiles are emitted in ascending
-   `(bi, bj)` order and, with their masks and the `excl_jblock_offsets` /
-   `excl_jblocks` CSR skip-list, uploaded to the device. Building from an
-   ordered map makes the tile set, their order, and their bitmasks a
-   deterministic function of the exclusion topology and
-   `sorted_particle_ids`. Only fully-excluded pairs (`scale == 0`)
-   produce bits; a not-excluded (`scale == 1`) topology entry produces
-   none.
+   slot-for-each-atom permutation, and walks each modified canonical pair
+   `(a, b)` (`a < b`, taken from the host exclusion topology captured at
+   neighbour-list construction — every pair whose scale differs from `1`
+   in some fragment). Each pair maps to slots `(sa, sb)`, blocks
+   `(bi, bj) = (sa/32, sb/32)` with the pair ordered so `bi ≤ bj`, and
+   lanes `(sa%32, sb%32)`. Pairs are grouped by block pair in an ordered
+   map keyed by `(bi, bj)`; each block pair becomes one exclusion tile
+   whose 1024-bit mask has bit `(i_lane, j_lane)` — and, for a self-block
+   tile, the symmetric bit `(j_lane, i_lane)` — set. The tiles are emitted
+   in ascending `(bi, bj)` order and, with their masks and the
+   `excl_jblock_offsets` / `excl_jblocks` CSR skip-list, uploaded to the
+   device. Building from an ordered map makes the tile set, their order,
+   and their bitmasks a deterministic function of the exclusion topology
+   and `sorted_particle_ids`. The mask marks *which* pairs are modified;
+   the force pass reads each flagged pair's per-fragment scale at
+   evaluation time, so a full exclusion (`scale == 0`) and a 1-4 pair
+   (fractional scale) are flagged identically and distinguished only by
+   the scale the force pass applies.
 7. **`find_blocks_with_interactions`** — the main construction
    kernel. One warp per i-block (iterated through
    `sorted_blocks`). For each candidate j-block (from inner
@@ -642,16 +653,24 @@ For every exclusion tile `t` in `[0, interaction_count[2])`:
   `tile_sorted_posq[bi · 32 + lane]` / `tile_sorted_posq[bj · 32 + lane]`
   (two coalesced loads). Inactive slots (`≥ N`) carry `+∞` and fail the
   cutoff.
-- Read this lane's exclusion-mask row `exclusion_tile_masks[t · 32 + lane]`.
-- Run the 32-iteration diagonal shuffle over all 32×32 lane pairs. A
-  lane pair `(i_lane, j_lane)` is evaluated only when its exclusion bit
-  is clear and it is not the self-block (`bi == bj`) diagonal; the mask
-  bit rotates alongside the j-side state. Surviving pairs invoke
-  `heddle_jit_eval_pair_sum` with **no exclusion lookup** and add their
-  contribution to the i-atom and j-atom fixed-point slots (Newton's 3rd
-  via `±`). A self-block tile applies only the i-side (each intra-block
-  pair is visited from both orderings); a cross-block tile applies both
-  sides.
+- Read this lane's modified-pair mask row `exclusion_tile_masks[t · 32 + lane]`.
+- Run the 32-iteration diagonal shuffle over all 32×32 lane pairs,
+  skipping only the self-block (`bi == bj`) diagonal. For each surviving
+  lane pair `(i_lane, j_lane)`:
+  - If its modified-pair mask bit is set, the pair's contribution is
+    summed through the scale-aware evaluator: each fragment's
+    `(factor, energy)` is multiplied by that fragment's per-pair scale
+    `exclusion_scale(i, j)`. A fully-excluded pair (`scale == 0` in every
+    fragment) therefore contributes nothing, and a 1-4 pair contributes a
+    scaled force and energy.
+  - If its mask bit is clear, the pair is evaluated at full strength with
+    **no scale lookup** (the scale is `1`).
+  The scaled contribution is added to the i-atom and j-atom fixed-point
+  slots (Newton's 3rd via `±`). A self-block tile applies only the i-side
+  (each intra-block pair is visited from both orderings and the mask is
+  symmetric, so both atoms receive their scaled force exactly once); a
+  cross-block tile applies both sides. The bulk max-cutoff mask applies
+  as elsewhere, so a modified pair beyond the cutoff contributes nothing.
 
 ### Packed-Neighbour Pass <!-- rq-a4b9e702 -->
 
@@ -670,7 +689,7 @@ For every entry `pos` in `[0, interaction_count[0])`:
   per-pair evaluator `heddle_jit_eval_pair_sum` (see
   `jit-composed-pair-force.md`), which sums each fragment's
   `evaluate(r², inv_r, r, i, j, …)`. **No `exclusion_scale` is applied**:
-  the construction guarantees no bulk entry contains an excluded pair,
+  the construction guarantees no bulk entry contains a modified pair,
   so every pair here is a full-strength interaction.
 - AtomicAdd per-lane accumulators to the fixed-point buffer using
   i-atom and j-atom original IDs.
@@ -1007,16 +1026,14 @@ The field `max_neighbors` is **not** part of `NeighborListConfig`.
 Specifying it in the configuration file is a load-time error with
 an explanatory message that the field is no longer used.
 
-Exclusions are binary and full (see *Exclusion Handling*). At load,
-every exclusion must be either fully excluded (all fragment scales `0`)
-or not excluded (all fragment scales `1`). Two configurations are
-load-time errors that name the offending atom pair and stop the run
-before any GPU work starts:
-
-- a fractional scale — any fragment scale in the open interval `(0, 1)`
-  (e.g. an OPLS/AMBER 1-4 term); and
-- a partial exclusion — fragment scales that disagree (one fragment `0`,
-  another `1`).
+Exclusion scales are per fragment (see *Exclusion Handling*). Each
+fragment scale is a value in `[0, 1]`; the two fragment scales of a pair
+are independent, so full exclusions (`0`), fractional 1-4 scaling
+(e.g. a Lennard-Jones scale of `0.5` with a Coulomb scale of `0.833`),
+and per-fragment combinations (e.g. `0` Lennard-Jones with `1` Coulomb)
+all load. Scale-range validation lives in the topology parser (see
+`topology.md`): a scale outside `[0, 1]` or a NaN is a load-time error
+naming the offending pair, and the run does not start.
 
 ## Determinism <!-- rq-db98d977 -->
 
@@ -1058,15 +1075,16 @@ supporting this:
    atom's slot exactly once.
 7. **Deterministic exclusion tiles.** The set of exclusion tiles, their
    order, and their bitmasks are a pure function of the exclusion
-   topology and `sorted_particle_ids`. The host build groups excluded
+   topology and `sorted_particle_ids`. The host build groups modified
    pairs by block pair in an ordered map keyed by `(bi, bj)` and emits
    tiles in ascending key order, so the tile order is fixed rather than
    scheduling-dependent; each tile's mask is the OR of its pairs' bits,
-   which is order-independent. Which lane pairs a tile skips, and the
-   order the exclusion-tile pass walks them in, are therefore identical
-   across runs. (Slot order would in any case be irrelevant to the
-   forces, because the exclusion-tile pass, like the bulk pass,
-   accumulates through the per-particle fixed-point accumulators.)
+   which is order-independent. Which lane pairs a tile flags, the
+   per-fragment scale applied to each, and the order the exclusion-tile
+   pass walks them in are therefore identical across runs. (Slot order
+   would in any case be irrelevant to the forces, because the
+   exclusion-tile pass, like the bulk pass, accumulates through the
+   per-particle fixed-point accumulators.)
 
 The reproducibility scope is GPU-vs-GPU on the same hardware,
 matching `architecture.md`. CPU-vs-GPU is not promised.
@@ -1153,18 +1171,22 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   host helper; produces the slot-for-each-atom permutation
   `atom_slot[sorted_particle_ids[s]] = s` so the exclusion builder can
   map a canonical atom id to its current slot.
-- `build_exclusion_tiles(excluded_pairs, atom_slot, n_blocks) -> <!-- rq-8945395f -->
-  ExclusionTiles` — host builder run each rebuild. `excluded_pairs` is
-  the fully-excluded canonical pairs (`a < b`) captured at neighbour-list
-  construction. For each pair it computes slots `(sa, sb)` via
-  `atom_slot`, the ordered block pair `(bi, bj)` (`bi ≤ bj`), and lanes,
-  and accumulates the pair's bit — plus the symmetric bit on a self-block
-  tile — into a `(bi, bj)`-keyed ordered map of 1024-bit masks. It
-  returns the tiles in ascending `(bi, bj)` order together with their
-  masks and the `excl_jblock_offsets` / `excl_jblocks` CSR skip-list, and
-  the caller uploads them and writes the tile count to
-  `interaction_count[2]`. The exclusion-tile buffers grow (like the tile
-  list) when a rebuild produces more tiles than `exclusion_tiles_capacity`.
+- `build_exclusion_tiles(modified_pairs, atom_slot, n_blocks) -> <!-- rq-8945395f -->
+  ExclusionTiles` — host builder run each rebuild. `modified_pairs` is
+  the canonical pairs (`a < b`) whose scale differs from `1` in some
+  fragment, captured at neighbour-list construction. For each pair it
+  computes slots `(sa, sb)` via `atom_slot`, the ordered block pair
+  `(bi, bj)` (`bi ≤ bj`), and lanes, and accumulates the pair's bit —
+  plus the symmetric bit on a self-block tile — into a `(bi, bj)`-keyed
+  ordered map of 1024-bit masks. It returns the tiles in ascending
+  `(bi, bj)` order together with their masks and the `excl_jblock_offsets`
+  / `excl_jblocks` CSR skip-list, and the caller uploads them and writes
+  the tile count to `interaction_count[2]`. The exclusion-tile buffers
+  grow (like the tile list) when a rebuild produces more tiles than
+  `exclusion_tiles_capacity`. The per-fragment scale each flagged pair
+  receives is not stored in the tile; the force pass reads it from the
+  per-fragment scale tables via `exclusion_scale(i, j)` at evaluation
+  time.
 - `heddle_jit_composed_pair_force_f` / <!-- rq-42e29605 -->
   `heddle_jit_composed_pair_force_fev` — JIT-composed packed-
   neighbour entry points; argument list documented under
@@ -1616,41 +1638,48 @@ Feature: Packed-Neighbour Pair-Force Architecture
     And the packed-neighbour pass's inner loop dispatches to heddle_jit_eval_pair_sum with no per-pair scale multiply
 
   @rq-80c6a964
-  Scenario: A fully-excluded pair is masked out by the exclusion-tile pass
-    Given atoms a and b are a fully-excluded pair sharing exclusion tile t
+  Scenario: A fully-excluded pair contributes nothing via the exclusion-tile pass
+    Given atoms a and b are a modified pair with every fragment scale 0, sharing exclusion tile t
     And their lane positions set bit (a_lane, b_lane) in exclusion_tile_masks[t]
     When the exclusion-tile pass processes tile t
-    Then the (a, b) lane pair is skipped
-    And neither atom receives any contribution from the (a, b) pair
+    Then the (a, b) pair is evaluated with per-fragment scale 0
+    And neither atom receives any force, energy, or virial contribution from the (a, b) pair
 
   @rq-8840662f
-  Scenario: A non-excluded pair inside an exclusion tile is still computed
-    Given atoms a and c share exclusion tile t but are NOT an excluded pair
-      (their exclusion-mask bit is clear) and lie within the cutoff
+  Scenario: A non-modified pair inside an exclusion tile is computed at full strength
+    Given atoms a and c share exclusion tile t but are NOT a modified pair
+      (their mask bit is clear) and lie within the cutoff
     When the exclusion-tile pass processes tile t
-    Then the (a, c) interaction is evaluated at full strength
+    Then the (a, c) interaction is evaluated at full strength with no scale lookup
     And it is not also computed by the bulk or single-pair passes
 
+  @rq-4aad39c8
+  Scenario: A fractional 1-4 pair contributes a scaled force
+    Given atoms a and d are a modified pair with a Lennard-Jones scale of 0.5, sharing exclusion tile t, within the cutoff
+    When the exclusion-tile pass processes tile t
+    Then each atom's Lennard-Jones force contribution from (a, d) is half the unscaled pair force
+    And the cell-list total forces match an all-pairs run that applies the same per-fragment scales
+
+  @rq-27add068
+  Scenario: A per-fragment exclusion applies each fragment's scale independently
+    Given atoms a and e are a modified pair with a Lennard-Jones scale of 0 and a Coulomb scale of 1, sharing exclusion tile t
+    When the exclusion-tile pass processes tile t
+    Then the (a, e) pair contributes no Lennard-Jones force
+    And it contributes its full Coulomb force
+
   @rq-acfb3375
-  Scenario: Construction routes an exclusion block pair away from the bulk list
-    Given block pair (bi, bj) contains at least one fully-excluded atom pair
+  Scenario: Construction routes a modified-pair block pair away from the bulk list
+    Given block pair (bi, bj) contains at least one modified atom pair
     When NeighborListState::rebuild completes
     Then (bi, bj) appears in the exclusion-tile list
     And no interacting_atoms / single_pair_atoms entry pairs an atom of bi with an atom of bj
 
-  @rq-b8c58d4d
-  Scenario: A fractional exclusion scale is rejected at load
-    Given a topology whose exclusion for pair (i, j) has a Coulomb scale of 0.833
+  @rq-ea4617e1
+  Scenario: A fractional exclusion scale loads without error
+    Given a topology whose exclusion for pair (i, j) has a Lennard-Jones scale of 0.5 and a Coulomb scale of 0.833
     When the simulation loads
-    Then loading fails with an error naming pair (i, j) and the unsupported fractional scale
-    And no GPU work is started
-
-  @rq-bfe82d37
-  Scenario: A partial (mixed-binary) exclusion is rejected at load
-    Given a topology whose exclusion for pair (i, j) has a Lennard-Jones scale of 0 and a Coulomb scale of 1
-    When the simulation loads
-    Then loading fails with an error naming pair (i, j) and both fragment scales
-    And no GPU work is started
+    Then loading succeeds
+    And (i, j) is recorded as a modified pair carrying those per-fragment scales
 
   @rq-10443d06
   Scenario: Two GPU runs build byte-identical exclusion tiles

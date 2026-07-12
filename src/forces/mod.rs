@@ -672,23 +672,25 @@ impl ForceField {
             None
         };
 
-        // Capture the fully-excluded canonical pairs (both fragment scales
-        // 0) for the per-rebuild exclusion-tile builder. Exclusions are
-        // binary and full, so a not-excluded (scale 1) entry contributes
-        // no tile bit. rq-8945395f
+        // Capture the modified canonical pairs — any pair whose scale
+        // differs from 1 in some fragment — for the per-rebuild
+        // exclusion-tile builder. A pair with every fragment scale 1 is
+        // not modified and contributes no tile bit; the exclusion-tile
+        // pass reads each flagged pair's per-fragment scale at evaluation
+        // time. rq-8945395f rq-03faaf24
         if let Some(nl) = neighbor_list.as_mut() {
-            let mut excluded_pairs: Vec<(u32, u32)> = exclusion_list
+            let mut modified_pairs: Vec<(u32, u32)> = exclusion_list
                 .entries
                 .iter()
-                .filter(|e| e.scale_lj == 0.0 && e.scale_coul == 0.0)
+                .filter(|e| e.scale_lj != 1.0 || e.scale_coul != 1.0)
                 .map(|e| {
                     let (a, b) = (e.atom_i.min(e.atom_j), e.atom_i.max(e.atom_j));
                     (a, b)
                 })
                 .collect();
-            excluded_pairs.sort_unstable();
-            excluded_pairs.dedup();
-            nl.set_excluded_pairs(excluded_pairs);
+            modified_pairs.sort_unstable();
+            modified_pairs.dedup();
+            nl.set_excluded_pairs(modified_pairs);
         }
 
         // Collect each shape's participants from `jit_participant`. A

@@ -47,7 +47,7 @@ fn load_typical_bonds_file() {
 
 [exclusions]
 0 1 0.0
-0 2 0.0
+0 2 0.5
 "#;
     let path = write(&dir, body);
     let (bl, _al, _dl, el, _cl, _ql) = load_topology_file(&path, 4, &["CC", "CN"], &[], &[], &[], &registry(), UnitSystem::Atomic).unwrap();
@@ -55,7 +55,7 @@ fn load_typical_bonds_file() {
     assert_eq!((bl.bonds[0].atom_i, bl.bonds[0].atom_j, bl.bonds[0].bond_type_index), (0, 1, 0));
     assert_eq!((bl.bonds[1].atom_i, bl.bonds[1].atom_j, bl.bonds[1].bond_type_index), (1, 2, 0));
     assert_eq!((bl.bonds[2].atom_i, bl.bonds[2].atom_j, bl.bonds[2].bond_type_index), (2, 3, 1));
-    // Effective exclusions: explicit (0,1,0.0), (0,2,0.0), implicit (1,2,0.0), (2,3,0.0)
+    // Effective exclusions: explicit (0,1,0.0), (0,2,0.5), implicit (1,2,0.0), (2,3,0.0)
     assert_eq!(el.entries.len(), 4);
 }
 
@@ -141,7 +141,7 @@ fn empty_sections_valid() {
 #[test]
 fn sections_either_order() {
     let dir = tmp_path("section_order");
-    let body = "[exclusions]\n0 2 0.0\n\n[bonds]\n0 1 CC\n";
+    let body = "[exclusions]\n0 2 0.5\n\n[bonds]\n0 1 CC\n";
     let path = write(&dir, body);
     let (bl, _al, _dl, el, _cl, _ql) = load_topology_file(&path, 4, &["CC"], &[], &[], &[], &registry(), UnitSystem::Atomic).unwrap();
     assert_eq!(bl.bonds.len(), 1);
@@ -364,42 +364,26 @@ fn exclusion_scale_nan_rejected() {
 #[test]
 fn single_scale_form_sets_both_lj_and_coul_scales_equally() {
     let dir = tmp_path("single_scale");
-    let body = "[exclusions]\n0 1 0.0\n";
+    let body = "[exclusions]\n0 1 0.5\n";
     let path = write(&dir, body);
     let (_b, _al, _dl, el, _cl, _ql) = load_topology_file(&path, 2, &[], &[], &[], &[], &registry(), UnitSystem::Atomic).unwrap();
     assert_eq!(el.entries.len(), 1);
-    assert_eq!(el.entries[0].scale_lj, 0.0);
-    assert_eq!(el.entries[0].scale_coul, 0.0);
+    assert_eq!(el.entries[0].scale_lj, 0.5);
+    assert_eq!(el.entries[0].scale_coul, 0.5);
 }
 
-// rq-1fde7
+// rq-1fde7 rq-ea4617e1
+// A fractional four-column exclusion (LJ 0.5, Coulomb 0.833) loads
+// without error and records the two per-fragment scales independently.
 #[test]
 fn four_column_form_sets_lj_and_coul_scales_independently() {
-    // The four-column form parses independent LJ and Coulomb columns; a
-    // full exclusion sets both to 0.
     let dir = tmp_path("four_col");
-    let body = "[exclusions]\n0 1 0.0 0.0\n";
+    let body = "[exclusions]\n0 1 0.5 0.833\n";
     let path = write(&dir, body);
     let (_b, _al, _dl, el, _cl, _ql) = load_topology_file(&path, 2, &[], &[], &[], &[], &registry(), UnitSystem::Atomic).unwrap();
     assert_eq!(el.entries.len(), 1);
-    assert_eq!(el.entries[0].scale_lj, 0.0);
-    assert_eq!(el.entries[0].scale_coul, 0.0);
-}
-
-// rq-03faaf24 — a per-pair bit is all-or-nothing across fragments, so a
-// mixed-binary (partial) exclusion is rejected at load.
-#[test]
-fn partial_exclusion_scale_rejected_at_load() {
-    let dir = tmp_path("partial_excl");
-    let body = "[exclusions]\n0 1 0.0 1.0\n";
-    let path = write(&dir, body);
-    match load_topology_file(&path, 2, &[], &[], &[], &[], &registry(), UnitSystem::Atomic).unwrap_err() {
-        TopologyFileError::PartialExclusionScale { atom_i, atom_j, scale_lj, scale_coul } => {
-            assert_eq!((atom_i, atom_j), (0, 1));
-            assert_eq!((scale_lj, scale_coul), (0.0, 1.0));
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_eq!(el.entries[0].scale_lj, 0.5);
+    assert_eq!(el.entries[0].scale_coul, 0.833);
 }
 
 // rq-6a9f0a18
@@ -410,24 +394,6 @@ fn out_of_range_coul_scale_in_four_column_form_rejected() {
     let path = write(&dir, body);
     match load_topology_file(&path, 2, &[], &[], &[], &[], &registry(), UnitSystem::Atomic).unwrap_err() {
         TopologyFileError::ScaleOutOfRange { .. } => {}
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-// rq-b8c58d4d rq-03faaf24
-#[test]
-fn fractional_exclusion_scale_rejected_at_load() {
-    // Exclusions are binary; a Coulomb scale in the open interval (0, 1)
-    // (e.g. an OPLS/AMBER 1-4 term) is a load-time error naming the pair
-    // and the unsupported scale.
-    let dir = tmp_path("fractional_excl");
-    let body = "[exclusions]\n0 1 0.0 0.833\n";
-    let path = write(&dir, body);
-    match load_topology_file(&path, 2, &[], &[], &[], &[], &registry(), UnitSystem::Atomic).unwrap_err() {
-        TopologyFileError::FractionalExclusionScale { atom_i, atom_j, scale } => {
-            assert_eq!((atom_i, atom_j), (0, 1));
-            assert!((scale - 0.833).abs() < 1.0e-6, "scale was {scale}");
-        }
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -601,14 +567,12 @@ fn unknown_angle_type_rejected() {
 #[test]
 fn explicit_exclusion_overrides_angle_implicit_default() {
     let dir = tmp_path("angle_excl_override");
-    let body = "[bonds]\n0 1 OH\n0 2 OH\n[angles]\n1 0 2 HOH\n[exclusions]\n1 2 1.0 1.0\n";
+    let body = "[bonds]\n0 1 OH\n0 2 OH\n[angles]\n1 0 2 HOH\n[exclusions]\n1 2 0.5 0.833\n";
     let path = write(&dir, body);
     let (_bl, _al, _dl, el, _cl, _ql) = load_topology_file(&path, 3, &["OH"], &["HOH"], &[], &[], &registry(), UnitSystem::Atomic).unwrap();
-    // Explicit "not excluded" (1, 1) overrides the angle-implicit full
-    // exclusion the (1, 2) pair would otherwise receive.
     let entry_1_2 = el.entries.iter().find(|e| e.atom_i == 1 && e.atom_j == 2).unwrap();
-    assert_eq!(entry_1_2.scale_lj, 1.0);
-    assert_eq!(entry_1_2.scale_coul, 1.0);
+    assert_eq!(entry_1_2.scale_lj, 0.5);
+    assert_eq!(entry_1_2.scale_coul, 0.833);
 }
 
 // rq-9a386c23
@@ -754,14 +718,14 @@ fn bond_and_constraint_pair_overlap_rejected() {
 #[test]
 fn explicit_exclusion_overrides_constraint_derived_default() {
     let dir = tmp_path("constraint_excl_override");
-    let body = "[exclusions]\n1 2 0.0 0.0\n\n[constraints]\n0 1 2 SPCE\n";
+    let body = "[exclusions]\n1 2 0.25 0.25\n\n[constraints]\n0 1 2 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
     let (_bl, _al, _dl, el, _cl, _ql) =
         load_topology_file(&path, 3, &[], &[], &[], &cts, &registry(), UnitSystem::Atomic).unwrap();
     let entry = el.entries.iter().find(|e| e.atom_i == 1 && e.atom_j == 2).unwrap();
-    assert_eq!(entry.scale_lj, 0.0);
-    assert_eq!(entry.scale_coul, 0.0);
+    assert_eq!(entry.scale_lj, 0.25);
+    assert_eq!(entry.scale_coul, 0.25);
 }
 
 // rq-75a9815d rq-930121d6
@@ -851,11 +815,10 @@ fn exclusion_atom_out_of_range_rejected() {
 // rq-77f53d4b
 #[test]
 fn atom_excl_offsets_reflects_sorted_exclusion_list() {
-    // Build a 4-particle topology with the scenario's exclusion set (all
-    // full exclusions):
+    // Build a 4-particle topology with the scenario's exclusion set:
     //   (0, 1, lj=0.0, coul=0.0)
-    //   (0, 2, lj=0.0, coul=0.0)
-    //   (1, 3, lj=0.0, coul=0.0)
+    //   (0, 2, lj=0.5, coul=0.5)
+    //   (1, 3, lj=0.5, coul=0.833)
     // Every pair is mirror-expanded — both atom_i's and atom_j's lists
     // name the other. CSR offsets are [0, 2, 4, 5, 6]:
     //   atom 0 → 2 partners (1, 2)
@@ -866,8 +829,8 @@ fn atom_excl_offsets_reflects_sorted_exclusion_list() {
     let body = "\
 [exclusions]
 0 1 0.0 0.0
-0 2 0.0 0.0
-1 3 0.0 0.0
+0 2 0.5 0.5
+1 3 0.5 0.833
 ";
     let path = write(&dir, body);
     let (_bl, _al, _dl, el, _cl, _ql) =
@@ -879,24 +842,24 @@ fn atom_excl_offsets_reflects_sorted_exclusion_list() {
     };
     let (s0, e0) = slice(0);
     assert_eq!(&el.atom_excl_partners[s0..e0], &[1u32, 2]);
-    assert_eq!(&el.atom_excl_lj_scales[s0..e0], &[0.0, 0.0]);
-    assert_eq!(&el.atom_excl_coul_scales[s0..e0], &[0.0, 0.0]);
+    assert_eq!(&el.atom_excl_lj_scales[s0..e0], &[0.0, 0.5]);
+    assert_eq!(&el.atom_excl_coul_scales[s0..e0], &[0.0, 0.5]);
 
     let (s1, e1) = slice(1);
     assert_eq!(&el.atom_excl_partners[s1..e1], &[0u32, 3]);
-    assert_eq!(&el.atom_excl_lj_scales[s1..e1], &[0.0, 0.0]);
+    assert_eq!(&el.atom_excl_lj_scales[s1..e1], &[0.0, 0.5]);
     assert!((el.atom_excl_coul_scales[s1] - 0.0).abs() < 1.0e-6);
-    assert!((el.atom_excl_coul_scales[e1 - 1] - 0.0).abs() < 1.0e-6);
+    assert!((el.atom_excl_coul_scales[e1 - 1] - 0.833).abs() < 1.0e-6);
 
     let (s2, e2) = slice(2);
     assert_eq!(&el.atom_excl_partners[s2..e2], &[0u32]);
-    assert!((el.atom_excl_lj_scales[s2] - 0.0).abs() < 1.0e-6);
-    assert!((el.atom_excl_coul_scales[s2] - 0.0).abs() < 1.0e-6);
+    assert!((el.atom_excl_lj_scales[s2] - 0.5).abs() < 1.0e-6);
+    assert!((el.atom_excl_coul_scales[s2] - 0.5).abs() < 1.0e-6);
 
     let (s3, e3) = slice(3);
     assert_eq!(&el.atom_excl_partners[s3..e3], &[1u32]);
-    assert!((el.atom_excl_lj_scales[s3] - 0.0).abs() < 1.0e-6);
-    assert!((el.atom_excl_coul_scales[s3] - 0.0).abs() < 1.0e-6);
+    assert!((el.atom_excl_lj_scales[s3] - 0.5).abs() < 1.0e-6);
+    assert!((el.atom_excl_coul_scales[s3] - 0.833).abs() < 1.0e-6);
 }
 
 // =====================================================================
@@ -909,7 +872,7 @@ fn load_dihedral_row() {
     let dir = tmp_path("dih_one");
     let body = "[dihedrals]\n0 1 2 3 D\n";
     let path = write(&dir, body);
-    let dts = vec![dihedral_type("D", 0.0, 0.0)];
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
     let (_, _, dl, _, _, _ql) =
         load_topology_file(&path, 4, &[], &[], &dts, &[], &registry(), UnitSystem::Atomic).unwrap();
     assert_eq!(dl.dihedrals.len(), 1);
@@ -925,7 +888,7 @@ fn dihedral_canonicalised_so_i_leq_l() {
     let dir = tmp_path("dih_canon");
     let body = "[dihedrals]\n3 2 1 0 D\n";
     let path = write(&dir, body);
-    let dts = vec![dihedral_type("D", 0.0, 0.0)];
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
     let (_, _, dl, _, _, _ql) =
         load_topology_file(&path, 4, &[], &[], &dts, &[], &registry(), UnitSystem::Atomic).unwrap();
     let d = &dl.dihedrals[0];
@@ -937,7 +900,7 @@ fn dihedrals_sorted_by_quadruple() {
     let dir = tmp_path("dih_sort");
     let body = "[dihedrals]\n0 1 2 4 D\n0 1 2 3 D\n";
     let path = write(&dir, body);
-    let dts = vec![dihedral_type("D", 0.0, 0.0)];
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
     let (_, _, dl, _, _, _ql) =
         load_topology_file(&path, 5, &[], &[], &dts, &[], &registry(), UnitSystem::Atomic).unwrap();
     assert_eq!(dl.dihedrals.len(), 2);
@@ -951,8 +914,8 @@ fn two_dihedrals_same_quad_different_types_accepted() {
     let body = "[dihedrals]\n0 1 2 3 A\n0 1 2 3 B\n";
     let path = write(&dir, body);
     let dts = vec![
-        dihedral_type("A", 0.0, 0.0),
-        dihedral_type("B", 0.0, 0.0),
+        dihedral_type("A", 0.5, 0.8333),
+        dihedral_type("B", 0.5, 0.8333),
     ];
     let (_, _, dl, _, _, _ql) =
         load_topology_file(&path, 4, &[], &[], &dts, &[], &registry(), UnitSystem::Atomic).unwrap();
@@ -1046,7 +1009,7 @@ fn dihedral_implicit_14_exclusion_uses_type_scales() {
     let dir = tmp_path("dih_14_implicit");
     let body = "[dihedrals]\n0 1 2 3 D\n";
     let path = write(&dir, body);
-    let dts = vec![dihedral_type("D", 0.0, 0.0)];
+    let dts = vec![dihedral_type("D", 0.25, 0.75)];
     let (_, _, _dl, el, _, _ql) =
         load_topology_file(&path, 4, &[], &[], &dts, &[], &registry(), UnitSystem::Atomic).unwrap();
     let entry = el
@@ -1054,18 +1017,16 @@ fn dihedral_implicit_14_exclusion_uses_type_scales() {
         .iter()
         .find(|e| (e.atom_i, e.atom_j) == (0, 3))
         .expect("expected (0,3) 1-4 entry");
-    assert!((entry.scale_lj - 0.0).abs() < 1.0e-6);
-    assert!((entry.scale_coul - 0.0).abs() < 1.0e-6);
+    assert!((entry.scale_lj - 0.25).abs() < 1.0e-6);
+    assert!((entry.scale_coul - 0.75).abs() < 1.0e-6);
 }
 
 #[test]
 fn explicit_14_overrides_dihedral_implicit() {
     let dir = tmp_path("dih_14_override");
-    let body = "[exclusions]\n0 3 1.0 1.0\n[dihedrals]\n0 1 2 3 D\n";
+    let body = "[exclusions]\n0 3 0.4 0.6\n[dihedrals]\n0 1 2 3 D\n";
     let path = write(&dir, body);
-    // The dihedral type declares a full-exclusion 1-4 (0.0/0.0); the
-    // explicit "not excluded" (1.0/1.0) row for the same pair must win.
-    let dts = vec![dihedral_type("D", 0.0, 0.0)];
+    let dts = vec![dihedral_type("D", 0.25, 0.75)];
     let (_, _, _dl, el, _, _ql) =
         load_topology_file(&path, 4, &[], &[], &dts, &[], &registry(), UnitSystem::Atomic).unwrap();
     let entry = el
@@ -1073,8 +1034,8 @@ fn explicit_14_overrides_dihedral_implicit() {
         .iter()
         .find(|e| (e.atom_i, e.atom_j) == (0, 3))
         .expect("expected (0,3) entry");
-    assert!((entry.scale_lj - 1.0).abs() < 1.0e-6);
-    assert!((entry.scale_coul - 1.0).abs() < 1.0e-6);
+    assert!((entry.scale_lj - 0.4).abs() < 1.0e-6);
+    assert!((entry.scale_coul - 0.6).abs() < 1.0e-6);
 }
 
 #[test]
@@ -1083,8 +1044,8 @@ fn first_dihedral_wins_for_14_exclusion() {
     let body = "[dihedrals]\n0 1 2 3 A\n0 1 2 3 B\n";
     let path = write(&dir, body);
     let dts = vec![
-        dihedral_type("A", 0.0, 0.0),
-        dihedral_type("B", 1.0, 1.0),
+        dihedral_type("A", 0.5, 0.8333),
+        dihedral_type("B", 0.25, 0.75),
     ];
     let (_, _, _dl, el, _, _ql) =
         load_topology_file(&path, 4, &[], &[], &dts, &[], &registry(), UnitSystem::Atomic).unwrap();
@@ -1094,8 +1055,8 @@ fn first_dihedral_wins_for_14_exclusion() {
         .filter(|e| (e.atom_i, e.atom_j) == (0, 3))
         .collect();
     assert_eq!(entries_for_pair.len(), 1, "exactly one (0,3) row");
-    assert!((entries_for_pair[0].scale_lj - 0.0).abs() < 1.0e-6);
-    assert!((entries_for_pair[0].scale_coul - 0.0).abs() < 1.0e-3);
+    assert!((entries_for_pair[0].scale_lj - 0.5).abs() < 1.0e-6);
+    assert!((entries_for_pair[0].scale_coul - 0.8333).abs() < 1.0e-3);
 }
 
 #[test]
@@ -1120,7 +1081,7 @@ fn atom_dihedral_offsets_correct() {
     let dir = tmp_path("dih_atom_offsets");
     let body = "[dihedrals]\n0 1 2 3 D\n1 2 3 4 D\n";
     let path = write(&dir, body);
-    let dts = vec![dihedral_type("D", 0.0, 0.0)];
+    let dts = vec![dihedral_type("D", 0.5, 0.8333)];
     let (_, _, dl, _, _, _ql) =
         load_topology_file(&path, 5, &[], &[], &dts, &[], &registry(), UnitSystem::Atomic).unwrap();
     assert_eq!(dl.dihedrals.len(), 2);

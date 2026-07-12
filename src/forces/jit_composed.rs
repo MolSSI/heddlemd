@@ -959,6 +959,84 @@ fn functor_field_name(label: &str) -> String {
     out
 }
 
+/// Emit a `template <bool WriteEv>` per-pair evaluator named `fn_name`
+/// that sums each fragment's `(factor, energy)` at pair (i, j). When
+/// `apply_scale` is true, each fragment's contribution is multiplied by
+/// its per-pair `exclusion_scale(i, j)` (fully-excluded pairs contribute
+/// zero, 1-4 pairs contribute a scaled amount); when false, the
+/// contribution is added at full strength with no exclusion lookup.
+/// Per-fragment cutoff guards are emitted per each fragment's
+/// `CutoffHandling`; the outer-loop max-cutoff mask is applied by the
+/// caller. rq-7d64da58 rq-a4b9e702 rq-fa0b3d10
+fn emit_eval_pair_sum(
+    s: &mut String,
+    fragments: &[PairForceFragment],
+    max_cutoff: Real,
+    fn_name: &str,
+    apply_scale: bool,
+) {
+    s.push_str("\ntemplate <bool WriteEv>\n");
+    s.push_str(&format!("__device__ static inline void {fn_name}(\n"));
+    s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
+    s.push_str(
+        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j,\n",
+    );
+    s.push_str("    Real &factor, Real &energy)\n");
+    s.push_str("{\n");
+    s.push_str("    factor = R(0.0); energy = R(0.0);\n");
+    for f in fragments {
+        let field = functor_field_name(f.label);
+        let body = if apply_scale {
+            format!(
+                "Real s_factor, s_energy;\n            \
+                 composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
+                 Real ex_scale = composite.{f}.exclusion_scale(i, j);\n            \
+                 factor += s_factor * ex_scale;\n            \
+                 if (WriteEv) {{ energy += s_energy * ex_scale; }}",
+                f = field
+            )
+        } else {
+            format!(
+                "Real s_factor, s_energy;\n            \
+                 composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
+                 factor += s_factor;\n            \
+                 if (WriteEv) {{ energy += s_energy; }}",
+                f = field
+            )
+        };
+        match f.cutoff {
+            // Uniform cutoff matching the outer max: the outer mask
+            // already covers it; omit the per-fragment guard.
+            CutoffHandling::Uniform(c) if c == max_cutoff => {
+                s.push_str(&format!("    {{\n        {body}\n    }}\n", body = body));
+            }
+            // Uniform cutoff strictly less than the outer max: emit a
+            // compile-time-constant guard against c² (no per-pair load
+            // of `cutoff_squared(i, j)`).
+            CutoffHandling::Uniform(c) => {
+                let c_sq = (c as f64) * (c as f64);
+                s.push_str(&format!(
+                    "    {{\n        if (r2 <= R({c_sq:.17e})) {{\n            \
+                     {body}\n        }}\n    }}\n",
+                    c_sq = c_sq,
+                    body = body,
+                ));
+            }
+            // Per-pair cutoff: emit the runtime guard around the
+            // fragment's evaluate.
+            CutoffHandling::PerPair => {
+                s.push_str(&format!(
+                    "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i_type, j_type, i, j);\n        \
+                     if (r2 <= cut2) {{\n            {body}\n        }}\n    }}\n",
+                    f = field,
+                    body = body,
+                ));
+            }
+        }
+    }
+    s.push_str("}\n");
+}
+
 fn compose_source(
     fragments: &[PairForceFragment],
     max_cutoff: Real,
@@ -1004,99 +1082,34 @@ fn compose_source(
     }
     s.push_str("};\n");
 
-    // Per-pair functor sum: returns the SUM of (factor, energy,
-    // virial) across every active slot at pair (i, j). The outer loop
-    // computes `inv_r` and `r` once per pair and passes them in so
-    // every fragment reuses them. The outer-loop max-cutoff mask is
-    // applied after this function returns; per-fragment cutoff guards
-    // are emitted here according to each fragment's CutoffHandling.
+    // Per-pair functor sum: sums each active slot's `(factor, energy)`
+    // at pair (i, j). Where a fragment's per-pair `exclusion_scale(i, j)`
+    // is applied depends on the neighbour-list mode (see
+    // `packed-neighbour-pair-force.md` and `jit-composed-pair-force.md`
+    // *Exclusion Handling*):
     //
-    // Each fragment's `exclusion_scale(i, j)` is called and its
-    // scale multiplied into the fragment's `(factor, energy)`
-    // inline. Non-excluded pairs get a multiply-by-1.0; excluded
-    // pairs contribute `scale × evaluate` directly.
-    s.push_str("\ntemplate <bool WriteEv>\n");
-    s.push_str("__device__ static inline void heddle_jit_eval_pair_sum(\n");
-    s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
-    s.push_str(
-        "    Real r2, Real inv_r, Real r, Real qi, Real qj, unsigned int i_type, unsigned int j_type, unsigned int i, unsigned int j,\n",
-    );
-    s.push_str("    Real &factor, Real &energy)\n");
-    s.push_str("{\n");
-    s.push_str("    factor = R(0.0); energy = R(0.0);\n");
-    for f in fragments {
-        let field = functor_field_name(f.label);
-        // Each fragment's contribution is scaled by its own
-        // `exclusion_scale(i, j)` inside the main pair-force
-        // accumulator. This makes the pair-force output robust
-        // against the residual packed-neighbour double-emission
-        // defect documented in `rqm/forces/neighbor-list.md` (*Out of
-        // Scope: Known packed-neighbour double-emit*): a pair
-        // visited N times still resolves to `N × scale × pair_force`,
-        // which for excluded pairs (`scale ∈ {0, 0.5}`) is either
-        // zero or a bounded small residual regardless of the
-        // duplicate count. Non-excluded pairs (`scale = 1`) can
-        // still be over-counted by the duplicate-emit defect —
-        // that fix belongs in the neighbour-list construction and
-        // is tracked as an open item.
-        // rq-7d64da58 — the functor emits only (factor, energy); the
-        // per-pair scalar virial is derived by the caller as factor * r2.
-        //
-        // rq-a4b9e702 rq-fa0b3d10 — with the per-tile exclusion bitmask
-        // active (CellList mode), no bulk or single-pair entry contains an
-        // excluded pair and the exclusion-tile pass masks its own pairs, so
-        // the evaluator applies no per-pair exclusion scale. In all-pairs
-        // (Trivial) mode there is no bitmask, so each fragment's
-        // `exclusion_scale(i, j)` is still folded in inline.
-        let body = if use_exclusion_bitmask {
-            format!(
-                "Real s_factor, s_energy;\n            \
-                 composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
-                 factor += s_factor;\n            \
-                 if (WriteEv) {{ energy += s_energy; }}",
-                f = field
-            )
-        } else {
-            format!(
-                "Real s_factor, s_energy;\n            \
-                 composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
-                 Real ex_scale = composite.{f}.exclusion_scale(i, j);\n            \
-                 factor += s_factor * ex_scale;\n            \
-                 if (WriteEv) {{ energy += s_energy * ex_scale; }}",
-                f = field
-            )
-        };
-        match f.cutoff {
-            // Uniform cutoff matching the outer max: the outer mask
-            // already covers it; omit the per-fragment guard.
-            CutoffHandling::Uniform(c) if c == max_cutoff => {
-                s.push_str(&format!("    {{\n        {body}\n    }}\n", body = body));
-            }
-            // Uniform cutoff strictly less than the outer max: emit a
-            // compile-time-constant guard against c² (no per-pair load
-            // of `cutoff_squared(i, j)`).
-            CutoffHandling::Uniform(c) => {
-                let c_sq = (c as f64) * (c as f64);
-                s.push_str(&format!(
-                    "    {{\n        if (r2 <= R({c_sq:.17e})) {{\n            \
-                     {body}\n        }}\n    }}\n",
-                    c_sq = c_sq,
-                    body = body,
-                ));
-            }
-            // Per-pair cutoff: emit the runtime guard around the
-            // fragment's evaluate.
-            CutoffHandling::PerPair => {
-                s.push_str(&format!(
-                    "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i_type, j_type, i, j);\n        \
-                     if (r2 <= cut2) {{\n            {body}\n        }}\n    }}\n",
-                    f = field,
-                    body = body,
-                ));
-            }
-        }
+    // - CellList mode emits two evaluators: `heddle_jit_eval_pair_sum`
+    //   (scale-free) for the bulk and single-pair passes, which never see
+    //   a modified pair, and `heddle_jit_eval_pair_sum_scaled`, used by
+    //   the exclusion-tile pass on its flagged (modified) pairs.
+    // - All-pairs mode emits one scale-aware `heddle_jit_eval_pair_sum`
+    //   applied to every pair.
+    //
+    // rq-7d64da58 — the functor emits only (factor, energy); the per-pair
+    // scalar virial is derived by the caller as factor * r2.
+    // rq-a4b9e702 rq-b28a6d96 rq-fa0b3d10 rq-8ae4a9f1
+    if use_exclusion_bitmask {
+        emit_eval_pair_sum(&mut s, fragments, max_cutoff, "heddle_jit_eval_pair_sum", false);
+        emit_eval_pair_sum(
+            &mut s,
+            fragments,
+            max_cutoff,
+            "heddle_jit_eval_pair_sum_scaled",
+            true,
+        );
+    } else {
+        emit_eval_pair_sum(&mut s, fragments, max_cutoff, "heddle_jit_eval_pair_sum", true);
     }
-    s.push_str("}\n");
 
     let _ = max_cutoff;
 
@@ -1888,18 +1901,21 @@ __device__ static inline void heddle_jit_single_pair_loop(
 "#;
 
 // Exclusion-tile pair-force pass. One warp per exclusion tile — a block
-// pair (bi <= bj) that contains at least one fully-excluded atom pair.
-// The whole block pair (excluded and non-excluded pairs alike) is
-// computed here so the bulk and single-pair passes can skip it and do
-// zero exclusion work. Lane `l` owns i-atom slot bi*32+l and initially
-// j-atom slot bj*32+l; the 32-iteration diagonal shuffle visits every
-// (i_lane, j_lane) pair. A pair is evaluated only when its
-// exclusion-bitmask bit is clear and the two atoms are distinct. A
-// self-block tile (bi==bj) applies the i-side only — each intra-block
-// pair is visited from both orderings and the bitmask is symmetric — and
-// a cross-block tile applies both sides (Newton's 3rd). The j-side
-// diagonal-shuffle bookkeeping mirrors the packed-neighbour pass.
-// Accumulation is i64 fixed-point, so it is order-independent and
+// pair (bi <= bj) that contains at least one modified atom pair (a pair
+// whose scale differs from 1 in some fragment). The whole block pair
+// (modified and unmodified pairs alike) is computed here so the bulk and
+// single-pair passes can skip it and do zero exclusion work. Lane `l`
+// owns i-atom slot bi*32+l and initially j-atom slot bj*32+l; the
+// 32-iteration diagonal shuffle visits every (i_lane, j_lane) pair. A
+// pair flagged in the modified-pair bitmask is summed through the
+// scale-aware evaluator (applying each fragment's per-pair scale — a
+// full exclusion contributes nothing, a 1-4 pair a scaled force); an
+// unflagged pair is evaluated at full strength. The self-block (bi==bj)
+// diagonal is skipped. A self-block tile applies the i-side only — each
+// intra-block pair is visited from both orderings and the bitmask is
+// symmetric — and a cross-block tile applies both sides (Newton's 3rd).
+// The j-side diagonal-shuffle bookkeeping mirrors the packed-neighbour
+// pass. Accumulation is i64 fixed-point, so it is order-independent and
 // bit-exact run to run. rq-fa0b3d10
 const EXCL_TILE_LOOP_TEMPLATE: &str = r#"
 template <bool WriteEv>
@@ -1954,10 +1970,10 @@ __device__ static inline void heddle_jit_excl_tile_loop(
   unsigned int j_type = 0u;
   /*HEDDLE_JIT_JTYPE_LOAD*/
 
-  // This lane's exclusion-mask row (i_lane == lane): bit j_lane set =>
-  // pair (lane, j_lane) is excluded. The mask row is fixed for this
-  // lane, so no rotation is needed — at iteration tt the partner is
-  // j_lane = (lane + tt) mod 32.
+  // This lane's modified-pair mask row (i_lane == lane): bit j_lane set
+  // => pair (lane, j_lane) is a modified pair whose per-fragment scale is
+  // applied. The mask row is fixed for this lane, so no rotation is
+  // needed — at iteration tt the partner is j_lane = (lane + tt) mod 32.
   unsigned int my_mask_row = exclusion_tile_masks[t * 32u + lane];
 
   // i-side accumulator (this lane's i-atom, fixed). j-side accumulator
@@ -1969,8 +1985,8 @@ __device__ static inline void heddle_jit_excl_tile_loop(
 
   for (unsigned int tt = 0u; tt < 32u; ++tt) {
     unsigned int j_lane = (lane + tt) & 31u;
-    bool excluded = ((my_mask_row >> j_lane) & 1u) != 0u;
-    if (i_valid && j_valid && !excluded && i_atom_id != j_atom_id) {
+    bool modified = ((my_mask_row >> j_lane) & 1u) != 0u;
+    if (i_valid && j_valid && i_atom_id != j_atom_id) {
       Real dx = pi_x - pj_x;
       Real dy = pi_y - pj_y;
       Real dz = pi_z - pj_z;
@@ -1980,10 +1996,21 @@ __device__ static inline void heddle_jit_excl_tile_loop(
       Real r = r2 * inv_r;
       Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
       Real factor = R(0.0), energy = R(0.0);
-      heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r,
-                                         qi, qj, i_type, j_type,
-                                         i_atom_id, j_atom_id,
-                                         factor, energy);
+      // A flagged (modified) pair applies its per-fragment exclusion
+      // scale; an unflagged pair is evaluated at full strength with no
+      // scale lookup. A fully-excluded pair (scale 0) contributes
+      // nothing; a 1-4 pair contributes a scaled force. rq-fa0b3d10
+      if (modified) {
+        heddle_jit_eval_pair_sum_scaled<WriteEv>(composite, r2, inv_r, r,
+                                           qi, qj, i_type, j_type,
+                                           i_atom_id, j_atom_id,
+                                           factor, energy);
+      } else {
+        heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r,
+                                           qi, qj, i_type, j_type,
+                                           i_atom_id, j_atom_id,
+                                           factor, energy);
+      }
       factor *= cutoff_mask;
       if (WriteEv) energy *= cutoff_mask;
       Real fx = factor * dx, fy = factor * dy, fz = factor * dz;
@@ -2909,23 +2936,34 @@ struct {n} {{
         );
     }
 
-    // rq-a4b9e702 rq-b28a6d96 — with the per-tile exclusion bitmask
-    // (CellList mode) the bulk and single-pair passes do zero exclusion
-    // work: the composed evaluator applies no per-pair exclusion scale.
+    // rq-a4b9e702 rq-b28a6d96 rq-8ae4a9f1 — in CellList mode the composer
+    // emits a scale-free evaluator for the bulk and single-pair passes
+    // (which never see a modified pair) plus a scale-aware evaluator used
+    // by the exclusion-tile pass.
     #[test]
-    fn bitmask_evaluator_omits_exclusion_scale() {
+    fn bitmask_composer_emits_scale_free_and_scaled_evaluators() {
         let src = compose_source(&[minimal_fragment("a")], 1.0 as Real, true);
+        // The scale-free evaluator's accumulate has no per-pair scale.
         assert!(
-            src.contains("heddle_jit_eval_pair_sum"),
-            "composer still emits the `heddle_jit_eval_pair_sum` evaluator"
+            src.contains("factor += s_factor;"),
+            "CellList mode must emit a scale-free evaluator (bulk/single)"
+        );
+        // The scale-aware evaluator (for the exclusion-tile pass) applies
+        // each fragment's exclusion_scale.
+        assert!(
+            src.contains("heddle_jit_eval_pair_sum_scaled"),
+            "CellList mode must emit the scale-aware evaluator"
         );
         assert!(
-            !src.contains(".exclusion_scale("),
-            "bitmask-mode evaluator must NOT call `.exclusion_scale(i, j)`"
+            src.contains("factor += s_factor * ex_scale;"),
+            "the scale-aware evaluator must multiply by exclusion_scale"
         );
+        // The exclusion-tile pass exists and dispatches to the scale-aware
+        // evaluator for its flagged pairs.
         assert!(
-            !src.contains("ex_scale"),
-            "bitmask-mode evaluator must not multiply by a per-pair scale"
+            src.contains("heddle_jit_excl_tile_loop")
+                && src.contains("heddle_jit_eval_pair_sum_scaled<WriteEv>"),
+            "the exclusion-tile pass must dispatch to the scale-aware evaluator"
         );
     }
 
@@ -3152,6 +3190,37 @@ struct {name} {{
             cutoff: CutoffHandling::Uniform(1.0 as Real),
             consumes_type_index: false,
         }
+    }
+
+    // rq-27add068 rq-e7fc1920 — the scale-aware evaluator applies each
+    // fragment's own exclusion_scale independently, so per-fragment
+    // combinations (e.g. one fragment scaled 0, another 1) act
+    // fragment-by-fragment rather than as a single shared scale.
+    #[test] // rq-27add068 rq-e7fc1920
+    fn scale_aware_evaluator_scales_each_fragment_independently() {
+        // All-pairs mode emits the scale-aware `heddle_jit_eval_pair_sum`.
+        let src = compose_source(
+            &[pair_frag("a", "VFa"), pair_frag("b", "VFb")],
+            1.0 as Real,
+            false,
+        );
+        // Each fragment's contribution is multiplied by *its own*
+        // functor's exclusion_scale — both appear, one per fragment.
+        assert!(
+            src.contains("composite.functor_a.exclusion_scale(i, j)"),
+            "fragment a must be scaled by functor_a's exclusion_scale"
+        );
+        assert!(
+            src.contains("composite.functor_b.exclusion_scale(i, j)"),
+            "fragment b must be scaled by functor_b's exclusion_scale"
+        );
+        // And each fragment's evaluate feeds its own scaled accumulate
+        // (no cross-fragment sharing of the scale).
+        assert!(
+            src.contains("composite.functor_a.evaluate(")
+                && src.contains("composite.functor_b.evaluate("),
+            "each fragment evaluates and scales through its own functor"
+        );
     }
 
     // rq-7d64da58 — the pair composer derives the per-pair scalar virial
