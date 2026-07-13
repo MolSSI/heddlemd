@@ -9908,15 +9908,10 @@
     "type": "section"
   },
   "rq-4625ed82": {
-    "decl": "Scenario: Coupling break-out tightens the displacement-flag cadence",
+    "decl": "Scenario: A thermostatted phase does not shorten the displacement-flag cadence",
     "file": "cuda-graphs",
-    "refs": [
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Coupling break-out tightens the displacement-flag cadence",
+    "refs": [],
+    "title": "A thermostatted phase does not shorten the displacement-flag cadence",
     "type": "scenario"
   },
   "rq-4656e089": {
@@ -10331,7 +10326,7 @@
     "type": "section"
   },
   "rq-49f6bbfb": {
-    "decl": "Scenario: A thermostat coupling every step also runs on the per-step path",
+    "decl": "Scenario: A thermostat coupling every step captures only the coupling graph",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -10343,7 +10338,7 @@
         "kind": "code"
       }
     ],
-    "title": "A thermostat coupling every step also runs on the per-step path",
+    "title": "A thermostat coupling every step captures only the coupling graph",
     "type": "scenario"
   },
   "rq-49fe5f2e": {
@@ -12548,10 +12543,15 @@
     "type": "scenario"
   },
   "rq-5b2a1cde": {
-    "decl": "Scenario: Coupling steps run on the per-step path, non-coupling steps replay the graph",
+    "decl": "Scenario: Coupling steps replay the coupling variant, non-coupling steps the non-coupling variant",
     "file": "cuda-graphs",
-    "refs": [],
-    "title": "Coupling steps run on the per-step path, non-coupling steps replay the graph",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Coupling steps replay the coupling variant, non-coupling steps the non-coupling variant",
     "type": "scenario"
   },
   "rq-5b4519e9": {
@@ -13158,6 +13158,18 @@
     "file": "precision",
     "refs": [],
     "title": "Default build resolves Real to f32",
+    "type": "scenario"
+  },
+  "rq-5fc7b67f": {
+    "decl": "Scenario: Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit",
     "type": "scenario"
   },
   "rq-5fcdc437": {
@@ -14106,15 +14118,10 @@
     "type": "scenario"
   },
   "rq-673e25a5": {
-    "decl": "Scenario: A coupling step ends the graph batch as a forced boundary",
+    "decl": "Scenario: A coupling step is not a batch boundary",
     "file": "cuda-graphs",
-    "refs": [
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A coupling step ends the graph batch as a forced boundary",
+    "refs": [],
+    "title": "A coupling step is not a batch boundary",
     "type": "scenario"
   },
   "rq-6745e7c5": {
@@ -14290,6 +14297,10 @@
     "refs": [
       {
         "file": "src/gpu/graph.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
         "kind": "code"
       }
     ],
@@ -18313,7 +18324,7 @@
     "type": "scenario"
   },
   "rq-867630af": {
-    "decl": "Scenario: GraphLoop.launch routes by the scalars flag",
+    "decl": "Scenario: GraphLoop.launch routes by the coupling and scalars flags",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -18321,7 +18332,7 @@
         "kind": "code"
       }
     ],
-    "title": "GraphLoop.launch routes by the scalars flag",
+    "title": "GraphLoop.launch routes by the coupling and scalars flags",
     "type": "scenario"
   },
   "rq-86aa2be7": {
@@ -19751,19 +19762,15 @@
     "type": "scenario"
   },
   "rq-91c02dd8": {
-    "decl": "Scenario: A cadence-inert thermostat other than csvr is also hybrid-eligible",
+    "decl": "Scenario: A device-side thermostat other than csvr also captures a coupling graph",
     "file": "cuda-graphs",
     "refs": [
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
-      },
       {
         "file": "tests/post_force_composition.rs",
         "kind": "code"
       }
     ],
-    "title": "A cadence-inert thermostat other than csvr is also hybrid-eligible",
+    "title": "A device-side thermostat other than csvr also captures a coupling graph",
     "type": "scenario"
   },
   "rq-91c4727a": {
@@ -21156,7 +21163,7 @@
     "type": "scenario"
   },
   "rq-9c1eb803": {
-    "decl": "Scenario: Hybrid graph run matches the fully per-step run bit-for-bit",
+    "decl": "Scenario: Graph run with a coupling variant matches the fully per-step run bit-for-bit",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -21164,7 +21171,7 @@
         "kind": "code"
       }
     ],
-    "title": "Hybrid graph run matches the fully per-step run bit-for-bit",
+    "title": "Graph run with a coupling variant matches the fully per-step run bit-for-bit",
     "type": "scenario"
   },
   "rq-9c22145d": {
@@ -23515,10 +23522,10 @@
     "type": "scenario"
   },
   "rq-acc595b8": {
-    "decl": "Scenario: Eligible phase captures a graph at phase start",
+    "decl": "Scenario: Eligible thermostatted phase captures non-coupling and coupling graphs at phase start",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Eligible phase captures a graph at phase start",
+    "title": "Eligible thermostatted phase captures non-coupling and coupling graphs at phase start",
     "type": "scenario"
   },
   "rq-accf1a4b": {
@@ -29974,7 +29981,7 @@
     "type": "scenario"
   },
   "rq-dce6f4cf": {
-    "decl": "Scenario: A thermostatted phase replays non-coupling steps and runs coupling steps per-step",
+    "decl": "Scenario: A thermostatted phase replays a coupling variant on coupling steps",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -29982,7 +29989,7 @@
         "kind": "code"
       }
     ],
-    "title": "A thermostatted phase replays non-coupling steps and runs coupling steps per-step",
+    "title": "A thermostatted phase replays a coupling variant on coupling steps",
     "type": "scenario"
   },
   "rq-dceedbbb": {

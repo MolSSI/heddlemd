@@ -220,23 +220,44 @@ impl CudaGraphExec {
 // rq-6887c76d
 #[derive(Debug)]
 pub struct GraphLoop {
-    /// The forces+scalars (`_fev`) graph. Always captured.
-    pub forces_and_scalars: CudaGraphExec,
-    /// The forces-only (`_f`) graph. `Some` when no barostat is active
-    /// for the phase, `None` otherwise (a barostat consumes the per-step
-    /// virial, so every step must evaluate scalars).
+    /// The non-coupling forces+scalars (`_fev`) graph. `Some` when the
+    /// phase has non-coupling steps (no thermostat, or `coupling_interval
+    /// > 1`); `None` when a thermostat couples every step.
+    pub forces_and_scalars: Option<CudaGraphExec>,
+    /// The non-coupling forces-only (`_f`) graph. `Some` when the phase has
+    /// non-coupling steps and no per-step barostat is active (a barostat
+    /// consumes the per-step virial, so every step must evaluate scalars).
     pub forces_only: Option<CudaGraphExec>,
+    /// The coupling-variant graph — a forces+scalars step with the
+    /// thermostat's device-side coupling recorded. `Some` when the phase
+    /// has a graph-eligible thermostat; `None` otherwise.
+    pub coupling: Option<CudaGraphExec>,
 }
 
 impl GraphLoop {
-    /// Launch the graph for one physical step. Uses the forces+scalars
-    /// graph when `scalars` is true or when no forces-only graph was
-    /// captured; otherwise the forces-only graph.
+    /// Launch the graph for one physical step. Launches the coupling
+    /// variant when `coupling` is true; otherwise the forces+scalars graph
+    /// when `scalars` is true or no forces-only graph was captured, else
+    /// the forces-only graph. The selected variant is `Some` for the step
+    /// shape the replay loop requests (coupling steps occur only with a
+    /// thermostat; non-coupling steps only when a non-coupling variant was
+    /// captured).
     // rq-6887c76d
-    pub fn launch(&self, scalars: bool) -> Result<(), GraphError> {
+    pub fn launch(&self, coupling: bool, scalars: bool) -> Result<(), GraphError> {
+        if coupling {
+            return self
+                .coupling
+                .as_ref()
+                .expect("coupling variant captured when a coupling step replays")
+                .launch();
+        }
         match (scalars, self.forces_only.as_ref()) {
             (false, Some(forces_only)) => forces_only.launch(),
-            _ => self.forces_and_scalars.launch(),
+            _ => self
+                .forces_and_scalars
+                .as_ref()
+                .expect("non-coupling forces+scalars captured when a non-coupling step replays")
+                .launch(),
         }
     }
 }

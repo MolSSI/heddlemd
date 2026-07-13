@@ -185,6 +185,12 @@ impl Accumulator {
 pub enum GraphVariant {
     ForcesOnly,
     ForcesAndScalars,
+    // rq-6887c76d — the coupling-variant graph (a forces+scalars step with
+    // the thermostat's device-side coupling recorded); replayed on coupling
+    // steps. Its per-stage stop counts are tracked separately so the
+    // thermostat kernels, which run only in this variant, do not clobber the
+    // non-coupling forces+scalars counts.
+    Coupling,
 }
 
 #[derive(Debug)]
@@ -203,6 +209,9 @@ struct KernelStageState {
     /// `kernel_stop` count per replay of the forces+scalars graph,
     /// committed by `end_capture(GraphVariant::ForcesAndScalars)`.
     captured_stops_forces_and_scalars: u32,
+    /// `kernel_stop` count per replay of the coupling-variant graph,
+    /// committed by `end_capture(GraphVariant::Coupling)`.
+    captured_stops_coupling: u32,
     /// Representative per-replay duration (ns) for this stage under graph
     /// mode, snapshotted from the instrumented calibration steps the
     /// runner executes before the replay loop (see
@@ -252,6 +261,7 @@ impl Timings {
                     captured_stops_per_replay: 0,
                     captured_stops_forces_only: 0,
                     captured_stops_forces_and_scalars: 0,
+                    captured_stops_coupling: 0,
                     representative_ns: 0,
                 },
             );
@@ -297,6 +307,9 @@ impl Timings {
                     state.captured_stops_forces_and_scalars =
                         state.captured_stops_per_replay;
                 }
+                GraphVariant::Coupling => {
+                    state.captured_stops_coupling = state.captured_stops_per_replay;
+                }
             }
         }
     }
@@ -340,6 +353,7 @@ impl Timings {
                 GraphVariant::ForcesAndScalars => {
                     state.captured_stops_forces_and_scalars
                 }
+                GraphVariant::Coupling => state.captured_stops_coupling,
             } as u64;
             if stops == 0 {
                 continue;

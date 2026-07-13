@@ -132,13 +132,13 @@ fn log_row_count(dir: &Path) -> u64 {
 // Build a GraphLoop from two captured single-node graphs that zero
 // distinct device buffers, then observe which buffer a launch zeroes to
 // confirm the `scalars` flag selects the graph.
-#[test]
 fn graph_loop_launch_routes_by_scalars_flag() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
 
     let mut buf_fo = device.htod_copy(vec![7u32]).unwrap();
     let mut buf_fev = device.htod_copy(vec![7u32]).unwrap();
+    let mut buf_cpl = device.htod_copy(vec![7u32]).unwrap();
 
     begin_stream_capture(&device, CaptureMode::ThreadLocal).unwrap();
     device.memset_zeros(&mut buf_fo).unwrap();
@@ -148,23 +148,37 @@ fn graph_loop_launch_routes_by_scalars_flag() {
     device.memset_zeros(&mut buf_fev).unwrap();
     let g_fev = end_stream_capture(&device).unwrap().instantiate().unwrap();
 
+    begin_stream_capture(&device, CaptureMode::ThreadLocal).unwrap();
+    device.memset_zeros(&mut buf_cpl).unwrap();
+    let g_cpl = end_stream_capture(&device).unwrap().instantiate().unwrap();
+
     let gl = GraphLoop {
-        forces_and_scalars: g_fev,
+        forces_and_scalars: Some(g_fev),
         forces_only: Some(g_fo),
+        coupling: Some(g_cpl),
     };
 
-    // scalars = false -> forces-only graph (zeros buf_fo, leaves buf_fev).
-    gl.launch(false).unwrap();
+    // coupling = false, scalars = false -> forces-only graph.
+    gl.launch(false, false).unwrap();
     device.synchronize().unwrap();
     assert_eq!(device.dtoh_sync_copy(&buf_fo).unwrap()[0], 0);
     assert_eq!(device.dtoh_sync_copy(&buf_fev).unwrap()[0], 7);
+    assert_eq!(device.dtoh_sync_copy(&buf_cpl).unwrap()[0], 7);
 
-    // scalars = true -> forces+scalars graph (zeros buf_fev).
+    // coupling = false, scalars = true -> forces+scalars graph.
     device.htod_copy_into(vec![7u32], &mut buf_fo).unwrap();
-    gl.launch(true).unwrap();
+    gl.launch(false, true).unwrap();
     device.synchronize().unwrap();
     assert_eq!(device.dtoh_sync_copy(&buf_fev).unwrap()[0], 0);
     assert_eq!(device.dtoh_sync_copy(&buf_fo).unwrap()[0], 7);
+    assert_eq!(device.dtoh_sync_copy(&buf_cpl).unwrap()[0], 7);
+
+    // coupling = true -> coupling graph, regardless of scalars.
+    device.htod_copy_into(vec![7u32], &mut buf_fev).unwrap();
+    gl.launch(true, true).unwrap();
+    device.synchronize().unwrap();
+    assert_eq!(device.dtoh_sync_copy(&buf_cpl).unwrap()[0], 0);
+    assert_eq!(device.dtoh_sync_copy(&buf_fev).unwrap()[0], 7);
 
     // forces_only = None -> scalars = false still routes to forces+scalars.
     let mut buf_none = device.htod_copy(vec![7u32]).unwrap();
@@ -172,10 +186,11 @@ fn graph_loop_launch_routes_by_scalars_flag() {
     device.memset_zeros(&mut buf_none).unwrap();
     let g_none = end_stream_capture(&device).unwrap().instantiate().unwrap();
     let gl_none = GraphLoop {
-        forces_and_scalars: g_none,
+        forces_and_scalars: Some(g_none),
         forces_only: None,
+        coupling: None,
     };
-    gl_none.launch(false).unwrap();
+    gl_none.launch(false, false).unwrap();
     device.synchronize().unwrap();
     assert_eq!(device.dtoh_sync_copy(&buf_none).unwrap()[0], 0);
 }

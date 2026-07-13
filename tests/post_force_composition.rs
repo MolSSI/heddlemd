@@ -436,25 +436,27 @@ fn builtin_thermostat_rescale_is_standalone_every_step() {
     assert_eq!(stage_count(&counts, "vv_kick"), 3);
 }
 
-// rq-49f6bbfb — a thermostat with the default coupling_interval (1) couples
-// every step, so no non-coupling step exists to capture; the phase runs
-// entirely on the per-step launch path even with graphs enabled, and the
-// thermostat's standalone rescale runs every step.
+// rq-49f6bbfb — at the default coupling_interval (1) every step couples, so
+// the phase captures only the coupling-variant graph and replays it every
+// step. The thermostat's rescale therefore runs on every step, recorded
+// through the coupling variant. n_steps = 20 exceeds the 8-step calibration
+// prefix, so the batched graph loop replays the coupling variant for the
+// remaining steps.
 #[test]
-fn thermostat_coupling_every_step_runs_per_step_with_graphs_enabled() {
-    let dir = tmp("thermostat_graphs_on");
+fn thermostat_coupling_every_step_runs_in_graph_mode() {
+    let dir = tmp("thermostat_ci1_graph");
     write_lattice_init(&dir, 9, 4.4e-10);
     let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n";
     std::fs::write(
         dir.join("sim.in.toml"),
-        lj_config(4, "kind = \"velocity-verlet\"\nlossless = false", extra, true),
+        lj_config(20, "kind = \"velocity-verlet\"\nlossless = false", extra, true),
     )
     .unwrap();
     run_simulation(&dir.join("sim.in.toml")).unwrap();
     let counts = timings_counts(&dir.join("sim.out.run.timings"));
-    // Coupling every step: the thermostat's standalone rescale ran each
-    // step, which only happens on the per-step path.
-    assert_eq!(stage_count(&counts, "csvr_rescale_velocities"), 4);
+    // Every step is a coupling step: the coupling variant carries the
+    // rescale, so its sample count equals n_steps.
+    assert_eq!(stage_count(&counts, "csvr_rescale_velocities"), 20);
 }
 
 // rq-26c9b8cb rq-6f09d7e3 rq-91c02dd8 — the slot-eligibility table: csvr,
@@ -482,14 +484,13 @@ fn thermostat_slot_graph_compatibility_table() {
     );
 }
 
-// rq-9c1eb803 — the hybrid graph path (non-coupling steps replayed from a
-// captured graph, coupling steps run whole on the per-step launch path)
-// produces a byte-identical trajectory to the fully per-step path for the
-// same csvr-thermostatted phase with coupling_interval > 1. n_steps = 20
-// exceeds the 8-step graph-timing calibration prefix, so the batched graph
-// loop runs (steps 9..20) with coupling break-outs at 10, 15, 20.
+// rq-9c1eb803 — a thermostatted phase with coupling_interval > 1 replays the
+// coupling variant on coupling steps and a non-coupling variant otherwise,
+// producing a byte-identical trajectory to the fully per-step path. n_steps
+// = 20 exceeds the 8-step calibration prefix, so the batched graph loop runs
+// (steps 9..20) spanning coupling steps 10, 15, 20.
 #[test]
-fn hybrid_graph_matches_per_step_byte_for_byte() {
+fn graph_coupling_variant_matches_per_step_byte_for_byte() {
     let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\n\
                  seed = 3\ncoupling_interval = 5\n";
     let run = |graphs: bool, tag: &str| -> Vec<u8> {
@@ -503,11 +504,37 @@ fn hybrid_graph_matches_per_step_byte_for_byte() {
         run_simulation(&dir.join("sim.in.toml")).unwrap();
         std::fs::read(dir.join("sim.out.run.xyz")).unwrap()
     };
-    let hybrid = run(true, "hybrid_bitexact_graph");
-    let per_step = run(false, "hybrid_bitexact_perstep");
+    let graph = run(true, "couplevar_bitexact_graph");
+    let per_step = run(false, "couplevar_bitexact_perstep");
     assert_eq!(
-        hybrid, per_step,
-        "hybrid graph-replay trajectory differs from the fully per-step trajectory"
+        graph, per_step,
+        "coupling-variant graph-replay trajectory differs from the fully per-step trajectory"
+    );
+}
+
+// rq-5fc7b67f — the default-interval (1) thermostatted phase runs in graph
+// mode (replaying the coupling variant every step) and produces a
+// byte-identical trajectory to the fully per-step path — the recovery of
+// graph capture for the default thermostatted config.
+#[test]
+fn default_interval_graph_matches_per_step_byte_for_byte() {
+    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n";
+    let run = |graphs: bool, tag: &str| -> Vec<u8> {
+        let dir = tmp(tag);
+        write_lattice_init(&dir, 9, 4.4e-10);
+        std::fs::write(
+            dir.join("sim.in.toml"),
+            lj_config(20, "kind = \"velocity-verlet\"\nlossless = false", extra, graphs),
+        )
+        .unwrap();
+        run_simulation(&dir.join("sim.in.toml")).unwrap();
+        std::fs::read(dir.join("sim.out.run.xyz")).unwrap()
+    };
+    let graph = run(true, "ci1_bitexact_graph");
+    let per_step = run(false, "ci1_bitexact_perstep");
+    assert_eq!(
+        graph, per_step,
+        "default-interval graph-replay trajectory differs from the fully per-step trajectory"
     );
 }
 

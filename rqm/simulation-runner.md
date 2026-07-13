@@ -487,14 +487,13 @@ the simulation box.
     / trajectory cadence boundary. Each batch invokes
     `graph_loop.launch(stream)` exactly `batch` times in sequence.
 
-    When the eligible phase has a graph-compatible thermostat with
-    `coupling_interval > 1`, each batch is additionally bounded so it
-    ends on the step before a coupling step, and every coupling step
-    (`s % coupling_interval == 0`) runs on the per-step launch loop
-    (steps a–g above) rather than from the graph — it is the only place
-    the thermostat's kinetic-energy reduction and rescale run. See
-    `cuda-graphs.md`'s *Batched Replay Loop* for the full break-out
-    contract.
+    When the eligible phase has a graph-compatible thermostat, each
+    per-step launch selects the coupling-variant graph on coupling steps
+    (`s % coupling_interval == 0`) and a non-coupling variant otherwise;
+    the thermostat's device-side coupling is recorded into the coupling
+    variant, so it replays in-graph and coupling steps are ordinary
+    replays, not batch boundaries. See `cuda-graphs.md`'s *Batched Replay
+    Loop*.
 
     At each batch boundary the runner runs `nl.pre_step`
     (displacement check + optional rebuild) and then, if the new
