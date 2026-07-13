@@ -696,6 +696,251 @@ extern "C" __global__ void set_neighbor_status_bits(
   }
 }
 
+// =====================================================================
+// On-device exclusion-tile build
+// (rqm/forces/packed-neighbour-pair-force.md Construction Pipeline step 6)
+//
+// Materialises the exclusion tiles, their 1024-bit modified-pair
+// bitmasks, and the excl_jblock_offsets / excl_jblocks CSR skip-list
+// entirely on the device, from the fixed canonical modified-pair list
+// and the current sort. No host round-trip. The sequence is:
+//   build_atom_slot -> count_pairs_by_iblock -> serial_prefix_scan_u32
+//   -> scatter_pairs_by_iblock -> sort_and_count_tiles_by_iblock
+//   -> serial_prefix_scan_u32 -> emit_tiles_by_iblock
+//   -> set_exclusion_status
+// Determinism: a permutation inversion, a fixed-index emit, a per-i-block
+// sort by bj, and an order-independent OR of lane bits, so the tile set,
+// its ascending (bi, bj) order, and the masks are a pure function of the
+// exclusion topology and sorted_particle_ids. rq-dbffee81 rq-8945395f
+// =====================================================================
+
+// rq-5f871bd5 — invert the sort: atom_slot[sorted_particle_ids[s]] = s.
+extern "C" __global__ void build_atom_slot(
+    const unsigned int *sorted_particle_ids,
+    unsigned int *atom_slot,
+    unsigned int n_atoms)
+{
+  unsigned int s = blockIdx.x * blockDim.x + threadIdx.x;
+  if (s >= n_atoms) {
+    return;
+  }
+  atom_slot[sorted_particle_ids[s]] = s;
+}
+
+// rq-8945395f — map a canonical modified pair (a, b) to its ordered block
+// pair (bi <= bj) and lanes under the current sort.
+__device__ static inline void heddle_excl_pair_blocks(
+    unsigned int a, unsigned int b, const unsigned int *atom_slot,
+    unsigned int &bi, unsigned int &bj, unsigned int &li, unsigned int &lj)
+{
+  unsigned int sa = atom_slot[a];
+  unsigned int sb = atom_slot[b];
+  unsigned int si = sa < sb ? sa : sb;
+  unsigned int sj = sa < sb ? sb : sa;
+  bi = si >> 5;
+  bj = sj >> 5;
+  li = si & 31u;
+  lj = sj & 31u;
+}
+
+// rq-8945395f — count modified pairs per i-block bi. One thread per pair.
+extern "C" __global__ void count_pairs_by_iblock(
+    const unsigned int *modified_pairs,    // [a0,b0,a1,b1,...], length 2*n_pairs
+    unsigned int n_pairs,
+    const unsigned int *atom_slot,
+    unsigned int *iblock_pair_count)       // length n_blocks, pre-zeroed
+{
+  unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
+  if (k >= n_pairs) {
+    return;
+  }
+  unsigned int bi, bj, li, lj;
+  heddle_excl_pair_blocks(modified_pairs[2u * k], modified_pairs[2u * k + 1u],
+                          atom_slot, bi, bj, li, lj);
+  atomicAdd(&iblock_pair_count[bi], 1u);
+}
+
+// rq-67a09135 — exclusive prefix sum of counts[0..n) into offsets[0..n],
+// with offsets[n] = total. When `clamp` is non-zero every written offset
+// is capped at `clamp`, so a CSR built from an over-capacity tile count
+// stays in-bounds for the consumer (find_blocks); the true total for
+// overflow detection is recovered separately from the per-block counts.
+// One thread; n is small (<= n_blocks) and the scan runs only at a
+// rebuild, which is amortised over many steps.
+extern "C" __global__ void serial_prefix_scan_u32(
+    const unsigned int *counts, unsigned int *offsets, unsigned int n,
+    unsigned int clamp)
+{
+  if (blockIdx.x != 0u || threadIdx.x != 0u) {
+    return;
+  }
+  unsigned int acc = 0u;
+  for (unsigned int i = 0u; i < n; ++i) {
+    unsigned int v = acc;
+    if (clamp != 0u && v > clamp) {
+      v = clamp;
+    }
+    offsets[i] = v;
+    acc += counts[i];
+  }
+  unsigned int last = acc;
+  if (clamp != 0u && last > clamp) {
+    last = clamp;
+  }
+  offsets[n] = last;
+}
+
+// rq-8945395f — scatter each modified pair's (bj, lane-packed) record into
+// its i-block's contiguous run. `iblock_cursor` is pre-zeroed; the slot
+// order within a run is arbitrary (the per-i-block sort re-canonicalises
+// it), so the atomicAdd race is determinism-safe.
+extern "C" __global__ void scatter_pairs_by_iblock(
+    const unsigned int *modified_pairs, unsigned int n_pairs,
+    const unsigned int *atom_slot,
+    const unsigned int *iblock_pair_offset,   // length n_blocks + 1
+    unsigned int *iblock_cursor,              // length n_blocks, pre-zeroed
+    unsigned int *pair_bj,                    // length n_pairs
+    unsigned int *pair_lane)                  // length n_pairs, li | (lj<<6)
+{
+  unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
+  if (k >= n_pairs) {
+    return;
+  }
+  unsigned int bi, bj, li, lj;
+  heddle_excl_pair_blocks(modified_pairs[2u * k], modified_pairs[2u * k + 1u],
+                          atom_slot, bi, bj, li, lj);
+  unsigned int pos = iblock_pair_offset[bi] + atomicAdd(&iblock_cursor[bi], 1u);
+  pair_bj[pos] = bj;
+  pair_lane[pos] = li | (lj << 6);
+}
+
+// rq-8945395f — per i-block: insertion-sort the pair records by bj
+// (co-moving the lane word) and count distinct bj = the number of
+// exclusion tiles this i-block contributes. One thread per i-block; the
+// per-block run is short (intramolecular pairs cluster).
+extern "C" __global__ void sort_and_count_tiles_by_iblock(
+    const unsigned int *iblock_pair_offset,
+    unsigned int *pair_bj, unsigned int *pair_lane,
+    unsigned int *iblock_tile_count, unsigned int n_blocks)
+{
+  unsigned int bi = blockIdx.x * blockDim.x + threadIdx.x;
+  if (bi >= n_blocks) {
+    return;
+  }
+  unsigned int start = iblock_pair_offset[bi];
+  unsigned int end = iblock_pair_offset[bi + 1u];
+  for (unsigned int k = start + 1u; k < end; ++k) {
+    unsigned int key = pair_bj[k];
+    unsigned int lane = pair_lane[k];
+    int pos = (int) k - 1;
+    while (pos >= (int) start && pair_bj[pos] > key) {
+      pair_bj[pos + 1] = pair_bj[pos];
+      pair_lane[pos + 1] = pair_lane[pos];
+      pos -= 1;
+    }
+    pair_bj[pos + 1] = key;
+    pair_lane[pos + 1] = lane;
+  }
+  unsigned int distinct = 0u;
+  for (unsigned int k = start; k < end; ++k) {
+    if (k == start || pair_bj[k] != pair_bj[k - 1u]) {
+      distinct += 1u;
+    }
+  }
+  iblock_tile_count[bi] = distinct;
+}
+
+// rq-8945395f rq-fa0b3d10 — per i-block: emit one exclusion tile per
+// distinct bj at tile index t = tile_offset[bi] + local, OR-ing each
+// matching pair's lane bit (plus the symmetric bit on a self-block tile)
+// into the tile's mask, and writing the CSR jblock. `tile_offset` is the
+// prefix scan of iblock_tile_count and doubles as excl_jblock_offsets. A
+// tile whose index reaches capacity is not written (overflow guard); the
+// count is still counted so set_exclusion_status flags the overflow.
+extern "C" __global__ void emit_tiles_by_iblock(
+    const unsigned int *iblock_pair_offset,
+    const unsigned int *pair_bj, const unsigned int *pair_lane,
+    const unsigned int *tile_offset,          // = excl_jblock_offsets, length n_blocks+1
+    unsigned int exclusion_tiles_capacity,
+    unsigned int *exclusion_tile_iblocks,
+    unsigned int *exclusion_tile_jblocks,
+    unsigned int *exclusion_tile_masks,
+    unsigned int *excl_jblocks,
+    unsigned int n_blocks)
+{
+  unsigned int bi = blockIdx.x * blockDim.x + threadIdx.x;
+  if (bi >= n_blocks) {
+    return;
+  }
+  unsigned int start = iblock_pair_offset[bi];
+  unsigned int end = iblock_pair_offset[bi + 1u];
+  unsigned int t = tile_offset[bi];
+  unsigned int k = start;
+  while (k < end) {
+    unsigned int bj = pair_bj[k];
+    bool in_cap = t < exclusion_tiles_capacity;
+    if (in_cap) {
+      exclusion_tile_iblocks[t] = bi;
+      exclusion_tile_jblocks[t] = bj;
+      excl_jblocks[t] = bj;
+      unsigned int base = t * 32u;
+      for (unsigned int r = 0u; r < 32u; ++r) {
+        exclusion_tile_masks[base + r] = 0u;
+      }
+    }
+    unsigned int self_block = (bi == bj) ? 1u : 0u;
+    while (k < end && pair_bj[k] == bj) {
+      if (in_cap) {
+        unsigned int lane = pair_lane[k];
+        unsigned int li = lane & 63u;
+        unsigned int lj = (lane >> 6) & 63u;
+        unsigned int base = t * 32u;
+        exclusion_tile_masks[base + li] |= (1u << lj);
+        if (self_block) {
+          exclusion_tile_masks[base + lj] |= (1u << li);
+        }
+      }
+      k += 1u;
+    }
+    t += 1u;
+  }
+}
+
+// rq-67a09135 rq-8945395f — publish the exclusion-tile count to
+// interaction_count[2] and set the exclusion-tile high-water (bit 5) /
+// overflow (bit 6) bits of neighbor_status. One thread. The true tile
+// count is the sum of the per-i-block distinct-j-block counts (the
+// tile-offset CSR is clamped to capacity, so it cannot report the true
+// total on overflow). interaction_count[2] is published as
+// min(count, capacity) so the force pass, which launches over capacity
+// and early-exits past this count, never indexes an unallocated tile.
+extern "C" __global__ void set_exclusion_status(
+    const unsigned int *iblock_tile_count, unsigned int n_blocks,
+    unsigned int exclusion_tiles_capacity,
+    unsigned int exclusion_tiles_high_water_mark,
+    unsigned int *interaction_count,
+    unsigned int *neighbor_status)
+{
+  if (blockIdx.x != 0u || threadIdx.x != 0u) {
+    return;
+  }
+  unsigned int count = 0u;
+  for (unsigned int b = 0u; b < n_blocks; ++b) {
+    count += iblock_tile_count[b];
+  }
+  interaction_count[2] =
+      count > exclusion_tiles_capacity ? exclusion_tiles_capacity : count;
+  unsigned int bits = 0u;
+  if (count > exclusion_tiles_capacity) {
+    bits |= (1u << 6);
+  } else if (count > exclusion_tiles_high_water_mark) {
+    bits |= (1u << 5);
+  }
+  if (bits != 0u) {
+    atomicOr(neighbor_status, bits);
+  }
+}
+
 // Histogram entries by i-block. For each entry e in 0..entry_count,
 // reads interacting_tiles[e] and increments the corresponding
 // counter via atomicAdd. One thread per entry; the work is small but

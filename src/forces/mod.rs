@@ -690,7 +690,7 @@ impl ForceField {
                 .collect();
             modified_pairs.sort_unstable();
             modified_pairs.dedup();
-            nl.set_excluded_pairs(modified_pairs);
+            nl.set_excluded_pairs(modified_pairs)?;
         }
 
         // Collect each shape's participants from `jit_participant`. A

@@ -324,10 +324,11 @@ single-pair outputs, and no unmodified pair is dropped or double-counted
 This confines the per-pair, per-fragment exclusion scan to the small set
 of flagged pairs inside the exclusion tiles; the bulk pass — the vast
 majority of pair evaluations — carries no exclusion cost at all. The
-per-fragment scale tables `atom_excl_offsets` / `atom_excl_partners` and
-the per-fragment scale arrays (see `topology.md`) are read by the
-per-rebuild bitmask builder and by the exclusion-tile force pass; the
-bulk and single-pair passes never read them.
+exclusion-topology index tables `atom_excl_offsets` / `atom_excl_partners`
+(see `topology.md`) are read by the per-rebuild on-device tile build to
+enumerate the modified pairs and place their bits; the per-fragment scale
+arrays are read only by the exclusion-tile force pass, at evaluation time.
+The bulk and single-pair passes read neither.
 
 ## Construction Pipeline <!-- rq-dbffee81 -->
 
@@ -363,29 +364,65 @@ produced `sorted_particle_ids`:
    `block_centre` and `block_bbox` through `sorted_blocks` into
    `sorted_block_centre` and `sorted_block_bbox`. Half-precision
    conversion happens here.
-6. **`build_exclusion_tiles`** — materialise the exclusion tiles and
-   their bitmasks from the exclusion topology under the current block
-   membership. Because the modified-pair set is `O(N)` and rebuilds are
-   amortised over many steps, the tiles are built on the host: the
-   rebuild copies `sorted_particle_ids` to the host, inverts it to a
-   slot-for-each-atom permutation, and walks each modified canonical pair
-   `(a, b)` (`a < b`, taken from the host exclusion topology captured at
-   neighbour-list construction — every pair whose scale differs from `1`
-   in some fragment). Each pair maps to slots `(sa, sb)`, blocks
-   `(bi, bj) = (sa/32, sb/32)` with the pair ordered so `bi ≤ bj`, and
-   lanes `(sa%32, sb%32)`. Pairs are grouped by block pair in an ordered
-   map keyed by `(bi, bj)`; each block pair becomes one exclusion tile
-   whose 1024-bit mask has bit `(i_lane, j_lane)` — and, for a self-block
-   tile, the symmetric bit `(j_lane, i_lane)` — set. The tiles are emitted
-   in ascending `(bi, bj)` order and, with their masks and the
-   `excl_jblock_offsets` / `excl_jblocks` CSR skip-list, uploaded to the
-   device. Building from an ordered map makes the tile set, their order,
-   and their bitmasks a deterministic function of the exclusion topology
-   and `sorted_particle_ids`. The mask marks *which* pairs are modified;
-   the force pass reads each flagged pair's per-fragment scale at
-   evaluation time, so a full exclusion (`scale == 0`) and a 1-4 pair
-   (fractional scale) are flagged identically and distinguished only by
-   the scale the force pass applies.
+6. **`build_exclusion_tiles`** — materialise the exclusion tiles, their
+   bitmasks, and the `excl_jblock_offsets` / `excl_jblocks` CSR skip-list
+   from the exclusion topology under the current block membership,
+   entirely on the device. It runs as a short kernel sub-pipeline on the
+   default stream and copies nothing to and from the host:
+
+   a. **Invert the sort.** `build_atom_slot` writes the
+      slot-for-each-atom permutation `atom_slot[sorted_particle_ids[s]] = s`
+      (one thread per slot) into a per-rebuild device scratch of length
+      `N`, so a canonical atom id maps to its current slot without a host
+      copy.
+   b. **Emit per-pair keys.** `emit_exclusion_tile_keys` enumerates every
+      canonical modified pair `(a, b)` (`a < b`) directly from the
+      device-resident exclusion topology (`atom_excl_offsets` /
+      `atom_excl_partners`; a modified pair is any partner entry, and the
+      `a < b` filter yields each unordered pair exactly once). For each
+      pair it reads slots `(sa, sb) = (atom_slot[a], atom_slot[b])`, orders
+      them so `si ≤ sj`, and forms blocks `(bi, bj) = (si/32, sj/32)` and
+      lanes `(li, lj) = (si%32, sj%32)`. It writes one record — the
+      block-pair key `(bi, bj)` together with the lane pair — at the pair's
+      own fixed index in a per-rebuild scratch of length `E` (the
+      modified-pair count, fixed for the run), so placement needs no
+      atomics.
+   c. **Sort by block pair.** `sort_exclusion_keys` stably radix-sorts the
+      records by their `(bi, bj)` key (the reproducible radix sort of
+      *Sorted-Blocks-by-Volume*, ties broken by record index), grouping all
+      records that share a block pair into one contiguous run in ascending
+      `(bi, bj)` order.
+   d. **Reduce to tiles.** `reduce_exclusion_tiles` marks each run head (a
+      record whose key differs from its predecessor), prefix-scans the head
+      flags to assign tile indices, and writes the tile count to
+      `interaction_count[2]`. Each tile `t` records
+      `exclusion_tile_iblocks[t] = bi` and `exclusion_tile_jblocks[t] = bj`,
+      and every record in the run ORs its lane bit into
+      `exclusion_tile_masks[t·32 + li]` (bit `lj`) — plus the symmetric bit
+      `exclusion_tile_masks[t·32 + lj]` (bit `li`) for a self-block tile
+      (`bi == bj`). Because the mask is an OR, it is independent of
+      intra-run record order.
+   e. **Build the CSR skip-list.** `build_exclusion_csr` scans the sorted,
+      unique tiles into `excl_jblock_offsets` (length `n_blocks + 1`) and
+      `excl_jblocks` so that
+      `excl_jblocks[excl_jblock_offsets[bi] .. excl_jblock_offsets[bi+1]]`
+      lists the ascending `bj` of every exclusion tile whose i-block is
+      `bi`. `find_blocks_with_interactions` (step 7) consults this CSR to
+      skip exclusion-tile candidate block pairs.
+
+   The tile set, their ascending `(bi, bj)` order, their bitmasks, and the
+   CSR are a pure function of the exclusion topology and
+   `sorted_particle_ids` — a permutation inversion, a fixed-index emit, a
+   stable sort, and an order-independent OR — so they are byte-identical
+   across runs. The mask marks *which* pairs are modified; the force pass
+   reads each flagged pair's per-fragment scale at evaluation time, so a
+   full exclusion (`scale == 0`) and a 1-4 pair (fractional scale) are
+   flagged identically and distinguished only by the scale the force pass
+   applies. As its final action a single designated thread compares
+   `interaction_count[2]` against `exclusion_tiles_capacity` and sets the
+   `exclusion_tiles_high_water` / `exclusion_tiles_overflow` bits of
+   `neighbor_status` (see *Capacity*); the count and status stay
+   device-resident.
 7. **`find_blocks_with_interactions`** — the main construction
    kernel. One warp per i-block (iterated through
    `sorted_blocks`). For each candidate j-block (from inner
@@ -476,6 +513,17 @@ multiple of `n_blocks`, clamped down to the all-pairs reference
 `n_blocks²` for tiny systems. There is no configuration knob for the
 initial capacity; the probe rebuild (below) determines it.
 
+The exclusion-tile buffers (`exclusion_tile_iblocks`,
+`exclusion_tile_jblocks`, `exclusion_tile_masks`, `excl_jblocks`) carry
+their own capacity `exclusion_tiles_capacity`, seeded `O(n_blocks)` and
+grown by the same count-free geometric high-water mechanism as the tile
+and single-pair buffers. The exclusion-tile count has a hard static upper
+bound — the fixed modified-pair count `E`, since each modified pair joins
+exactly one tile — so growth converges after the probe rebuild and a
+steady run never regrows them; the per-rebuild build scratch
+(`atom_slot`, length `N`, and the sort records, length `E`) is sized once
+from `N` and `E` and never grows.
+
 **Device-resident counts.** A steady-state rebuild copies no count
 to the host. The construction kernel writes the live counts to the
 two-element device buffer `interaction_count` (`[0]` = packed-tile
@@ -492,6 +540,12 @@ grid sized by a host-known capacity and reads the live count from
 - The packed-neighbour force pass launches over `n_blocks`; the
   single-pair force pass launches over `single_pairs_capacity` and
   reads `interaction_count[1]` on the device (see *Single-Pair Pass*).
+- The exclusion-tile force pass launches over `exclusion_tiles_capacity`
+  and reads the live tile count `interaction_count[2]` on the device;
+  warps past that count exit early (see *Exclusion-Tile Pass*). The
+  exclusion-tile build (step 6) writes the count and sets the
+  exclusion-tile high-water / overflow bits, so this pass never needs a
+  host-known tile count.
 
 **Status word.** `CellListData` carries the single-`u32` device
 buffer `neighbor_status` (see `neighbor-list.md` *Displacement Check*)
@@ -504,10 +558,14 @@ whose bits are:
 | 2 | `single_pairs_high_water` | construction kernel |
 | 3 | `tiles_overflow` | construction kernel |
 | 4 | `single_pairs_overflow` | construction kernel |
+| 5 | `exclusion_tiles_high_water` | exclusion-tile build (step 6) |
+| 6 | `exclusion_tiles_overflow` | exclusion-tile build (step 6) |
 
-After the construction sweep, a single device thread compares each
-live count `interaction_count[c]` against the capacity `capacity_c`
-and sets bits via `atomicOr(neighbor_status, …)`:
+Each list's producing stage sets its own bits from a single designated
+device thread that compares the live count `interaction_count[c]` against
+the capacity `capacity_c` via `atomicOr(neighbor_status, …)`: the
+construction sweep (step 7) sets the tile and single-pair bits, and the
+exclusion-tile build (step 6) sets the exclusion-tile bits. In every case:
 
 - `interaction_count[c] > floor(capacity_c · tile_pair_fill_threshold)`
   sets the matching `*_high_water` bit. The build is **complete** — no
@@ -1075,16 +1133,17 @@ supporting this:
    atom's slot exactly once.
 7. **Deterministic exclusion tiles.** The set of exclusion tiles, their
    order, and their bitmasks are a pure function of the exclusion
-   topology and `sorted_particle_ids`. The host build groups modified
-   pairs by block pair in an ordered map keyed by `(bi, bj)` and emits
-   tiles in ascending key order, so the tile order is fixed rather than
-   scheduling-dependent; each tile's mask is the OR of its pairs' bits,
-   which is order-independent. Which lane pairs a tile flags, the
-   per-fragment scale applied to each, and the order the exclusion-tile
-   pass walks them in are therefore identical across runs. (Slot order
-   would in any case be irrelevant to the forces, because the
-   exclusion-tile pass, like the bulk pass, accumulates through the
-   per-particle fixed-point accumulators.)
+   topology and `sorted_particle_ids`. The on-device build inverts the
+   sort (a permutation), emits one record per modified pair at that pair's
+   fixed index, stably radix-sorts the records by `(bi, bj)` key (ties
+   broken by record index), and segment-reduces each run into one tile in
+   ascending `(bi, bj)` order; each tile's mask is the OR of its run's
+   lane bits, which is order-independent. The tile set, its order, and the
+   bitmasks are therefore fixed rather than scheduling-dependent, and the
+   per-fragment scale the force pass applies to each flagged pair is
+   identical across runs. (Slot order would in any case be irrelevant to
+   the forces, because the exclusion-tile pass, like the bulk pass,
+   accumulates through the per-particle fixed-point accumulators.)
 
 The reproducibility scope is GPU-vs-GPU on the same hardware,
 matching `architecture.md`. CPU-vs-GPU is not promised.
@@ -1117,10 +1176,12 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `PackedNeighborOverflow { buffer: &'static str }` — returned by
   `NeighborListState::pre_step` when a steady-state build set a
   `*_overflow` bit of `neighbor_status`, meaning a packed-neighbour
-  buffer would have dropped within-`r_search` entries. `buffer` names
-  the buffer that overflowed (`"interacting_tiles"` or
-  `"single_pair_atoms"`). This is the only neighbour-overflow error;
-  there is no per-particle neighbour cap to exceed.
+  buffer would have dropped within-`r_search` entries, or the
+  exclusion-tile build produced more tiles than `exclusion_tiles_capacity`.
+  `buffer` names the buffer that overflowed (`"interacting_tiles"`,
+  `"single_pair_atoms"`, or `"exclusion_tiles"`). This is the only
+  neighbour-overflow error; there is no per-particle neighbour cap to
+  exceed.
 - `PairSnapshot` — host-side owned enumeration of the pair set <!-- rq-a0ab0088 -->
   represented by a `NeighborListState` at the time the snapshot
   was taken. Constructed by
@@ -1167,26 +1228,33 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `floor(capacity · tile_pair_fill_threshold)`, computed on the host
   from the current capacities. The `MAX_BITS_FOR_PAIRS = 3` threshold
   is a compile-time `#define`.
-- `invert_sorted_particle_ids(sorted_particle_ids) -> atom_slot` — <!-- rq-5f871bd5 -->
-  host helper; produces the slot-for-each-atom permutation
-  `atom_slot[sorted_particle_ids[s]] = s` so the exclusion builder can
-  map a canonical atom id to its current slot.
-- `build_exclusion_tiles(modified_pairs, atom_slot, n_blocks) -> <!-- rq-8945395f -->
-  ExclusionTiles` — host builder run each rebuild. `modified_pairs` is
-  the canonical pairs (`a < b`) whose scale differs from `1` in some
-  fragment, captured at neighbour-list construction. For each pair it
-  computes slots `(sa, sb)` via `atom_slot`, the ordered block pair
-  `(bi, bj)` (`bi ≤ bj`), and lanes, and accumulates the pair's bit —
-  plus the symmetric bit on a self-block tile — into a `(bi, bj)`-keyed
-  ordered map of 1024-bit masks. It returns the tiles in ascending
-  `(bi, bj)` order together with their masks and the `excl_jblock_offsets`
-  / `excl_jblocks` CSR skip-list, and the caller uploads them and writes
-  the tile count to `interaction_count[2]`. The exclusion-tile buffers
-  grow (like the tile list) when a rebuild produces more tiles than
-  `exclusion_tiles_capacity`. The per-fragment scale each flagged pair
-  receives is not stored in the tile; the force pass reads it from the
-  per-fragment scale tables via `exclusion_scale(i, j)` at evaluation
-  time.
+- `build_atom_slot(sorted_particle_ids, atom_slot, n_atoms)` — device <!-- rq-5f871bd5 -->
+  kernel; one thread per slot writes the slot-for-each-atom permutation
+  `atom_slot[sorted_particle_ids[s]] = s` into a per-rebuild device
+  scratch, so the exclusion-tile build maps a canonical atom id to its
+  current slot without a host copy.
+- `build_exclusion_tiles(...)` — the on-device exclusion-tile <!-- rq-8945395f -->
+  sub-pipeline launched each rebuild (see *Construction Pipeline* step 6):
+  the kernels `build_atom_slot`, `emit_exclusion_tile_keys`,
+  `sort_exclusion_keys` (the reproducible radix sort), `reduce_exclusion_tiles`,
+  and `build_exclusion_csr`, run in sequence on the default stream. It
+  reads the device-resident exclusion topology (`atom_excl_offsets` /
+  `atom_excl_partners`) and `sorted_particle_ids`, and writes
+  `exclusion_tile_iblocks`, `exclusion_tile_jblocks`,
+  `exclusion_tile_masks`, `excl_jblock_offsets`, `excl_jblocks`, and the
+  tile count `interaction_count[2]` — all on the device — then sets the
+  exclusion-tile high-water / overflow bits of `neighbor_status`. It maps
+  each canonical modified pair (`a < b`, every partner entry of the
+  exclusion topology) to its ordered block pair `(bi, bj)` (`bi ≤ bj`) and
+  lanes under the current sort, sorts the per-pair records by `(bi, bj)`,
+  and segment-reduces each block pair into one exclusion tile whose
+  1024-bit mask ORs the pair's bit — plus the symmetric bit on a
+  self-block tile. It uses per-rebuild device scratch sized once from
+  `n_atoms` (the `atom_slot` permutation) and the fixed modified-pair
+  count `E` (the sort records); it performs no host round-trip. The
+  per-fragment scale each flagged pair receives is not stored in the tile;
+  the force pass reads it from the per-fragment scale tables via
+  `exclusion_scale(i, j)` at evaluation time.
 - `heddle_jit_composed_pair_force_f` / <!-- rq-42e29605 -->
   `heddle_jit_composed_pair_force_fev` — JIT-composed packed-
   neighbour entry points; argument list documented under
@@ -1616,6 +1684,25 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then pre_step returns Err(NeighborListError::PackedNeighborOverflow { buffer: "interacting_tiles" })
     And the run halts without presenting forces from the incomplete list as final
 
+  @rq-3b18d9db
+  Scenario: Probe rebuild grows exclusion-tile capacity on a near-full build
+    Given the phase has not yet been CUDA-graph captured
+    And exclusion_tiles_capacity = 100 with tile_pair_fill_threshold = 0.8
+    And a topology whose current sort produces 90 exclusion tiles
+    When the probe rebuild runs build_exclusion_tiles
+    Then the exclusion_tiles_high_water bit of neighbor_status is set
+    And no exclusion tile was dropped from the 90-tile build
+    And the probe reallocates the exclusion-tile buffers to ceil(100 * 1.5)
+    And the construction is re-run from build_exclusion_tiles
+
+  @rq-51d6a942
+  Scenario: An exclusion-tile overflow halts the run
+    Given a build whose exclusion-tile count exceeds exclusion_tiles_capacity
+      so a tile would be dropped
+    When the batch loop reads neighbor_status and observes an exclusion_tiles_overflow bit
+    Then pre_step returns Err(NeighborListError::PackedNeighborOverflow { buffer: "exclusion_tiles" })
+    And the run halts without presenting forces from the incomplete tile set as final
+
   # --- Force kernel ---
 
   @rq-a786df3a
@@ -1687,6 +1774,62 @@ Feature: Packed-Neighbour Pair-Force Architecture
     When both run a single neighbour-list rebuild
     Then interaction_count[2] is identical across the two runs
     And the exclusion tiles sorted by (bi, bj) carry identical bitmasks across the two runs
+
+  # --- Exclusion-tile build (on device) ---
+
+  @rq-e4a333d2
+  Scenario: A steady-state rebuild builds exclusion tiles without a host round-trip
+    Given a CUDA-graph-captured phase past its pre-capture probe rebuild
+    And a batch boundary on which the displacement bit triggers a rebuild
+    When NeighborListState::rebuild runs the construction pipeline including
+      build_exclusion_tiles
+    Then no dtoh_sync_copy of sorted_particle_ids is issued
+    And the exclusion tiles, their bitmasks, the excl_jblock_offsets /
+      excl_jblocks CSR, and interaction_count[2] are all written on the device
+    And the only device-to-host transfer the rebuild performs is the single
+      combined neighbor_status word read by the batch loop
+
+  @rq-61d3e1a7
+  Scenario: build_atom_slot inverts the sort permutation
+    Given sorted_particle_ids holds a permutation of [0, N)
+    When build_atom_slot runs
+    Then atom_slot[sorted_particle_ids[s]] equals s for every slot s in [0, N)
+
+  @rq-94d51613
+  Scenario: Two modified pairs sharing a block pair merge into one exclusion tile
+    Given modified pairs (a, b) and (c, d) whose atoms all map, under the
+      current sort, into the same ordered block pair (bi, bj)
+    When build_exclusion_tiles completes
+    Then exactly one exclusion tile carries the block pair (bi, bj)
+    And that tile's 1024-bit mask has the bit set for each of (a, b) and (c, d)
+      at their respective lanes
+    And interaction_count[2] counts that block pair exactly once
+
+  @rq-3dd31c3d
+  Scenario: A self-block exclusion tile sets the symmetric mask bit
+    Given a modified pair (a, b) whose atoms map to the same block bi
+      (bi == bj) at lanes (li, lj)
+    When build_exclusion_tiles completes
+    Then the tile for (bi, bi) sets bit lj of mask row li
+    And it also sets bit li of mask row lj
+
+  @rq-8631baa6
+  Scenario: Exclusion tiles are emitted in ascending (bi, bj) order with an ascending CSR
+    Given a topology producing exclusion tiles for several distinct block pairs
+    When build_exclusion_tiles completes
+    Then for every consecutive pair of tiles t, t+1 the key
+      (exclusion_tile_iblocks[t], exclusion_tile_jblocks[t]) is strictly less
+      than (exclusion_tile_iblocks[t+1], exclusion_tile_jblocks[t+1])
+    And for every i-block bi,
+      excl_jblocks[excl_jblock_offsets[bi] .. excl_jblock_offsets[bi+1]] lists
+      the bj of that i-block's tiles in ascending order
+
+  @rq-62cf6290
+  Scenario: An empty modified-pair set produces no exclusion tiles
+    Given a topology with no modified pairs (every fragment scale is 1)
+    When NeighborListState::rebuild completes
+    Then interaction_count[2] equals 0
+    And the exclusion-tile force pass is not launched
 
   # --- Single-pair pass ---
 

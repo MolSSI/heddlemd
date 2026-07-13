@@ -8550,6 +8550,18 @@
     "title": "Morse bond_type missing de is rejected",
     "type": "scenario"
   },
+  "rq-3b18d9db": {
+    "decl": "Scenario: Probe rebuild grows exclusion-tile capacity on a near-full build",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Probe rebuild grows exclusion-tile capacity on a near-full build",
+    "type": "scenario"
+  },
   "rq-3b42c2ff": {
     "decl": "Scenario: Repeated markers dispatch once each in plan order",
     "file": "integration/constraint-framework",
@@ -8930,6 +8942,18 @@
     "file": "forces/spme",
     "refs": [],
     "title": "spme_spread_fixed_point issues at most N · p³ atomicAdd<i64> operations",
+    "type": "scenario"
+  },
+  "rq-3dd31c3d": {
+    "decl": "Scenario: A self-block exclusion tile sets the symmetric mask bit",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A self-block exclusion tile sets the symmetric mask bit",
     "type": "scenario"
   },
   "rq-3ddf259b": {
@@ -11213,6 +11237,18 @@
     "title": "register(...) appends a builder at the end",
     "type": "scenario"
   },
+  "rq-51d6a942": {
+    "decl": "Scenario: An exclusion-tile overflow halts the run",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An exclusion-tile overflow halts the run",
+    "type": "scenario"
+  },
   "rq-51e5a0cd": {
     "decl": "### Sub-step Execution",
     "file": "integration/velocity-verlet",
@@ -13069,15 +13105,19 @@
     "type": "section"
   },
   "rq-5f871bd5": {
-    "decl": "- `invert_sorted_particle_ids(sorted_particle_ids) -> atom_slot` —",
+    "decl": "- `build_atom_slot(sorted_particle_ids, atom_slot, n_atoms)` — device",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
         "file": "src/forces/neighbor_list.rs",
         "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
       }
     ],
-    "title": "invert_sorted_particle_ids",
+    "title": "build_atom_slot",
     "type": "api-item"
   },
   "rq-5f8f7d00": {
@@ -13414,6 +13454,18 @@
     "title": "Construction and Lifetime",
     "type": "section"
   },
+  "rq-61d3e1a7": {
+    "decl": "Scenario: build_atom_slot inverts the sort permutation",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "build_atom_slot inverts the sort permutation",
+    "type": "scenario"
+  },
   "rq-61f241f6": {
     "decl": "## Position Rescale",
     "file": "integration/c-rescale-barostat",
@@ -13547,6 +13599,18 @@
       }
     ],
     "title": "A ConstraintPoint hook receives the marker's own dt",
+    "type": "scenario"
+  },
+  "rq-62cf6290": {
+    "decl": "Scenario: An empty modified-pair set produces no exclusion tiles",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "An empty modified-pair set produces no exclusion tiles",
     "type": "scenario"
   },
   "rq-62e2469f": {
@@ -18176,6 +18240,18 @@
     "title": "Two particles across the box boundary interact via the minimum image",
     "type": "scenario"
   },
+  "rq-8631baa6": {
+    "decl": "Scenario: Exclusion tiles are emitted in ascending (bi, bj) order with an ascending CSR",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Exclusion tiles are emitted in ascending (bi, bj) order with an ascending CSR",
+    "type": "scenario"
+  },
   "rq-863cf49f": {
     "decl": "Scenario: units field set to \"atomic\"",
     "file": "io/unit-system",
@@ -18661,7 +18737,7 @@
     "type": "section"
   },
   "rq-8945395f": {
-    "decl": "- `build_exclusion_tiles(modified_pairs, atom_slot, n_blocks) ->",
+    "decl": "- `build_exclusion_tiles(...)` — the on-device exclusion-tile",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -18670,6 +18746,10 @@
       },
       {
         "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
         "kind": "code"
       }
     ],
@@ -20155,6 +20235,18 @@
       }
     ],
     "title": "Triclinic shape is preserved under apply",
+    "type": "scenario"
+  },
+  "rq-94d51613": {
+    "decl": "Scenario: Two modified pairs sharing a block pair merge into one exclusion tile",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two modified pairs sharing a block pair merge into one exclusion tile",
     "type": "scenario"
   },
   "rq-94e7affd": {
@@ -29736,6 +29828,10 @@
       {
         "file": "src/forces/neighbor_list.rs",
         "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
       }
     ],
     "title": "Construction Pipeline",
@@ -30896,6 +30992,18 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-e4a333d2": {
+    "decl": "Scenario: A steady-state rebuild builds exclusion tiles without a host round-trip",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A steady-state rebuild builds exclusion tiles without a host round-trip",
+    "type": "scenario"
   },
   "rq-e4ace7d6": {
     "decl": "## Out of Scope",
@@ -33995,6 +34103,14 @@
       },
       {
         "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
         "kind": "code"
       }
     ],

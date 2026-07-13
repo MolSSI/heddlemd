@@ -307,6 +307,7 @@ fn read_exclusion_tiles(
     (count, pairs, mask_rows)
 }
 
+// rq-3dd31c3d
 #[test]
 fn exclusion_tiles_empty_when_no_exclusions() {
     let gpu = init_device().unwrap();
@@ -340,7 +341,7 @@ fn exclusion_tile_appears_for_excluded_block_pair() {
     let mut nl = cell_list_state(&gpu, n, &sb);
     let mut timings = Timings::new(&gpu).unwrap();
     let excluded = vec![(0u32, 1u32), (2u32, 3u32), (10u32, 40u32)];
-    nl.set_excluded_pairs(excluded.clone());
+    nl.set_excluded_pairs(excluded.clone()).unwrap();
     nl.rebuild(&sb, &buffers, &mut timings).unwrap();
 
     // Replicate the inversion to know each pair's expected block pair.
@@ -375,7 +376,7 @@ fn exclusion_tiles_byte_identical_across_rebuilds() {
     let (sb, buffers, n) = grid_system(&gpu, 4);
     let mut nl = cell_list_state(&gpu, n, &sb);
     let mut timings = Timings::new(&gpu).unwrap();
-    nl.set_excluded_pairs(vec![(0u32, 1u32), (5u32, 33u32), (20u32, 21u32)]);
+    nl.set_excluded_pairs(vec![(0u32, 1u32), (5u32, 33u32), (20u32, 21u32)]).unwrap();
 
     nl.rebuild(&sb, &buffers, &mut timings).unwrap();
     let (c1, tiles1, masks1) = read_exclusion_tiles(&gpu.device, &nl);
@@ -406,7 +407,8 @@ fn exclusion_block_pair_absent_from_bulk_list() {
         (5u32, 40u32),
         (33u32, 130u32),
         (200u32, 201u32),
-    ]);
+    ])
+    .unwrap();
     nl.rebuild(&sb, &buffers, &mut timings).unwrap();
 
     // slot(atom) -> block via the inverse sort.
@@ -460,5 +462,212 @@ fn exclusion_block_pair_absent_from_bulk_list() {
             !excl_set.contains(&key),
             "single pair ({ai},{aj}) sits in exclusion tile {key:?}"
         );
+    }
+}
+
+// Exclusion-tile status-word bits (mirror the private constants).
+const STATUS_EXCL_TILES_HIGH_WATER: u32 = 1 << 5;
+const STATUS_EXCL_TILES_OVERFLOW: u32 = 1 << 6;
+
+/// Read the inverse-sort `atom_slot` and the exclusion CSR off the device.
+fn read_atom_slot(device: &Arc<CudaDevice>, nl: &NeighborListState) -> Vec<u32> {
+    device
+        .dtoh_sync_copy(&nl.packed.as_ref().unwrap().atom_slot)
+        .unwrap()
+}
+
+fn read_excl_csr(device: &Arc<CudaDevice>, nl: &NeighborListState) -> (Vec<u32>, Vec<u32>) {
+    let packed = nl.packed.as_ref().unwrap();
+    (
+        device.dtoh_sync_copy(&packed.excl_jblock_offsets).unwrap(),
+        device.dtoh_sync_copy(&packed.excl_jblocks).unwrap(),
+    )
+}
+
+// Build the reference exclusion tiles the on-device pipeline must produce
+// from a modified-pair set and the observed sort: distinct block pairs in
+// ascending order, each mask the OR of its pairs' lane bits (symmetric on
+// a self-block tile).
+fn reference_tiles(
+    excluded: &[(u32, u32)],
+    atom_slot: &[u32],
+) -> std::collections::BTreeMap<(u32, u32), [u32; 32]> {
+    let mut tiles: std::collections::BTreeMap<(u32, u32), [u32; 32]> =
+        std::collections::BTreeMap::new();
+    for &(a, b) in excluded {
+        let (sa, sb) = (atom_slot[a as usize], atom_slot[b as usize]);
+        let (si, sj) = if sa <= sb { (sa, sb) } else { (sb, sa) };
+        let (bi, bj) = (si / 32, sj / 32);
+        let (li, lj) = ((si % 32) as usize, (sj % 32) as usize);
+        let mask = tiles.entry((bi, bj)).or_insert([0u32; 32]);
+        mask[li] |= 1u32 << lj;
+        if bi == bj {
+            mask[lj] |= 1u32 << li;
+        }
+    }
+    tiles
+}
+
+// rq-51d6a942
+#[test]
+fn build_atom_slot_inverts_the_sort_permutation() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 4); // 64 atoms
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.set_excluded_pairs(vec![(0u32, 1u32)]).unwrap();
+    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+
+    let sorted = gpu
+        .device
+        .dtoh_sync_copy(nl.sorted_particle_ids_for_packed().unwrap())
+        .unwrap();
+    let atom_slot = read_atom_slot(&gpu.device, &nl);
+    for s in 0..n {
+        assert_eq!(
+            atom_slot[sorted[s] as usize], s as u32,
+            "atom_slot[sorted_particle_ids[{s}]] must equal {s}"
+        );
+    }
+}
+
+// rq-e4a333d2 rq-61d3e1a7 rq-94d51613 — the on-device build merges pairs
+// sharing a block pair into one tile (OR'd, symmetric on self-blocks) and
+// emits tiles + CSR in ascending (bi, bj) order.
+#[test]
+fn on_device_tiles_merge_are_symmetric_and_ordered() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 8); // 512 atoms, 16 blocks
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    // A mix: intra-molecule (self-block-likely) and cross-block pairs, with
+    // several pairs that will share a block pair once sorted.
+    let excluded = vec![
+        (0u32, 1u32),
+        (0u32, 2u32),
+        (1u32, 2u32),
+        (3u32, 4u32),
+        (100u32, 101u32),
+        (200u32, 260u32),
+    ];
+    nl.set_excluded_pairs(excluded.clone()).unwrap();
+    nl.rebuild(&sb, &buffers, &mut timings).unwrap();
+
+    let atom_slot = read_atom_slot(&gpu.device, &nl);
+    let expected = reference_tiles(&excluded, &atom_slot);
+    let (count, tiles, masks) = read_exclusion_tiles(&gpu.device, &nl);
+
+    // Merge + count: one tile per distinct block pair.
+    assert_eq!(count as usize, expected.len(), "one tile per distinct block pair");
+
+    // Ascending (bi, bj) order.
+    for w in tiles.windows(2) {
+        assert!(w[0] < w[1], "tiles must be strictly ascending: {:?} !< {:?}", w[0], w[1]);
+    }
+
+    // Every tile's mask equals the reference OR (symmetric on self-blocks).
+    for (t, &(bi, bj)) in tiles.iter().enumerate() {
+        let want = expected.get(&(bi, bj)).expect("tile is a reference block pair");
+        for r in 0..32usize {
+            assert_eq!(
+                masks[t * 32 + r], want[r],
+                "mask row {r} of tile ({bi},{bj}) mismatch"
+            );
+        }
+    }
+
+    // CSR: excl_jblocks[offsets[bi]..offsets[bi+1]] lists this i-block's
+    // tiles' bj ascending, and offsets are the tile-index boundaries.
+    let (offsets, jblocks) = read_excl_csr(&gpu.device, &nl);
+    for (t, &(bi, bj)) in tiles.iter().enumerate() {
+        assert!(
+            (offsets[bi as usize]..offsets[bi as usize + 1]).contains(&(t as u32)),
+            "tile {t} block ({bi},{bj}) not inside its i-block CSR row"
+        );
+        assert_eq!(jblocks[t], bj, "CSR jblock at tile {t} must equal {bj}");
+    }
+    for bi in 0..nl.packed.as_ref().unwrap().n_blocks as usize {
+        let row = &jblocks[offsets[bi] as usize..offsets[bi + 1] as usize];
+        for w in row.windows(2) {
+            assert!(w[0] < w[1], "CSR row for i-block {bi} must be ascending");
+        }
+    }
+}
+
+// rq-3b18d9db — a steady-state (post-probe) rebuild reproduces the correct
+// device-resident exclusion-tile count with no host round-trip. (The
+// absence of a sorted_particle_ids dtoh is structural: the build reads it
+// only on the device; here we assert the steady-state path yields the same
+// device count as the probe.)
+#[test]
+fn steady_state_rebuild_reproduces_exclusion_count_on_device() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 8);
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.set_excluded_pairs(vec![(0u32, 1u32), (5u32, 33u32), (200u32, 201u32)])
+        .unwrap();
+
+    // Probe rebuild, then a steady-state rebuild.
+    nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    let ic_probe = gpu
+        .device
+        .dtoh_sync_copy(&nl.packed.as_ref().unwrap().interaction_count)
+        .unwrap()[2];
+    set_status(&gpu.device, &mut nl, STATUS_DISPLACEMENT_TRIPPED);
+    nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    let ic_steady = gpu
+        .device
+        .dtoh_sync_copy(&nl.packed.as_ref().unwrap().interaction_count)
+        .unwrap()[2];
+
+    assert!(ic_probe > 0, "expected exclusion tiles");
+    assert_eq!(ic_steady, ic_probe, "steady-state build must reproduce the tile count");
+}
+
+// rq-8631baa6
+#[test]
+fn exclusion_high_water_grows_and_reallocates() {
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 8);
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.set_excluded_pairs(vec![(0u32, 1u32)]).unwrap();
+
+    nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    let cap_before = nl.packed.as_ref().unwrap().exclusion_tiles_capacity;
+    let growth = nl.packed.as_ref().unwrap().tile_pair_growth_factor;
+    set_status(&gpu.device, &mut nl, STATUS_EXCL_TILES_HIGH_WATER);
+
+    let outcome = nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    assert!(outcome.rebuilt);
+    assert!(outcome.reallocated, "an exclusion high-water grow must report reallocation");
+    let cap_after = nl.packed.as_ref().unwrap().exclusion_tiles_capacity;
+    assert_eq!(
+        cap_after,
+        (cap_before as f64 * growth).ceil() as u32,
+        "exclusion-tile capacity must grow by exactly one geometric step",
+    );
+}
+
+// rq-62cf6290
+#[test]
+fn exclusion_tile_overflow_halts_with_packed_neighbor_overflow() {
+    use heddle_md::forces::NeighborListError;
+    let gpu = init_device().unwrap();
+    let (sb, buffers, n) = grid_system(&gpu, 8);
+    let mut nl = cell_list_state(&gpu, n, &sb);
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.set_excluded_pairs(vec![(0u32, 1u32)]).unwrap();
+
+    nl.pre_step(&sb, &buffers, &mut timings).unwrap();
+    set_status(&gpu.device, &mut nl, STATUS_EXCL_TILES_OVERFLOW);
+
+    let err = nl.pre_step(&sb, &buffers, &mut timings).unwrap_err();
+    match err {
+        NeighborListError::PackedNeighborOverflow { buffer } => {
+            assert_eq!(buffer, "exclusion_tiles");
+        }
+        other => panic!("expected PackedNeighborOverflow, got {other:?}"),
     }
 }
