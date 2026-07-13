@@ -436,11 +436,12 @@ fn builtin_thermostat_rescale_is_standalone_every_step() {
     assert_eq!(stage_count(&counts, "vv_kick"), 3);
 }
 
-// rq-dce6f4cf rq-49f6bbfb — a thermostatted phase is graph-ineligible and
-// runs on the per-step path even when graphs are enabled: the thermostat
-// still couples (its standalone rescale runs every step).
+// rq-49f6bbfb — a thermostat with the default coupling_interval (1) couples
+// every step, so no non-coupling step exists to capture; the phase runs
+// entirely on the per-step launch path even with graphs enabled, and the
+// thermostat's standalone rescale runs every step.
 #[test]
-fn thermostatted_phase_runs_per_step_even_with_graphs_enabled() {
+fn thermostat_coupling_every_step_runs_per_step_with_graphs_enabled() {
     let dir = tmp("thermostat_graphs_on");
     write_lattice_init(&dir, 9, 4.4e-10);
     let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n";
@@ -454,6 +455,60 @@ fn thermostatted_phase_runs_per_step_even_with_graphs_enabled() {
     // Coupling every step: the thermostat's standalone rescale ran each
     // step, which only happens on the per-step path.
     assert_eq!(stage_count(&counts, "csvr_rescale_velocities"), 4);
+}
+
+// rq-26c9b8cb rq-6f09d7e3 rq-91c02dd8 — the slot-eligibility table: csvr,
+// berendsen, and andersen are cadence-inert (their per-step work fires only
+// on coupling steps through the runner) and report graph_compatible == true;
+// nose-hoover-chain integrates its Yoshida chain every step and reports
+// false. A false thermostat makes its phase graph-ineligible regardless of
+// coupling_interval.
+#[test]
+fn thermostat_slot_graph_compatibility_table() {
+    let regs = Registries::with_builtins();
+    let empty = toml::Value::Table(Default::default());
+    let compat = |kind: &str| -> bool {
+        regs.thermostats
+            .lookup(kind)
+            .expect("builtin thermostat")
+            .graph_compatible(&empty)
+    };
+    assert!(compat("csvr"), "csvr is cadence-inert");
+    assert!(compat("berendsen"), "berendsen is cadence-inert");
+    assert!(compat("andersen"), "andersen resamples only on coupling steps");
+    assert!(
+        !compat("nose-hoover-chain"),
+        "nose-hoover-chain integrates its chain every step"
+    );
+}
+
+// rq-9c1eb803 — the hybrid graph path (non-coupling steps replayed from a
+// captured graph, coupling steps run whole on the per-step launch path)
+// produces a byte-identical trajectory to the fully per-step path for the
+// same csvr-thermostatted phase with coupling_interval > 1. n_steps = 20
+// exceeds the 8-step graph-timing calibration prefix, so the batched graph
+// loop runs (steps 9..20) with coupling break-outs at 10, 15, 20.
+#[test]
+fn hybrid_graph_matches_per_step_byte_for_byte() {
+    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\n\
+                 seed = 3\ncoupling_interval = 5\n";
+    let run = |graphs: bool, tag: &str| -> Vec<u8> {
+        let dir = tmp(tag);
+        write_lattice_init(&dir, 9, 4.4e-10);
+        std::fs::write(
+            dir.join("sim.in.toml"),
+            lj_config(20, "kind = \"velocity-verlet\"\nlossless = false", extra, graphs),
+        )
+        .unwrap();
+        run_simulation(&dir.join("sim.in.toml")).unwrap();
+        std::fs::read(dir.join("sim.out.run.xyz")).unwrap()
+    };
+    let hybrid = run(true, "hybrid_bitexact_graph");
+    let per_step = run(false, "hybrid_bitexact_perstep");
+    assert_eq!(
+        hybrid, per_step,
+        "hybrid graph-replay trajectory differs from the fully per-step trajectory"
+    );
 }
 
 // rq-b85a38d6 — a thermostat + per-step barostat together: every step is

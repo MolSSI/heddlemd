@@ -5848,7 +5848,16 @@
     "decl": "### Slot eligibility",
     "file": "cuda-graphs",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slot eligibility",
     "type": "section"
   },
@@ -8794,7 +8803,12 @@
     "decl": "## Activation Policy",
     "file": "cuda-graphs",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Activation Policy",
     "type": "section"
   },
@@ -9893,6 +9907,18 @@
     "title": "Constraint Virial",
     "type": "section"
   },
+  "rq-4625ed82": {
+    "decl": "Scenario: Coupling break-out tightens the displacement-flag cadence",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Coupling break-out tightens the displacement-flag cadence",
+    "type": "scenario"
+  },
   "rq-4656e089": {
     "decl": "## Empty State",
     "file": "integration/shake",
@@ -10308,6 +10334,10 @@
     "decl": "Scenario: A thermostat coupling every step also runs on the per-step path",
     "file": "cuda-graphs",
     "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
       {
         "file": "tests/post_force_composition.rs",
         "kind": "code"
@@ -12517,6 +12547,13 @@
     "title": "f64 build resolves Real to f64",
     "type": "scenario"
   },
+  "rq-5b2a1cde": {
+    "decl": "Scenario: Coupling steps run on the per-step path, non-coupling steps replay the graph",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Coupling steps run on the per-step path, non-coupling steps replay the graph",
+    "type": "scenario"
+  },
   "rq-5b4519e9": {
     "decl": "Scenario: rho_fixed is zeroed at the start of every step",
     "file": "forces/spme",
@@ -14068,6 +14105,18 @@
     "title": "Default build does not pass -DREAL_F64 to nvcc",
     "type": "scenario"
   },
+  "rq-673e25a5": {
+    "decl": "Scenario: A coupling step ends the graph batch as a forced boundary",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A coupling step ends the graph batch as a forced boundary",
+    "type": "scenario"
+  },
   "rq-6745e7c5": {
     "decl": "Scenario: Each subsystem's XKernels::load returns its kernel handle",
     "file": "build-pipeline",
@@ -15217,7 +15266,12 @@
   "rq-6f09d7e3": {
     "decl": "Scenario: nose-hoover-chain phase falls back to per-step launches",
     "file": "cuda-graphs",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
     "title": "nose-hoover-chain phase falls back to per-step launches",
     "type": "scenario"
   },
@@ -19697,10 +19751,19 @@
     "type": "scenario"
   },
   "rq-91c02dd8": {
-    "decl": "Scenario: A thermostatted phase is graph-ineligible and runs per-step",
+    "decl": "Scenario: A cadence-inert thermostat other than csvr is also hybrid-eligible",
     "file": "cuda-graphs",
-    "refs": [],
-    "title": "A thermostatted phase is graph-ineligible and runs per-step",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A cadence-inert thermostat other than csvr is also hybrid-eligible",
     "type": "scenario"
   },
   "rq-91c4727a": {
@@ -21090,6 +21153,18 @@
       }
     ],
     "title": "Exclusion scales default to 0.0 when both columns omitted",
+    "type": "scenario"
+  },
+  "rq-9c1eb803": {
+    "decl": "Scenario: Hybrid graph run matches the fully per-step run bit-for-bit",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Hybrid graph run matches the fully per-step run bit-for-bit",
     "type": "scenario"
   },
   "rq-9c22145d": {
@@ -29899,15 +29974,15 @@
     "type": "scenario"
   },
   "rq-dce6f4cf": {
-    "decl": "Scenario: A thermostatted phase is graph-ineligible and runs on the per-step path",
+    "decl": "Scenario: A thermostatted phase replays non-coupling steps and runs coupling steps per-step",
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "tests/post_force_composition.rs",
+        "file": "src/runner.rs",
         "kind": "code"
       }
     ],
-    "title": "A thermostatted phase is graph-ineligible and runs on the per-step path",
+    "title": "A thermostatted phase replays non-coupling steps and runs coupling steps per-step",
     "type": "scenario"
   },
   "rq-dceedbbb": {

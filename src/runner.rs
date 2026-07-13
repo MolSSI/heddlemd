@@ -1578,17 +1578,20 @@ pub(crate) fn run_md_phase_inner(
     // the phase eligible (its `apply` runs in the captured post-force
     // tail as standalone launches).
     let plan_has_interleaved_barostat = probe_plan.has_interleaved_barostat_point();
-    // rq-ee10237d — a thermostat couples on a cadence, and on coupling
-    // steps the whole post-force region runs eagerly (the full-step KE
-    // reduction is a fusion barrier) with host-side thermostat work that
-    // cannot be captured. A thermostatted phase therefore runs on the
-    // per-step launch path; the coupling interval's fusion benefit is
-    // still realised there, because non-coupling steps use the composed
-    // post-force kernel and skip the thermostat reduction and rescale.
+    // rq-3c78ea7d — a cadence-inert thermostat does its host-side work
+    // (the full-step KE reduction, a fusion barrier, and the rescale) only
+    // on coupling steps. With `coupling_interval > 1` the phase captures
+    // the non-coupling steps as a graph and runs each coupling step whole
+    // on the per-step launch path (see `run_batched_graph_loop`). A
+    // thermostat with `coupling_interval == 1` couples every step, leaving
+    // no non-coupling step to capture, so the phase runs entirely per-step;
+    // a non-cadence-inert thermostat (graph_compatible == false) is
+    // rejected by `phase_slots_graph_compatible`.
+    let thermostat_ok = thermostat_permits_graph(thermostat.is_some(), coupling_interval);
     let graph_eligible = !setup.config.simulation.cuda_graphs_disable
         && !plan_has_thermostat_points
         && !plan_has_interleaved_barostat
-        && thermostat.is_none()
+        && thermostat_ok
         && phase_slots_graph_compatible(setup, phase);
 
     // Graph-timing calibration: CUDA forbids `cuEventElapsedTime` on the
@@ -1672,10 +1675,13 @@ pub(crate) fn run_md_phase_inner(
             phase_index,
             calib,
             &mut graph_loop,
-            integrator.as_mut(),
+            &mut integrator,
             &mut thermostat,
             &mut barostat,
-            &mut constraint,            dt,
+            &mut constraint,
+            plan_has_thermostat_points,
+            coupling_interval,
+            dt,
             &mut timings,
             &mut frame,
             &mut traj_writer,
@@ -2158,6 +2164,32 @@ pub(crate) fn run_minimization_phase_inner(
     })
 }
 
+// rq-3c78ea7d — a phase's thermostat permits graph capture when there is
+// no thermostat, or the thermostat couples less often than every step
+// (`coupling_interval > 1`), leaving non-coupling steps to capture. A
+// thermostat with `coupling_interval == 1` couples every step, so no
+// non-coupling step exists and the phase runs entirely per-step.
+fn thermostat_permits_graph(has_thermostat: bool, coupling_interval: u64) -> bool {
+    !has_thermostat || coupling_interval > 1
+}
+
+// rq-3c78ea7d — the physical step following `step` (i.e. `step + 1`) is a
+// coupling step when it is a multiple of `coupling_interval`. Coupling
+// steps run on the per-step launch path; the runner checks this before
+// replaying a graph batch so a coupling step is never replayed.
+fn next_step_is_coupling(step: u64, coupling_interval: u64) -> bool {
+    (step + 1) % coupling_interval == 0
+}
+
+// rq-3c78ea7d — the number of non-coupling steps that may be replayed from
+// the graph starting after `step` before the next coupling step. Callers
+// invoke this only when `step + 1` is not itself a coupling step (the
+// coupling-step break-out is handled first), so the result is `>= 1` and
+// the subtraction never underflows.
+fn non_coupling_batch_bound(step: u64, coupling_interval: u64) -> u64 {
+    (coupling_interval - 1) - (step % coupling_interval)
+}
+
 /// Returns `true` iff every active slot for the phase reports
 /// `graph_compatible = true`. Used by the runner to decide whether a
 /// phase is eligible for CUDA graph capture. See `cuda-graphs.md`.
@@ -2181,11 +2213,24 @@ fn phase_slots_graph_compatible(
     if !int_ok {
         return false;
     }
-    // rq-ee10237d — a thermostat never runs inside a captured graph: the
-    // graph records non-coupling steps (no thermostat work) and coupling
-    // steps run on the per-step path, so a thermostat's own
-    // graph-compatibility does not gate eligibility (the
-    // `coupling_interval == 1` case is handled by the caller).
+    // rq-26c9b8cb — a thermostat gates eligibility only when it is not
+    // cadence-inert. csvr / berendsen / andersen do their per-step work
+    // solely on coupling steps (through the runner's apply_pre / apply_post),
+    // so they report graph_compatible == true and the captured non-coupling
+    // steps are pure device sequences; nose-hoover-chain reports false (its
+    // Yoshida chain and per-step KE dtoh cannot be captured). The
+    // `coupling_interval == 1` condition is applied by the caller.
+    if let Some(t) = phase.thermostat.as_ref() {
+        let ok = setup
+            .registries
+            .thermostats
+            .lookup(&t.kind)
+            .map(|builder| builder.graph_compatible(&t.params))
+            .unwrap_or(false);
+        if !ok {
+            return false;
+        }
+    }
     if let Some(b) = phase.barostat.as_ref() {
         let ok = setup
             .registries
@@ -2718,10 +2763,18 @@ fn run_batched_graph_loop(
     _phase_index: usize,
     start_step: u64,
     graph_loop: &mut crate::gpu::GraphLoop,
-    integrator: &mut dyn crate::integrator::Integrator,
+    integrator: &mut Box<dyn crate::integrator::Integrator>,
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    // rq-3c78ea7d — a plan-owned ThermostatHalf suppresses runner-wrapped
+    // coupling; such phases are graph-ineligible, so `plan_owns_thermostat`
+    // is always false here, but it is threaded for the single-coupling-step
+    // per-step call, which shares `run_per_step_range`.
+    plan_owns_thermostat: bool,
+    // rq-3c78ea7d — the thermostat coupling cadence. Non-coupling steps
+    // replay the graph; every `coupling_interval`-th step runs per-step.
+    coupling_interval: u64,
     dt: Real,
     timings: &mut Timings,
     frame: &mut ParticleState,
@@ -2760,7 +2813,73 @@ fn run_batched_graph_loop(
     // exactly on a batch boundary.
     let move_frequency = barostat_move_frequency(barostat).map(|f| f as u64);
 
+    // rq-3c78ea7d — a cadence-inert thermostat with coupling_interval > 1
+    // makes each coupling step a forced batch boundary that runs whole on
+    // the per-step launch path; non-coupling steps replay the graph. The
+    // eligibility gate guarantees coupling_interval > 1 whenever a
+    // runner-wrapped thermostat is present.
+    let thermostatted = thermostat.is_some() && !plan_owns_thermostat && coupling_interval > 1;
+
     while step < n_steps {
+        // rq-3c78ea7d — the next step couples: run it whole on the per-step
+        // launch path (full post-force region including the thermostat's
+        // kinetic-energy reduction and rescale), then resume graph replay. A
+        // coupling step whose rebuild reallocates a packed-neighbour buffer
+        // invalidates the captured graph, so re-capture before the next batch.
+        if thermostatted && next_step_is_coupling(step, coupling_interval) {
+            let caps_before = packed_capacities(&setup.force_field);
+            run_per_step_range(
+                step + 1,
+                step + 1,
+                setup,
+                phase,
+                integrator,
+                thermostat,
+                barostat,
+                constraint,
+                plan_owns_thermostat,
+                coupling_interval,
+                dt,
+                timings,
+                frame,
+                traj_writer,
+                log_writer,
+                pe_scratch,
+                type_indices,
+                n_thermal_dof,
+                log_extra_columns,
+                phase_started,
+                phase_name,
+                progress_to_stdout,
+                progress_every,
+                frames_written,
+                log_rows_written,
+                physics,
+            )?;
+            step += 1;
+            if packed_capacities(&setup.force_field) != caps_before && step < n_steps {
+                match capture_phase_graph(
+                    &mut setup.buffers,
+                    &mut setup.sim_box,
+                    &mut setup.force_field,
+                    integrator.as_mut(),
+                    barostat,
+                    constraint,
+                    dt,
+                    timings,
+                    &device,
+                ) {
+                    Ok(new_loop) => *graph_loop = new_loop,
+                    Err(e) => {
+                        eprintln!(
+                            "warning: cuda graph capture failed for phase `{phase_name}`: {e}; falling back to per-step launches"
+                        );
+                        return Ok(Some(step + 1));
+                    }
+                }
+            }
+            continue;
+        }
         let remaining = n_steps - step;
         let next_log = if log_every > 0 {
             log_every - (step % log_every)
@@ -2776,11 +2895,21 @@ fn run_batched_graph_loop(
             Some(f) if f > 0 => f - (step % f),
             _ => remaining,
         };
+        // rq-3c78ea7d — bound the graph batch so it ends on the step before
+        // the next coupling step; that coupling step then runs per-step at
+        // the top of the next iteration. In this branch the next step is not
+        // a coupling step, so `next_couple >= 1`.
+        let next_couple = if thermostatted {
+            non_coupling_batch_bound(step, coupling_interval)
+        } else {
+            remaining
+        };
         let batch = batch_size
             .min(remaining)
             .min(next_log)
             .min(next_traj)
-            .min(next_move);
+            .min(next_move)
+            .min(next_couple);
         let barostat_active = barostat_couples_per_step(barostat);
         let mut forces_only_launches: u32 = 0;
         let mut forces_and_scalars_launches: u32 = 0;
@@ -2869,7 +2998,7 @@ fn run_batched_graph_loop(
                 &mut setup.buffers,
                 &mut setup.sim_box,
                 &mut setup.force_field,
-                integrator,
+                integrator.as_mut(),
                 barostat,
                 constraint,                dt,
                 timings,
@@ -3379,6 +3508,76 @@ fn cli_main_analyze(rest: Vec<String>) -> u8 {
                 crate::analysis::AnalyzeError::Trajectory(_)
                 | crate::analysis::AnalyzeError::Analysis { .. } => 2,
                 _ => 1,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod hybrid_gate_tests {
+    use super::{
+        next_step_is_coupling, non_coupling_batch_bound, thermostat_permits_graph,
+    };
+
+    // rq-3c78ea7d — no thermostat always permits graph capture.
+    #[test]
+    fn no_thermostat_permits_graph() {
+        assert!(thermostat_permits_graph(false, 1));
+        assert!(thermostat_permits_graph(false, 25));
+    }
+
+    // rq-49f6bbfb — a thermostat coupling every step (coupling_interval == 1)
+    // leaves no non-coupling step to capture, so the phase runs per-step.
+    #[test]
+    fn thermostat_coupling_every_step_forbids_graph() {
+        assert!(!thermostat_permits_graph(true, 1));
+    }
+
+    // rq-3c78ea7d rq-91c02dd8 — a thermostat with coupling_interval > 1 is
+    // graph-eligible (subject to the slot's graph_compatible hook).
+    #[test]
+    fn thermostat_with_wide_interval_permits_graph() {
+        assert!(thermostat_permits_graph(true, 2));
+        assert!(thermostat_permits_graph(true, 25));
+    }
+
+    // rq-dce6f4cf — coupling_interval = 4: coupling steps are 4 and 8, so the
+    // step *before* each (3 and 7) reports the next step as coupling; the
+    // graph runs the maximal non-coupling runs 1..3 and 5..7 (length 3 each).
+    #[test]
+    fn coupling_cadence_marks_boundaries_and_run_lengths() {
+        // next step couples exactly when (step+1) % interval == 0.
+        let ci = 4;
+        let coupling: Vec<u64> = (0..8).filter(|&s| next_step_is_coupling(s, ci)).collect();
+        assert_eq!(coupling, vec![3, 7]); // steps 4 and 8 are the coupling steps
+        // From step 0 the graph runs 3 non-coupling steps (1,2,3) then step 4
+        // couples; from step 4 it runs 3 more (5,6,7) then step 8 couples.
+        assert_eq!(non_coupling_batch_bound(0, ci), 3);
+        assert_eq!(non_coupling_batch_bound(4, ci), 3);
+    }
+
+    // rq-673e25a5 — coupling_interval = 25: the first graph batch replays
+    // exactly 24 non-coupling steps, ending on the step before the coupling
+    // step 25.
+    #[test]
+    fn first_batch_ends_before_coupling_step() {
+        let ci = 25;
+        assert_eq!(non_coupling_batch_bound(0, ci), 24);
+        assert!(next_step_is_coupling(24, ci)); // step 25 couples
+        assert!(!next_step_is_coupling(0, ci));
+    }
+
+    // rq-4625ed82 — because a coupling step forces a batch boundary, the
+    // effective flag-check interval is at most `coupling_interval`: the
+    // graph batch never spans more than `coupling_interval - 1` steps.
+    #[test]
+    fn coupling_interval_caps_batch_length() {
+        for ci in [2u64, 5, 10, 25] {
+            for step in 0..(3 * ci) {
+                if !next_step_is_coupling(step, ci) {
+                    assert!(non_coupling_batch_bound(step, ci) <= ci - 1);
+                    assert!(non_coupling_batch_bound(step, ci) >= 1);
+                }
             }
         }
     }
