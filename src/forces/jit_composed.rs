@@ -1289,6 +1289,11 @@ fn emit_excl_tile_entry_point(
     s.push_str("    const unsigned int *exclusion_tile_masks,\n");
     s.push_str("    const unsigned int *interaction_count,\n");
     s.push_str("    const Real4 *tile_sorted_posq,\n");
+    // rq-5ce17997 — block_centre / block_bbox feed the SPC predicate and
+    // centre-wrap; placed after tile_sorted_posq, mirroring the
+    // packed-neighbour entry point's argument order.
+    s.push_str("    const Real *block_centre,\n");
+    s.push_str("    const Real *block_bbox,\n");
     s.push_str("    const unsigned int *sorted_particle_ids,\n");
     s.push_str("    const unsigned int *type_indices,\n");
     s.push_str("    const Real *lattice,\n");
@@ -1312,6 +1317,7 @@ fn emit_excl_tile_entry_point(
     s.push_str("        composite, exclusion_tile_iblocks, exclusion_tile_jblocks,\n");
     s.push_str("        exclusion_tile_masks, interaction_count,\n");
     s.push_str("        tile_sorted_posq,\n");
+    s.push_str("        block_centre, block_bbox,\n");
     s.push_str("        sorted_particle_ids,\n");
     s.push_str("        type_indices,\n");
     s.push_str("        lattice,\n");
@@ -1926,6 +1932,8 @@ __device__ static inline void heddle_jit_excl_tile_loop(
     const unsigned int *exclusion_tile_masks,
     const unsigned int *interaction_count_ptr,
     const Real4 *tile_sorted_posq,
+    const Real *block_centre,
+    const Real *block_bbox,
     const unsigned int *sorted_particle_ids,
     const unsigned int *type_indices,
     const Real *lattice,
@@ -1952,21 +1960,55 @@ __device__ static inline void heddle_jit_excl_tile_loop(
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
 
+  // rq-5ce17997 — per-tile single-periodic-copy (SPC) predicate on the
+  // tile's i-block `bi`. When every axis margin `0.5*L - bbox` clears the
+  // max cutoff on an orthorhombic box, wrapping every atom of `bi` and
+  // `bj` once against `block_centre[bi]` makes the per-pair `dx = pi - pj`
+  // already the canonical min-image displacement, so the inner loop skips
+  // `heddle_jit_triclinic_min_image`. The predicate reads only `bi`, the
+  // lattice, and MAX_CUTOFF, so it is uniform across the tile's warp.
+  // Triclinic boxes are conservatively ineligible (min-image path).
+  Real bbox_x = block_bbox[bi * 3u + 0u];
+  Real bbox_y = block_bbox[bi * 3u + 1u];
+  Real bbox_z = block_bbox[bi * 3u + 2u];
+  bool orthorhombic = (xy == R(0.0)) && (xz == R(0.0)) && (yz == R(0.0));
+  bool spc = orthorhombic
+          && (R(0.5) * lx - bbox_x >= HEDDLE_JIT_MAX_CUTOFF)
+          && (R(0.5) * ly - bbox_y >= HEDDLE_JIT_MAX_CUTOFF)
+          && (R(0.5) * lz - bbox_z >= HEDDLE_JIT_MAX_CUTOFF);
+  Real cx = R(0.0), cy = R(0.0), cz = R(0.0);
+  if (spc) {
+    cx = block_centre[bi * 4u + 0u];
+    cy = block_centre[bi * 4u + 1u];
+    cz = block_centre[bi * 4u + 2u];
+  }
+
   // i-atom: this lane owns slot bi*32 + lane.
   unsigned int i_slot = bi * 32u + lane;
   bool i_valid = i_slot < n;
   unsigned int i_atom_id = i_valid ? sorted_particle_ids[i_slot] : n;
   Real4 pq_i = tile_sorted_posq[i_slot];
   Real pi_x = pq_i.x, pi_y = pq_i.y, pi_z = pq_i.z, qi = pq_i.w;
+  if (spc && i_valid) {
+    triclinic_wrap_against_center(pi_x, pi_y, pi_z, cx, cy, cz,
+                                  lx, ly, lz, xy, xz, yz);
+  }
   unsigned int i_type = 0u;
   /*HEDDLE_JIT_ITYPE_LOAD*/
 
-  // j-atom: this lane owns slot bj*32 + lane initially; it rotates.
+  // j-atom: this lane owns slot bj*32 + lane initially; it rotates. The
+  // centre-wrap is applied once here (all j-atoms wrap against the same
+  // `bi` centre), so the wrapped position stays valid as the diagonal
+  // shuffle rotates it between lanes.
   unsigned int j_slot = bj * 32u + lane;
   bool j_valid = j_slot < n;
   unsigned int j_atom_id = j_valid ? sorted_particle_ids[j_slot] : n;
   Real4 pq_j = tile_sorted_posq[j_slot];
   Real pj_x = pq_j.x, pj_y = pq_j.y, pj_z = pq_j.z, qj = pq_j.w;
+  if (spc && j_valid) {
+    triclinic_wrap_against_center(pj_x, pj_y, pj_z, cx, cy, cz,
+                                  lx, ly, lz, xy, xz, yz);
+  }
   unsigned int j_type = 0u;
   /*HEDDLE_JIT_JTYPE_LOAD*/
 
@@ -1990,7 +2032,12 @@ __device__ static inline void heddle_jit_excl_tile_loop(
       Real dx = pi_x - pj_x;
       Real dy = pi_y - pj_y;
       Real dz = pi_z - pj_z;
-      heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+      // rq-5ce17997 — on the SPC path pi and pj are already wrapped to the
+      // same-periodic-copy image, so dx is the canonical min-image
+      // displacement and the per-pair min-image call is skipped.
+      if (!spc) {
+        heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+      }
       Real r2 = dx * dx + dy * dy + dz * dz;
       Real inv_r = Real_rsqrt(r2);
       Real r = r2 * inv_r;

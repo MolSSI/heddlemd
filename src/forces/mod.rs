@@ -1220,6 +1220,10 @@ impl ForceField {
                         excl_builder.push_device_buffer(&packed.exclusion_tile_masks);
                         excl_builder.push_device_buffer(&packed.interaction_count);
                         excl_builder.push_device_buffer(&packed.tile_sorted_posq);
+                        // rq-5ce17997 — block_centre / block_bbox feed the
+                        // exclusion-tile SPC predicate and centre-wrap.
+                        excl_builder.push_device_buffer(&packed.block_centre);
+                        excl_builder.push_device_buffer(&packed.block_bbox);
                         excl_builder.push_device_buffer(sorted_view);
                         excl_builder.push_device_buffer(&buffers.type_indices);
                         excl_builder.push_device_buffer(sim_box.lattice_device());

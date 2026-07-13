@@ -4588,6 +4588,18 @@
     "title": "Reject when positions_y has the wrong length",
     "type": "scenario"
   },
+  "rq-1e9bb643": {
+    "decl": "Scenario: Exclusion-tile SPC predicate uses the tile's i-block and is warp-uniform",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Exclusion-tile SPC predicate uses the tile's i-block and is warp-uniform",
+    "type": "scenario"
+  },
   "rq-1ea7342a": {
     "decl": "Scenario: A settle [constraints] row with the wrong atom count is rejected by the parser",
     "file": "integration/settle",
@@ -12717,7 +12729,16 @@
     "decl": "### Single-Periodic-Copy Fast Path",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Single-Periodic-Copy Fast Path",
     "type": "section"
   },
@@ -24876,6 +24897,18 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-b72ac355": {
+    "decl": "Scenario: A cross-block exclusion tile with an out-of-cutoff pair contributes nothing under SPC",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A cross-block exclusion tile with an out-of-cutoff pair contributes nothing under SPC",
+    "type": "scenario"
+  },
   "rq-b7317e2d": {
     "decl": "### Failed runs",
     "file": "performance-analysis",
@@ -25296,6 +25329,18 @@
       }
     ],
     "title": "File does not exist",
+    "type": "scenario"
+  },
+  "rq-ba3ad34b": {
+    "decl": "Scenario: Triclinic box forces the exclusion-tile pass onto the min-image path",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Triclinic box forces the exclusion-tile pass onto the min-image path",
     "type": "scenario"
   },
   "rq-ba4087d7": {
@@ -29908,6 +29953,18 @@
     "title": "Construct AndersenThermostat via the registry",
     "type": "scenario"
   },
+  "rq-dc44a114": {
+    "decl": "Scenario: Exclusion-tile pass takes the min-image path when its i-block does not qualify",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Exclusion-tile pass takes the min-image path when its i-block does not qualify",
+    "type": "scenario"
+  },
   "rq-dc5041ea": {
     "decl": "Scenario: ParticleState fields are Vec<Real> under f64",
     "file": "precision",
@@ -31278,6 +31335,18 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-e6620f2c": {
+    "decl": "Scenario: Exclusion-tile pass takes the SPC fast path when its i-block qualifies",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Exclusion-tile pass takes the SPC fast path when its i-block qualifies",
+    "type": "scenario"
+  },
   "rq-e67ef8c3": {
     "decl": "### Types",
     "file": "forces/potential-consistency-harness",
@@ -31844,6 +31913,18 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
+    "type": "scenario"
+  },
+  "rq-ea68a7aa": {
+    "decl": "Scenario: Exclusion-tile SPC path is bit-identical to the min-image path",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Exclusion-tile SPC path is bit-identical to the min-image path",
     "type": "scenario"
   },
   "rq-ea8640f5": {

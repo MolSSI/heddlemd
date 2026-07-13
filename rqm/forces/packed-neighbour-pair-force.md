@@ -712,6 +712,16 @@ For every exclusion tile `t` in `[0, interaction_count[2])`:
   (two coalesced loads). Inactive slots (`≥ N`) carry `+∞` and fail the
   cutoff.
 - Read this lane's modified-pair mask row `exclusion_tile_masks[t · 32 + lane]`.
+- Evaluate the per-tile single-periodic-copy (SPC) predicate on block `bi`
+  (the tile's i-block) — the same predicate the packed-neighbour pass uses
+  (see *Single-Periodic-Copy Fast Path*), read from `block_bbox[bi]` and the
+  lattice, warp-uniform across the tile's 32 lanes. When it holds, each lane
+  wraps its own `bi` atom and its own `bj` atom once against the i-block
+  centre `block_centre[bi]` with `triclinic_wrap_against_center`, and the
+  inner loop computes `dx = pi − pj` directly with **no** per-pair
+  `heddle_jit_triclinic_min_image` call; otherwise the inner loop takes the
+  per-pair min-image path. The branch is warp-uniform, so exactly one path
+  runs per tile per launch.
 - Run the 32-iteration diagonal shuffle over all 32×32 lane pairs,
   skipping only the self-block (`bi == bj`) diagonal. For each surviving
   lane pair `(i_lane, j_lane)`:
@@ -809,13 +819,18 @@ gating is by `j_atom_id < N` (and by the optional
 
 ### Single-Periodic-Copy Fast Path <!-- rq-5ce17997 -->
 
-The packed-neighbour pass evaluates a per-i-block
-single-periodic-copy (SPC) predicate at the top of the outer loop
-and branches on the result. The predicate is uniform across the
-warp (all 32 lanes processing one i-block compute the same value
-from `i_block`, the lattice constants, and the compile-time max
+The packed-neighbour pass and the exclusion-tile pass each evaluate
+a per-i-block single-periodic-copy (SPC) predicate at the top of the
+outer loop and branch on the result. The predicate is uniform across
+the warp (all 32 lanes processing one i-block — or, for the
+exclusion-tile pass, one tile — compute the same value from the
+block's bbox, the lattice constants, and the compile-time max
 cutoff), so there is no per-pair warp divergence and only one
-warp-wide control flow path executes per i-block per launch.
+warp-wide control flow path executes per i-block / per tile per
+launch. The exclusion-tile pass uses the tile's i-block `bi` as its
+predicate-and-centre block: the same predicate on `block_bbox[bi]`,
+and both the `bi` atoms and the `bj` atoms wrap against
+`block_centre[bi]`.
 
 The two code paths are:
 
@@ -824,13 +839,15 @@ The two code paths are:
   `dx = pi - pj` into the canonical `[-L/2, L/2)` displacement
   per lattice direction before the `r²` evaluation.
 - **SPC path.** Before entering the inner loop, each lane wraps
-  its own `pi` (loaded from `tile_sorted_posq`) and its own `pj`
-  (loaded from `posq`) into the periodic image closest to the
-  i-block centre `block_centre[i_block]`, using
+  its own `pi` and its own `pj` into the periodic image closest to
+  the i-block centre `block_centre[i_block]` (for the exclusion-tile
+  pass, `block_centre[bi]`), using
   `triclinic_wrap_against_center(pos, centre, lattice)`. After
   both wraps, the inner loop computes `dx = pi - pj` and **does
   not call** `heddle_jit_triclinic_min_image` — `dx` is already
-  the canonical min-image displacement.
+  the canonical min-image displacement. (In the packed-neighbour
+  pass `pi` comes from `tile_sorted_posq` and `pj` from `posq`; in
+  the exclusion-tile pass both come from `tile_sorted_posq`.)
 
 The wrap helper `triclinic_wrap_against_center(pos, centre,
 lattice)` shifts `pos` to the periodic image closest to `centre`:
@@ -871,34 +888,45 @@ where:
 Correctness rationale. For an i-block whose bbox half-extent
 along axis `d` is `B_d`, every i-atom is within `B_d` of the
 centre along that axis. After wrapping `pj` against the centre,
-`|pj − centre|_d ≤ L_d / 2`. The candidate j-atom passes the
-construction-kernel distance test against some i-atom, so under
-min-image relative to that i-atom its position is within
-`MAX_CUTOFF + B_d` of the centre. When
-`0.5 · L_d − B_d ≥ MAX_CUTOFF`, the centre-image wrap and the
-min-image wrap select the same periodic copy, so `pi − pj` is
-already the canonical min-image displacement. Out-of-cutoff
-candidates (the small fraction that the bbox-prune lets through
-even though no real interaction survives) are zeroed by the
-existing `cutoff_mask` whether the wrap matched min-image or
-not, so the predicate only needs to be safe for in-cutoff pairs.
+`|pj − centre|_d ≤ L_d / 2`. The predicate only needs to be safe
+for **in-cutoff** pairs — an in-cutoff pair is one whose true
+min-image separation is `≤ MAX_CUTOFF`, so its j-atom is within
+`MAX_CUTOFF` of some i-atom and therefore within `MAX_CUTOFF + B_d`
+of the centre. When `0.5 · L_d − B_d ≥ MAX_CUTOFF`, the
+centre-image wrap and the min-image wrap select the same periodic
+copy for such a j-atom, so `pi − pj` is already the canonical
+min-image displacement. Out-of-cutoff pairs are zeroed by the
+existing `cutoff_mask` regardless of which image the wrap selected:
+the centre-wrapped separation is never smaller than the true
+min-image separation (the min-image is the closest of all images,
+so any other image is at least as far), so a pair whose min-image
+separation exceeds the cutoff cannot be pulled below it by the
+centre wrap. This holds for both passes. The packed-neighbour
+pass's j-atoms reach the kernel already filtered to within-search
+candidates by the construction sweep; the exclusion-tile pass
+instead evaluates every one of its block pair's `32×32` lane pairs
+(the block pair is skipped by the construction sweep), but the same
+in-cutoff / out-of-cutoff split applies, so the predicate is safe
+there too.
 
 #### Triclinic Boxes <!-- rq-412fea28 -->
 
 The predicate gates SPC on `orthorhombic`. Triclinic boxes (any
 of `xy`, `xz`, `yz` non-zero) take the min-image path on every
-i-block regardless of bbox extent. Extending SPC to triclinic
-boxes is future work that would replace the per-axis box-length
-check with a projection of the i-block bbox onto each face
-normal; the kernel helper `triclinic_wrap_against_center` already
-handles arbitrary lattice geometry, so the change would be
-confined to the eligibility predicate.
+i-block and every exclusion tile regardless of bbox extent.
+Extending SPC to triclinic boxes is future work that would replace
+the per-axis box-length check with a projection of the i-block
+bbox onto each face normal; the kernel helper
+`triclinic_wrap_against_center` already handles arbitrary lattice
+geometry, so the change would be confined to the eligibility
+predicate.
 
 #### Box-Geometry Transitions <!-- rq-1ccb6e53 -->
 
 Under NPT or NPH the box and the per-block bbox both change
 across a step. The predicate is evaluated freshly at every
-i-block of every launch, reading the current lattice constants
+i-block / tile of every launch (of both the packed-neighbour and
+the exclusion-tile pass), reading the current lattice constants
 (passed as a kernel argument) and the current `block_bbox` (one
 of the buffers populated by the per-rebuild
 `compute_block_bbox`). No host-side cache or CUDA-graph
@@ -1266,8 +1294,14 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `heddle_jit_composed_pair_force_excl_fev` — JIT-composed
   exclusion-tile entry points; one warp per exclusion tile. Load the
   full `bi` and `bj` blocks from `tile_sorted_posq`, take the tile's
-  `exclusion_tile_masks` row, and skip masked lane pairs and the
-  self-block diagonal (see *Exclusion-Tile Pass*).
+  `exclusion_tile_masks` row, apply per-fragment scale to masked lane
+  pairs, and skip the self-block diagonal (see *Exclusion-Tile Pass*).
+  Receive `block_centre` and `block_bbox` (alongside `lattice`) and
+  evaluate the per-tile SPC predicate on the tile's i-block `bi`,
+  taking the centre-wrap fast path against `block_centre[bi]` when it
+  holds and the per-pair min-image path otherwise (see *Single-Periodic-Copy
+  Fast Path*). The predicate is warp-uniform, so the branch is taken
+  once per tile with no per-pair divergence.
 - `heddle_jit_composed_pair_force_single_f` / <!-- rq-3ddf259b -->
   `heddle_jit_composed_pair_force_single_fev` — JIT-composed
   single-pair entry points; argument list documented under
@@ -2053,6 +2087,55 @@ Feature: Packed-Neighbour Pair-Force Architecture
     When the single-pair pass runs
     Then it invokes heddle_jit_triclinic_min_image for every pair it evaluates
     And it does not read block_centre or block_bbox
+
+  # --- Single-periodic-copy fast path: exclusion-tile pass ---
+
+  @rq-e6620f2c
+  Scenario: Exclusion-tile pass takes the SPC fast path when its i-block qualifies
+    Given an orthorhombic box in which the SPC predicate on block_bbox[bi] is true
+    And an exclusion tile t with i-block bi and j-block bj
+    When the exclusion-tile kernel processes tile t
+    Then every lane wraps its bi atom and its bj atom once against block_centre[bi]
+    And the inner loop computes dx = pi - pj without calling heddle_jit_triclinic_min_image
+
+  @rq-dc44a114
+  Scenario: Exclusion-tile pass takes the min-image path when its i-block does not qualify
+    Given an orthorhombic box in which the SPC predicate on block_bbox[bi] is false
+      for exclusion tile t's i-block bi
+    When the exclusion-tile kernel processes tile t
+    Then the inner loop calls heddle_jit_triclinic_min_image once per lane pair
+    And neither pi nor pj is centre-wrapped
+
+  @rq-1e9bb643
+  Scenario: Exclusion-tile SPC predicate uses the tile's i-block and is warp-uniform
+    Given the exclusion-tile kernel processes tile t with i-block bi
+    When all 32 lanes of the tile's warp evaluate the SPC predicate
+    Then every lane reads block_bbox[bi] and observes the same boolean value
+    And the kernel branches once warp-wide without per-lane divergence
+
+  @rq-ba3ad34b
+  Scenario: Triclinic box forces the exclusion-tile pass onto the min-image path
+    Given a SimulationBox whose lattice has any of xy, xz, yz non-zero
+    When the exclusion-tile kernel processes any tile
+    Then the SPC predicate evaluates to false
+    And the inner loop takes the per-pair min-image path
+
+  @rq-ea68a7aa
+  Scenario: Exclusion-tile SPC path is bit-identical to the min-image path
+    Given a simulation whose exclusion tiles all have an SPC-eligible i-block
+    And a comparator run on the same hardware that disables the exclusion-tile SPC branch
+      and always takes min-image
+    When both runs perform one ForceField::step(Fast)
+    Then ParticleBuffers.forces_x, forces_y, forces_z compare byte-identical across
+      the two runs after finalize_fast_class_forces
+
+  @rq-b72ac355
+  Scenario: A cross-block exclusion tile with an out-of-cutoff pair contributes nothing under SPC
+    Given an SPC-eligible exclusion tile t whose i-block bi and j-block bj contain a
+      lane pair whose true min-image separation exceeds MAX_CUTOFF
+    When the exclusion-tile kernel processes tile t on the SPC path
+    Then that lane pair's centre-wrapped separation is at least its min-image separation
+    And the cutoff mask zeroes its contribution, matching the min-image path
 
   # --- PairSnapshot: canonical pair enumeration ---
 

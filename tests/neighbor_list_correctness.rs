@@ -767,6 +767,103 @@ fn cell_list_matches_all_pairs_across_r_skin_sweep() {
     }
 }
 
+// rq-ea68a7aa rq-e6620f2c rq-1e9bb643 rq-b72ac355 — the exclusion-tile
+// pass's single-periodic-copy (SPC) fast path. A box far larger than the
+// cutoff plus block bbox makes every exclusion tile's i-block SPC-eligible,
+// so the pass takes the centre-wrap fast path. Its forces must be identical
+// (to f32 tolerance) to an all-pairs run, which always uses per-pair
+// min-image — i.e. the SPC path matches min-image. The at-rounding-zero
+// check confirms out-of-cutoff pairs of cross-block tiles contribute
+// nothing on the SPC path, exactly as they do under min-image. Correct
+// forces also require the predicate/centre to read the tile's own i-block
+// `bi`: a wrong block would wrap against the wrong centre and diverge.
+#[test]
+fn exclusion_tile_spc_matches_all_pairs_in_large_box() {
+    let gpu = init_device().unwrap();
+    let (state, _lx, _ly, _lz) = small_multi_mol_state(42);
+    // 240 Angstrom cubic box; the ethane cluster spans ~60 Angstrom, so
+    // 0.5*L - block_bbox greatly exceeds the interaction cutoff and every
+    // exclusion tile's i-block clears the SPC predicate.
+    let big = 240.0e-10;
+    let sim_box = box_from_dims(&gpu, big, big, big);
+    let (bl, al, dl, excl) = ethane_topology(64);
+
+    let r_skin = m_to_bohr(3.0e-10) as f64;
+    let cell = NeighborListConfig::CellList { r_skin };
+    let ap = NeighborListConfig::AllPairs;
+
+    let (fx_c, fy_c, fz_c) =
+        run_force_evaluation(&gpu, &state, &sim_box, &bl, &al, &dl, &excl, &cell);
+    let (fx_a, fy_a, fz_a) =
+        run_force_evaluation(&gpu, &state, &sim_box, &bl, &al, &dl, &excl, &ap);
+
+    let rel = max_relative_diff(
+        (&fx_c, &fy_c, &fz_c),
+        (&fx_a, &fy_a, &fz_a),
+        1e-12 as Real,
+    );
+    assert!(
+        rel < 1e-4 as Real,
+        "exclusion-tile SPC vs all-pairs max relative diff = {rel:e} exceeds 1e-4",
+    );
+
+    // Out-of-cutoff (and fully-excluded) components that are rounding-zero
+    // in the all-pairs run must also be rounding-zero on the SPC path.
+    let mut worst_abs_at_zero = 0.0 as Real;
+    for i in 0..fx_a.len() {
+        for (u, v) in [(fx_a[i], fx_c[i]), (fy_a[i], fy_c[i]), (fz_a[i], fz_c[i])] {
+            if u.abs() < (1e-10 as Real) && v.abs() > worst_abs_at_zero {
+                worst_abs_at_zero = v.abs();
+            }
+        }
+    }
+    assert!(
+        worst_abs_at_zero < 1e-6 as Real,
+        "SPC path has {worst_abs_at_zero:e} force where all-pairs reports zero",
+    );
+}
+
+// rq-ba3ad34b rq-dc44a114 — a triclinic box makes the exclusion-tile pass
+// ineligible for SPC (the predicate gates on orthorhombic), so it takes the
+// per-pair min-image path; its forces still match the all-pairs reference.
+#[test]
+fn exclusion_tile_min_image_under_triclinic_box() {
+    let gpu = init_device().unwrap();
+    let (state, lx, ly, lz) = small_multi_mol_state(42);
+    // A non-zero xy tilt makes the box triclinic; the SPC predicate is false
+    // for every tile regardless of extent.
+    let sim_box = SimulationBox::new(
+        &gpu.device,
+        m_to_bohr(lx),
+        m_to_bohr(ly),
+        m_to_bohr(lz),
+        m_to_bohr(lx * 0.1),
+        0.0,
+        0.0,
+    )
+    .unwrap();
+    let (bl, al, dl, excl) = ethane_topology(64);
+
+    let r_skin = m_to_bohr(3.0e-10) as f64;
+    let cell = NeighborListConfig::CellList { r_skin };
+    let ap = NeighborListConfig::AllPairs;
+
+    let (fx_c, fy_c, fz_c) =
+        run_force_evaluation(&gpu, &state, &sim_box, &bl, &al, &dl, &excl, &cell);
+    let (fx_a, fy_a, fz_a) =
+        run_force_evaluation(&gpu, &state, &sim_box, &bl, &al, &dl, &excl, &ap);
+
+    let rel = max_relative_diff(
+        (&fx_c, &fy_c, &fz_c),
+        (&fx_a, &fy_a, &fz_a),
+        1e-12 as Real,
+    );
+    assert!(
+        rel < 1e-4 as Real,
+        "triclinic exclusion-tile (min-image) vs all-pairs rel diff = {rel:e}",
+    );
+}
+
 /// rq-c90fb1bd — r_skin-invariance under repeated force evaluation.
 #[test]
 fn r_skin_invariance_across_cell_layout_change() {
