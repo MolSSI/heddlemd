@@ -5881,7 +5881,7 @@
     "type": "scenario"
   },
   "rq-26dce0f6": {
-    "decl": "Scenario: A phase without a barostat captures both graphs",
+    "decl": "Scenario: A thermostatted phase without a per-step barostat captures all four cells",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -5893,7 +5893,7 @@
         "kind": "code"
       }
     ],
-    "title": "A phase without a barostat captures both graphs",
+    "title": "A thermostatted phase without a per-step barostat captures all four cells",
     "type": "scenario"
   },
   "rq-26ff4aea": {
@@ -10326,7 +10326,7 @@
     "type": "section"
   },
   "rq-49f6bbfb": {
-    "decl": "Scenario: A thermostat coupling every step captures only the coupling graph",
+    "decl": "Scenario: A thermostat coupling every step captures only the coupling row",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -10338,7 +10338,7 @@
         "kind": "code"
       }
     ],
-    "title": "A thermostat coupling every step captures only the coupling graph",
+    "title": "A thermostat coupling every step captures only the coupling row",
     "type": "scenario"
   },
   "rq-49fe5f2e": {
@@ -12543,7 +12543,7 @@
     "type": "scenario"
   },
   "rq-5b2a1cde": {
-    "decl": "Scenario: Coupling steps replay the coupling variant, non-coupling steps the non-coupling variant",
+    "decl": "Scenario: Coupling steps replay a coupling cell, non-coupling steps a non-coupling cell",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -12551,7 +12551,7 @@
         "kind": "code"
       }
     ],
-    "title": "Coupling steps replay the coupling variant, non-coupling steps the non-coupling variant",
+    "title": "Coupling steps replay a coupling cell, non-coupling steps a non-coupling cell",
     "type": "scenario"
   },
   "rq-5b4519e9": {
@@ -13161,7 +13161,7 @@
     "type": "scenario"
   },
   "rq-5fc7b67f": {
-    "decl": "Scenario: Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit",
+    "decl": "Scenario: Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -13169,7 +13169,7 @@
         "kind": "code"
       }
     ],
-    "title": "Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit",
+    "title": "Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing",
     "type": "scenario"
   },
   "rq-5fcdc437": {
@@ -14297,6 +14297,10 @@
     "refs": [
       {
         "file": "src/gpu/graph.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
         "kind": "code"
       },
       {
@@ -18324,7 +18328,7 @@
     "type": "scenario"
   },
   "rq-867630af": {
-    "decl": "Scenario: GraphLoop.launch routes by the coupling and scalars flags",
+    "decl": "Scenario: GraphLoop.launch routes by the coupling and scalars indices",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -18332,7 +18336,7 @@
         "kind": "code"
       }
     ],
-    "title": "GraphLoop.launch routes by the coupling and scalars flags",
+    "title": "GraphLoop.launch routes by the coupling and scalars indices",
     "type": "scenario"
   },
   "rq-86aa2be7": {
@@ -19116,7 +19120,7 @@
     "type": "section"
   },
   "rq-8c24f057": {
-    "decl": "Scenario: GraphLoop.launch ignores the scalars flag when forces_only is None",
+    "decl": "Scenario: GraphLoop.launch falls back to the forces+scalars cell when the forces-only cell is None",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -19124,7 +19128,7 @@
         "kind": "code"
       }
     ],
-    "title": "GraphLoop.launch ignores the scalars flag when forces_only is None",
+    "title": "GraphLoop.launch falls back to the forces+scalars cell when the forces-only cell is None",
     "type": "scenario"
   },
   "rq-8c630ad6": {
@@ -19762,7 +19766,7 @@
     "type": "scenario"
   },
   "rq-91c02dd8": {
-    "decl": "Scenario: A device-side thermostat other than csvr also captures a coupling graph",
+    "decl": "Scenario: A device-side thermostat other than csvr also captures a coupling row",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -19770,7 +19774,7 @@
         "kind": "code"
       }
     ],
-    "title": "A device-side thermostat other than csvr also captures a coupling graph",
+    "title": "A device-side thermostat other than csvr also captures a coupling row",
     "type": "scenario"
   },
   "rq-91c4727a": {
@@ -21163,7 +21167,7 @@
     "type": "scenario"
   },
   "rq-9c1eb803": {
-    "decl": "Scenario: Graph run with a coupling variant matches the fully per-step run bit-for-bit",
+    "decl": "Scenario: Graph run with a coupling variant matches the fully per-step run bit-for-bit on a regular packing",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -21171,7 +21175,7 @@
         "kind": "code"
       }
     ],
-    "title": "Graph run with a coupling variant matches the fully per-step run bit-for-bit",
+    "title": "Graph run with a coupling variant matches the fully per-step run bit-for-bit on a regular packing",
     "type": "scenario"
   },
   "rq-9c22145d": {
@@ -23522,10 +23526,10 @@
     "type": "scenario"
   },
   "rq-acc595b8": {
-    "decl": "Scenario: Eligible thermostatted phase captures non-coupling and coupling graphs at phase start",
+    "decl": "Scenario: Eligible thermostatted NVT phase captures all four matrix cells at phase start",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Eligible thermostatted phase captures non-coupling and coupling graphs at phase start",
+    "title": "Eligible thermostatted NVT phase captures all four matrix cells at phase start",
     "type": "scenario"
   },
   "rq-accf1a4b": {
@@ -26652,6 +26656,22 @@
     "title": ".minlog reports accepted=0 for rejected iterations",
     "type": "scenario"
   },
+  "rq-c4ba5005": {
+    "decl": "Scenario: A non-log coupling step replays the coupling forces-only cell",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A non-log coupling step replays the coupling forces-only cell",
+    "type": "scenario"
+  },
   "rq-c4cc1d99": {
     "decl": "Scenario: Quiescent batch incurs no rebuild",
     "file": "cuda-graphs",
@@ -26943,7 +26963,7 @@
     "type": "scenario"
   },
   "rq-c6c56cdc": {
-    "decl": "Scenario: A phase with a barostat captures only the forces+scalars graph",
+    "decl": "Scenario: A per-step-barostat phase captures no forces-only cell",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -26955,7 +26975,7 @@
         "kind": "code"
       }
     ],
-    "title": "A phase with a barostat captures only the forces+scalars graph",
+    "title": "A per-step-barostat phase captures no forces-only cell",
     "type": "scenario"
   },
   "rq-c6ee2fb9": {
@@ -27665,6 +27685,14 @@
     "level": 2,
     "refs": [],
     "title": "Algorithm",
+    "type": "section"
+  },
+  "rq-cbf4f13e": {
+    "decl": "## Reproducibility Scope",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Reproducibility Scope",
     "type": "section"
   },
   "rq-cc12f2d8": {
@@ -29981,7 +30009,7 @@
     "type": "scenario"
   },
   "rq-dce6f4cf": {
-    "decl": "Scenario: A thermostatted phase replays a coupling variant on coupling steps",
+    "decl": "Scenario: A thermostatted phase replays a coupling cell on coupling steps",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -29989,7 +30017,7 @@
         "kind": "code"
       }
     ],
-    "title": "A thermostatted phase replays a coupling variant on coupling steps",
+    "title": "A thermostatted phase replays a coupling cell on coupling steps",
     "type": "scenario"
   },
   "rq-dceedbbb": {
@@ -31636,10 +31664,10 @@
     "type": "scenario"
   },
   "rq-e954f09e": {
-    "decl": "Scenario: Graph-mode and non-graph-mode runs are byte-identical (GPU)",
+    "decl": "Scenario: Graph-mode and non-graph-mode runs agree on a regularly-packed system (GPU)",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Graph-mode and non-graph-mode runs are byte-identical (GPU)",
+    "title": "Graph-mode and non-graph-mode runs agree on a regularly-packed system (GPU)",
     "type": "scenario"
   },
   "rq-e963f27a": {
@@ -34032,10 +34060,10 @@
     "type": "scenario"
   },
   "rq-f986ba18": {
-    "decl": "Scenario: Graph-mode run with a mid-phase re-capture is byte-identical to per-step",
+    "decl": "Scenario: Graph-mode run with a mid-phase re-capture matches per-step on a regular packing",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Graph-mode run with a mid-phase re-capture is byte-identical to per-step",
+    "title": "Graph-mode run with a mid-phase re-capture matches per-step on a regular packing",
     "type": "scenario"
   },
   "rq-f9d0621d": {

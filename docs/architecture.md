@@ -49,6 +49,21 @@ Tests that compare a kernel result against a CPU-computed expected value
 should use a small relative tolerance. Tests that compare two GPU runs to
 each other use exact equality — that is the load-bearing invariant.
 
+"Two GPU runs" here means two runs of the **same execution path**. Each
+timestep runs through one of two paths — the per-step launch loop or the
+replayed CUDA graph (see `rqm/cuda-graphs.md`) — and these are two different
+floating-point summation orders. They agree to f32 rounding and are bit-exact
+for regularly-packed neighbour lists, but on a disordered system the two paths
+can differ by an f32 quantum (order `1e-6`): the packed-neighbour build groups
+j-atoms into 32-atom tiles in a warp-scheduling-dependent order, the pair
+kernel's per-tile partial sums are float, and the two paths' scheduling yields
+different tile partitions. This is a benign summation-order difference, not a
+race. The enforced bit-exact invariant is therefore **run-to-run within one
+path**, and that is the invariant that surfaces a race — a scheduling-dependent
+bug breaks it the moment scheduling varies between runs. Cross-path
+(graph-vs-per-step) agreement is an f32-order property, not a bit-exact
+guarantee.
+
 ## High-level data flow
 
 ```

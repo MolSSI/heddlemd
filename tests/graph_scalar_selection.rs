@@ -128,71 +128,158 @@ fn log_row_count(dir: &Path) -> u64 {
     text.lines().skip(1).filter(|l| !l.trim().is_empty()).count() as u64
 }
 
-// rq-867630af rq-8c24f057
-// Build a GraphLoop from two captured single-node graphs that zero
-// distinct device buffers, then observe which buffer a launch zeroes to
-// confirm the `scalars` flag selects the graph.
-fn graph_loop_launch_routes_by_scalars_flag() {
+// rq-867630af
+// Build a GraphLoop from four captured single-node graphs (one per cell of
+// the coupling × scalars matrix) that zero distinct device buffers, then
+// observe which buffer a launch zeroes to confirm `launch(coupling, scalars)`
+// selects graphs[coupling][scalars].
+#[test]
+fn graph_loop_launch_routes_by_matrix_indices() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
 
-    let mut buf_fo = device.htod_copy(vec![7u32]).unwrap();
-    let mut buf_fev = device.htod_copy(vec![7u32]).unwrap();
-    let mut buf_cpl = device.htod_copy(vec![7u32]).unwrap();
+    // One buffer + one-node graph per cell graphs[coupling][scalars]; each
+    // graph zeroes its own buffer, so the buffer that flips to 0 identifies
+    // which cell `launch` selected.
+    let mut bufs = [
+        [
+            device.htod_copy(vec![7u32]).unwrap(),
+            device.htod_copy(vec![7u32]).unwrap(),
+        ],
+        [
+            device.htod_copy(vec![7u32]).unwrap(),
+            device.htod_copy(vec![7u32]).unwrap(),
+        ],
+    ];
+    let mut graphs: [[Option<_>; 2]; 2] = [[None, None], [None, None]];
+    for c in 0..2 {
+        for s in 0..2 {
+            begin_stream_capture(&device, CaptureMode::ThreadLocal).unwrap();
+            device.memset_zeros(&mut bufs[c][s]).unwrap();
+            graphs[c][s] = Some(end_stream_capture(&device).unwrap().instantiate().unwrap());
+        }
+    }
+    let gl = GraphLoop { graphs };
 
+    // Each (coupling, scalars) selects exactly graphs[coupling][scalars].
+    for c in 0..2 {
+        for s in 0..2 {
+            for cc in 0..2 {
+                for ss in 0..2 {
+                    device.htod_copy_into(vec![7u32], &mut bufs[cc][ss]).unwrap();
+                }
+            }
+            gl.launch(c == 1, s == 1).unwrap();
+            device.synchronize().unwrap();
+            for cc in 0..2 {
+                for ss in 0..2 {
+                    let expect = if cc == c && ss == s { 0 } else { 7 };
+                    assert_eq!(
+                        device.dtoh_sync_copy(&bufs[cc][ss]).unwrap()[0],
+                        expect,
+                        "launch(coupling={c}, scalars={s}) selected the wrong cell"
+                    );
+                }
+            }
+        }
+    }
+}
+
+// rq-8c24f057 — when a row's forces-only cell is None (a per-step barostat
+// evaluates scalars every step), launch(coupling, scalars = false) falls
+// back to that row's forces+scalars cell.
+#[test]
+fn graph_loop_launch_falls_back_when_forces_only_absent() {
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+
+    let mut buf_nc = device.htod_copy(vec![7u32]).unwrap();
+    let mut buf_cp = device.htod_copy(vec![7u32]).unwrap();
     begin_stream_capture(&device, CaptureMode::ThreadLocal).unwrap();
-    device.memset_zeros(&mut buf_fo).unwrap();
-    let g_fo = end_stream_capture(&device).unwrap().instantiate().unwrap();
-
+    device.memset_zeros(&mut buf_nc).unwrap();
+    let g_nc = end_stream_capture(&device).unwrap().instantiate().unwrap();
     begin_stream_capture(&device, CaptureMode::ThreadLocal).unwrap();
-    device.memset_zeros(&mut buf_fev).unwrap();
-    let g_fev = end_stream_capture(&device).unwrap().instantiate().unwrap();
+    device.memset_zeros(&mut buf_cp).unwrap();
+    let g_cp = end_stream_capture(&device).unwrap().instantiate().unwrap();
 
-    begin_stream_capture(&device, CaptureMode::ThreadLocal).unwrap();
-    device.memset_zeros(&mut buf_cpl).unwrap();
-    let g_cpl = end_stream_capture(&device).unwrap().instantiate().unwrap();
-
+    // Only the forces+scalars column captured (forces-only cells None).
     let gl = GraphLoop {
-        forces_and_scalars: Some(g_fev),
-        forces_only: Some(g_fo),
-        coupling: Some(g_cpl),
+        graphs: [[None, Some(g_nc)], [None, Some(g_cp)]],
     };
 
-    // coupling = false, scalars = false -> forces-only graph.
-    gl.launch(false, false).unwrap();
+    gl.launch(false, false).unwrap(); // falls back to graphs[0][1]
     device.synchronize().unwrap();
-    assert_eq!(device.dtoh_sync_copy(&buf_fo).unwrap()[0], 0);
-    assert_eq!(device.dtoh_sync_copy(&buf_fev).unwrap()[0], 7);
-    assert_eq!(device.dtoh_sync_copy(&buf_cpl).unwrap()[0], 7);
+    assert_eq!(device.dtoh_sync_copy(&buf_nc).unwrap()[0], 0);
 
-    // coupling = false, scalars = true -> forces+scalars graph.
-    device.htod_copy_into(vec![7u32], &mut buf_fo).unwrap();
-    gl.launch(false, true).unwrap();
+    gl.launch(true, false).unwrap(); // falls back to graphs[1][1]
     device.synchronize().unwrap();
-    assert_eq!(device.dtoh_sync_copy(&buf_fev).unwrap()[0], 0);
-    assert_eq!(device.dtoh_sync_copy(&buf_fo).unwrap()[0], 7);
-    assert_eq!(device.dtoh_sync_copy(&buf_cpl).unwrap()[0], 7);
+    assert_eq!(device.dtoh_sync_copy(&buf_cp).unwrap()[0], 0);
+}
 
-    // coupling = true -> coupling graph, regardless of scalars.
-    device.htod_copy_into(vec![7u32], &mut buf_fev).unwrap();
-    gl.launch(true, true).unwrap();
-    device.synchronize().unwrap();
-    assert_eq!(device.dtoh_sync_copy(&buf_cpl).unwrap()[0], 0);
-    assert_eq!(device.dtoh_sync_copy(&buf_fev).unwrap()[0], 7);
+// rq-c4ba5005 — at coupling_interval = 1 with log_every = 5, coupling steps
+// that are not log steps replay the coupling forces-only cell (graphs[1][0])
+// and coupling steps that are also log steps replay the coupling
+// forces+scalars cell (graphs[1][1]). n_steps = 20 exceeds the 8-step
+// calibration prefix, so the batched loop replays both coupling cells:
+// non-log steps 9,11,12,13,14,16,17,18,19 use forces-only, log steps 10,15,20
+// use forces+scalars. The forces-only coupling cell is exercised and the run
+// is bit-exact GPU-vs-GPU (the load-bearing reproducibility invariant): two
+// graph-mode runs from byte-identical inputs produce byte-identical
+// trajectories.
+#[test] // rq-c4ba5005
+fn coupling_forces_only_cell_is_reproducible() {
+    let run = |tag: &str| -> Vec<u8> {
+        let dir = tmp(tag);
+        write_lj_liquid(&dir);
+        let cfg = format!(
+            r#"schema_version = 1
+init = "sim.in.xyz"
 
-    // forces_only = None -> scalars = false still routes to forces+scalars.
-    let mut buf_none = device.htod_copy(vec![7u32]).unwrap();
-    begin_stream_capture(&device, CaptureMode::ThreadLocal).unwrap();
-    device.memset_zeros(&mut buf_none).unwrap();
-    let g_none = end_stream_capture(&device).unwrap().instantiate().unwrap();
-    let gl_none = GraphLoop {
-        forces_and_scalars: Some(g_none),
-        forces_only: None,
-        coupling: None,
+[simulation]
+seed = 1
+temperature = 100.0
+
+[[phase]]
+name = "run"
+n_steps = 20
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+{CSVR}
+
+[phase.output]
+log_every = 5
+trajectory_every = 1
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+kind = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 9.0e-10
+
+[neighbor_list]
+mode = "cell-list"
+r_skin = 3.0e-10
+"#
+        );
+        std::fs::write(dir.join("sim.in.toml"), cfg).unwrap();
+        run_simulation(&dir.join("sim.in.toml")).unwrap();
+        std::fs::read(dir.join("sim.out.run.xyz")).unwrap()
     };
-    gl_none.launch(false, false).unwrap();
-    device.synchronize().unwrap();
-    assert_eq!(device.dtoh_sync_copy(&buf_none).unwrap()[0], 0);
+    let a = run("cpl_fo_run_a");
+    let b = run("cpl_fo_run_b");
+    assert_eq!(
+        a, b,
+        "coupling forces-only cell is not run-to-run reproducible in graph mode"
+    );
 }
 
 // rq-009eed1b rq-26dce0f6
