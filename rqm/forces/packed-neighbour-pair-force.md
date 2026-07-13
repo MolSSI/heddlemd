@@ -25,25 +25,31 @@ the same fixed-point accumulators:
 
 - The **packed-neighbour pass** (the main pair-force kernel) walks
   every entry of `interacting_tiles` / `interacting_atoms` and
-  evaluates each pair at full strength. It contains no modified pairs
-  (the construction routes them elsewhere), so it does no exclusion
-  work at all.
+  evaluates each pair at full strength. It does no exclusion work at
+  all — every pair it sees, modified or not, is evaluated as if its
+  scale were `1`.
 - The **single-pair pass** walks `single_pairs` — individual
   (atom_i, atom_j) pairs extracted at neighbour-list build time from
-  sparse (i-block, j-block) candidates. One thread per pair; also
-  free of modified pairs by construction.
-- The **exclusion-tile pass** walks the small set of block pairs that
-  contain modified pairs. Each such tile carries a 1024-bit
-  modified-pair bitmask; the pass computes the full 32×32 block-pair
-  interaction and, for each flagged lane pair, multiplies each
-  fragment's contribution by that fragment's per-pair scale.
+  sparse (i-block, j-block) candidates. One thread per pair; it too
+  evaluates every pair at full strength and reads no exclusion data.
+- The **correction pass** walks the fixed list of **modified pairs**
+  (every pair whose scale differs from `1` in some fragment, a pure
+  function of the topology). One thread per modified pair; it adds each
+  fragment's `(scale − 1) × evaluate` so that, summed with the
+  full-strength contribution the bulk or single-pair pass already
+  added, the net is `scale × evaluate`.
 
 Exclusion scales are **per fragment**: each fragment's contribution to a
 pair is scaled by a value in `[0, 1]` (`0` a full exclusion, `1` full
 strength, intermediate for OPLS/AMBER 1-4). Scaling is applied only in
-the exclusion-tile pass, through the per-tile bitmask plus a per-pair
-scale lookup confined to the flagged pairs; the bulk and single-pair
-passes never read the exclusion tables. See *Exclusion Handling*.
+the correction pass, confined to the modified-pair list; the
+packed-neighbour and single-pair passes never read the exclusion tables.
+The full-strength term (from a neighbour-list pass) and the correction
+term (from the correction pass) are computed through different
+displacement code paths, so a full exclusion (`scale = 0`) nets to a
+small, bounded residual (order `1e-5` atomic units, far below MD-relevant
+forces) rather than exactly zero; the residual is deterministic for fixed
+inputs. See *Exclusion Handling*.
 
 This file specifies the data model, the block layout, the
 neighbour-list construction pipeline, the force kernel, the
@@ -230,32 +236,28 @@ single-pair pass amortises a full 32×32 = 1024-pair tile loop over
 just a handful of true interactions; above it the packed-
 neighbour pass is cheaper.
 
-The bulk list never contains a modified pair; modified pairs are
-carried by a parallel **exclusion-tile** list (see *Exclusion
-Handling*):
+The packed-neighbour and single-pair lists may contain modified pairs
+like any other in-range pair; the correction pass adjusts them
+afterwards (see *Exclusion Handling*). Modified pairs are carried by a
+device-resident **modified-pair list**, a pure function of the topology
+uploaded once at construction and never rebuilt:
 
-- `exclusion_tile_iblocks: CudaSlice<u32>` and
-  `exclusion_tile_jblocks: CudaSlice<u32>`, each of length
-  `exclusion_tiles_capacity` — the i-block and j-block (`bi ≤ bj`) of
-  each exclusion tile.
-- `exclusion_tile_masks: CudaSlice<u32>` of length
-  `exclusion_tiles_capacity · 32` — `exclusion_tile_masks[t·32 + ℓ]` is
-  the 32-bit row of tile `t`'s 1024-bit bitmask for i-lane `ℓ`; bit
-  `j_lane` is set when the two atoms are a modified pair (some fragment
-  scale differs from `1`), and the force pass reads that pair's
-  per-fragment scale at evaluation time.
+- `modified_pairs: CudaSlice<u32>` of length `2 · E` — the canonical
+  modified pairs interleaved `[a₀, b₀, a₁, b₁, …]` with `a < b`, where
+  `E` is the number of pairs whose scale differs from `1` in some
+  fragment. The correction pass reads this list; each entry's
+  per-fragment scale is looked up through `exclusion_scale(a, b)` at
+  evaluation time.
 
 The interaction counts are held on a small device counter array:
 
-- `interaction_count: CudaSlice<u32>` of length 3 —
+- `interaction_count: CudaSlice<u32>` of length 2 —
   `interaction_count[0]` is the live entry count of
-  `interacting_tiles` / `interacting_atoms`;
-  `interaction_count[1]` is the live entry count of
-  `single_pair_atoms`; `interaction_count[2]` is the live count of
-  exclusion tiles.
+  `interacting_tiles` / `interacting_atoms`; `interaction_count[1]` is
+  the live entry count of `single_pair_atoms`. The modified-pair count
+  `E` is a host-side constant (the list is fixed), not a device counter.
 
-`interaction_count` is reset to `(0, 0, 0)` at the start of every
-rebuild.
+`interaction_count` is reset to `(0, 0)` at the start of every rebuild.
 
 ## Exclusion Handling <!-- rq-03faaf24 -->
 
@@ -272,63 +274,72 @@ while keeping its Coulomb contribution (scale `1`).
 
 A **modified pair** is an atom pair whose scale differs from `1` in at
 least one fragment. A pair whose every fragment scale is `1` is not
-modified and carries no exclusion entry. Modified pairs are handled
-entirely by a dedicated exclusion-tile pass; the bulk neighbour-list and
-single-pair passes apply no per-pair scale and read no exclusion data.
-Because every modified pair is short-range (intramolecular), modified
-pairs concentrate in a small set of block pairs, materialised each
-rebuild as the **exclusion tiles**:
+modified and carries no exclusion entry. The set of modified pairs is a
+pure function of the topology, fixed for the lifetime of a run.
 
-- An **exclusion tile** is an ordered block pair `(bi, bj)` with
-  `bi ≤ bj` such that at least one atom of block `bi` is a modified pair
-  with at least one atom of block `bj` under the current block
-  membership (`sorted_particle_ids`). It carries a 1024-bit modified-pair
-  bitmask (32 `u32` words, one per i-lane): bit `(i_lane, j_lane)` is set
-  when the atom at slot `bi·32 + i_lane` is a modified pair with the atom
-  at slot `bj·32 + j_lane`.
-- The set of exclusion tiles and their bitmasks is a deterministic
-  function of the exclusion topology and the current
-  `sorted_particle_ids`, recomputed at every neighbour-list rebuild
-  (block membership changes with the cell sort). Building it is
-  amortised over the many steps between rebuilds.
+Modified pairs are handled by a **correction pass** that is entirely
+separate from the two passes that evaluate the neighbour list:
 
-The force kernel is split so that only the exclusion-tile pass ever
-consults exclusion data:
+- The **packed-neighbour pass** and the **single-pair pass** evaluate
+  every pair they see — modified or not — at full strength. They carry
+  no `exclusion_scale` call, no `atom_excl_*` read, and no per-pair scale
+  multiply. The construction does not route modified pairs away from
+  them; a modified pair simply appears in one of these passes like any
+  other in-range pair and contributes `1 × evaluate`.
+- The **correction pass** walks the fixed **modified-pair list** — the
+  canonical pairs `(a, b)` (`a < b`) whose scale differs from `1` in some
+  fragment, held device-resident. One thread per modified pair. It loads
+  the two atoms' positions, forms the minimum-image displacement,
+  applies the max-cutoff mask, and for each fragment adds
+  `(exclusion_scale(a, b) − 1) × evaluate` to both atoms' fixed-point
+  slots (Newton's 3rd via `±`). Summed with the full-strength `1 ×
+  evaluate` the neighbour-list pass already contributed, the net per
+  fragment is `scale × evaluate`: a full exclusion (`scale = 0`)
+  contributes nothing, a 1-4 pair contributes its scaled force and
+  energy. The per-fragment scale lookup and the `atom_excl_*` reads are
+  confined to the `E` modified pairs.
 
-- The **exclusion-tile pass** walks the exclusion tiles. It loads the
-  full 32 atoms of `bi` and the full 32 atoms of `bj` from
-  `tile_sorted_posq` (two coalesced loads) and runs the 32-iteration
-  diagonal shuffle over all 32×32 lane pairs. For a lane pair whose
-  modified-pair bit is set, it looks up each fragment's per-pair scale
-  (`exclusion_scale(i, j)`) and multiplies that fragment's contribution
-  by it — a full exclusion's `0` contributes nothing, a 1-4 pair's
-  fraction contributes a scaled force. A lane pair whose bit is clear
-  (and is not the self-block diagonal) is evaluated at full strength with
-  **no scale lookup**. The scale lookup is thus confined to the flagged
-  pairs of the (few) exclusion tiles.
-- The **bulk neighbour-list pass** and the **single-pair pass** do
-  **zero** exclusion work: they carry no `exclusion_scale` call, no
-  `atom_excl_*` reads, and no per-pair scale multiply. The construction
-  guarantees they never contain a modified pair (below).
+This correctness rests on two properties:
 
-The neighbour-list construction keeps modified pairs out of the bulk
-list by **skipping exclusion-tile block pairs**: when the construction
-sweeps candidate j-blocks for i-block `bi`, any candidate `bj` for which
-`(bi, bj)` is an exclusion tile is skipped entirely — all of that block
-pair's interactions (modified and unmodified alike) are computed by the
-exclusion-tile pass instead. Because a modified pair's two atoms always
-share such a block pair, no modified pair can reach the bulk or
-single-pair outputs, and no unmodified pair is dropped or double-counted
-(each block pair is processed by exactly one pass).
+1. **Unique emission.** Each unordered pair appears exactly once across
+   the union of the packed-neighbour and single-pair outputs (the
+   construction's ordered block-pair sweep plus its `aid < jid`
+   self-block dedup guarantee this — see *Construction Pipeline* and the
+   uniqueness scenarios). So a modified pair receives exactly one
+   full-strength `1 × evaluate` for the correction pass's single
+   `(scale − 1) × evaluate` to complete.
+2. **Bounded-residual cancellation.** The force accumulator is 64-bit
+   integer fixed-point, so accumulation itself is order-independent and
+   exact. A modified pair's full-strength term is computed by whichever
+   neighbour-list pass owns it — the packed-neighbour pass (the diagonal
+   shuffle, possibly under the single-periodic-copy fast path) or the
+   single-pair pass (per-pair min-image) — while the correction term is
+   computed by the correction pass through its own per-pair min-image
+   evaluation. These are different displacement code paths, so the two
+   terms are equal only to `f32` precision, not bit-for-bit; a full
+   exclusion (`scale = 0`) nets to a small residual rather than exactly
+   zero. The residual is bounded by roughly `f32` precision times the
+   pair's pre-cancellation force magnitude (order `1e-5` atomic units for
+   a typical excluded bond, below `1e-4` atomic units and far below
+   MD-relevant force magnitudes of `~1e-2` atomic units). It is
+   **deterministic**: for byte-identical inputs the same pass owns each
+   modified pair, so the forces are bit-identical run to run (preserving
+   the GPU-vs-GPU reproducibility invariant of `architecture.md`). It is
+   **routing-dependent**: which pass owns a modified pair follows the
+   neighbour-list layout, so the residual — and therefore the exclusion
+   forces — can vary within its bound across different `r_skin` values or
+   atom orderings that route the pair differently. Exclusion forces are
+   thus reproducible for fixed inputs but agree only to the residual bound
+   across neighbour-list routing.
 
-This confines the per-pair, per-fragment exclusion scan to the small set
-of flagged pairs inside the exclusion tiles; the bulk pass — the vast
-majority of pair evaluations — carries no exclusion cost at all. The
-exclusion-topology index tables `atom_excl_offsets` / `atom_excl_partners`
-(see `topology.md`) are read by the per-rebuild on-device tile build to
-enumerate the modified pairs and place their bits; the per-fragment scale
-arrays are read only by the exclusion-tile force pass, at evaluation time.
-The bulk and single-pair passes read neither.
+The correction pass reads the exclusion-topology index tables
+`atom_excl_offsets` / `atom_excl_partners` and the per-fragment scale
+arrays (see `topology.md`) only for the `E` modified pairs; the
+packed-neighbour and single-pair passes read none of them. Because the
+correction pass is a per-pair pass keyed on the fixed modified-pair list
+and never touches the neighbour-list block structure, it is independent
+of the neighbour-list mode and applies equally to cell-list and
+all-pairs (`Trivial`) neighbour lists.
 
 ## Construction Pipeline <!-- rq-dbffee81 -->
 
@@ -364,75 +375,10 @@ produced `sorted_particle_ids`:
    `block_centre` and `block_bbox` through `sorted_blocks` into
    `sorted_block_centre` and `sorted_block_bbox`. Half-precision
    conversion happens here.
-6. **`build_exclusion_tiles`** — materialise the exclusion tiles, their
-   bitmasks, and the `excl_jblock_offsets` / `excl_jblocks` CSR skip-list
-   from the exclusion topology under the current block membership,
-   entirely on the device. It runs as a short kernel sub-pipeline on the
-   default stream and copies nothing to and from the host:
-
-   a. **Invert the sort.** `build_atom_slot` writes the
-      slot-for-each-atom permutation `atom_slot[sorted_particle_ids[s]] = s`
-      (one thread per slot) into a per-rebuild device scratch of length
-      `N`, so a canonical atom id maps to its current slot without a host
-      copy.
-   b. **Emit per-pair keys.** `emit_exclusion_tile_keys` enumerates every
-      canonical modified pair `(a, b)` (`a < b`) directly from the
-      device-resident exclusion topology (`atom_excl_offsets` /
-      `atom_excl_partners`; a modified pair is any partner entry, and the
-      `a < b` filter yields each unordered pair exactly once). For each
-      pair it reads slots `(sa, sb) = (atom_slot[a], atom_slot[b])`, orders
-      them so `si ≤ sj`, and forms blocks `(bi, bj) = (si/32, sj/32)` and
-      lanes `(li, lj) = (si%32, sj%32)`. It writes one record — the
-      block-pair key `(bi, bj)` together with the lane pair — at the pair's
-      own fixed index in a per-rebuild scratch of length `E` (the
-      modified-pair count, fixed for the run), so placement needs no
-      atomics.
-   c. **Sort by block pair.** `sort_exclusion_keys` stably radix-sorts the
-      records by their `(bi, bj)` key (the reproducible radix sort of
-      *Sorted-Blocks-by-Volume*, ties broken by record index), grouping all
-      records that share a block pair into one contiguous run in ascending
-      `(bi, bj)` order.
-   d. **Reduce to tiles.** `reduce_exclusion_tiles` marks each run head (a
-      record whose key differs from its predecessor), prefix-scans the head
-      flags to assign tile indices, and writes the tile count to
-      `interaction_count[2]`. Each tile `t` records
-      `exclusion_tile_iblocks[t] = bi` and `exclusion_tile_jblocks[t] = bj`,
-      and every record in the run ORs its lane bit into
-      `exclusion_tile_masks[t·32 + li]` (bit `lj`) — plus the symmetric bit
-      `exclusion_tile_masks[t·32 + lj]` (bit `li`) for a self-block tile
-      (`bi == bj`). Because the mask is an OR, it is independent of
-      intra-run record order.
-   e. **Build the CSR skip-list.** `build_exclusion_csr` scans the sorted,
-      unique tiles into `excl_jblock_offsets` (length `n_blocks + 1`) and
-      `excl_jblocks` so that
-      `excl_jblocks[excl_jblock_offsets[bi] .. excl_jblock_offsets[bi+1]]`
-      lists the ascending `bj` of every exclusion tile whose i-block is
-      `bi`. `find_blocks_with_interactions` (step 7) consults this CSR to
-      skip exclusion-tile candidate block pairs.
-
-   The tile set, their ascending `(bi, bj)` order, their bitmasks, and the
-   CSR are a pure function of the exclusion topology and
-   `sorted_particle_ids` — a permutation inversion, a fixed-index emit, a
-   stable sort, and an order-independent OR — so they are byte-identical
-   across runs. The mask marks *which* pairs are modified; the force pass
-   reads each flagged pair's per-fragment scale at evaluation time, so a
-   full exclusion (`scale == 0`) and a 1-4 pair (fractional scale) are
-   flagged identically and distinguished only by the scale the force pass
-   applies. As its final action a single designated thread compares
-   `interaction_count[2]` against `exclusion_tiles_capacity` and sets the
-   `exclusion_tiles_high_water` / `exclusion_tiles_overflow` bits of
-   `neighbor_status` (see *Capacity*); the count and status stay
-   device-resident.
-7. **`find_blocks_with_interactions`** — the main construction
+6. **`find_blocks_with_interactions`** — the main construction
    kernel. One warp per i-block (iterated through
    `sorted_blocks`). For each candidate j-block (from inner
    sweep), the warp:
-   - **Skips the candidate when `(bi, bj)` is an exclusion tile** (a
-     lookup against the exclusion-tile table from step 6). That block
-     pair's interactions — excluded and non-excluded alike — are
-     computed by the exclusion-tile pass, so the bulk list omits them
-     entirely, keeping every bulk and single-pair output exclusion-free
-     without dropping or double-counting any pair.
    - Computes the centre-to-centre bbox-prune test (`Δ² ≤
      (r_search + radius_i + radius_j)²`) using
      `sorted_block_centre` and `sorted_block_bbox`.
@@ -513,16 +459,9 @@ multiple of `n_blocks`, clamped down to the all-pairs reference
 `n_blocks²` for tiny systems. There is no configuration knob for the
 initial capacity; the probe rebuild (below) determines it.
 
-The exclusion-tile buffers (`exclusion_tile_iblocks`,
-`exclusion_tile_jblocks`, `exclusion_tile_masks`, `excl_jblocks`) carry
-their own capacity `exclusion_tiles_capacity`, seeded `O(n_blocks)` and
-grown by the same count-free geometric high-water mechanism as the tile
-and single-pair buffers. The exclusion-tile count has a hard static upper
-bound — the fixed modified-pair count `E`, since each modified pair joins
-exactly one tile — so growth converges after the probe rebuild and a
-steady run never regrows them; the per-rebuild build scratch
-(`atom_slot`, length `N`, and the sort records, length `E`) is sized once
-from `N` and `E` and never grows.
+The modified-pair list has no capacity of its own: it is a fixed
+device buffer of length `2 · E` uploaded once at construction (`E` is a
+host-side constant), never grown and never rebuilt.
 
 **Device-resident counts.** A steady-state rebuild copies no count
 to the host. The construction kernel writes the live counts to the
@@ -540,12 +479,9 @@ grid sized by a host-known capacity and reads the live count from
 - The packed-neighbour force pass launches over `n_blocks`; the
   single-pair force pass launches over `single_pairs_capacity` and
   reads `interaction_count[1]` on the device (see *Single-Pair Pass*).
-- The exclusion-tile force pass launches over `exclusion_tiles_capacity`
-  and reads the live tile count `interaction_count[2]` on the device;
-  warps past that count exit early (see *Exclusion-Tile Pass*). The
-  exclusion-tile build (step 6) writes the count and sets the
-  exclusion-tile high-water / overflow bits, so this pass never needs a
-  host-known tile count.
+- The correction pass launches over `E` (the fixed modified-pair count),
+  one thread per modified pair; it reads no device count (see
+  *Correction Pass*).
 
 **Status word.** `CellListData` carries the single-`u32` device
 buffer `neighbor_status` (see `neighbor-list.md` *Displacement Check*)
@@ -558,14 +494,10 @@ whose bits are:
 | 2 | `single_pairs_high_water` | construction kernel |
 | 3 | `tiles_overflow` | construction kernel |
 | 4 | `single_pairs_overflow` | construction kernel |
-| 5 | `exclusion_tiles_high_water` | exclusion-tile build (step 6) |
-| 6 | `exclusion_tiles_overflow` | exclusion-tile build (step 6) |
 
-Each list's producing stage sets its own bits from a single designated
-device thread that compares the live count `interaction_count[c]` against
-the capacity `capacity_c` via `atomicOr(neighbor_status, …)`: the
-construction sweep (step 7) sets the tile and single-pair bits, and the
-exclusion-tile build (step 6) sets the exclusion-tile bits. In every case:
+The construction sweep sets its bits from a single designated device
+thread that compares the live count `interaction_count[c]` against the
+capacity `capacity_c` via `atomicOr(neighbor_status, …)`:
 
 - `interaction_count[c] > floor(capacity_c · tile_pair_fill_threshold)`
   sets the matching `*_high_water` bit. The build is **complete** — no
@@ -692,53 +624,50 @@ class-zero kernel does that).
 ## Force Kernel <!-- rq-6083409b -->
 
 The fast-class pair-force pipeline has three JIT-composed pair-force
-passes — the exclusion-tile pass, the packed-neighbour (bulk) pass, and
-the single-pair pass. Each writes into the same per-particle fixed-point
+passes — the packed-neighbour (bulk) pass, the single-pair pass, and the
+correction pass. Each writes into the same per-particle fixed-point
 accumulators (`fast_total_forces_fp_*`,
 `fast_total_potential_energies_fp`, `fast_total_virials_fp`); the
 finaliser converts to `Real` after all passes have run. Only the
-exclusion-tile pass consults exclusion data; the other two evaluate
-`heddle_jit_eval_pair_sum` with no exclusion lookup or scale multiply
-(see *Exclusion Handling*).
+correction pass consults exclusion data; the packed-neighbour and
+single-pair passes evaluate `heddle_jit_eval_pair_sum` with no exclusion
+lookup or scale multiply (see *Exclusion Handling*).
 
-### Exclusion-Tile Pass <!-- rq-fa0b3d10 -->
+### Correction Pass <!-- rq-fa0b3d10 -->
 
-For every exclusion tile `t` in `[0, interaction_count[2])`:
+For every modified pair `k` in `[0, E)` — one thread per pair:
 
-- `bi = exclusion_tile_iblocks[t]`, `bj = exclusion_tile_jblocks[t]`
-  (`bi ≤ bj`).
-- Load the full 32 i-atoms of `bi` and 32 j-atoms of `bj` from
-  `tile_sorted_posq[bi · 32 + lane]` / `tile_sorted_posq[bj · 32 + lane]`
-  (two coalesced loads). Inactive slots (`≥ N`) carry `+∞` and fail the
-  cutoff.
-- Read this lane's modified-pair mask row `exclusion_tile_masks[t · 32 + lane]`.
-- Evaluate the per-tile single-periodic-copy (SPC) predicate on block `bi`
-  (the tile's i-block) — the same predicate the packed-neighbour pass uses
-  (see *Single-Periodic-Copy Fast Path*), read from `block_bbox[bi]` and the
-  lattice, warp-uniform across the tile's 32 lanes. When it holds, each lane
-  wraps its own `bi` atom and its own `bj` atom once against the i-block
-  centre `block_centre[bi]` with `triclinic_wrap_against_center`, and the
-  inner loop computes `dx = pi − pj` directly with **no** per-pair
-  `heddle_jit_triclinic_min_image` call; otherwise the inner loop takes the
-  per-pair min-image path. The branch is warp-uniform, so exactly one path
-  runs per tile per launch.
-- Run the 32-iteration diagonal shuffle over all 32×32 lane pairs,
-  skipping only the self-block (`bi == bj`) diagonal. For each surviving
-  lane pair `(i_lane, j_lane)`:
-  - If its modified-pair mask bit is set, the pair's contribution is
-    summed through the scale-aware evaluator: each fragment's
-    `(factor, energy)` is multiplied by that fragment's per-pair scale
-    `exclusion_scale(i, j)`. A fully-excluded pair (`scale == 0` in every
-    fragment) therefore contributes nothing, and a 1-4 pair contributes a
-    scaled force and energy.
-  - If its mask bit is clear, the pair is evaluated at full strength with
-    **no scale lookup** (the scale is `1`).
-  The scaled contribution is added to the i-atom and j-atom fixed-point
-  slots (Newton's 3rd via `±`). A self-block tile applies only the i-side
-  (each intra-block pair is visited from both orderings and the mask is
-  symmetric, so both atoms receive their scaled force exactly once); a
-  cross-block tile applies both sides. The bulk max-cutoff mask applies
-  as elsewhere, so a modified pair beyond the cutoff contributes nothing.
+- `a = modified_pairs[2·k]`, `b = modified_pairs[2·k + 1]` (`a < b`,
+  original atom IDs).
+- Load `posq[a]` and `posq[b]`, form `dx = p_a − p_b`, wrap it with
+  `heddle_jit_triclinic_min_image`, and compute `r²`, `inv_r`, `r` and the
+  max-cutoff mask the same way the single-pair pass does. (A modified pair is
+  intramolecular and short-range, so its min-image displacement matches the
+  displacement the packed-neighbour or single-pair pass computed for the same
+  pair to `f32` precision, not bit-for-bit — the packed-neighbour pass reaches
+  it through the diagonal shuffle, possibly under the SPC fast path, rather
+  than this per-pair min-image — leaving the bounded correction residual
+  described in *Exclusion Handling* and *Determinism*.)
+- For each fragment, invoke the composer's **correction evaluator**
+  `heddle_jit_eval_pair_correction`, which computes each fragment's
+  `(factor, energy)` and multiplies it by `exclusion_scale(a, b) − 1`
+  (the per-fragment scale minus one). It adds the resulting
+  `(scale − 1) · factor · d` to atom `a` and its negation to atom `b`
+  (Newton's 3rd via `±`), and the correspondingly scaled energy and virial
+  shares. The max-cutoff mask zeroes the contribution for a modified pair
+  beyond the cutoff.
+- Summed with the `1 · evaluate` the packed-neighbour or single-pair pass
+  already added for this pair, the net per fragment is `scale · evaluate` to
+  within the correction residual: the full-strength term (from a neighbour-list
+  pass) and the correction term (this pass) are evaluated through different
+  displacement code paths, so a full exclusion (`scale = 0`) nets to a bounded
+  residual (order `1e-5` atomic units) rather than an exact integer
+  cancellation, and a 1-4 pair to its scaled contribution within the same
+  bound. The residual is deterministic for fixed inputs (see *Determinism*).
+
+The pass is launched only when `E > 0`. It reads no neighbour-list block
+structure and no interaction count; its grid is sized from the host-known
+constant `E`.
 
 ### Packed-Neighbour Pass <!-- rq-a4b9e702 -->
 
@@ -819,18 +748,15 @@ gating is by `j_atom_id < N` (and by the optional
 
 ### Single-Periodic-Copy Fast Path <!-- rq-5ce17997 -->
 
-The packed-neighbour pass and the exclusion-tile pass each evaluate
-a per-i-block single-periodic-copy (SPC) predicate at the top of the
-outer loop and branch on the result. The predicate is uniform across
-the warp (all 32 lanes processing one i-block — or, for the
-exclusion-tile pass, one tile — compute the same value from the
-block's bbox, the lattice constants, and the compile-time max
-cutoff), so there is no per-pair warp divergence and only one
-warp-wide control flow path executes per i-block / per tile per
-launch. The exclusion-tile pass uses the tile's i-block `bi` as its
-predicate-and-centre block: the same predicate on `block_bbox[bi]`,
-and both the `bi` atoms and the `bj` atoms wrap against
-`block_centre[bi]`.
+The packed-neighbour pass evaluates a per-i-block single-periodic-copy
+(SPC) predicate at the top of the outer loop and branches on the
+result. The predicate is uniform across the warp (all 32 lanes
+processing one i-block compute the same value from the block's bbox,
+the lattice constants, and the compile-time max cutoff), so there is
+no per-pair warp divergence and only one warp-wide control flow path
+executes per i-block per launch. The single-pair and correction passes
+are per-pair (one thread per pair) with no block centre, so they always
+take the min-image path.
 
 The two code paths are:
 
@@ -840,14 +766,12 @@ The two code paths are:
   per lattice direction before the `r²` evaluation.
 - **SPC path.** Before entering the inner loop, each lane wraps
   its own `pi` and its own `pj` into the periodic image closest to
-  the i-block centre `block_centre[i_block]` (for the exclusion-tile
-  pass, `block_centre[bi]`), using
+  the i-block centre `block_centre[i_block]`, using
   `triclinic_wrap_against_center(pos, centre, lattice)`. After
   both wraps, the inner loop computes `dx = pi - pj` and **does
   not call** `heddle_jit_triclinic_min_image` — `dx` is already
-  the canonical min-image displacement. (In the packed-neighbour
-  pass `pi` comes from `tile_sorted_posq` and `pj` from `posq`; in
-  the exclusion-tile pass both come from `tile_sorted_posq`.)
+  the canonical min-image displacement. (`pi` comes from
+  `tile_sorted_posq` and `pj` from `posq`.)
 
 The wrap helper `triclinic_wrap_against_center(pos, centre,
 lattice)` shifts `pos` to the periodic image closest to `centre`:
@@ -901,20 +825,15 @@ the centre-wrapped separation is never smaller than the true
 min-image separation (the min-image is the closest of all images,
 so any other image is at least as far), so a pair whose min-image
 separation exceeds the cutoff cannot be pulled below it by the
-centre wrap. This holds for both passes. The packed-neighbour
-pass's j-atoms reach the kernel already filtered to within-search
-candidates by the construction sweep; the exclusion-tile pass
-instead evaluates every one of its block pair's `32×32` lane pairs
-(the block pair is skipped by the construction sweep), but the same
-in-cutoff / out-of-cutoff split applies, so the predicate is safe
-there too.
+centre wrap. The packed-neighbour pass's j-atoms reach the kernel
+already filtered to within-search candidates by the construction
+sweep, so only in-cutoff pairs contribute and the predicate is safe.
 
 #### Triclinic Boxes <!-- rq-412fea28 -->
 
 The predicate gates SPC on `orthorhombic`. Triclinic boxes (any
 of `xy`, `xz`, `yz` non-zero) take the min-image path on every
-i-block and every exclusion tile regardless of bbox extent.
-Extending SPC to triclinic boxes is future work that would replace
+i-block regardless of bbox extent. Extending SPC to triclinic boxes is future work that would replace
 the per-axis box-length check with a projection of the i-block
 bbox onto each face normal; the kernel helper
 `triclinic_wrap_against_center` already handles arbitrary lattice
@@ -925,8 +844,7 @@ predicate.
 
 Under NPT or NPH the box and the per-block bbox both change
 across a step. The predicate is evaluated freshly at every
-i-block / tile of every launch (of both the packed-neighbour and
-the exclusion-tile pass), reading the current lattice constants
+i-block of every packed-neighbour launch, reading the current lattice constants
 (passed as a kernel argument) and the current `block_bbox` (one
 of the buffers populated by the per-rebuild
 `compute_block_bbox`). No host-side cache or CUDA-graph
@@ -978,17 +896,23 @@ The per-slot `PairForceFragment` source contract is documented in
 declaration. The functor's interface is
 `cutoff_squared(i_type, j_type, i, j) -> Real` and
 `evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, factor,
-energy)`. The fragment carries no `exclusion_scale` method:
-exclusions are applied by the exclusion-tile bitmask, not by the
-per-pair evaluator. The composer emits one per-pair evaluator:
+energy)`. Each fragment provides an `exclusion_scale(i, j) -> Real`
+method reading the per-fragment scale tables (see `topology.md`); it is
+consulted only by the correction pass. The composer emits two per-pair
+evaluators:
 
 - `heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r, i,
-  j, factor, energy)` — sums each fragment's contribution. Used by
-  all three passes (exclusion-tile, packed-neighbour, single-pair);
-  none applies an exclusion scale. The caller derives the per-pair
-  scalar virial as `factor * r²` from the summed `factor`.
+  j, factor, energy)` — sums each fragment's contribution at full
+  strength, applying no exclusion scale. Used by the packed-neighbour
+  and single-pair passes.
+- `heddle_jit_eval_pair_correction<WriteEv>(composite, r2, inv_r, r, i,
+  j, factor, energy)` — sums each fragment's contribution multiplied by
+  that fragment's `exclusion_scale(i, j) − 1`. Used by the correction
+  pass; summed with the full-strength contribution the neighbour-list
+  pass added, the net is `scale × evaluate`.
 
-The evaluator applies the cutoff handling described in
+Both derive the per-pair scalar virial as `factor * r²` from the summed
+`factor`, and both apply the cutoff handling described in
 `jit-composed-pair-force.md` (the per-fragment cutoff guard,
 collapsed when `CutoffHandling::Uniform(c)` matches the outer
 max-cutoff mask).
@@ -1075,17 +999,17 @@ every step:
 | 1 | `scatter_positions_to_tile_order` | Every step |
 | 2 | Pre-step neighbour-list check | Every step; rebuild may run if displacement exceeds `r_skin / 2` |
 | 3 | `cudaMemsetAsync` zeroing fast fixed-point buffers | Every step (or only when re-evaluating the Fast class) |
-| 4 | `heddle_jit_composed_pair_force_excl_{f,fev}` (exclusion-tile pass) | Once per step (only if `interaction_count[2] > 0`) |
-| 5 | `heddle_jit_composed_pair_force_{f,fev}` (packed-neighbour pass) | Once per step; per-i-block SPC predicate inside the kernel selects between the min-image branch and the centre-wrap branch |
-| 6 | `heddle_jit_composed_pair_force_single_{f,fev}` (single-pair pass) | Once per step (only if `interaction_count[1] > 0`) |
+| 4 | `heddle_jit_composed_pair_force_{f,fev}` (packed-neighbour pass) | Once per step; per-i-block SPC predicate inside the kernel selects between the min-image branch and the centre-wrap branch |
+| 5 | `heddle_jit_composed_pair_force_single_{f,fev}` (single-pair pass) | Once per step (only if `interaction_count[1] > 0`) |
+| 6 | `heddle_jit_composed_pair_force_correct_{f,fev}` (correction pass) | Once per step (only if `E > 0`) |
 | 7 | `finalize_fast_class_forces` | Once per step; converts fixed-point to Real and adds into `ParticleBuffers.forces_*` |
 
 The three pair passes (4–6) all accumulate into the same fixed-point
 buffers and may run in any order; the finaliser (7) follows them.
 
 When step 2 triggers a rebuild, the rebuild pipeline (the *Construction
-Pipeline* steps, including `build_exclusion_tiles` and the second
-`scatter` since `sorted_particle_ids` has changed) runs before step 3.
+Pipeline* steps, plus the second `scatter` since `sorted_particle_ids`
+has changed) runs before step 3.
 
 ## Configuration <!-- rq-9527bd2d -->
 
@@ -1159,19 +1083,31 @@ supporting this:
    the integer sum; the final `Real` addition into
    `ParticleBuffers.forces_*` happens in a kernel that reads each
    atom's slot exactly once.
-7. **Deterministic exclusion tiles.** The set of exclusion tiles, their
-   order, and their bitmasks are a pure function of the exclusion
-   topology and `sorted_particle_ids`. The on-device build inverts the
-   sort (a permutation), emits one record per modified pair at that pair's
-   fixed index, stably radix-sorts the records by `(bi, bj)` key (ties
-   broken by record index), and segment-reduces each run into one tile in
-   ascending `(bi, bj)` order; each tile's mask is the OR of its run's
-   lane bits, which is order-independent. The tile set, its order, and the
-   bitmasks are therefore fixed rather than scheduling-dependent, and the
-   per-fragment scale the force pass applies to each flagged pair is
-   identical across runs. (Slot order would in any case be irrelevant to
-   the forces, because the exclusion-tile pass, like the bulk pass,
-   accumulates through the per-particle fixed-point accumulators.)
+7. **Deterministic correction.** The correction pass walks the fixed
+   modified-pair list (a pure function of the topology, in a fixed order)
+   and adds `(exclusion_scale − 1) × evaluate` per fragment through the
+   same fixed-point accumulators, so its per-atom result is
+   permutation-invariant like every other pass. For byte-identical inputs
+   the neighbour-list layout is identical, so the same neighbour-list pass
+   owns each modified pair's full-strength term on every run; the
+   full-strength and correction terms are therefore evaluated through the
+   same code paths run to run, and their (non-zero) residual is
+   bit-identical across runs. Run-to-run determinism is thus fully
+   preserved.
+
+   The residual itself is **not zero**. A modified pair's full-strength
+   term comes from whichever neighbour-list pass owns it — the
+   packed-neighbour diagonal shuffle (possibly under the SPC fast path) or
+   the single-pair min-image — while the correction term is the correction
+   pass's own per-pair min-image. These are different displacement code
+   paths, equal only to `f32` precision, so a full exclusion nets to a
+   bounded residual (order `1e-5` atomic units, below `1e-4` atomic units
+   and far below MD-relevant forces) rather than exactly zero. Because the
+   owning pass depends on the neighbour-list layout, the residual — and
+   hence the exclusion forces — can vary within that bound across `r_skin`
+   values or atom orderings that route a pair differently. Exclusion forces
+   are therefore reproducible for fixed inputs but only routing-agreeing to
+   the residual bound, not routing-independent. See *Exclusion Handling*.
 
 The reproducibility scope is GPU-vs-GPU on the same hardware,
 matching `architecture.md`. CPU-vs-GPU is not promised.
@@ -1183,10 +1119,9 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
 - `NeighborListState` adds the fields documented under *Atom <!-- rq-b5c18e6b -->
   Blocks*, *Tile-Sorted Position View*, *Block Bounding Boxes*,
   *Sorted-Blocks-by-Volume*, and *Neighbour List* above — including the
-  exclusion-tile buffers `exclusion_tile_iblocks`, `exclusion_tile_jblocks`,
-  and `exclusion_tile_masks`, their `exclusion_tiles_capacity`, and the
-  `interaction_count[2]` live exclusion-tile count. The per-particle
-  padded `neighbor_list` and `neighbor_counts` fields are not present.
+  device-resident `modified_pairs` buffer (length `2 · E`, uploaded once at
+  construction) and its host-side count `E`. The per-particle padded
+  `neighbor_list` and `neighbor_counts` fields are not present.
 - `ForceField` adds the fixed-point class accumulator fields <!-- rq-e6b37d18 -->
   documented under *Fixed-Point Force Buffers*. The per-class
   `fast_total_forces_x/y/z` (and the `_potential_energies` /
@@ -1204,12 +1139,10 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `PackedNeighborOverflow { buffer: &'static str }` — returned by
   `NeighborListState::pre_step` when a steady-state build set a
   `*_overflow` bit of `neighbor_status`, meaning a packed-neighbour
-  buffer would have dropped within-`r_search` entries, or the
-  exclusion-tile build produced more tiles than `exclusion_tiles_capacity`.
-  `buffer` names the buffer that overflowed (`"interacting_tiles"`,
-  `"single_pair_atoms"`, or `"exclusion_tiles"`). This is the only
-  neighbour-overflow error; there is no per-particle neighbour cap to
-  exceed.
+  buffer would have dropped within-`r_search` entries. `buffer` names the
+  buffer that overflowed (`"interacting_tiles"` or `"single_pair_atoms"`).
+  This is the only neighbour-overflow error; there is no per-particle
+  neighbour cap to exceed.
 - `PairSnapshot` — host-side owned enumeration of the pair set <!-- rq-a0ab0088 -->
   represented by a `NeighborListState` at the time the snapshot
   was taken. Constructed by
@@ -1248,41 +1181,19 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   single_pairs_high_water_mark, r_search_sq, lattice,
   force_rebuild_flag, n_blocks, n_atoms, neighbor_status)` — main
   construction kernel. One warp per i-block iterating through
-  `sorted_blocks`; skips candidate j-blocks that form an exclusion tile
-  with the i-block. Writes the live counts to `interaction_count` and,
+  `sorted_blocks`. Writes the live counts to `interaction_count` and,
   from a single designated thread, sets the `*_high_water` and
   `*_overflow` bits of `neighbor_status` (see *Capacity*); it returns
   no count or status to the host. The `*_high_water_mark` arguments are
   `floor(capacity · tile_pair_fill_threshold)`, computed on the host
   from the current capacities. The `MAX_BITS_FOR_PAIRS = 3` threshold
   is a compile-time `#define`.
-- `build_atom_slot(sorted_particle_ids, atom_slot, n_atoms)` — device <!-- rq-5f871bd5 -->
-  kernel; one thread per slot writes the slot-for-each-atom permutation
-  `atom_slot[sorted_particle_ids[s]] = s` into a per-rebuild device
-  scratch, so the exclusion-tile build maps a canonical atom id to its
-  current slot without a host copy.
-- `build_exclusion_tiles(...)` — the on-device exclusion-tile <!-- rq-8945395f -->
-  sub-pipeline launched each rebuild (see *Construction Pipeline* step 6):
-  the kernels `build_atom_slot`, `emit_exclusion_tile_keys`,
-  `sort_exclusion_keys` (the reproducible radix sort), `reduce_exclusion_tiles`,
-  and `build_exclusion_csr`, run in sequence on the default stream. It
-  reads the device-resident exclusion topology (`atom_excl_offsets` /
-  `atom_excl_partners`) and `sorted_particle_ids`, and writes
-  `exclusion_tile_iblocks`, `exclusion_tile_jblocks`,
-  `exclusion_tile_masks`, `excl_jblock_offsets`, `excl_jblocks`, and the
-  tile count `interaction_count[2]` — all on the device — then sets the
-  exclusion-tile high-water / overflow bits of `neighbor_status`. It maps
-  each canonical modified pair (`a < b`, every partner entry of the
-  exclusion topology) to its ordered block pair `(bi, bj)` (`bi ≤ bj`) and
-  lanes under the current sort, sorts the per-pair records by `(bi, bj)`,
-  and segment-reduces each block pair into one exclusion tile whose
-  1024-bit mask ORs the pair's bit — plus the symmetric bit on a
-  self-block tile. It uses per-rebuild device scratch sized once from
-  `n_atoms` (the `atom_slot` permutation) and the fixed modified-pair
-  count `E` (the sort records); it performs no host round-trip. The
-  per-fragment scale each flagged pair receives is not stored in the tile;
-  the force pass reads it from the per-fragment scale tables via
-  `exclusion_scale(i, j)` at evaluation time.
+- The device-resident `modified_pairs` buffer (length `2 · E`) is <!-- rq-8945395f -->
+  uploaded once at construction from the topology's modified-pair set
+  (every canonical pair `(a, b)`, `a < b`, whose scale differs from `1` in
+  some fragment). It is fixed for the run — no per-rebuild build and no
+  device-to-host transfer. The correction pass reads it and looks up each
+  pair's per-fragment scale via `exclusion_scale(a, b)` at evaluation time.
 - `heddle_jit_composed_pair_force_f` / <!-- rq-42e29605 -->
   `heddle_jit_composed_pair_force_fev` — JIT-composed packed-
   neighbour entry points; argument list documented under
@@ -1290,18 +1201,14 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   per-i-block SPC predicate at runtime and branches between the
   centre-wrap fast path and the per-pair min-image path; the
   branch is uniform across the warp. They apply no exclusion scale.
-- `heddle_jit_composed_pair_force_excl_f` / <!-- rq-9d34c158 -->
-  `heddle_jit_composed_pair_force_excl_fev` — JIT-composed
-  exclusion-tile entry points; one warp per exclusion tile. Load the
-  full `bi` and `bj` blocks from `tile_sorted_posq`, take the tile's
-  `exclusion_tile_masks` row, apply per-fragment scale to masked lane
-  pairs, and skip the self-block diagonal (see *Exclusion-Tile Pass*).
-  Receive `block_centre` and `block_bbox` (alongside `lattice`) and
-  evaluate the per-tile SPC predicate on the tile's i-block `bi`,
-  taking the centre-wrap fast path against `block_centre[bi]` when it
-  holds and the per-pair min-image path otherwise (see *Single-Periodic-Copy
-  Fast Path*). The predicate is warp-uniform, so the branch is taken
-  once per tile with no per-pair divergence.
+- `heddle_jit_composed_pair_force_correct_f` / <!-- rq-9d34c158 -->
+  `heddle_jit_composed_pair_force_correct_fev` — JIT-composed correction
+  entry points; one thread per modified pair over `[0, E)`. Read the pair
+  `(a, b)` from `modified_pairs`, load `posq[a]` / `posq[b]`, form the
+  per-pair min-image displacement, apply the max-cutoff mask, and add each
+  fragment's `(exclusion_scale(a, b) − 1) × evaluate` to both atoms'
+  fixed-point slots (Newton's 3rd via `±`). Launched only when `E > 0`
+  (see *Correction Pass*).
 - `heddle_jit_composed_pair_force_single_f` / <!-- rq-3ddf259b -->
   `heddle_jit_composed_pair_force_single_fev` — JIT-composed
   single-pair entry points; argument list documented under
@@ -1718,25 +1625,6 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then pre_step returns Err(NeighborListError::PackedNeighborOverflow { buffer: "interacting_tiles" })
     And the run halts without presenting forces from the incomplete list as final
 
-  @rq-3b18d9db
-  Scenario: Probe rebuild grows exclusion-tile capacity on a near-full build
-    Given the phase has not yet been CUDA-graph captured
-    And exclusion_tiles_capacity = 100 with tile_pair_fill_threshold = 0.8
-    And a topology whose current sort produces 90 exclusion tiles
-    When the probe rebuild runs build_exclusion_tiles
-    Then the exclusion_tiles_high_water bit of neighbor_status is set
-    And no exclusion tile was dropped from the 90-tile build
-    And the probe reallocates the exclusion-tile buffers to ceil(100 * 1.5)
-    And the construction is re-run from build_exclusion_tiles
-
-  @rq-51d6a942
-  Scenario: An exclusion-tile overflow halts the run
-    Given a build whose exclusion-tile count exceeds exclusion_tiles_capacity
-      so a tile would be dropped
-    When the batch loop reads neighbor_status and observes an exclusion_tiles_overflow bit
-    Then pre_step returns Err(NeighborListError::PackedNeighborOverflow { buffer: "exclusion_tiles" })
-    And the run halts without presenting forces from the incomplete tile set as final
-
   # --- Force kernel ---
 
   @rq-a786df3a
@@ -1752,48 +1640,41 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then no pair contribution is accumulated for that lane
 
   @rq-b49bfdff
-  Scenario: Bulk and single-pair passes do no exclusion work
+  Scenario: Packed-neighbour and single-pair passes do no exclusion work
     Given a ForceField with at least one fast-class pair-force fragment
     And the JIT-composed packed-neighbour and single-pair kernel sources captured for inspection
     Then neither source contains a call to exclusion_scale or a read of atom_excl_offsets / atom_excl_partners
-    And the packed-neighbour pass's inner loop dispatches to heddle_jit_eval_pair_sum with no per-pair scale multiply
+    And each dispatches to heddle_jit_eval_pair_sum with no per-pair scale multiply
+
+  # --- Exclusion handling: correction pass ---
 
   @rq-80c6a964
-  Scenario: A fully-excluded pair contributes nothing via the exclusion-tile pass
-    Given atoms a and b are a modified pair with every fragment scale 0, sharing exclusion tile t
-    And their lane positions set bit (a_lane, b_lane) in exclusion_tile_masks[t]
-    When the exclusion-tile pass processes tile t
-    Then the (a, b) pair is evaluated with per-fragment scale 0
-    And neither atom receives any force, energy, or virial contribution from the (a, b) pair
-
-  @rq-8840662f
-  Scenario: A non-modified pair inside an exclusion tile is computed at full strength
-    Given atoms a and c share exclusion tile t but are NOT a modified pair
-      (their mask bit is clear) and lie within the cutoff
-    When the exclusion-tile pass processes tile t
-    Then the (a, c) interaction is evaluated at full strength with no scale lookup
-    And it is not also computed by the bulk or single-pair passes
+  Scenario: A fully-excluded pair nets to within the correction residual
+    Given atoms a and b are a modified pair with every fragment scale 0, within the cutoff
+    When the packed-neighbour or single-pair pass evaluates (a, b) at full strength
+    And the correction pass processes the modified pair (a, b)
+    Then the correction pass adds (0 - 1) x evaluate for each fragment
+    And the full-strength and correction contributions cancel to within the
+      correction residual bound (absolute 1e-4 au or 1e-4 relative to the
+      unscaled pair force, whichever is more permissive), the two terms being
+      evaluated through different displacement code paths
+    And the net force, energy, and virial each atom carries from the (a, b)
+      pair is bounded by that residual rather than exactly zero
 
   @rq-4aad39c8
-  Scenario: A fractional 1-4 pair contributes a scaled force
-    Given atoms a and d are a modified pair with a Lennard-Jones scale of 0.5, sharing exclusion tile t, within the cutoff
-    When the exclusion-tile pass processes tile t
-    Then each atom's Lennard-Jones force contribution from (a, d) is half the unscaled pair force
-    And the cell-list total forces match an all-pairs run that applies the same per-fragment scales
+  Scenario: A fractional 1-4 pair nets a scaled force
+    Given atoms a and d are a modified pair with a Lennard-Jones scale of 0.5, within the cutoff
+    When the neighbour-list pass evaluates (a, d) at full strength and the correction pass adds (0.5 - 1) x evaluate
+    Then each atom's net Lennard-Jones force from (a, d) is half the unscaled pair force to within the correction residual bound
+    And the cell-list total forces match an all-pairs run that applies the same
+      per-fragment scales within absolute 1e-4 au or 1e-4 relative, whichever is more permissive
 
   @rq-27add068
   Scenario: A per-fragment exclusion applies each fragment's scale independently
-    Given atoms a and e are a modified pair with a Lennard-Jones scale of 0 and a Coulomb scale of 1, sharing exclusion tile t
-    When the exclusion-tile pass processes tile t
-    Then the (a, e) pair contributes no Lennard-Jones force
-    And it contributes its full Coulomb force
-
-  @rq-acfb3375
-  Scenario: Construction routes a modified-pair block pair away from the bulk list
-    Given block pair (bi, bj) contains at least one modified atom pair
-    When NeighborListState::rebuild completes
-    Then (bi, bj) appears in the exclusion-tile list
-    And no interacting_atoms / single_pair_atoms entry pairs an atom of bi with an atom of bj
+    Given atoms a and e are a modified pair with a Lennard-Jones scale of 0 and a Coulomb scale of 1
+    When the correction pass processes (a, e)
+    Then the (a, e) pair carries no net Lennard-Jones force beyond the correction residual bound
+    And it carries its full Coulomb force
 
   @rq-ea4617e1
   Scenario: A fractional exclusion scale loads without error
@@ -1802,68 +1683,44 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then loading succeeds
     And (i, j) is recorded as a modified pair carrying those per-fragment scales
 
-  @rq-10443d06
-  Scenario: Two GPU runs build byte-identical exclusion tiles
-    Given two simulations started from byte-identical initial state
-    When both run a single neighbour-list rebuild
-    Then interaction_count[2] is identical across the two runs
-    And the exclusion tiles sorted by (bi, bj) carry identical bitmasks across the two runs
+  @rq-350b8807
+  Scenario: A modified pair appears at full strength in the neighbour-list output
+    Given block pair (bi, bj) contains at least one modified atom pair within the cutoff
+    When NeighborListState::rebuild completes
+    Then that modified pair appears exactly once across the union of the
+      interacting_atoms and single_pair_atoms outputs
+    And the construction does not route it away from those outputs
 
-  # --- Exclusion-tile build (on device) ---
+  @rq-26734dec
+  Scenario: Modified pairs in the neighbour-list output are unique
+    Given a multi-molecule system whose intramolecular pairs are all modified
+      and all within r_search
+    When NeighborListState::rebuild completes
+    Then every modified pair appears exactly once across the union of the
+      packed-neighbour and single-pair outputs, so the single correction term
+      completes it
 
-  @rq-e4a333d2
-  Scenario: A steady-state rebuild builds exclusion tiles without a host round-trip
+  @rq-37d3cd28
+  Scenario: The correction pass is skipped when no pair is modified
+    Given a topology with no modified pairs (every fragment scale is 1)
+    When the force-evaluation pipeline runs
+    Then E equals 0
+    And heddle_jit_composed_pair_force_correct_f is not launched
+
+  @rq-c057bf03
+  Scenario: The modified-pair list is uploaded once and never rebuilt
     Given a CUDA-graph-captured phase past its pre-capture probe rebuild
     And a batch boundary on which the displacement bit triggers a rebuild
-    When NeighborListState::rebuild runs the construction pipeline including
-      build_exclusion_tiles
-    Then no dtoh_sync_copy of sorted_particle_ids is issued
-    And the exclusion tiles, their bitmasks, the excl_jblock_offsets /
-      excl_jblocks CSR, and interaction_count[2] are all written on the device
-    And the only device-to-host transfer the rebuild performs is the single
-      combined neighbor_status word read by the batch loop
+    When NeighborListState::rebuild runs the construction pipeline
+    Then no exclusion data is copied to or from the host
+    And the device-resident modified_pairs buffer is the same buffer uploaded at construction
 
-  @rq-61d3e1a7
-  Scenario: build_atom_slot inverts the sort permutation
-    Given sorted_particle_ids holds a permutation of [0, N)
-    When build_atom_slot runs
-    Then atom_slot[sorted_particle_ids[s]] equals s for every slot s in [0, N)
-
-  @rq-94d51613
-  Scenario: Two modified pairs sharing a block pair merge into one exclusion tile
-    Given modified pairs (a, b) and (c, d) whose atoms all map, under the
-      current sort, into the same ordered block pair (bi, bj)
-    When build_exclusion_tiles completes
-    Then exactly one exclusion tile carries the block pair (bi, bj)
-    And that tile's 1024-bit mask has the bit set for each of (a, b) and (c, d)
-      at their respective lanes
-    And interaction_count[2] counts that block pair exactly once
-
-  @rq-3dd31c3d
-  Scenario: A self-block exclusion tile sets the symmetric mask bit
-    Given a modified pair (a, b) whose atoms map to the same block bi
-      (bi == bj) at lanes (li, lj)
-    When build_exclusion_tiles completes
-    Then the tile for (bi, bi) sets bit lj of mask row li
-    And it also sets bit li of mask row lj
-
-  @rq-8631baa6
-  Scenario: Exclusion tiles are emitted in ascending (bi, bj) order with an ascending CSR
-    Given a topology producing exclusion tiles for several distinct block pairs
-    When build_exclusion_tiles completes
-    Then for every consecutive pair of tiles t, t+1 the key
-      (exclusion_tile_iblocks[t], exclusion_tile_jblocks[t]) is strictly less
-      than (exclusion_tile_iblocks[t+1], exclusion_tile_jblocks[t+1])
-    And for every i-block bi,
-      excl_jblocks[excl_jblock_offsets[bi] .. excl_jblock_offsets[bi+1]] lists
-      the bj of that i-block's tiles in ascending order
-
-  @rq-62cf6290
-  Scenario: An empty modified-pair set produces no exclusion tiles
-    Given a topology with no modified pairs (every fragment scale is 1)
-    When NeighborListState::rebuild completes
-    Then interaction_count[2] equals 0
-    And the exclusion-tile force pass is not launched
+  @rq-50967ef2
+  Scenario: Two GPU runs produce byte-identical forces with exclusions
+    Given two simulations with modified pairs started from byte-identical initial state
+    When both run ForceField::step(Fast) once
+    Then ParticleBuffers.forces_x, forces_y, forces_z compare byte-identical
+      across the two runs after finalize_fast_class_forces
 
   # --- Single-pair pass ---
 
@@ -2088,54 +1945,12 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then it invokes heddle_jit_triclinic_min_image for every pair it evaluates
     And it does not read block_centre or block_bbox
 
-  # --- Single-periodic-copy fast path: exclusion-tile pass ---
-
-  @rq-e6620f2c
-  Scenario: Exclusion-tile pass takes the SPC fast path when its i-block qualifies
-    Given an orthorhombic box in which the SPC predicate on block_bbox[bi] is true
-    And an exclusion tile t with i-block bi and j-block bj
-    When the exclusion-tile kernel processes tile t
-    Then every lane wraps its bi atom and its bj atom once against block_centre[bi]
-    And the inner loop computes dx = pi - pj without calling heddle_jit_triclinic_min_image
-
-  @rq-dc44a114
-  Scenario: Exclusion-tile pass takes the min-image path when its i-block does not qualify
-    Given an orthorhombic box in which the SPC predicate on block_bbox[bi] is false
-      for exclusion tile t's i-block bi
-    When the exclusion-tile kernel processes tile t
-    Then the inner loop calls heddle_jit_triclinic_min_image once per lane pair
-    And neither pi nor pj is centre-wrapped
-
-  @rq-1e9bb643
-  Scenario: Exclusion-tile SPC predicate uses the tile's i-block and is warp-uniform
-    Given the exclusion-tile kernel processes tile t with i-block bi
-    When all 32 lanes of the tile's warp evaluate the SPC predicate
-    Then every lane reads block_bbox[bi] and observes the same boolean value
-    And the kernel branches once warp-wide without per-lane divergence
-
-  @rq-ba3ad34b
-  Scenario: Triclinic box forces the exclusion-tile pass onto the min-image path
-    Given a SimulationBox whose lattice has any of xy, xz, yz non-zero
-    When the exclusion-tile kernel processes any tile
-    Then the SPC predicate evaluates to false
-    And the inner loop takes the per-pair min-image path
-
-  @rq-ea68a7aa
-  Scenario: Exclusion-tile SPC path is bit-identical to the min-image path
-    Given a simulation whose exclusion tiles all have an SPC-eligible i-block
-    And a comparator run on the same hardware that disables the exclusion-tile SPC branch
-      and always takes min-image
-    When both runs perform one ForceField::step(Fast)
-    Then ParticleBuffers.forces_x, forces_y, forces_z compare byte-identical across
-      the two runs after finalize_fast_class_forces
-
-  @rq-b72ac355
-  Scenario: A cross-block exclusion tile with an out-of-cutoff pair contributes nothing under SPC
-    Given an SPC-eligible exclusion tile t whose i-block bi and j-block bj contain a
-      lane pair whose true min-image separation exceeds MAX_CUTOFF
-    When the exclusion-tile kernel processes tile t on the SPC path
-    Then that lane pair's centre-wrapped separation is at least its min-image separation
-    And the cutoff mask zeroes its contribution, matching the min-image path
+  @rq-077f82c6
+  Scenario: Correction pass takes the min-image path
+    Given any simulation step with modified pairs
+    When the correction pass evaluates a modified pair
+    Then it invokes heddle_jit_triclinic_min_image for that pair
+    And it does not read block_centre or block_bbox
 
   # --- PairSnapshot: canonical pair enumeration ---
 

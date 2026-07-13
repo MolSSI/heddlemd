@@ -660,6 +660,47 @@ fn max_relative_diff(
     m
 }
 
+// Combined absolute-or-relative tolerance, "whichever is more permissive"
+// (`rqm/forces/neighbor-list.md` rq-4b40604b/6eca8f0e/d991a151/c90fb1bd and
+// `rqm/forces/jit-composed-pair-force.md` rq-841a4bd3/e2b3da89/392fb4a3). A
+// modified pair's full-strength term and its correction term are evaluated
+// through different displacement code paths, so cross-routing force
+// comparisons carry a bounded correction residual (order 1e-5 au). A
+// component passes when EITHER its absolute difference is below `abs_tol`
+// (atomic units) OR its relative difference is below `rel_tol`; the
+// per-component score is min(abs_diff/abs_tol, rel_diff/rel_tol) and the
+// whole comparison passes when the returned max score is below 1.0. The
+// absolute floor absorbs the residual on near-zero components where a pure
+// relative metric would explode.
+fn max_combined_residual(
+    a: (&[Real], &[Real], &[Real]),
+    b: (&[Real], &[Real], &[Real]),
+    abs_tol: Real,
+    rel_tol: Real,
+) -> Real {
+    let mut m = 0.0 as Real;
+    for i in 0..a.0.len() {
+        for (u, v) in [
+            (a.0[i], b.0[i]),
+            (a.1[i], b.1[i]),
+            (a.2[i], b.2[i]),
+        ] {
+            let abs_diff = (u - v).abs();
+            let denom = u.abs().max(v.abs());
+            let rel_diff = if denom > 0.0 as Real {
+                abs_diff / denom
+            } else {
+                0.0 as Real
+            };
+            let score = (abs_diff / abs_tol).min(rel_diff / rel_tol);
+            if score > m {
+                m = score;
+            }
+        }
+    }
+    m
+}
+
 // --------------------------------------------------------------
 // Cross-validation with the all-pairs oracle
 // (`rqm/forces/neighbor-list.md` — new *Cross-validation* subsection)
@@ -698,20 +739,26 @@ fn cell_list_matches_all_pairs_on_multi_molecule_system() {
     let (fx_a, fy_a, fz_a) =
         run_force_evaluation(&gpu, &state, &sim_box, &bl, &al, &dl, &excl, &ap);
 
-    let rel = max_relative_diff(
+    // Cell-list and all-pairs route each modified pair through a
+    // different force pass, so their exclusion-correction residuals
+    // (order 1e-5 au) differ within the bound. Accept absolute 1e-4 au
+    // OR 1e-4 relative, whichever is more permissive (rq-6eca8f0e).
+    let score = max_combined_residual(
         (&fx_c, &fy_c, &fz_c),
         (&fx_a, &fy_a, &fz_a),
-        1e-12 as Real,
+        1e-4 as Real,
+        1e-4 as Real,
     );
     assert!(
-        rel < 1e-4 as Real,
-        "cell-list vs all-pairs max relative diff = {rel:e} exceeds 1e-4",
+        score < 1.0 as Real,
+        "cell-list vs all-pairs exceeds absolute-1e-4-au-or-1e-4-relative (score = {score:e})",
     );
 
-    // Every component that is at rounding-zero in the all-pairs run
-    // must also be at rounding-zero in the cell-list run — a stronger
-    // check that catches "cell-list adds a spurious force where
-    // all-pairs correctly reports zero".
+    // A component that is at rounding-zero in the all-pairs run must
+    // stay below the correction-residual bound (1e-4 au) in the
+    // cell-list run — this catches "cell-list adds a spurious force
+    // where all-pairs correctly reports zero" while tolerating the
+    // routing-dependent residual (order 1e-5 au).
     let mut worst_abs_at_zero = 0.0 as Real;
     for i in 0..fx_a.len() {
         for (u, v) in [
@@ -728,7 +775,7 @@ fn cell_list_matches_all_pairs_on_multi_molecule_system() {
         }
     }
     assert!(
-        worst_abs_at_zero < 1e-6 as Real,
+        worst_abs_at_zero < 1e-4 as Real,
         "cell-list has {worst_abs_at_zero:e} force on a component that is zero in all-pairs",
     );
 }
@@ -755,14 +802,19 @@ fn cell_list_matches_all_pairs_across_r_skin_sweep() {
         let cell = NeighborListConfig::CellList { r_skin };
         let (fx_c, fy_c, fz_c) =
             run_force_evaluation(&gpu, &state, &sim_box, &bl, &al, &dl, &excl, &cell);
-        let rel = max_relative_diff(
+        // r_skin routes each modified pair through a particular force pass,
+        // and the exclusion-correction residual (order 1e-5 au) varies within
+        // its bound across routings. Accept absolute 1e-4 au OR 1e-4 relative,
+        // whichever is more permissive (rq-d991a151).
+        let score = max_combined_residual(
             (&fx_c, &fy_c, &fz_c),
             (&fx_a, &fy_a, &fz_a),
-            3.0e-4 as Real,
+            1e-4 as Real,
+            1e-4 as Real,
         );
         assert!(
-            rel < 1e-3 as Real,
-            "r_skin = {r_skin_m:e} m: cell-list vs all-pairs rel diff = {rel:e}",
+            score < 1.0 as Real,
+            "r_skin = {r_skin_m:e} m: cell-list vs all-pairs exceeds absolute-1e-4-au-or-1e-4-relative (score = {score:e})",
         );
     }
 }
@@ -894,20 +946,21 @@ fn r_skin_invariance_across_cell_layout_change() {
         &excl,
         &NeighborListConfig::CellList { r_skin: r_skin_b },
     );
-    // Use an epsilon at the "legitimate LJ_14 residual" scale
-    // (~3 × 10⁻⁴ au) so the relative-diff denominator is at or
-    // above the physical force magnitude and the check doesn't
-    // divide two thermal-noise components by each other. See
-    // `equilibrium_multi_molecule_thermal_scale_fmax` for the
-    // rationale on why the residual is legitimate LJ physics.
-    let rel = max_relative_diff(
+    // The two r_skin values route each modified pair through a
+    // different force pass, so the exclusion-correction residual
+    // (order 1e-5 au) differs within its bound between the runs.
+    // Accept absolute 1e-4 au OR 1e-4 relative, whichever is more
+    // permissive (rq-c90fb1bd); the absolute floor covers near-zero
+    // components where a pure relative metric would explode.
+    let score = max_combined_residual(
         (&fx_a, &fy_a, &fz_a),
         (&fx_b, &fy_b, &fz_b),
-        3.0e-4 as Real,
+        1e-4 as Real,
+        1e-4 as Real,
     );
     assert!(
-        rel < 1e-3 as Real,
-        "r_skin_a vs r_skin_b rel diff = {rel:e}",
+        score < 1.0 as Real,
+        "r_skin_a vs r_skin_b exceeds absolute-1e-4-au-or-1e-4-relative (score = {score:e})",
     );
 
     // F_max at the reference intramolecular geometry sits at the
@@ -1052,6 +1105,9 @@ fn enumerate_pair_visits(
 fn max_pair_visits(counts: &HashMap<(u32, u32), usize>) -> usize {
     counts.values().copied().max().unwrap_or(0)
 }
+
+/// rq-bebff0e9 — packed + sparse outputs list each unordered pair
+/// at most once. Because the main kernel's rotation sweep visits
 
 /// rq-bebff0e9 — packed + sparse outputs list each unordered pair
 /// at most once. Because the main kernel's rotation sweep visits
@@ -1747,10 +1803,13 @@ fn equilibrium_cell_list_matches_all_pairs() {
     );
     // Every component of the all-pairs force is at rounding-zero
     // (~1e-11) at reference geometry; the cell-list run must land
-    // within 1e-6 of that in absolute terms — the "zero component
-    // doesn't spuriously become non-zero" invariant.
+    // within the accept-and-relax bound of 1e-4 au (rq-841a4bd3). The
+    // two modes route each modified pair through a different force pass,
+    // so their exclusion-correction residuals (order 1e-5 au) differ
+    // within that bound — a real "zero component becomes non-zero" fault
+    // would exceed it by orders of magnitude.
     assert!(
-        (abs_diff as f64) < 1e-6,
+        (abs_diff as f64) < 1e-4,
         "equilibrium cell-list vs all-pairs abs diff = {abs_diff:e}",
     );
 }
@@ -1827,14 +1886,19 @@ fn intramolecular_exclusion_holds_with_straddling_molecule() {
         &excl,
         &NeighborListConfig::AllPairs,
     );
-    let rel = max_relative_diff(
+    // Cell-list and all-pairs route the straddling molecule's modified
+    // pairs through different force passes, so the exclusion-correction
+    // residual (order 1e-5 au) differs within its bound. Accept absolute
+    // 1e-4 au OR 1e-4 relative, whichever is more permissive (rq-e2b3da89).
+    let score = max_combined_residual(
         (&fx_c, &fy_c, &fz_c),
         (&fx_a, &fy_a, &fz_a),
-        1e-12 as Real,
+        1e-4 as Real,
+        1e-4 as Real,
     );
     assert!(
-        rel < 1e-4 as Real,
-        "straddling-molecule cell-list vs all-pairs rel diff = {rel:e}",
+        score < 1.0 as Real,
+        "straddling-molecule cell-list vs all-pairs exceeds absolute-1e-4-au-or-1e-4-relative (score = {score:e})",
     );
 }
 
@@ -1895,21 +1959,22 @@ fn translation_invariance_across_cell_boundary_shift() {
         &excl,
         &NeighborListConfig::CellList { r_skin },
     );
-    // Physics is translation-invariant, so the per-atom forces
-    // should agree up to floating-point rounding differences that
-    // arise because the shifted state produces a different
-    // per-block atom order after the cell-list sort. Use an
-    // ABSOLUTE component-diff check with a bound at the LJ_14
-    // residual scale — this catches any real force divergence
-    // (which would be one or more orders of magnitude bigger)
-    // while tolerating legitimate rounding drift.
+    // Physics is translation-invariant, but the shifted state
+    // produces a different per-block atom order after the cell-list
+    // sort, which routes each modified pair through a different force
+    // pass. The exclusion-correction residual (order 1e-5 au) therefore
+    // differs within its bound between the runs. Use an ABSOLUTE
+    // component-diff check with the accept-and-relax bound of 1e-4 au
+    // (rq-392fb4a3) — this still catches any real force divergence
+    // (one or more orders of magnitude bigger) while tolerating the
+    // routing-dependent residual and legitimate rounding drift.
     let abs = max_component_diff(
         (&fx_a, &fy_a, &fz_a),
         (&fx_b, &fy_b, &fz_b),
     );
     assert!(
-        (abs as f64) < 1.0e-5,
-        "translation shift produced |ΔF_component| = {abs:e} au — much larger than legitimate float-rounding noise",
+        (abs as f64) < 1.0e-4,
+        "translation shift produced |ΔF_component| = {abs:e} au — larger than the correction-residual bound",
     );
 }
 

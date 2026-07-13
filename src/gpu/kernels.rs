@@ -2109,8 +2109,6 @@ pub fn find_blocks_with_interactions(
     interacting_atoms: &mut CudaSlice<u32>,
     single_pair_atoms: &mut CudaSlice<u32>,
     interaction_count: &mut CudaSlice<u32>,
-    excl_jblock_offsets: &CudaSlice<u32>,
-    excl_jblocks: &CudaSlice<u32>,
 ) -> Result<(), GpuError> {
     if n_blocks == 0 {
         return Ok(());
@@ -2139,8 +2137,6 @@ pub fn find_blocks_with_interactions(
                 &mut *interacting_atoms,
                 &mut *single_pair_atoms,
                 &mut *interaction_count,
-                excl_jblock_offsets,
-                excl_jblocks,
             ),
         )
         .map_err(GpuError::from)?;

@@ -939,11 +939,10 @@ impl NeighborListState {
 
     /// Records the modified canonical atom pairs `(a, b)` (`a < b`) — every
     /// pair whose scale differs from `1` in some fragment — that the
-    /// per-rebuild on-device exclusion-tile build maps into the bitmasks.
-    /// Uploads the pairs to the device (interleaved `[a, b, …]`) and sizes
-    /// the per-pair build scratch to the pair count. Called once after
-    /// construction by the force field; a slot that consumes no exclusions
-    /// leaves this empty. rq-8945395f rq-5f871bd5
+    /// correction pass adjusts, and uploads them to the device as the
+    /// fixed `modified_pairs` list (interleaved `[a, b, …]`, length
+    /// `2 · E`). Called once after construction by the force field; a slot
+    /// that consumes no exclusions leaves this empty. rq-8945395f
     pub fn set_excluded_pairs(&mut self, pairs: Vec<(u32, u32)>) -> Result<(), GpuError> {
         let n = pairs.len() as u32;
         let mut flat: Vec<u32> = Vec::with_capacity(pairs.len().max(1) * 2);
@@ -957,14 +956,19 @@ impl NeighborListState {
         }
         self.modified_pairs_dev = self.device.htod_sync_copy(&flat)?;
         self.n_modified = n;
-        if let Some(packed) = self.packed.as_mut() {
-            let cap = n.max(1);
-            packed.excl_pair_bj = self.device.alloc_zeros::<u32>(cap as usize)?;
-            packed.excl_pair_lane = self.device.alloc_zeros::<u32>(cap as usize)?;
-            packed.excl_pair_capacity = cap;
-        }
         self.excluded_pairs = pairs;
         Ok(())
+    }
+
+    /// The device-resident modified-pair list (interleaved `[a, b, …]`).
+    /// rq-8945395f
+    pub fn modified_pairs_device(&self) -> &CudaSlice<u32> {
+        &self.modified_pairs_dev
+    }
+
+    /// The number of modified pairs `E`. rq-8945395f
+    pub fn n_modified(&self) -> u32 {
+        self.n_modified
     }
 
     /// Returns the sorted-particle-ids buffer the packed-neighbour
@@ -1291,10 +1295,6 @@ impl NeighborListState {
             NeighborListMode::CellList(cl) => &cl.sorted_particle_ids,
             _ => unreachable!("rebuild_packed_neighbour is for CellList only"),
         };
-        // Disjoint fields: the device modified-pair list (and its count),
-        // read by the on-device exclusion-tile build below.
-        let modified_view: *const CudaSlice<u32> = &self.modified_pairs_dev;
-        let n_modified = self.n_modified;
         let packed = self.packed.as_mut().expect("packed data present");
 
         // 1. Scatter positions into tile-sorted view (block order).
@@ -1325,78 +1325,6 @@ impl NeighborListState {
             n_blocks,
         )?;
 
-        // 3b. Build the exclusion tiles for the current sort on the device:
-        //     invert the sort, count/scatter modified pairs by i-block, sort
-        //     each i-block by j-block, emit one tile per distinct block pair
-        //     with an OR'd bitmask, and publish the count + CSR + status
-        //     bits. No host round-trip. In probe mode this grows the
-        //     exclusion-tile buffers until neither the high-water nor the
-        //     overflow bit is set, mirroring the find_blocks probe below.
-        //     rq-dbffee81 rq-8945395f rq-5f871bd5 rq-fa0b3d10 rq-67a09135
-        let mut excl_reallocated = false;
-        loop {
-            device
-                .memset_zeros(&mut packed.excl_iblock_pair_count)
-                .map_err(GpuError::from)?;
-            device
-                .memset_zeros(&mut packed.excl_iblock_cursor)
-                .map_err(GpuError::from)?;
-            if probe {
-                // Clear the status word before each exclusion build so a
-                // retry re-checks from a clean slate. Redundant with
-                // `rebuild`'s zeroing on the first iteration.
-                device
-                    .memset_zeros(&mut packed.neighbor_status)
-                    .map_err(GpuError::from)?;
-            }
-            let excl_cap = packed.exclusion_tiles_capacity;
-            let excl_hw = packed.exclusion_tiles_high_water_mark();
-            crate::gpu::build_exclusion_tiles_device(
-                &kernels,
-                unsafe { &*sorted_view },
-                unsafe { &*modified_view },
-                n_modified,
-                particle_count as u32,
-                n_blocks,
-                excl_cap,
-                excl_hw,
-                &mut packed.atom_slot,
-                &mut packed.excl_iblock_pair_count,
-                &mut packed.excl_iblock_pair_offset,
-                &mut packed.excl_iblock_cursor,
-                &mut packed.excl_pair_bj,
-                &mut packed.excl_pair_lane,
-                &mut packed.excl_iblock_tile_count,
-                &mut packed.excl_jblock_offsets,
-                &mut packed.exclusion_tile_iblocks,
-                &mut packed.exclusion_tile_jblocks,
-                &mut packed.exclusion_tile_masks,
-                &mut packed.excl_jblocks,
-                &mut packed.interaction_count,
-                &mut packed.neighbor_status,
-            )?;
-            if !probe {
-                break;
-            }
-            let status = device
-                .dtoh_sync_copy(&packed.neighbor_status)
-                .map_err(GpuError::from)?[0];
-            if (status & (STATUS_EXCL_TILES_HIGH_WATER | STATUS_EXCL_TILES_OVERFLOW)) == 0 {
-                // Probe converged: mirror the device count into the host
-                // field for diagnostics. This dtoh runs only in the
-                // pre-capture probe, never in a steady-state rebuild, so
-                // the no-dtoh invariant is preserved. rq-8945395f
-                packed.exclusion_tiles_count = device
-                    .dtoh_sync_copy(&packed.interaction_count.slice(2..3))
-                    .map_err(GpuError::from)?[0];
-                break;
-            }
-            packed
-                .grow_exclusion_tiles(&device)
-                .map_err(NeighborListError::Gpu)?;
-            excl_reallocated = true;
-        }
-
         // 4. Find blocks with interactions, then record the high-water /
         //    overflow state in `neighbor_status` from the device-resident
         //    counts. No interaction count is copied to the host.
@@ -1410,15 +1338,10 @@ impl NeighborListState {
         //    overflow bit is set, sizing capacity with headroom. Runs once
         //    per state, before CUDA-graph capture.
         //    rq-67a09135
-        // Seed with the exclusion-tile build's own reallocation so a grown
-        // exclusion buffer also triggers CUDA-graph re-capture. rq-8945395f
-        let mut reallocated = excl_reallocated;
+        let mut reallocated = false;
         loop {
-            // Zero only the tile and single-pair counts ([0], [1]); the
-            // exclusion-tile count [2] was written on the device by the
-            // step-3b build above and must survive. rq-8945395f
             device
-                .memset_zeros(&mut packed.interaction_count.slice_mut(0..2))
+                .memset_zeros(&mut packed.interaction_count)
                 .map_err(GpuError::from)?;
             if probe {
                 // A retry's set_neighbor_status_bits must start from a
@@ -1447,8 +1370,6 @@ impl NeighborListState {
                 &mut packed.interacting_atoms,
                 &mut packed.single_pair_atoms,
                 &mut packed.interaction_count,
-                &packed.excl_jblock_offsets,
-                &packed.excl_jblocks,
             )?;
             // rq-67a09135 — set bits 1-4 of neighbor_status on the device.
             let tiles_hw = packed.tiles_high_water_mark();

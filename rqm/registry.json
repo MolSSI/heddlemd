@@ -1069,6 +1069,13 @@
     "title": "Barostat",
     "type": "api-item"
   },
+  "rq-077f82c6": {
+    "decl": "Scenario: Correction pass takes the min-image path",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Correction pass takes the min-image path",
+    "type": "scenario"
+  },
   "rq-077fb357": {
     "decl": "Scenario: Dihedral composed module is compiled at ForceField::new when at least one dihedral slot is active",
     "file": "forces/jit-composed-intramolecular",
@@ -2360,18 +2367,6 @@
     "refs": [],
     "title": "Slot Participation",
     "type": "section"
-  },
-  "rq-10443d06": {
-    "decl": "Scenario: Two GPU runs build byte-identical exclusion tiles",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Two GPU runs build byte-identical exclusion tiles",
-    "type": "scenario"
   },
   "rq-105afb1d": {
     "decl": "Scenario: min <= mean <= max for every row",
@@ -4588,18 +4583,6 @@
     "title": "Reject when positions_y has the wrong length",
     "type": "scenario"
   },
-  "rq-1e9bb643": {
-    "decl": "Scenario: Exclusion-tile SPC predicate uses the tile's i-block and is warp-uniform",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/neighbor_list_correctness.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Exclusion-tile SPC predicate uses the tile's i-block and is warp-uniform",
-    "type": "scenario"
-  },
   "rq-1ea7342a": {
     "decl": "Scenario: A settle [constraints] row with the wrong atom count is rejected by the parser",
     "file": "integration/settle",
@@ -5793,6 +5776,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "scatter places each atom inside its cell's slice",
+    "type": "scenario"
+  },
+  "rq-26734dec": {
+    "decl": "Scenario: Modified pairs in the neighbour-list output are unique",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Modified pairs in the neighbour-list output are unique",
     "type": "scenario"
   },
   "rq-2674f18a": {
@@ -7698,6 +7688,13 @@
     "title": "Refuse to run with multiple types",
     "type": "scenario"
   },
+  "rq-350b8807": {
+    "decl": "Scenario: A modified pair appears at full strength in the neighbour-list output",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "A modified pair appears at full strength in the neighbour-list output",
+    "type": "scenario"
+  },
   "rq-351976f8": {
     "decl": "Scenario: step() with one dihedral slot launches the dihedral composed kernel once and the reduction once",
     "file": "forces/jit-composed-intramolecular",
@@ -8084,6 +8081,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-37d3cd28": {
+    "decl": "Scenario: The correction pass is skipped when no pair is modified",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "The correction pass is skipped when no pair is modified",
+    "type": "scenario"
+  },
   "rq-37e6f318": {
     "decl": "Scenario: Two independent runs produce byte-identical outputs",
     "file": "integration/velocity-verlet",
@@ -8194,6 +8198,14 @@
     ],
     "title": "Langevin BAOAB rejects friction=0",
     "type": "scenario"
+  },
+  "rq-385abed5": {
+    "decl": "### Mixed-entry Newton's-3rd double-count (FIXED)",
+    "file": "forces/neighbor-list",
+    "level": 3,
+    "refs": [],
+    "title": "Mixed-entry Newton's-3rd double-count (FIXED)",
+    "type": "section"
   },
   "rq-386cfae3": {
     "decl": "Scenario: vv_kick on an empty state is a no-op",
@@ -8560,18 +8572,6 @@
       }
     ],
     "title": "Morse bond_type missing de is rejected",
-    "type": "scenario"
-  },
-  "rq-3b18d9db": {
-    "decl": "Scenario: Probe rebuild grows exclusion-tile capacity on a near-full build",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Probe rebuild grows exclusion-tile capacity on a near-full build",
     "type": "scenario"
   },
   "rq-3b42c2ff": {
@@ -8954,18 +8954,6 @@
     "file": "forces/spme",
     "refs": [],
     "title": "spme_spread_fixed_point issues at most N · p³ atomicAdd<i64> operations",
-    "type": "scenario"
-  },
-  "rq-3dd31c3d": {
-    "decl": "Scenario: A self-block exclusion tile sets the symmetric mask bit",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A self-block exclusion tile sets the symmetric mask bit",
     "type": "scenario"
   },
   "rq-3ddf259b": {
@@ -9661,7 +9649,7 @@
     "type": "api-item"
   },
   "rq-44385733": {
-    "decl": "Scenario: ForceField carries no per-excluded-pair state",
+    "decl": "Scenario: ForceField carries the device modified-pair list",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -9669,7 +9657,7 @@
         "kind": "code"
       }
     ],
-    "title": "ForceField carries no per-excluded-pair state",
+    "title": "ForceField carries the device modified-pair list",
     "type": "scenario"
   },
   "rq-443a91da": {
@@ -10433,7 +10421,7 @@
     "type": "api-item"
   },
   "rq-4aad39c8": {
-    "decl": "Scenario: A fractional 1-4 pair contributes a scaled force",
+    "decl": "Scenario: A fractional 1-4 pair nets a scaled force",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -10441,7 +10429,7 @@
         "kind": "code"
       }
     ],
-    "title": "A fractional 1-4 pair contributes a scaled force",
+    "title": "A fractional 1-4 pair nets a scaled force",
     "type": "scenario"
   },
   "rq-4ab1c94e": {
@@ -10495,7 +10483,12 @@
   "rq-4b40604b": {
     "decl": "Scenario: Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "type": "scenario"
   },
@@ -11117,6 +11110,13 @@
     "title": "MtkNptIntegrator",
     "type": "api-item"
   },
+  "rq-50967ef2": {
+    "decl": "Scenario: Two GPU runs produce byte-identical forces with exclusions",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Two GPU runs produce byte-identical forces with exclusions",
+    "type": "scenario"
+  },
   "rq-50b50f8d": {
     "decl": "Scenario: flush_from_device refreshes host fields from the device buffer",
     "file": "simulation-box",
@@ -11249,18 +11249,6 @@
     "title": "register(...) appends a builder at the end",
     "type": "scenario"
   },
-  "rq-51d6a942": {
-    "decl": "Scenario: An exclusion-tile overflow halts the run",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "An exclusion-tile overflow halts the run",
-    "type": "scenario"
-  },
   "rq-51e5a0cd": {
     "decl": "### Sub-step Execution",
     "file": "integration/velocity-verlet",
@@ -11270,7 +11258,7 @@
     "type": "section"
   },
   "rq-5214bef3": {
-    "decl": "Scenario: Composer emits no exclusion-correction entry points",
+    "decl": "Scenario: Composer emits correction entry points",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -11278,7 +11266,7 @@
         "kind": "code"
       }
     ],
-    "title": "Composer emits no exclusion-correction entry points",
+    "title": "Composer emits correction entry points",
     "type": "scenario"
   },
   "rq-5214e3b3": {
@@ -11661,7 +11649,7 @@
     "type": "section"
   },
   "rq-54aec894": {
-    "decl": "Scenario: Packed-neighbour pass dispatches to the composer's evaluator",
+    "decl": "Scenario: Packed-neighbour pass dispatches to the scale-free evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -11669,7 +11657,7 @@
         "kind": "code"
       }
     ],
-    "title": "Packed-neighbour pass dispatches to the composer's evaluator",
+    "title": "Packed-neighbour pass dispatches to the scale-free evaluator",
     "type": "scenario"
   },
   "rq-54b99519": {
@@ -12729,16 +12717,7 @@
     "decl": "### Single-Periodic-Copy Fast Path",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
-    "refs": [
-      {
-        "file": "src/forces/jit_composed.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/forces/mod.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Single-Periodic-Copy Fast Path",
     "type": "section"
   },
@@ -13125,22 +13104,6 @@
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
-  "rq-5f871bd5": {
-    "decl": "- `build_atom_slot(sorted_particle_ids, atom_slot, n_atoms)` — device",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "src/forces/neighbor_list.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "build_atom_slot",
-    "type": "api-item"
-  },
   "rq-5f8f7d00": {
     "decl": "Scenario: Registries::with_builtins() pre-populates every inner registry",
     "file": "simulation-runner",
@@ -13475,18 +13438,6 @@
     "title": "Construction and Lifetime",
     "type": "section"
   },
-  "rq-61d3e1a7": {
-    "decl": "Scenario: build_atom_slot inverts the sort permutation",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "build_atom_slot inverts the sort permutation",
-    "type": "scenario"
-  },
   "rq-61f241f6": {
     "decl": "## Position Rescale",
     "file": "integration/c-rescale-barostat",
@@ -13620,18 +13571,6 @@
       }
     ],
     "title": "A ConstraintPoint hook receives the marker's own dt",
-    "type": "scenario"
-  },
-  "rq-62cf6290": {
-    "decl": "Scenario: An empty modified-pair set produces no exclusion tiles",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "An empty modified-pair set produces no exclusion tiles",
     "type": "scenario"
   },
   "rq-62e2469f": {
@@ -17681,7 +17620,7 @@
     "type": "scenario"
   },
   "rq-80c6a964": {
-    "decl": "Scenario: A fully-excluded pair contributes nothing via the exclusion-tile pass",
+    "decl": "Scenario: A fully-excluded pair nets to within the correction residual",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -17689,7 +17628,7 @@
         "kind": "code"
       }
     ],
-    "title": "A fully-excluded pair contributes nothing via the exclusion-tile pass",
+    "title": "A fully-excluded pair nets to within the correction residual",
     "type": "scenario"
   },
   "rq-80d00b52": {
@@ -18115,7 +18054,7 @@
     "type": "api-item"
   },
   "rq-841a4bd3": {
-    "decl": "Scenario: Cell-list forces at equilibrium match all-pairs forces to f32 tolerance",
+    "decl": "Scenario: Cell-list forces at equilibrium match all-pairs forces within the correction residual",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -18123,7 +18062,7 @@
         "kind": "code"
       }
     ],
-    "title": "Cell-list forces at equilibrium match all-pairs forces to f32 tolerance",
+    "title": "Cell-list forces at equilibrium match all-pairs forces within the correction residual",
     "type": "scenario"
   },
   "rq-8443c065": {
@@ -18259,18 +18198,6 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Two particles across the box boundary interact via the minimum image",
-    "type": "scenario"
-  },
-  "rq-8631baa6": {
-    "decl": "Scenario: Exclusion tiles are emitted in ascending (bi, bj) order with an ascending CSR",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Exclusion tiles are emitted in ascending (bi, bj) order with an ascending CSR",
     "type": "scenario"
   },
   "rq-863cf49f": {
@@ -18576,18 +18503,6 @@
     "title": "Full per-kernel timings on cuda_graphs_disable",
     "type": "scenario"
   },
-  "rq-8840662f": {
-    "decl": "Scenario: A non-modified pair inside an exclusion tile is computed at full strength",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/neighbor_list_correctness.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A non-modified pair inside an exclusion tile is computed at full strength",
-    "type": "scenario"
-  },
   "rq-884b5cd6": {
     "decl": "- `neighbor_displacement_check_flag(particle_buffers, reference_x, reference_y, reference_z, sim_box, threshold_sq, neighbor_status) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
@@ -18758,7 +18673,7 @@
     "type": "section"
   },
   "rq-8945395f": {
-    "decl": "- `build_exclusion_tiles(...)` — the on-device exclusion-tile",
+    "decl": "- The device-resident `modified_pairs` buffer (length `2 · E`) is",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [
       {
@@ -18774,8 +18689,8 @@
         "kind": "code"
       }
     ],
-    "title": "build_exclusion_tiles",
-    "type": "api-item"
+    "title": "- The device-resident `modified_pairs` buffer (length `2 · E`) is",
+    "type": "anchor"
   },
   "rq-894c16c4": {
     "decl": "Scenario: Defaults populate the output section when [output] is omitted",
@@ -18994,7 +18909,7 @@
     "type": "scenario"
   },
   "rq-8ae4a9f1": {
-    "decl": "Scenario: Composer emits a scale-free evaluator in CellList mode",
+    "decl": "Scenario: Composer emits a correction evaluator that applies scale minus one",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -19002,7 +18917,7 @@
         "kind": "code"
       }
     ],
-    "title": "Composer emits a scale-free evaluator in CellList mode",
+    "title": "Composer emits a correction evaluator that applies scale minus one",
     "type": "scenario"
   },
   "rq-8b1827a9": {
@@ -20258,18 +20173,6 @@
     "title": "Triclinic shape is preserved under apply",
     "type": "scenario"
   },
-  "rq-94d51613": {
-    "decl": "Scenario: Two modified pairs sharing a block pair merge into one exclusion tile",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Two modified pairs sharing a block pair merge into one exclusion tile",
-    "type": "scenario"
-  },
   "rq-94e7affd": {
     "decl": "- `Convert` — trait for applying the I/O-boundary rescaling to a value",
     "file": "io/unit-system",
@@ -20443,7 +20346,7 @@
     "type": "scenario"
   },
   "rq-95f0812c": {
-    "decl": "Scenario: Single-pair pass dispatches to the composer's evaluator",
+    "decl": "Scenario: Single-pair pass dispatches to the scale-free evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -20451,7 +20354,7 @@
         "kind": "code"
       }
     ],
-    "title": "Single-pair pass dispatches to the composer's evaluator",
+    "title": "Single-pair pass dispatches to the scale-free evaluator",
     "type": "scenario"
   },
   "rq-963604a4": {
@@ -21387,10 +21290,10 @@
     "type": "scenario"
   },
   "rq-9d34c158": {
-    "decl": "- `heddle_jit_composed_pair_force_excl_f` /",
+    "decl": "- `heddle_jit_composed_pair_force_correct_f` /",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "heddle_jit_composed_pair_force_excl_f",
+    "title": "heddle_jit_composed_pair_force_correct_f",
     "type": "api-item"
   },
   "rq-9d523d38": {
@@ -23550,18 +23453,6 @@
     "title": "Per-kernel timings are populated in graph mode",
     "type": "scenario"
   },
-  "rq-acfb3375": {
-    "decl": "Scenario: Construction routes a modified-pair block pair away from the bulk list",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Construction routes a modified-pair block pair away from the bulk list",
-    "type": "scenario"
-  },
   "rq-acfda5d4": {
     "decl": "## Compatibility Rules",
     "file": "integration/constraint-framework",
@@ -24033,7 +23924,7 @@
     "type": "api-item"
   },
   "rq-b099ff28": {
-    "decl": "Scenario: Composer emits a scale-aware evaluator in all-pairs mode",
+    "decl": "Scenario: Composer emits a scale-free bulk evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -24041,7 +23932,7 @@
         "kind": "code"
       }
     ],
-    "title": "Composer emits a scale-aware evaluator in all-pairs mode",
+    "title": "Composer emits a scale-free bulk evaluator",
     "type": "scenario"
   },
   "rq-b0a520ac": {
@@ -24612,10 +24503,10 @@
     "type": "section"
   },
   "rq-b49bfdff": {
-    "decl": "Scenario: Bulk and single-pair passes do no exclusion work",
+    "decl": "Scenario: Packed-neighbour and single-pair passes do no exclusion work",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Bulk and single-pair passes do no exclusion work",
+    "title": "Packed-neighbour and single-pair passes do no exclusion work",
     "type": "scenario"
   },
   "rq-b4bb7096": {
@@ -24896,18 +24787,6 @@
     ],
     "title": "Types",
     "type": "section"
-  },
-  "rq-b72ac355": {
-    "decl": "Scenario: A cross-block exclusion tile with an out-of-cutoff pair contributes nothing under SPC",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/neighbor_list_correctness.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A cross-block exclusion tile with an out-of-cutoff pair contributes nothing under SPC",
-    "type": "scenario"
   },
   "rq-b7317e2d": {
     "decl": "### Failed runs",
@@ -25329,18 +25208,6 @@
       }
     ],
     "title": "File does not exist",
-    "type": "scenario"
-  },
-  "rq-ba3ad34b": {
-    "decl": "Scenario: Triclinic box forces the exclusion-tile pass onto the min-image path",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/neighbor_list_correctness.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Triclinic box forces the exclusion-tile pass onto the min-image path",
     "type": "scenario"
   },
   "rq-ba4087d7": {
@@ -26080,6 +25947,13 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "MTK-NPT phase runs per-step with standalone launches",
+    "type": "scenario"
+  },
+  "rq-c057bf03": {
+    "decl": "Scenario: The modified-pair list is uploaded once and never rebuilt",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "The modified-pair list is uploaded once and never rebuilt",
     "type": "scenario"
   },
   "rq-c0668cb7": {
@@ -29871,10 +29745,6 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/forces/neighbor_list.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
       }
@@ -29951,18 +29821,6 @@
       }
     ],
     "title": "Construct AndersenThermostat via the registry",
-    "type": "scenario"
-  },
-  "rq-dc44a114": {
-    "decl": "Scenario: Exclusion-tile pass takes the min-image path when its i-block does not qualify",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/neighbor_list_correctness.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Exclusion-tile pass takes the min-image path when its i-block does not qualify",
     "type": "scenario"
   },
   "rq-dc5041ea": {
@@ -31050,18 +30908,6 @@
     "title": "Types",
     "type": "section"
   },
-  "rq-e4a333d2": {
-    "decl": "Scenario: A steady-state rebuild builds exclusion tiles without a host round-trip",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/packed_neighbour_capacity.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "A steady-state rebuild builds exclusion tiles without a host round-trip",
-    "type": "scenario"
-  },
   "rq-e4ace7d6": {
     "decl": "## Out of Scope",
     "file": "integration/langevin-baoab",
@@ -31334,18 +31180,6 @@
     "refs": [],
     "title": "Functions",
     "type": "section"
-  },
-  "rq-e6620f2c": {
-    "decl": "Scenario: Exclusion-tile pass takes the SPC fast path when its i-block qualifies",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/neighbor_list_correctness.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Exclusion-tile pass takes the SPC fast path when its i-block qualifies",
-    "type": "scenario"
   },
   "rq-e67ef8c3": {
     "decl": "### Types",
@@ -31913,18 +31747,6 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
-    "type": "scenario"
-  },
-  "rq-ea68a7aa": {
-    "decl": "Scenario: Exclusion-tile SPC path is bit-identical to the min-image path",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [
-      {
-        "file": "tests/neighbor_list_correctness.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Exclusion-tile SPC path is bit-identical to the min-image path",
     "type": "scenario"
   },
   "rq-ea8640f5": {
@@ -34174,7 +33996,7 @@
     "type": "section"
   },
   "rq-fa0b3d10": {
-    "decl": "### Exclusion-Tile Pass",
+    "decl": "### Correction Pass",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
     "refs": [
@@ -34187,15 +34009,11 @@
         "kind": "code"
       },
       {
-        "file": "src/forces/neighbor_list.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
       }
     ],
-    "title": "Exclusion-Tile Pass",
+    "title": "Correction Pass",
     "type": "section"
   },
   "rq-fa14a87f": {

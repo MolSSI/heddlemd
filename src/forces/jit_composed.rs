@@ -85,9 +85,9 @@ const F_ENTRY: &str = "heddle_jit_composed_pair_force_f";
 const FEV_ENTRY: &str = "heddle_jit_composed_pair_force_fev";
 const F_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_f";
 const FEV_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_fev";
-// Exclusion-tile pass entry points (CellList mode only). rq-fa0b3d10
-const F_EXCL_ENTRY: &str = "heddle_jit_composed_pair_force_excl_f";
-const FEV_EXCL_ENTRY: &str = "heddle_jit_composed_pair_force_excl_fev";
+// Correction-pass entry points (one thread per modified pair). rq-fa0b3d10
+const F_CORRECT_ENTRY: &str = "heddle_jit_composed_pair_force_correct_f";
+const FEV_CORRECT_ENTRY: &str = "heddle_jit_composed_pair_force_correct_fev";
 
 const WARPS_PER_BLOCK: u32 = 8;
 const BLOCK_SIZE: u32 = WARPS_PER_BLOCK * 32;
@@ -659,12 +659,10 @@ pub struct JitComposedPairForce {
     pub single_pair_f: CudaFunction,
     /// `AggregateLevel::ForcesAndScalars` variant of `single_pair_f`.
     pub single_pair_fev: CudaFunction,
-    /// Exclusion-tile pass entry points, present only when the kernel was
-    /// composed with the per-tile exclusion bitmask (CellList mode). In
-    /// all-pairs mode exclusions fold into the evaluator's per-pair scale
-    /// and there is no separate pass. rq-fa0b3d10
-    pub excl_tile_f: Option<CudaFunction>,
-    pub excl_tile_fev: Option<CudaFunction>,
+    /// Correction-pass entry points (one thread per modified pair); always
+    /// present, in every neighbour-list mode. rq-fa0b3d10
+    pub correct_f: CudaFunction,
+    pub correct_fev: CudaFunction,
 }
 
 impl JitComposedPairForce {
@@ -704,11 +702,14 @@ impl JitComposedPairForce {
             }
         })?;
 
-        let mut entry_points = vec![F_ENTRY, FEV_ENTRY, F_SINGLE_ENTRY, FEV_SINGLE_ENTRY];
-        if use_exclusion_bitmask {
-            entry_points.push(F_EXCL_ENTRY);
-            entry_points.push(FEV_EXCL_ENTRY);
-        }
+        let entry_points = vec![
+            F_ENTRY,
+            FEV_ENTRY,
+            F_SINGLE_ENTRY,
+            FEV_SINGLE_ENTRY,
+            F_CORRECT_ENTRY,
+            FEV_CORRECT_ENTRY,
+        ];
         device
             .load_ptx(ptx, MODULE_NAME, &entry_points)
             .map_err(|e| ForceFieldError::FragmentLoadFailed(GpuError::from(e)))?;
@@ -724,22 +725,12 @@ impl JitComposedPairForce {
         let single_pair_fev = device
             .get_func(MODULE_NAME, FEV_SINGLE_ENTRY)
             .expect("composed pair-force single-pair _fev entry was just loaded");
-        let (excl_tile_f, excl_tile_fev) = if use_exclusion_bitmask {
-            (
-                Some(
-                    device
-                        .get_func(MODULE_NAME, F_EXCL_ENTRY)
-                        .expect("composed pair-force excl-tile _f entry was just loaded"),
-                ),
-                Some(
-                    device
-                        .get_func(MODULE_NAME, FEV_EXCL_ENTRY)
-                        .expect("composed pair-force excl-tile _fev entry was just loaded"),
-                ),
-            )
-        } else {
-            (None, None)
-        };
+        let correct_f = device
+            .get_func(MODULE_NAME, F_CORRECT_ENTRY)
+            .expect("composed pair-force correction _f entry was just loaded");
+        let correct_fev = device
+            .get_func(MODULE_NAME, FEV_CORRECT_ENTRY)
+            .expect("composed pair-force correction _fev entry was just loaded");
 
         Ok(JitComposedPairForce {
             fragment_labels: fragments.iter().map(|f| f.label).collect(),
@@ -747,8 +738,8 @@ impl JitComposedPairForce {
             pair_force_fev,
             single_pair_f,
             single_pair_fev,
-            excl_tile_f,
-            excl_tile_fev,
+            correct_f,
+            correct_fev,
         })
     }
 
@@ -836,47 +827,36 @@ impl JitComposedPairForce {
         Ok(())
     }
 
-    /// Launch the exclusion-tile pass (one warp per tile). The grid is
-    /// sized to `exclusion_tiles_capacity` warps so the captured kernel
-    /// covers any post-rebuild tile count; each warp reads the live count
-    /// from `interaction_count[2]` (via the pointer in the builder) and
-    /// returns early past the live boundary. `builder` must be
-    /// pre-populated with the exclusion-tile common args (exclusion-tile
-    /// buffers, `interaction_count`, `tile_sorted_posq`,
-    /// `sorted_particle_ids`, `type_indices`, `lattice`, and the
-    /// fixed-point accumulators), the per-fragment args in canonical slot
-    /// order, and the trailing `n`.
+    /// Launch the correction pass — one thread per modified pair over the
+    /// fixed `modified_pairs` list. `n_modified` is the topology-constant
+    /// pair count. `builder` must be pre-populated with the correction
+    /// common args (`posq`, `type_indices`, `modified_pairs`, `n_modified`,
+    /// `lattice`, and the fixed-point accumulators), the per-fragment args
+    /// in canonical slot order, and the trailing `n`.
     ///
     /// # Safety
-    /// `builder`'s argument list must match the exclusion-tile entry
-    /// point's signature exactly. rq-fa0b3d10
-    pub unsafe fn launch_excl_tile(
+    /// `builder`'s argument list must match the correction entry point's
+    /// signature exactly. rq-fa0b3d10
+    pub unsafe fn launch_correction(
         &self,
-        exclusion_tiles_capacity: u32,
+        n_modified: u32,
         use_fev: bool,
         mut builder: ForceLaunchBuilder,
     ) -> Result<(), GpuError> {
-        let func = if use_fev {
-            self.excl_tile_fev.as_ref()
-        } else {
-            self.excl_tile_f.as_ref()
-        };
-        let func = match func {
-            Some(f) if exclusion_tiles_capacity > 0 => f.clone(),
-            // No bitmask pass compiled (all-pairs mode) or empty capacity:
-            // nothing to launch.
-            _ => {
-                drop(builder.storage);
-                return Ok(());
-            }
-        };
-        // 8 warps per block (256 threads); one warp per tile.
-        const WARPS_PER_BLOCK: u32 = 8;
-        let block_size: u32 = WARPS_PER_BLOCK * 32;
+        if n_modified == 0 {
+            drop(builder.storage);
+            return Ok(());
+        }
+        let block_size: u32 = 256;
         let cfg = LaunchConfig {
-            grid_dim: (exclusion_tiles_capacity.div_ceil(WARPS_PER_BLOCK), 1, 1),
+            grid_dim: (n_modified.div_ceil(block_size), 1, 1),
             block_dim: (block_size, 1, 1),
             shared_mem_bytes: 0,
+        };
+        let func = if use_fev {
+            self.correct_fev.clone()
+        } else {
+            self.correct_f.clone()
         };
         unsafe {
             func.launch(cfg, &mut builder.kernel_params)
@@ -973,7 +953,7 @@ fn emit_eval_pair_sum(
     fragments: &[PairForceFragment],
     max_cutoff: Real,
     fn_name: &str,
-    apply_scale: bool,
+    correction: bool,
 ) {
     s.push_str("\ntemplate <bool WriteEv>\n");
     s.push_str(&format!("__device__ static inline void {fn_name}(\n"));
@@ -986,11 +966,15 @@ fn emit_eval_pair_sum(
     s.push_str("    factor = R(0.0); energy = R(0.0);\n");
     for f in fragments {
         let field = functor_field_name(f.label);
-        let body = if apply_scale {
+        // rq-8ae4a9f1 — the correction evaluator weights each fragment by
+        // `exclusion_scale(i, j) - 1`; summed with the full-strength
+        // contribution the neighbour-list pass added, the net is
+        // `scale * evaluate`.
+        let body = if correction {
             format!(
                 "Real s_factor, s_energy;\n            \
                  composite.{f}.evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, s_factor, s_energy);\n            \
-                 Real ex_scale = composite.{f}.exclusion_scale(i, j);\n            \
+                 Real ex_scale = composite.{f}.exclusion_scale(i, j) - R(1.0);\n            \
                  factor += s_factor * ex_scale;\n            \
                  if (WriteEv) {{ energy += s_energy * ex_scale; }}",
                 f = field
@@ -1098,26 +1082,25 @@ fn compose_source(
     // rq-7d64da58 — the functor emits only (factor, energy); the per-pair
     // scalar virial is derived by the caller as factor * r2.
     // rq-a4b9e702 rq-b28a6d96 rq-fa0b3d10 rq-8ae4a9f1
-    if use_exclusion_bitmask {
-        emit_eval_pair_sum(&mut s, fragments, max_cutoff, "heddle_jit_eval_pair_sum", false);
-        emit_eval_pair_sum(
-            &mut s,
-            fragments,
-            max_cutoff,
-            "heddle_jit_eval_pair_sum_scaled",
-            true,
-        );
-    } else {
-        emit_eval_pair_sum(&mut s, fragments, max_cutoff, "heddle_jit_eval_pair_sum", true);
-    }
+    // rq-b099ff28 rq-8ae4a9f1 — the packed-neighbour and single-pair
+    // passes use the scale-free evaluator; the correction pass uses the
+    // correction evaluator (`exclusion_scale - 1`). Both are emitted in
+    // every neighbour-list mode.
+    let _ = use_exclusion_bitmask;
+    emit_eval_pair_sum(&mut s, fragments, max_cutoff, "heddle_jit_eval_pair_sum", false);
+    emit_eval_pair_sum(
+        &mut s,
+        fragments,
+        max_cutoff,
+        "heddle_jit_eval_pair_correction",
+        true,
+    );
 
     let _ = max_cutoff;
 
     s.push_str(OUTER_LOOP_TEMPLATE);
     s.push_str(SINGLE_PAIR_LOOP_TEMPLATE);
-    if use_exclusion_bitmask {
-        s.push_str(EXCL_TILE_LOOP_TEMPLATE);
-    }
+    s.push_str(CORRECTION_LOOP_TEMPLATE);
 
     // _f / _fev entry points. Each evaluates the single-periodic-copy
     // eligibility once per i-block at runtime and branches inside the
@@ -1130,11 +1113,9 @@ fn compose_source(
     // Per-pair single-pair entry points
     emit_single_pair_entry_point(&mut s, fragments, F_SINGLE_ENTRY, false);
     emit_single_pair_entry_point(&mut s, fragments, FEV_SINGLE_ENTRY, true);
-    // Exclusion-tile pass entry points (CellList mode only). rq-fa0b3d10
-    if use_exclusion_bitmask {
-        emit_excl_tile_entry_point(&mut s, fragments, F_EXCL_ENTRY, false);
-        emit_excl_tile_entry_point(&mut s, fragments, FEV_EXCL_ENTRY, true);
-    }
+    // Correction-pass entry points (one thread per modified pair). rq-fa0b3d10
+    emit_correct_entry_point(&mut s, fragments, F_CORRECT_ENTRY, false);
+    emit_correct_entry_point(&mut s, fragments, FEV_CORRECT_ENTRY, true);
 
     // Resolve the per-atom type-index load markers left in the loop
     // templates. The per-atom `type_indices` buffer is always a common
@@ -1275,7 +1256,11 @@ fn emit_entry_point(
 // fixed-point accumulators; per-fragment args follow in canonical slot
 // order (the functor still needs its parameter buffers even though no
 // exclusion scale is applied here). One warp per tile.
-fn emit_excl_tile_entry_point(
+// rq-fa0b3d10 — correction-pass entry point. One thread per modified
+// pair over the fixed `modified_pairs` list; adds each fragment's
+// `(exclusion_scale(a, b) - 1) * evaluate`. `n_modified` (the pair count,
+// a topology constant) and `n` (n_atoms) are trailing scalars.
+fn emit_correct_entry_point(
     s: &mut String,
     fragments: &[PairForceFragment],
     entry_name: &str,
@@ -1284,18 +1269,10 @@ fn emit_excl_tile_entry_point(
     s.push_str("\nextern \"C\" __global__ void ");
     s.push_str(entry_name);
     s.push_str("(\n");
-    s.push_str("    const unsigned int *exclusion_tile_iblocks,\n");
-    s.push_str("    const unsigned int *exclusion_tile_jblocks,\n");
-    s.push_str("    const unsigned int *exclusion_tile_masks,\n");
-    s.push_str("    const unsigned int *interaction_count,\n");
-    s.push_str("    const Real4 *tile_sorted_posq,\n");
-    // rq-5ce17997 — block_centre / block_bbox feed the SPC predicate and
-    // centre-wrap; placed after tile_sorted_posq, mirroring the
-    // packed-neighbour entry point's argument order.
-    s.push_str("    const Real *block_centre,\n");
-    s.push_str("    const Real *block_bbox,\n");
-    s.push_str("    const unsigned int *sorted_particle_ids,\n");
+    s.push_str("    const Real4 *posq,\n");
     s.push_str("    const unsigned int *type_indices,\n");
+    s.push_str("    const unsigned int *modified_pairs,\n");
+    s.push_str("    unsigned int n_modified,\n");
     s.push_str("    const Real *lattice,\n");
     s.push_str("    unsigned long long *fast_force_x_fp,\n");
     s.push_str("    unsigned long long *fast_force_y_fp,\n");
@@ -1311,14 +1288,11 @@ fn emit_excl_tile_entry_point(
     for f in fragments {
         s.push_str(&f.functor_init_source);
     }
-    s.push_str("    heddle_jit_excl_tile_loop<");
+    s.push_str("    heddle_jit_correction_loop<");
     s.push_str(if write_ev { "true" } else { "false" });
     s.push_str(">(\n");
-    s.push_str("        composite, exclusion_tile_iblocks, exclusion_tile_jblocks,\n");
-    s.push_str("        exclusion_tile_masks, interaction_count,\n");
-    s.push_str("        tile_sorted_posq,\n");
-    s.push_str("        block_centre, block_bbox,\n");
-    s.push_str("        sorted_particle_ids,\n");
+    s.push_str("        composite, modified_pairs, n_modified,\n");
+    s.push_str("        posq,\n");
     s.push_str("        type_indices,\n");
     s.push_str("        lattice,\n");
     s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
@@ -1906,35 +1880,24 @@ __device__ static inline void heddle_jit_single_pair_loop(
 }
 "#;
 
-// Exclusion-tile pair-force pass. One warp per exclusion tile — a block
-// pair (bi <= bj) that contains at least one modified atom pair (a pair
-// whose scale differs from 1 in some fragment). The whole block pair
-// (modified and unmodified pairs alike) is computed here so the bulk and
-// single-pair passes can skip it and do zero exclusion work. Lane `l`
-// owns i-atom slot bi*32+l and initially j-atom slot bj*32+l; the
-// 32-iteration diagonal shuffle visits every (i_lane, j_lane) pair. A
-// pair flagged in the modified-pair bitmask is summed through the
-// scale-aware evaluator (applying each fragment's per-pair scale — a
-// full exclusion contributes nothing, a 1-4 pair a scaled force); an
-// unflagged pair is evaluated at full strength. The self-block (bi==bj)
-// diagonal is skipped. A self-block tile applies the i-side only — each
-// intra-block pair is visited from both orderings and the bitmask is
-// symmetric — and a cross-block tile applies both sides (Newton's 3rd).
-// The j-side diagonal-shuffle bookkeeping mirrors the packed-neighbour
-// pass. Accumulation is i64 fixed-point, so it is order-independent and
-// bit-exact run to run. rq-fa0b3d10
-const EXCL_TILE_LOOP_TEMPLATE: &str = r#"
+// rq-fa0b3d10 — correction pass. One thread per entry in the fixed
+// `modified_pairs` list. Reads the canonical (a, b) atom IDs, forms the
+// min-image displacement (a modified pair is intramolecular, so this is
+// bit-identical to the displacement the neighbour-list pass computed for
+// the same pair), applies the branchless max-cutoff mask, and invokes the
+// correction evaluator (`heddle_jit_eval_pair_correction`, weighting each
+// fragment by `exclusion_scale(a, b) - 1`). Summed with the full-strength
+// contribution the packed-neighbour or single-pair pass added, the net is
+// `scale * evaluate`; a full exclusion cancels to exactly zero in the
+// i64 fixed-point accumulator. `n_modified` is a topology constant, so
+// the grid is graph-capture stable.
+const CORRECTION_LOOP_TEMPLATE: &str = r#"
 template <bool WriteEv>
-__device__ static inline void heddle_jit_excl_tile_loop(
+__device__ static inline void heddle_jit_correction_loop(
     const HeddleJitComposedPairFunc &composite,
-    const unsigned int *exclusion_tile_iblocks,
-    const unsigned int *exclusion_tile_jblocks,
-    const unsigned int *exclusion_tile_masks,
-    const unsigned int *interaction_count_ptr,
-    const Real4 *tile_sorted_posq,
-    const Real *block_centre,
-    const Real *block_bbox,
-    const unsigned int *sorted_particle_ids,
+    const unsigned int *modified_pairs,
+    unsigned int n_modified,
+    const Real4 *posq,
     const unsigned int *type_indices,
     const Real *lattice,
     unsigned long long *fast_force_x_fp,
@@ -1944,174 +1907,63 @@ __device__ static inline void heddle_jit_excl_tile_loop(
     unsigned long long *fast_virial_fp,
     unsigned int n)
 {
-  // Live exclusion-tile count read from device memory (graph-capture
-  // safe: the host rebuild refreshes interaction_count[2] in place).
-  unsigned int n_excl_tiles = interaction_count_ptr[2];
-  unsigned int warp_global =
-      (blockIdx.x * blockDim.x + threadIdx.x) / HEDDLE_JIT_WARP_SIZE;
-  if (warp_global >= n_excl_tiles) return;
-  unsigned int lane = threadIdx.x & (HEDDLE_JIT_WARP_SIZE - 1u);
-  unsigned int t = warp_global;
-
-  unsigned int bi = exclusion_tile_iblocks[t];
-  unsigned int bj = exclusion_tile_jblocks[t];
-  bool self_block = (bi == bj);
+  unsigned int pair_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (pair_idx >= n_modified) return;
+  unsigned int atom_i = modified_pairs[2u * pair_idx];
+  unsigned int atom_j = modified_pairs[2u * pair_idx + 1u];
+  if (atom_i >= n || atom_j >= n) return;
 
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
 
-  // rq-5ce17997 — per-tile single-periodic-copy (SPC) predicate on the
-  // tile's i-block `bi`. When every axis margin `0.5*L - bbox` clears the
-  // max cutoff on an orthorhombic box, wrapping every atom of `bi` and
-  // `bj` once against `block_centre[bi]` makes the per-pair `dx = pi - pj`
-  // already the canonical min-image displacement, so the inner loop skips
-  // `heddle_jit_triclinic_min_image`. The predicate reads only `bi`, the
-  // lattice, and MAX_CUTOFF, so it is uniform across the tile's warp.
-  // Triclinic boxes are conservatively ineligible (min-image path).
-  Real bbox_x = block_bbox[bi * 3u + 0u];
-  Real bbox_y = block_bbox[bi * 3u + 1u];
-  Real bbox_z = block_bbox[bi * 3u + 2u];
-  bool orthorhombic = (xy == R(0.0)) && (xz == R(0.0)) && (yz == R(0.0));
-  bool spc = orthorhombic
-          && (R(0.5) * lx - bbox_x >= HEDDLE_JIT_MAX_CUTOFF)
-          && (R(0.5) * ly - bbox_y >= HEDDLE_JIT_MAX_CUTOFF)
-          && (R(0.5) * lz - bbox_z >= HEDDLE_JIT_MAX_CUTOFF);
-  Real cx = R(0.0), cy = R(0.0), cz = R(0.0);
-  if (spc) {
-    cx = block_centre[bi * 4u + 0u];
-    cy = block_centre[bi * 4u + 1u];
-    cz = block_centre[bi * 4u + 2u];
-  }
-
-  // i-atom: this lane owns slot bi*32 + lane.
-  unsigned int i_slot = bi * 32u + lane;
-  bool i_valid = i_slot < n;
-  unsigned int i_atom_id = i_valid ? sorted_particle_ids[i_slot] : n;
-  Real4 pq_i = tile_sorted_posq[i_slot];
-  Real pi_x = pq_i.x, pi_y = pq_i.y, pi_z = pq_i.z, qi = pq_i.w;
-  if (spc && i_valid) {
-    triclinic_wrap_against_center(pi_x, pi_y, pi_z, cx, cy, cz,
-                                  lx, ly, lz, xy, xz, yz);
-  }
+  Real4 pq_i = posq[atom_i];
+  Real4 pq_j = posq[atom_j];
+  Real qi = pq_i.w;
+  Real qj = pq_j.w;
   unsigned int i_type = 0u;
-  /*HEDDLE_JIT_ITYPE_LOAD*/
-
-  // j-atom: this lane owns slot bj*32 + lane initially; it rotates. The
-  // centre-wrap is applied once here (all j-atoms wrap against the same
-  // `bi` centre), so the wrapped position stays valid as the diagonal
-  // shuffle rotates it between lanes.
-  unsigned int j_slot = bj * 32u + lane;
-  bool j_valid = j_slot < n;
-  unsigned int j_atom_id = j_valid ? sorted_particle_ids[j_slot] : n;
-  Real4 pq_j = tile_sorted_posq[j_slot];
-  Real pj_x = pq_j.x, pj_y = pq_j.y, pj_z = pq_j.z, qj = pq_j.w;
-  if (spc && j_valid) {
-    triclinic_wrap_against_center(pj_x, pj_y, pj_z, cx, cy, cz,
-                                  lx, ly, lz, xy, xz, yz);
-  }
   unsigned int j_type = 0u;
-  /*HEDDLE_JIT_JTYPE_LOAD*/
+  /*HEDDLE_JIT_TYPE_LOAD_PERPAIR*/
 
-  // This lane's modified-pair mask row (i_lane == lane): bit j_lane set
-  // => pair (lane, j_lane) is a modified pair whose per-fragment scale is
-  // applied. The mask row is fixed for this lane, so no rotation is
-  // needed — at iteration tt the partner is j_lane = (lane + tt) mod 32.
-  unsigned int my_mask_row = exclusion_tile_masks[t * 32u + lane];
+  Real dx = pq_i.x - pq_j.x;
+  Real dy = pq_i.y - pq_j.y;
+  Real dz = pq_i.z - pq_j.z;
+  heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+  Real r2 = dx * dx + dy * dy + dz * dz;
+  Real inv_r = Real_rsqrt(r2);
+  Real r = r2 * inv_r;
 
-  // i-side accumulator (this lane's i-atom, fixed). j-side accumulator
-  // travels with the j-atom currently held by this lane.
-  Real i_fx = R(0.0), i_fy = R(0.0), i_fz = R(0.0);
-  Real i_e  = R(0.0), i_w  = R(0.0);
-  Real j_fx = R(0.0), j_fy = R(0.0), j_fz = R(0.0);
-  Real j_e  = R(0.0), j_w  = R(0.0);
+  Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
 
-  for (unsigned int tt = 0u; tt < 32u; ++tt) {
-    unsigned int j_lane = (lane + tt) & 31u;
-    bool modified = ((my_mask_row >> j_lane) & 1u) != 0u;
-    if (i_valid && j_valid && i_atom_id != j_atom_id) {
-      Real dx = pi_x - pj_x;
-      Real dy = pi_y - pj_y;
-      Real dz = pi_z - pj_z;
-      // rq-5ce17997 — on the SPC path pi and pj are already wrapped to the
-      // same-periodic-copy image, so dx is the canonical min-image
-      // displacement and the per-pair min-image call is skipped.
-      if (!spc) {
-        heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
-      }
-      Real r2 = dx * dx + dy * dy + dz * dz;
-      Real inv_r = Real_rsqrt(r2);
-      Real r = r2 * inv_r;
-      Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
-      Real factor = R(0.0), energy = R(0.0);
-      // A flagged (modified) pair applies its per-fragment exclusion
-      // scale; an unflagged pair is evaluated at full strength with no
-      // scale lookup. A fully-excluded pair (scale 0) contributes
-      // nothing; a 1-4 pair contributes a scaled force. rq-fa0b3d10
-      if (modified) {
-        heddle_jit_eval_pair_sum_scaled<WriteEv>(composite, r2, inv_r, r,
-                                           qi, qj, i_type, j_type,
-                                           i_atom_id, j_atom_id,
-                                           factor, energy);
-      } else {
-        heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r,
-                                           qi, qj, i_type, j_type,
-                                           i_atom_id, j_atom_id,
-                                           factor, energy);
-      }
-      factor *= cutoff_mask;
-      if (WriteEv) energy *= cutoff_mask;
-      Real fx = factor * dx, fy = factor * dy, fz = factor * dz;
-      i_fx += fx; i_fy += fy; i_fz += fz;
-      if (!self_block) { j_fx -= fx; j_fy -= fy; j_fz -= fz; }
-      if (WriteEv) {
-        Real he = energy * R(0.5);
-        // rq-7d64da58 — per-pair scalar virial: W = factor * r2.
-        Real hw = (factor * r2) * R(0.5);
-        i_e += he; i_w += hw;
-        if (!self_block) { j_e += he; j_w += hw; }
-      }
-    }
-    unsigned int src_lane = (lane + 1u) & 31u;
-    pj_x = __shfl_sync(0xFFFFFFFFu, pj_x, src_lane);
-    pj_y = __shfl_sync(0xFFFFFFFFu, pj_y, src_lane);
-    pj_z = __shfl_sync(0xFFFFFFFFu, pj_z, src_lane);
-    qj   = __shfl_sync(0xFFFFFFFFu, qj,   src_lane);
-    j_atom_id = __shfl_sync(0xFFFFFFFFu, j_atom_id, src_lane);
-    j_valid = j_atom_id < n;
-    /*HEDDLE_JIT_JTYPE_SHUFFLE*/
-    j_fx = __shfl_sync(0xFFFFFFFFu, j_fx, src_lane);
-    j_fy = __shfl_sync(0xFFFFFFFFu, j_fy, src_lane);
-    j_fz = __shfl_sync(0xFFFFFFFFu, j_fz, src_lane);
-    if (WriteEv) {
-      j_e = __shfl_sync(0xFFFFFFFFu, j_e, src_lane);
-      j_w = __shfl_sync(0xFFFFFFFFu, j_w, src_lane);
-    }
+  Real factor = R(0.0), energy = R(0.0);
+  heddle_jit_eval_pair_correction<WriteEv>(
+      composite, r2, inv_r, r, qi, qj, i_type, j_type, atom_i, atom_j, factor, energy);
+  factor *= cutoff_mask;
+  if (WriteEv) {
+    energy *= cutoff_mask;
   }
 
-  // Flush: i-side always; j-side only for cross-block tiles (a
-  // self-block tile's Newton's-3rd contributions are already covered by
-  // the symmetric sweep). After 32 rotations the j-side registers and
-  // j_atom_id have returned to their starting lane.
-  if (i_valid) {
-    heddle_jit_atomic_add_fp(fast_force_x_fp, i_atom_id, i_fx);
-    heddle_jit_atomic_add_fp(fast_force_y_fp, i_atom_id, i_fy);
-    heddle_jit_atomic_add_fp(fast_force_z_fp, i_atom_id, i_fz);
-    if (WriteEv) {
-      heddle_jit_atomic_add_fp(fast_energy_fp, i_atom_id, i_e);
-      heddle_jit_atomic_add_fp(fast_virial_fp, i_atom_id, i_w);
-    }
-  }
-  if (!self_block && j_valid) {
-    heddle_jit_atomic_add_fp(fast_force_x_fp, j_atom_id, j_fx);
-    heddle_jit_atomic_add_fp(fast_force_y_fp, j_atom_id, j_fy);
-    heddle_jit_atomic_add_fp(fast_force_z_fp, j_atom_id, j_fz);
-    if (WriteEv) {
-      heddle_jit_atomic_add_fp(fast_energy_fp, j_atom_id, j_e);
-      heddle_jit_atomic_add_fp(fast_virial_fp, j_atom_id, j_w);
-    }
+  Real fx = factor * dx;
+  Real fy = factor * dy;
+  Real fz = factor * dz;
+
+  heddle_jit_atomic_add_fp(fast_force_x_fp, atom_i,  fx);
+  heddle_jit_atomic_add_fp(fast_force_y_fp, atom_i,  fy);
+  heddle_jit_atomic_add_fp(fast_force_z_fp, atom_i,  fz);
+  heddle_jit_atomic_add_fp(fast_force_x_fp, atom_j, -fx);
+  heddle_jit_atomic_add_fp(fast_force_y_fp, atom_j, -fy);
+  heddle_jit_atomic_add_fp(fast_force_z_fp, atom_j, -fz);
+
+  if (WriteEv) {
+    Real he = energy * R(0.5);
+    Real hw = (factor * r2) * R(0.5);
+    heddle_jit_atomic_add_fp(fast_energy_fp, atom_i, he);
+    heddle_jit_atomic_add_fp(fast_energy_fp, atom_j, he);
+    heddle_jit_atomic_add_fp(fast_virial_fp, atom_i, hw);
+    heddle_jit_atomic_add_fp(fast_virial_fp, atom_j, hw);
   }
 }
 "#;
+
 
 // ============================================================
 // Bonded composer
@@ -2906,35 +2758,6 @@ mod launch_bounds_tests {
         }
     }
 
-    // rq-5214bef3
-    #[test]
-    fn composer_emits_no_correction_entry_points() {
-        let src = composed_source_for_inspection();
-        // No _correct_f / _correct_fev entry points appear anywhere in
-        // the emitted source, and no per-pair `heddle_jit_eval_pair_correction`
-        // function is emitted.
-        for needle in ["_correct_f", "_correct_fev", "heddle_jit_eval_pair_correction"] {
-            assert!(
-                !src.contains(needle),
-                "composed source unexpectedly contains `{needle}` — the correction pass is retired"
-            );
-        }
-        // The composed module exposes exactly four extern "C" entry
-        // points: the packed-neighbour `_f`/`_fev` and the single-pair
-        // `_single_f`/`_single_fev`.
-        let extern_c_count = src.matches("extern \"C\"").count();
-        assert_eq!(
-            extern_c_count, 4,
-            "composed source must expose exactly four extern \"C\" entry points; got {extern_c_count}",
-        );
-        for name in [F_ENTRY, FEV_ENTRY, F_SINGLE_ENTRY, FEV_SINGLE_ENTRY] {
-            assert!(
-                src.contains(&format!("{name}(")),
-                "expected entry point `{name}` in composed source"
-            );
-        }
-    }
-
     fn minimal_fragment(label: &'static str) -> PairForceFragment {
         let name: &'static str = Box::leak(format!("XSF_{label}").into_boxed_str());
         let functor_source = format!(
@@ -2983,56 +2806,53 @@ struct {n} {{
         );
     }
 
-    // rq-a4b9e702 rq-b28a6d96 rq-8ae4a9f1 — in CellList mode the composer
-    // emits a scale-free evaluator for the bulk and single-pair passes
-    // (which never see a modified pair) plus a scale-aware evaluator used
-    // by the exclusion-tile pass.
-    #[test]
-    fn bitmask_composer_emits_scale_free_and_scaled_evaluators() {
-        let src = compose_source(&[minimal_fragment("a")], 1.0 as Real, true);
-        // The scale-free evaluator's accumulate has no per-pair scale.
-        assert!(
-            src.contains("factor += s_factor;"),
-            "CellList mode must emit a scale-free evaluator (bulk/single)"
-        );
-        // The scale-aware evaluator (for the exclusion-tile pass) applies
-        // each fragment's exclusion_scale.
-        assert!(
-            src.contains("heddle_jit_eval_pair_sum_scaled"),
-            "CellList mode must emit the scale-aware evaluator"
-        );
-        assert!(
-            src.contains("factor += s_factor * ex_scale;"),
-            "the scale-aware evaluator must multiply by exclusion_scale"
-        );
-        // The exclusion-tile pass exists and dispatches to the scale-aware
-        // evaluator for its flagged pairs.
-        assert!(
-            src.contains("heddle_jit_excl_tile_loop")
-                && src.contains("heddle_jit_eval_pair_sum_scaled<WriteEv>"),
-            "the exclusion-tile pass must dispatch to the scale-aware evaluator"
-        );
+    // rq-b099ff28 rq-8ae4a9f1 — the composer emits a scale-free evaluator
+    // (bulk/single) and a correction evaluator (`exclusion_scale - 1`) in
+    // every neighbour-list mode.
+    #[test] // rq-b099ff28 rq-8ae4a9f1
+    fn composer_emits_scale_free_and_correction_evaluators() {
+        for bitmask in [false, true] {
+            let src = compose_source(&[minimal_fragment("a")], 1.0 as Real, bitmask);
+            assert!(
+                src.contains("factor += s_factor;"),
+                "must emit a scale-free bulk/single evaluator"
+            );
+            assert!(
+                src.contains("heddle_jit_eval_pair_correction"),
+                "must emit the correction evaluator"
+            );
+            assert!(
+                src.contains("composite.functor_a.exclusion_scale(i, j) - R(1.0)"),
+                "the correction evaluator must weight by exclusion_scale - 1"
+            );
+            assert!(
+                !src.contains("heddle_jit_eval_pair_sum_scaled")
+                    && !src.contains("heddle_jit_excl_tile_loop"),
+                "no exclusion-tile evaluator or loop is emitted"
+            );
+        }
     }
 
-    // rq-fa0b3d10 — the exclusion-tile pass and its entry points are
-    // emitted only when the bitmask is active (CellList mode).
-    #[test]
-    fn excl_tile_pass_emitted_only_with_bitmask() {
-        let with_mask = compose_source(&[minimal_fragment("a")], 1.0 as Real, true);
-        assert!(
-            with_mask.contains("heddle_jit_excl_tile_loop"),
-            "bitmask mode must emit the exclusion-tile loop"
-        );
-        assert!(
-            with_mask.contains("heddle_jit_composed_pair_force_excl_f")
-                && with_mask.contains("heddle_jit_composed_pair_force_excl_fev"),
-            "bitmask mode must emit both exclusion-tile entry points"
-        );
-        let without = compose_source(&[minimal_fragment("a")], 1.0 as Real, false);
-        assert!(
-            !without.contains("heddle_jit_excl_tile_loop"),
-            "all-pairs mode must not emit the exclusion-tile loop"
-        );
+    // rq-5214bef3 — the composer emits the correction-pass entry points in
+    // every neighbour-list mode and no exclusion-tile entry points.
+    #[test] // rq-5214bef3
+    fn correction_pass_entry_points_emitted() {
+        for bitmask in [false, true] {
+            let src = compose_source(&[minimal_fragment("a")], 1.0 as Real, bitmask);
+            assert!(
+                src.contains("heddle_jit_correction_loop"),
+                "must emit the correction loop"
+            );
+            assert!(
+                src.contains("heddle_jit_composed_pair_force_correct_f")
+                    && src.contains("heddle_jit_composed_pair_force_correct_fev"),
+                "must emit both correction entry points"
+            );
+            assert!(
+                !src.contains("_excl_f") && !src.contains("_excl_fev"),
+                "no exclusion-tile entry points are emitted"
+            );
+        }
     }
 
     // rq-54aec894

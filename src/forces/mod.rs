@@ -1201,52 +1201,42 @@ impl ForceField {
                 }
             }
 
-            // Exclusion-tile pass. Processes the block pairs that contain
-            // a fully-excluded atom pair (routed out of the bulk /
-            // single-pair lists by find_blocks), applying the per-tile
-            // exclusion bitmask so those two passes do zero exclusion
-            // work. Compiled and launched only in CellList mode (all-pairs
-            // folds the scale into the evaluator). Grid covers
-            // `exclusion_tiles_capacity` warps; each warp reads the live
-            // tile count from `interaction_count[2]`. rq-fa0b3d10
-            if jit.excl_tile_f.is_some() {
-                if let Some(packed) =
-                    self.neighbor_list.as_ref().and_then(|nl| nl.packed.as_ref())
-                {
-                    if packed.exclusion_tiles_capacity > 0 {
-                        let mut excl_builder = ForceLaunchBuilder::new();
-                        excl_builder.push_device_buffer(&packed.exclusion_tile_iblocks);
-                        excl_builder.push_device_buffer(&packed.exclusion_tile_jblocks);
-                        excl_builder.push_device_buffer(&packed.exclusion_tile_masks);
-                        excl_builder.push_device_buffer(&packed.interaction_count);
-                        excl_builder.push_device_buffer(&packed.tile_sorted_posq);
-                        // rq-5ce17997 — block_centre / block_bbox feed the
-                        // exclusion-tile SPC predicate and centre-wrap.
-                        excl_builder.push_device_buffer(&packed.block_centre);
-                        excl_builder.push_device_buffer(&packed.block_bbox);
-                        excl_builder.push_device_buffer(sorted_view);
-                        excl_builder.push_device_buffer(&buffers.type_indices);
-                        excl_builder.push_device_buffer(sim_box.lattice_device());
-                        excl_builder.push_device_buffer(&self.fast_total_forces_fp_x);
-                        excl_builder.push_device_buffer(&self.fast_total_forces_fp_y);
-                        excl_builder.push_device_buffer(&self.fast_total_forces_fp_z);
-                        excl_builder
-                            .push_device_buffer(&self.fast_total_potential_energies_fp);
-                        excl_builder.push_device_buffer(&self.fast_total_virials_fp);
-                        for &slot_idx in &self.jit_slot_indices {
-                            self.pair_force_participant(slot_idx)
-                                .bind_pair_force_args(&bind_ctx, &mut excl_builder);
-                        }
-                        excl_builder.push_scalar(n as u32);
-                        let cap = packed.exclusion_tiles_capacity;
-                        unsafe {
-                            jit.launch_excl_tile(cap, write_scalars, excl_builder)?;
-                        }
+            // Correction pass. One thread per modified pair over the fixed
+            // modified-pair list; adds each fragment's
+            // `(exclusion_scale - 1) x evaluate`, so summed with the
+            // full-strength contribution the bulk / single-pair passes
+            // already added, the net is `scale x evaluate`. Neighbour-mode
+            // independent; runs whenever any pair is modified. rq-fa0b3d10
+            let modified_opt = self
+                .neighbor_list
+                .as_ref()
+                .map(|nl| (nl.modified_pairs_device(), nl.n_modified()));
+            if let Some((modified_pairs, n_modified)) = modified_opt {
+                if n_modified > 0 {
+                    let mut correct_builder = ForceLaunchBuilder::new();
+                    correct_builder.push_device_buffer(&buffers.posq);
+                    correct_builder.push_device_buffer(&buffers.type_indices);
+                    correct_builder.push_device_buffer(modified_pairs);
+                    correct_builder.push_scalar(n_modified);
+                    correct_builder.push_device_buffer(sim_box.lattice_device());
+                    correct_builder.push_device_buffer(&self.fast_total_forces_fp_x);
+                    correct_builder.push_device_buffer(&self.fast_total_forces_fp_y);
+                    correct_builder.push_device_buffer(&self.fast_total_forces_fp_z);
+                    correct_builder
+                        .push_device_buffer(&self.fast_total_potential_energies_fp);
+                    correct_builder.push_device_buffer(&self.fast_total_virials_fp);
+                    for &slot_idx in &self.jit_slot_indices {
+                        self.pair_force_participant(slot_idx)
+                            .bind_pair_force_args(&bind_ctx, &mut correct_builder);
+                    }
+                    correct_builder.push_scalar(n as u32);
+                    unsafe {
+                        jit.launch_correction(n_modified, write_scalars, correct_builder)?;
                     }
                 }
             }
             // The JIT_COMPOSED_PAIR_FORCE stage spans all three fast-class
-            // pair-force passes (bulk, single-pair, exclusion-tile), so it
+            // pair-force passes (bulk, single-pair, correction), so it
             // reflects the whole pair-force cost per step.
             timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
 
