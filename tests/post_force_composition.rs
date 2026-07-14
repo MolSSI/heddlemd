@@ -386,10 +386,10 @@ fn thermostat_apply_post_observes_full_step_kinetic_energy() {
     }
 }
 
-// rq-f4d73396 — the default coupling interval (1) couples every step,
-// each call receiving the base dt.
+// rq-f4d73396 — a unit coupling interval (1) couples every step, each call
+// receiving the base dt.
 #[test]
-fn thermostat_default_interval_couples_every_step() {
+fn thermostat_unit_interval_couples_every_step() {
     let (pre, post) = run_with_recording_thermostat("couple_every", 4, 1);
     assert_eq!(post.len(), 4, "apply_post should run on every step");
     let base_dt = post[0].0;
@@ -424,7 +424,9 @@ fn thermostat_interval_gates_coupling_and_scales_dt() {
 fn builtin_thermostat_rescale_is_standalone_every_step() {
     let dir = tmp("standalone_rescale");
     write_lattice_init(&dir, 9, 4.4e-10);
-    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n";
+    // coupling_interval = 1 so every step is a coupling step (the default
+    // interval is 25).
+    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\ncoupling_interval = 1\n";
     std::fs::write(
         dir.join("sim.in.toml"),
         lj_config(3, "kind = \"velocity-verlet\"\nlossless = false", extra, false),
@@ -436,17 +438,17 @@ fn builtin_thermostat_rescale_is_standalone_every_step() {
     assert_eq!(stage_count(&counts, "vv_kick"), 3);
 }
 
-// rq-49f6bbfb — at the default coupling_interval (1) every step couples, so
-// the phase captures only the coupling-variant graph and replays it every
-// step. The thermostat's rescale therefore runs on every step, recorded
-// through the coupling variant. n_steps = 20 exceeds the 8-step calibration
-// prefix, so the batched graph loop replays the coupling variant for the
-// remaining steps.
+// rq-49f6bbfb — at coupling_interval = 1 every step couples, so the phase
+// captures only the coupling-variant graph and replays it every step. The
+// thermostat's rescale therefore runs on every step, recorded through the
+// coupling variant. n_steps = 20 exceeds the 8-step calibration prefix, so
+// the batched graph loop replays the coupling variant for the remaining
+// steps.
 #[test]
 fn thermostat_coupling_every_step_runs_in_graph_mode() {
     let dir = tmp("thermostat_ci1_graph");
     write_lattice_init(&dir, 9, 4.4e-10);
-    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n";
+    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\ncoupling_interval = 1\n";
     std::fs::write(
         dir.join("sim.in.toml"),
         lj_config(20, "kind = \"velocity-verlet\"\nlossless = false", extra, true),
@@ -512,13 +514,13 @@ fn graph_coupling_variant_matches_per_step_byte_for_byte() {
     );
 }
 
-// rq-5fc7b67f — the default-interval (1) thermostatted phase runs in graph
-// mode (replaying the coupling variant every step) and produces a
-// byte-identical trajectory to the fully per-step path — the recovery of
-// graph capture for the default thermostatted config.
+// rq-5fc7b67f — a unit-interval (coupling_interval = 1) thermostatted phase
+// runs in graph mode (replaying the coupling variant every step) and produces
+// a byte-identical trajectory to the fully per-step path — every-step coupling
+// preserves graph capture.
 #[test]
-fn default_interval_graph_matches_per_step_byte_for_byte() {
-    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n";
+fn unit_interval_graph_matches_per_step_byte_for_byte() {
+    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\ncoupling_interval = 1\n";
     let run = |graphs: bool, tag: &str| -> Vec<u8> {
         let dir = tmp(tag);
         write_lattice_init(&dir, 9, 4.4e-10);
@@ -538,15 +540,15 @@ fn default_interval_graph_matches_per_step_byte_for_byte() {
     );
 }
 
-// rq-b85a38d6 — a thermostat + per-step barostat together: every step is
-// a coupling step (default interval), so the barostat's per-particle
-// position rescale runs as a standalone launch, after the thermostat
-// rescale.
+// rq-b85a38d6 — a thermostat + per-step barostat together: with
+// coupling_interval = 1 every step is a coupling step, so the barostat's
+// per-particle position rescale runs as a standalone launch, after the
+// thermostat rescale.
 #[test]
 fn thermostat_and_per_step_barostat_rescale_eagerly_on_coupling_steps() {
     let dir = tmp("thermostat_barostat_eager");
     write_lattice_init(&dir, 9, 4.4e-10);
-    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\n\
+    let extra = "[phase.thermostat]\nkind = \"csvr\"\ntemperature = 30.0\ntau = 1.0e-13\nseed = 3\ncoupling_interval = 1\n\
                  [phase.barostat]\nkind = \"c-rescale\"\npressure = 1.0\ntemperature = 30.0\n\
                  tau = 100.0\ncompressibility = 0.01\nseed = 1\n";
     std::fs::write(

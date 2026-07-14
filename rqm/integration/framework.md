@@ -1617,8 +1617,8 @@ Feature: Pluggable integration framework
     And the trailing kick runs before apply_post in the post-force tail
 
   @rq-f4d73396
-  Scenario: Default coupling interval couples every step
-    Given a thermostat with coupling_interval = 1 (the default)
+  Scenario: Unit coupling interval couples every step
+    Given a thermostat with coupling_interval = 1
     When the runner executes any step
     Then apply_pre and apply_post are called on that step
     And each receives dt_couple = dt

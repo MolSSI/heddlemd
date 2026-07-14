@@ -199,10 +199,20 @@ pub struct PhaseConfig {
     // thermostat couples every `coupling_interval` steps (on steps where
     // `step % coupling_interval == 0`), with the effective coupling
     // timestep `coupling_interval * dt`. Peeled from `[phase.thermostat]`
-    // before the kind's builder validates its params; `1` (couple every
-    // step) when the section omits it or has no thermostat.
+    // before the kind's builder validates its params;
+    // `DEFAULT_COUPLING_INTERVAL` when the section omits it or has no
+    // thermostat.
     pub coupling_interval: u32,
 }
+
+// rq-732daa1b — the kind-agnostic coupling cadence applied when a
+// thermostat section omits `coupling_interval`. A stochastic global
+// thermostat (CSVR) samples the canonical ensemble regardless of
+// cadence, so coupling every step is unnecessary; coupling every 25
+// steps amortizes the full-step kinetic-energy reduction and rescale
+// over the intervening steps and keeps those steps on the forces-only
+// graph variant.
+pub const DEFAULT_COUPLING_INTERVAL: u32 = 25;
 
 /// Parsed `[[minimization]]` entry. Energy-minimization phases run
 /// the SD outer loop documented in
@@ -1166,10 +1176,10 @@ fn extract_coupling_intervals(config: &mut Config) -> Result<(), ConfigError> {
 // `0`, negatives, non-integers, and values exceeding `u32` are rejected.
 fn take_coupling_interval(params: &mut toml::Value) -> Result<u32, ConfigError> {
     let Some(table) = params.as_table_mut() else {
-        return Ok(1);
+        return Ok(DEFAULT_COUPLING_INTERVAL);
     };
     let Some(value) = table.remove("coupling_interval") else {
-        return Ok(1);
+        return Ok(DEFAULT_COUPLING_INTERVAL);
     };
     let n = value.as_integer().ok_or_else(|| {
         invalid(
@@ -1681,7 +1691,7 @@ fn build_config(
                     // rq-ee10237d — default; `extract_coupling_intervals`
                     // overwrites it from the peeled `[phase.thermostat]`
                     // field before the builders see the params.
-                    coupling_interval: 1,
+                    coupling_interval: DEFAULT_COUPLING_INTERVAL,
                 })
             }
             SpannedEntry::Min(spanned) => {

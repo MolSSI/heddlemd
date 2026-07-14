@@ -946,8 +946,8 @@ Feature: CUDA graph capture and replay
     And every step replays a coupling cell — the coupling forces-only cell on non-log steps
 
   @rq-5fc7b67f
-  Scenario: Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing
-    Given a regularly-packed system (crystalline lattice) with thermostat "csvr" at the default coupling_interval of 1
+  Scenario: Unit-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing
+    Given a regularly-packed system (crystalline lattice) with thermostat "csvr" at coupling_interval = 1
     And two runs of the same config on the same GPU, one with cuda_graphs_disable = false and one with true
     When both runs complete
     Then the graph-mode run captures the coupling row and replays a coupling cell every step

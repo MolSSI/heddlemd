@@ -249,6 +249,7 @@ kind = "velocity-verlet"
 lossless = false
 
 {CSVR}
+coupling_interval = 1
 
 [phase.output]
 log_every = 5

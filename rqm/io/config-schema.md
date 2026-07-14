@@ -507,16 +507,20 @@ cadence:
 
 - `coupling_interval: u32` — the thermostat couples every
   `coupling_interval` steps (on steps where `step % coupling_interval
-  == 0`). Optional; defaults to `1` (couple every step). Must be
-  `≥ 1`; `0` is rejected. On a coupling step the thermostat acts with
-  the effective timestep `coupling_interval · dt`, so raising the
-  interval reduces how often the thermostat couples without changing
-  the physical meaning of the kind's coupling time `tau`. Coupling
-  every step (`1`) samples the thermostat's kinetic energy each step;
-  a larger interval amortizes that reduction and rescale over the
-  intervening steps. See `integration/framework.md` for the
-  coupling-step semantics (full-step kinetic energy; the composed
-  post-force kernel is bypassed on coupling steps).
+  == 0`). Optional; defaults to `25`. Must be `≥ 1`; `0` is rejected.
+  On a coupling step the thermostat acts with the effective timestep
+  `coupling_interval · dt`, so raising the interval reduces how often
+  the thermostat couples without changing the physical meaning of the
+  kind's coupling time `tau`. Coupling every step (`1`) samples the
+  thermostat's kinetic energy each step; a larger interval amortizes
+  that reduction and rescale over the intervening steps. The default
+  of `25` reflects that a stochastic global thermostat (CSVR) samples
+  the canonical ensemble regardless of cadence, so coupling every step
+  is unnecessary and needlessly forces the full-step kinetic-energy
+  reduction and rescale — and the forces+scalars pair kernel — onto
+  every step. See `integration/framework.md` for the coupling-step
+  semantics (full-step kinetic energy; the composed post-force kernel
+  is bypassed on coupling steps).
 
 Fields accepted for `kind = "nose-hoover-chain"`:
 
@@ -3132,13 +3136,13 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::MissingField { field: "thermostat.seed" })
 
   @rq-732daa1b
-  Scenario: [thermostat] coupling_interval defaults to 1 when omitted
+  Scenario: [thermostat] coupling_interval defaults to 25 when omitted
     Given the Background config with [integrator] kind="velocity-verlet"
     And a [thermostat] section with kind="csvr", temperature=300.0, tau=1.0e-13, seed=42
       (no coupling_interval)
     When load_config is called
     Then it returns Ok(config)
-    And the thermostat's coupling_interval equals 1
+    And the thermostat's coupling_interval equals 25
 
   @rq-908e8418
   Scenario: [thermostat] coupling_interval accepts a value greater than 1

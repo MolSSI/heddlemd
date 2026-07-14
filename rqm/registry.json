@@ -13161,7 +13161,7 @@
     "type": "scenario"
   },
   "rq-5fc7b67f": {
-    "decl": "Scenario: Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing",
+    "decl": "Scenario: Unit-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -13169,7 +13169,7 @@
         "kind": "code"
       }
     ],
-    "title": "Default-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing",
+    "title": "Unit-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing",
     "type": "scenario"
   },
   "rq-5fcdc437": {
@@ -15705,15 +15705,19 @@
     "type": "scenario"
   },
   "rq-732daa1b": {
-    "decl": "Scenario: [thermostat] coupling_interval defaults to 1 when omitted",
+    "decl": "Scenario: [thermostat] coupling_interval defaults to 25 when omitted",
     "file": "io/config-schema",
     "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
       {
         "file": "tests/io_config.rs",
         "kind": "code"
       }
     ],
-    "title": "[thermostat] coupling_interval defaults to 1 when omitted",
+    "title": "[thermostat] coupling_interval defaults to 25 when omitted",
     "type": "scenario"
   },
   "rq-73497463": {
@@ -33380,7 +33384,7 @@
     "type": "scenario"
   },
   "rq-f4d73396": {
-    "decl": "Scenario: Default coupling interval couples every step",
+    "decl": "Scenario: Unit coupling interval couples every step",
     "file": "integration/framework",
     "refs": [
       {
@@ -33388,7 +33392,7 @@
         "kind": "code"
       }
     ],
-    "title": "Default coupling interval couples every step",
+    "title": "Unit coupling interval couples every step",
     "type": "scenario"
   },
   "rq-f4ebf12a": {
