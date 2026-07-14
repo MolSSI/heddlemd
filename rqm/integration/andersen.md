@@ -29,7 +29,7 @@ at the runner's post-force-marker boundary. The integrator has already
 completed its velocity-Verlet substeps, including the trailing kick, and
 on a constrained run the runner has already projected the velocities back
 onto the constraint manifold
-(`Constraint::project_velocities_for_coupling`, see
+(`Constraint::apply_after_kick`, see
 `constraint-framework.md`). Andersen does not couple to the global
 kinetic energy at all — it resamples each particle independently from
 Maxwell-Boltzmann — so that leading projection does not change what the
@@ -83,15 +83,24 @@ The plan's terminal `ConstraintPoint { AfterKick }` — which runs *after*
 `apply_post` (see `framework.md`, *Per-Step Interface*) — is load-bearing
 for Andersen in a way it is not for the uniform-rescale thermostats. A
 global rescale `v ← α · v` commutes with the velocity projection: it
-scales every constrained-direction component, which the earlier
-pre-coupling projection has already zeroed, so the trailing projection is
-a no-op for CSVR, Berendsen, and NHC. A per-particle Maxwell-Boltzmann
-resample does not commute: each selected particle receives a fresh,
-unconstrained velocity with a generically non-zero component along its
-group's constrained directions, which knocks the group straight back off
-the velocity manifold. The trailing `AfterKick` projection is what repairs
-it, and a constrained Andersen run depends on it (RATTLE-last; see
+scales every constrained-direction component, which the earlier leading
+projection has already zeroed, so the terminal projection is a no-op for
+CSVR, Berendsen, and NHC. A per-particle Maxwell-Boltzmann resample does
+not commute: each selected particle receives a fresh, unconstrained
+velocity with a generically non-zero component along its group's
+constrained directions, which knocks the group straight back off the
+velocity manifold. The terminal `AfterKick` projection — dispatched as
+`Constraint::reproject_velocities_no_publish` — is what repairs it, and a
+constrained Andersen run depends on it (RATTLE-last; see
 `constraint-framework.md`).
+
+That repair projection applies a real impulse, and the constraint virial
+of that impulse is **dropped**: the terminal hook does not publish, so
+only the leading projection's virial (published before the barostat reads
+it) enters the pressure. This is an accepted approximation. The impulse
+answers a stochastic velocity resample rather than a physical force, so it
+carries no meaningful contribution to the mechanical pressure of the
+system.
 
 ## Per-Step Kernel Sequence <!-- rq-7843f188 -->
 

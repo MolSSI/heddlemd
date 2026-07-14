@@ -34,7 +34,7 @@ at the runner's post-force-marker boundary. The integrator has already
 completed its velocity-Verlet substeps, including the trailing kick, and
 on a constrained run the runner has already projected the velocities back
 onto the constraint manifold
-(`Constraint::project_velocities_for_coupling`, see
+(`Constraint::apply_after_kick`, see
 `constraint-framework.md`). The thermostat therefore operates on the
 full-step, on-manifold velocities, so the `K_old` it reduces is the
 physical kinetic energy the run reports — the one whose degree-of-freedom
@@ -100,7 +100,7 @@ Berendsen does nothing.
 
 On a coupling step the Berendsen thermostat's `apply_post` runs the
 following in fixed order, as its own kernel launches, after the
-integrator's trailing kick and after the runner's pre-coupling velocity
+integrator's trailing kick and after the runner's leading velocity
 projection (constrained runs only):
 
 | Order | Step              | Kernel / call                                     | Operation                                                                     | Stage label                  |

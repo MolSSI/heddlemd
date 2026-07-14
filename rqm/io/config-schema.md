@@ -518,16 +518,19 @@ cadence:
   the canonical ensemble regardless of cadence, so coupling every step
   is unnecessary and needlessly forces the full-step kinetic-energy
   reduction and rescale — and the forces+scalars pair kernel — onto
-  every step. On a run that also carries a `[constraints]` section a
-  coupling step costs one further velocity projection
-  (`settle_velocities` / `rattle_velocities`): the runner projects the
-  velocities onto the constraint manifold before the thermostat reduces
-  their kinetic energy, so that the coupling sees the physical, on-manifold
-  full-step `K`. That projection runs only on coupling steps, so its cost
-  amortizes with the interval too. See `integration/framework.md` for the
-  coupling-step semantics (full-step kinetic energy; the composed
-  post-force kernel is bypassed on coupling steps) and
-  `integration/constraint-framework.md` for the projection.
+  every step. On a run that also carries a `[constraints]` section the
+  interval does **not** govern the constraint slot's velocity
+  projections: the runner projects the velocities onto the constraint
+  manifold immediately after the trailing kick on *every* step (so that
+  a coupling step's reduction sees the physical, on-manifold full-step
+  `K`, and so that a per-step barostat's virial reduction sees the
+  constraint virial), and the plan's terminal projection likewise runs
+  every step. Both `settle_velocities` / `rattle_velocities` launches are
+  therefore a fixed per-step cost that raising `coupling_interval` does
+  not amortize. See `integration/framework.md` for the coupling-step
+  semantics (full-step kinetic energy; the composed post-force kernel is
+  bypassed on coupling steps) and
+  `integration/constraint-framework.md` for the projections.
 
 Fields accepted for `kind = "nose-hoover-chain"`:
 

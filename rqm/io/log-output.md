@@ -104,9 +104,10 @@ value of one atomic unit of the named dimension.
   `T_set` in the user's chosen unit system to within sampling
   fluctuations — on a constrained run as well as an unconstrained one.
   This holds because the two quantities are reduced from the *same*
-  velocities: on a coupling step the runner projects the velocities back
-  onto the constraint manifold before the thermostat reduces their kinetic
-  energy (see `integration/constraint-framework.md`), so the `K` the
+  velocities: the runner projects the velocities back onto the constraint
+  manifold immediately after the trailing kick, before the thermostat
+  reduces their kinetic energy (see
+  `integration/constraint-framework.md`), so the `K` the
   thermostat drives to its target is the same on-manifold `K` this column
   reports, and both divide it by the same `N_thermal_dof`. Coupling to the
   unprojected post-kick velocities would instead put the *inflated*

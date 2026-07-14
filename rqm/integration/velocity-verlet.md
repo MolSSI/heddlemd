@@ -379,17 +379,22 @@ are present unconditionally and are no-ops when their slot is absent, so
 the same plan drives NVE, NVT, and NPT compositions. The `BarostatPoint`
 and `AfterKick` sub-steps form the plan's post-force tail, and their plan
 order is the order the runner dispatches them: the runner walks the tail
-as a fixed ordered sequence — trailing kick; then, on a coupling step of a
-constrained run, the pre-coupling velocity projection
-(`Constraint::project_velocities_for_coupling`); then the thermostat's
-`apply_post`; then barostat `apply`; then the `AfterKick` constraint
-velocity projection (see `framework.md`, *Per-Step Interface*). The
-pre-coupling projection leads the thermostat because the trailing kick
-leaves the velocities off the constraint manifold, and a
-kinetic-energy-coupled thermostat that reduced `K` before the projection
-would couple to energy the projection is about to discard (see
-`constraint-framework.md`). The barostat rescale in turn precedes the
-`AfterKick` projection so that a velocity projection is the last
+as a fixed ordered sequence — trailing kick; then, on a constrained run,
+the leading velocity projection (`Constraint::apply_after_kick`), which
+projects *and* publishes the constraint virial; then the thermostat's
+`apply_post`; then barostat `apply`; then the `AfterKick` marker, which
+dispatches the terminal repair projection
+(`Constraint::reproject_velocities_no_publish`) (see `framework.md`,
+*Per-Step Interface*). The leading projection fires on every step, not
+only on coupling steps, and it leads both consumers for the same reason —
+each of them reads state the projection defines. The trailing kick leaves
+the velocities off the constraint manifold, so a kinetic-energy-coupled
+thermostat that reduced `K` before the projection would couple to energy
+the projection is about to discard; and the barostat's `apply` reduces
+`buffers.virials`, so without the constraint virial published ahead of it
+the barostat's pressure would omit the constraint contribution entirely
+(see `constraint-framework.md`). The barostat rescale in turn precedes the
+`AfterKick` repair projection so that a velocity projection is the last
 per-particle velocity operation of the step (RATTLE-last): a barostat
 velocity rescale placed after it would knock the velocities back off the
 constraint manifold. The plan shape is
@@ -447,14 +452,17 @@ marker to the configured constraint slot: `BeforeDrift` before the
 `KickDrift`, `AfterDrift` after it, and `AfterKick` after the trailing
 `KickHalf`. The trailing `AfterKick` runs in the post-force tail, after
 the trailing kick and any thermostat / barostat rescale, so a velocity
-projection is the last per-particle velocity operation of the step. It is
-no longer the *only* velocity projection of the step: on a coupling step
-of a constrained run the runner also projects the velocities immediately
-after the trailing kick and before the thermostat's `apply_post`, so that
-the thermostat couples to the on-manifold kinetic energy (see
-`framework.md`, *Per-Step Interface*, and `constraint-framework.md`). That
-leading projection is not a plan sub-step — it re-uses the terminal
-`AfterKick` marker's `dt`, and the marker itself still executes in place.
+projection is the last per-particle velocity operation of the step; the
+marker dispatches `reproject_velocities_no_publish`, the repair
+projection. It is not the *only* velocity projection of the step: on a
+constrained run the runner also projects the velocities immediately after
+the trailing kick — `apply_after_kick`, which additionally publishes the
+constraint virial — so that the thermostat couples to the on-manifold
+kinetic energy and the barostat's virial reduction sees the constraint
+contribution (see `framework.md`, *Per-Step Interface*, and
+`constraint-framework.md`). That leading projection fires on every step,
+is not a plan sub-step — it re-uses the terminal `AfterKick` marker's
+`dt` — and the marker itself still executes in place.
 Velocity Verlet's `execute()` is unaware of the constraint slot; it
 only places the markers in `plan`.
 

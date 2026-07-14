@@ -493,13 +493,15 @@ impl Constraint for ShakeConstraintsState {
         Ok(())
     }
 
-    // The pre-coupling projection: `rattle_velocities` only. It accumulates the
-    // velocity-level half of `constraint_virial` exactly as `apply_after_kick`
-    // does, but does NOT run `constraint_virial_scatter` — the terminal
-    // `apply_after_kick` publishes the accumulated virial into
-    // `buffers.virials`, once per step. See
-    // `Constraint::project_velocities_for_coupling`.
-    fn project_velocities_for_coupling(
+    // The step's terminal REPAIR projection: `rattle_velocities` only. The
+    // leading `apply_after_kick` has already projected the velocities and
+    // published the constraint virial; this puts them back on the manifold
+    // after whatever the thermostat and barostat did (RATTLE-last), and must
+    // NOT run `constraint_virial_scatter` — a second scatter would re-add the
+    // whole accumulated `constraint_virial`, position half included, and
+    // double-count the constraint contribution to the pressure. See
+    // `Constraint::reproject_velocities_no_publish`.
+    fn reproject_velocities_no_publish(
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,

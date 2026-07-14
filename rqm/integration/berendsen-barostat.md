@@ -9,10 +9,11 @@ pressure-coupling slot. One of the pluggable barostat slots (see
 The barostat's `apply` is dispatched once per timestep at the
 integrator plan's terminal `BarostatPoint` (see `framework.md`,
 *Per-Step Interface*), which the runner fires in its post-walk tail
-after the optional thermostat's `apply_post` — and therefore after the
-pre-coupling velocity projection that precedes that `apply_post` on a
-coupling step of a constrained run (`constraint-framework.md`). Each
-invocation
+after the optional thermostat's `apply_post` — and therefore, on a
+constrained run, after the leading velocity projection
+(`Constraint::apply_after_kick`) that precedes that `apply_post` on every
+step and publishes the constraint virial
+(`constraint-framework.md`). Each invocation
 computes the instantaneous pressure from the kinetic energy and the
 total scalar virial, derives an isotropic scale factor `μ` that
 relaxes the pressure toward the user-specified target on a coupling
@@ -39,14 +40,15 @@ byte-identical trajectories across runs on the same GPU.
 The barostat is invoked through `apply(buffers, sim_box, dt,
 timings)`, dispatched at the plan's terminal `BarostatPoint` after the
 plan walk and after the thermostat's `apply_post` (when a thermostat is
-configured), and hence after the pre-coupling velocity projection that
-leads that `apply_post` on a coupling step of a constrained run.
+configured), and hence, on a constrained run, after the leading velocity
+projection that leads that `apply_post` on every step.
 `apply` performs its per-particle position rescale itself
 as a standalone launch at this canonical placement. Both
 `buffers.virials` (per-particle scalar virials populated by the
-in-step force evaluation) and `buffers.velocities_*` (post-step
-velocities, on the constraint manifold when the run is constrained, and
-possibly rescaled by the thermostat) are read by this
+in-step force evaluation *and*, on a constrained run, by the leading
+projection's constraint-virial publish) and `buffers.velocities_*`
+(post-step velocities, on the constraint manifold when the run is
+constrained, and possibly rescaled by the thermostat) are read by this
 hook.
 
 For each invocation with timestep `dt`:
@@ -62,20 +64,20 @@ For each invocation with timestep `dt`:
    pressure estimator: pair / bonded / angle / SPME (real +
    reciprocal) terms populated by `force_field.step`.
 
-   It does **not** carry this step's constraint contribution. A
-   constraint slot publishes its virial exactly once per step, at the
-   plan's terminal `ConstraintPoint { AfterKick }` — which the runner
-   dispatches *after* the terminal `BarostatPoint` (RATTLE-last; see
-   `framework.md`, *Per-Step Interface*). The barostat's in-step
-   reduction therefore runs before the publication and does not observe
-   it. This holds uniformly: it is precisely why the pre-coupling
-   velocity projection accumulates the constraint virial but does not
-   publish it (`constraint-framework.md`), since a publication there —
-   between the trailing kick and the barostat — would make the barostat
-   see the constraint virial on coupling steps and not on non-coupling
-   steps, i.e. two different pressure definitions alternating at the
-   coupling cadence. For the constraint slots' own virial accounting see
-   `constraint-framework.md`, `settle.md`, and `shake.md`.
+   On a constrained run it **also** carries this step's constraint
+   contribution. A constraint slot publishes its virial exactly once per
+   step, at the leading `Constraint::apply_after_kick` that the runner
+   fires immediately after the trailing kick — before this
+   `BarostatPoint` (see `framework.md`, *Per-Step Interface*). The
+   barostat's in-step reduction therefore observes it, on every step and
+   with no dependence on the thermostat's coupling cadence. The
+   contribution is not optional: for rigid molecules the constraint
+   virial very nearly cancels the force virial (for 8192 rigid SPC/E
+   water molecules, −456 Ha against +412 Ha), so a pressure estimate that
+   omitted it would be wrong by orders of magnitude and the box would run
+   away. The terminal repair projection publishes nothing, so the virial
+   is scattered exactly once. For the constraint slots' own virial
+   accounting see `constraint-framework.md`, `settle.md`, and `shake.md`.
 
 3. Launch the `berendsen_compute_mu_and_rescale_lattice` kernel
    (described under *CUDA Kernels* below). The kernel reads `K`
@@ -432,10 +434,6 @@ All launches go through the default stream of
 - A `μ`-clamp configurable per-run. The host-side `μ_min = 1e-6`
   floor is a fixed safety guard; users who hit it should tighten
   their parameters.
-- Constraint algorithms (SHAKE/RATTLE) and their interaction with
-  the rescale. Constraints would need to be re-projected after the
-  position rescale; the framework does not yet ship a constraint
-  slot.
 
 ---
 

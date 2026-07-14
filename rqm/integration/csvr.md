@@ -21,7 +21,7 @@ at the runner's post-force-marker boundary. The integrator has already
 completed its velocity-Verlet substeps, including the trailing kick, and
 on a constrained run the runner has already projected the velocities back
 onto the constraint manifold
-(`Constraint::project_velocities_for_coupling`, see
+(`Constraint::apply_after_kick`, see
 `constraint-framework.md`). The thermostat therefore operates on the
 full-step, on-manifold velocities, and the `K` it reduces is the physical
 kinetic energy the run reports — the one whose degree-of-freedom count
@@ -100,7 +100,7 @@ CSVR does nothing.
 
 On a coupling step the CSVR thermostat's `apply_post` runs the
 following three device-side steps as its own kernel launches, after the
-integrator's trailing kick and after the runner's pre-coupling velocity
+integrator's trailing kick and after the runner's leading velocity
 projection (constrained runs only), so the reduction reads the full-step,
 on-manifold velocities:
 

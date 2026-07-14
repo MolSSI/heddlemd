@@ -72,40 +72,42 @@ pub trait Constraint: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(), ConstraintError>;
 
-    /// The same velocity projection as [`Constraint::apply_after_kick`] —
-    /// including accumulating the velocity-level constraint virial — but
-    /// **without publishing** that virial into `buffers.virials`.
+    /// The same velocity projection as [`Constraint::apply_after_kick`], but
+    /// **without publishing** the constraint virial into `buffers.virials`.
     ///
-    /// The runner calls this immediately after the trailing kick and
-    /// immediately before a wrapped thermostat's `apply_post`, so that a
-    /// kinetic-energy-coupled thermostat couples to the *physical* full-step
-    /// kinetic energy: the trailing kick accelerates every atom along the total
-    /// force, including the component parallel to the constrained directions,
-    /// and this projection deletes exactly that component. A thermostat that
-    /// reduced the kinetic energy before it would rescale against
-    /// `K_manifold + ΔK_off` and then watch the projection throw the surplus
-    /// away, settling the run below its setpoint (see
-    /// `rqm/integration/constraint-framework.md`).
+    /// This is the step's *repair* projection. `apply_after_kick` has already
+    /// run — the runner fires it immediately after the trailing kick — so the
+    /// velocities are already on the manifold and the constraint virial has
+    /// already been published. What runs after that point can knock them back
+    /// off: a per-particle resample (Andersen), or a barostat velocity rescale.
+    /// The plan's terminal `ConstraintPoint { AfterKick }` dispatches this hook
+    /// to put them back (RATTLE-last).
     ///
-    /// **Publishing here as well would be a bug**, which is the whole reason
-    /// this is a separate hook. The plan's terminal `ConstraintPoint {
-    /// AfterKick }` still runs `apply_after_kick`, and that call is what
-    /// scatters the accumulated virial — exactly once per step. Scattering
-    /// twice would double-count the constraint contribution to the pressure,
-    /// and would leave a per-step barostat — whose virial reduction runs at the
-    /// plan's terminal `BarostatPoint`, i.e. *between* the two projections —
-    /// reading a different virial on coupling and non-coupling steps.
+    /// It must not publish, for two reasons:
     ///
-    /// After this call the velocities are on the manifold, so the terminal
-    /// `apply_after_kick` costs nothing for a uniform rescale (its impulse, and
-    /// therefore its virial contribution, is zero). It stays load-bearing for a
-    /// per-particle resample (Andersen) and for a barostat velocity rescale,
-    /// neither of which is guaranteed to preserve the manifold.
+    /// - The constraint virial must reach `buffers.virials` **exactly once**.
+    ///   `settle_positions` writes the position half and `settle_velocities`
+    ///   accumulates the velocity half onto it, and nothing clears the buffer in
+    ///   between; a second scatter would re-add the whole accumulated total —
+    ///   position half included — and double-count the constraint contribution
+    ///   to the pressure.
+    /// - The publish has to happen *before* a per-step barostat reduces the
+    ///   virial at the plan's terminal `BarostatPoint`. That is the whole point
+    ///   of publishing at the leading `apply_after_kick`: for rigid water the
+    ///   constraint virial very nearly cancels the force virial (−456 Ha against
+    ///   +412 Ha for 8192 SPC/E molecules), so a barostat that cannot see it
+    ///   estimates tens of thousands of atmospheres instead of tens, and drives
+    ///   the box away without bound.
+    ///
+    /// For a uniform rescale this projection is a no-op (zero impulse), so its
+    /// discarded virial contribution is zero. For Andersen it is a real repair,
+    /// and its impulse virial is dropped — an accepted approximation, since that
+    /// impulse answers a stochastic resample rather than a physical force.
     ///
     /// The default delegates to `apply_after_kick`, which is correct for any
     /// slot that publishes no constraint virial. A slot that does publish one
     /// (SETTLE, SHAKE) must override it.
-    fn project_velocities_for_coupling(
+    fn reproject_velocities_no_publish(
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,

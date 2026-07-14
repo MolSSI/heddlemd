@@ -185,9 +185,10 @@ reproducibility, is the schedule walked in order plus the small, fixed set
 of dispatches the runner wraps around that walk (`framework.md`,
 *Determinism Guarantees*). Those wrapped dispatches are the documented
 default-topology thermostat halves (`docs/architecture.md`, *One deliberate
-exception*) and the pre-coupling velocity projection that precedes the
-thermostat's `apply_post` on a constrained coupling step (see *Out of
-Scope*). Neither is a schedule operation, and neither reorders operations
+exception*) and the leading velocity projection that precedes the
+thermostat's `apply_post` and the terminal `BarostatPoint` on every step of
+a constrained run (see *Out of Scope*). Neither is a schedule operation,
+and neither reorders operations
 within the walk or changes which state an operation observes. Validation
 adds a setup-time check; it changes no per-step execution.
 
@@ -205,18 +206,23 @@ adds a setup-time check; it changes no per-step execution.
   those reductions first-class barrier operations — with scalar resources
   and their own producer/consumer validation — is a separate layer of the
   Op model, not part of this foundation.
-- **The pre-coupling velocity projection.** On a coupling step of a
-  constrained run the runner projects the velocities onto the constraint
-  manifold between the trailing kick and the wrapped thermostat's
-  `apply_post`, so the thermostat couples to the on-manifold kinetic energy
-  (`framework.md`, *Per-Step Interface*; `constraint-framework.md`). It is
-  **not** a schedule operation: it declares no footprint, appears in no
-  `StepPlan`, and is not validated. It carries no ordering rules of its own
-  either — it re-uses the `dt` of the plan's terminal `ConstraintPoint {
-  AfterKick }` (and fires only when the plan has one), and that marker still
-  executes in place in the post-force tail. Its footprint would in any case
-  be identical to the `AfterKick` marker's, so it can invalidate nothing the
-  validator tracks.
+- **The leading velocity projection.** On every step of a constrained run
+  the runner projects the velocities onto the constraint manifold — and
+  publishes the constraint virial — between the trailing kick and the
+  wrapped thermostat's `apply_post`, so that the thermostat couples to the
+  on-manifold kinetic energy and the terminal `BarostatPoint`'s virial
+  reduction sees the constraint contribution (`framework.md`, *Per-Step
+  Interface*; `constraint-framework.md`). It is **not** a schedule
+  operation: it declares no footprint, appears in no `StepPlan`, and is not
+  validated. It carries no ordering rules of its own either — it re-uses the
+  `dt` of the plan's terminal `ConstraintPoint { AfterKick }` (and fires
+  only when the plan has one), and that marker still executes in place in
+  the post-force tail, where it dispatches the repair projection. Its
+  footprint would in any case be identical to the `AfterKick` marker's, so
+  it can invalidate nothing the validator tracks. (The virial is not a
+  tracked resource — see the bullet above — so the model does not express
+  the publish-before-reduce dependency either; that ordering is a
+  `run_step` invariant.)
 
 ## Gherkin Scenarios <!-- rq-f3467a4e -->
 

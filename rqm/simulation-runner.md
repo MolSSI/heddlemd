@@ -454,18 +454,24 @@ the simulation box.
        2. The plan walk: force evaluations, kicks and drifts including the
           trailing kick, and any interleaved thermostat / constraint /
           barostat markers.
-       3. At the post-force-marker boundary, after the trailing kick: on a
-          coupling step of a constrained run,
-          `constraint.project_velocities_for_coupling(...)` — putting the
-          velocities back on the constraint manifold, which the trailing
-          kick knocked them off — and then the wrapped thermostat's
-          `apply_post`, so it couples to the physical, on-manifold full-step
-          kinetic energy (see `integration/constraint-framework.md`).
+       3. At the post-force-marker boundary, after the trailing kick: on
+          every step of a constrained run,
+          `constraint.apply_after_kick(...)` — putting the velocities back
+          on the constraint manifold, which the trailing kick knocked them
+          off, and publishing the constraint virial into `buffers.virials`.
+          This is the step's single publication of that virial, and it is
+          unconditional (not gated on the coupling cadence). Then the
+          wrapped thermostat's `apply_post`, so it couples to the physical,
+          on-manifold full-step kinetic energy (see
+          `integration/constraint-framework.md`).
        4. The post-force marker tail: a terminal `BarostatPoint` runs
-          `barostat.apply(...)`, then a plan-final
-          `ConstraintPoint { AfterKick }` runs `constraint.apply_after_kick(...)`
-          (RATTLE-last), which is also the step's single publication of the
-          constraint virial.
+          `barostat.apply(...)` — whose virial reduction therefore sees the
+          constraint virial published in step 3 — then a plan-final
+          `ConstraintPoint { AfterKick }` runs
+          `constraint.reproject_velocities_no_publish(...)`, the repair
+          projection that restores the manifold after the thermostat's and
+          barostat's rescales (RATTLE-last) without re-publishing the
+          virial.
 
     The force evaluations inside `run_step` (step a) run at
     `AggregateLevel::ForcesAndScalars` — computing the total potential

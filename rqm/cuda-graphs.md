@@ -188,15 +188,21 @@ once per physical step. There is no composed post-force kernel. The
 **coupling** cells of the matrix additionally record the thermostat's
 coupling sequence — its kinetic-energy reduction, factor computation, and
 velocity rescale — as standalone nodes; the **non-coupling** cells record
-none of them. On a **constrained** phase a coupling cell records one more
-node ahead of all of those: the constraint slot's pre-coupling velocity
+none of them. On a **constrained** phase, **every** cell — coupling and
+non-coupling alike — records the constraint slot's leading velocity
 projection (`settle_velocities` / `rattle_velocities`, from
-`Constraint::project_velocities_for_coupling`), which puts the velocities
-on the manifold so the thermostat's reduction sees the physical full-step
-kinetic energy (`integration/constraint-framework.md`). It records no
-virial-scatter node — the projection accumulates the constraint virial but
-does not publish it; the terminal `apply_after_kick` in the post-force tail
-does that, once. Within a row the forces+scalars and forces-only cells differ
+`Constraint::apply_after_kick`) plus its virial-scatter node
+(`settle_virial_scatter` / `constraint_virial_scatter`) immediately after
+the trailing kick, ahead of any thermostat and barostat node. That
+projection puts the velocities on the manifold so the thermostat's
+reduction sees the physical full-step kinetic energy, and publishes the
+constraint virial so the barostat's virial reduction sees the constraint
+contribution (`integration/constraint-framework.md`). It is unconditional,
+which is why it is in the non-coupling cells too. The plan's terminal
+`ConstraintPoint { AfterKick }` then records a *second*
+`settle_velocities` / `rattle_velocities` node in the post-force tail —
+the repair projection (`Constraint::reproject_velocities_no_publish`) —
+with **no** second scatter. Within a row the forces+scalars and forces-only cells differ
 only in the force-evaluation `AggregateLevel` (the `_fev` scalar
 reductions present or absent). The replay loop launches the coupling row on
 coupling steps and the non-coupling row otherwise, and the forces+scalars
@@ -262,8 +268,9 @@ sequence:
      before the walk and `apply_post` at the post-force boundary — the
      kinetic-energy reduction, factor computation, and velocity rescale),
      preceded at that boundary, on a constrained phase, by the constraint
-     slot's pre-coupling velocity projection (`settle_velocities` /
-     `rattle_velocities`). Captured when the phase has a graph-eligible
+     slot's leading projection-and-publish (`settle_velocities` /
+     `rattle_velocities` plus the virial scatter), which the non-coupling
+     cells record too. Captured when the phase has a graph-eligible
      thermostat.
    - **coupling forces-only** — the same coupling step at
      `AggregateLevel::ForcesOnly`. Captured when the phase has a
@@ -302,24 +309,26 @@ sequence:
      slot (a no-op when the slot is `None`), the integrator's trailing
      kick (via `execute`), and then the post-force tail. See
      `integration/framework.md` for `RunStepOptions`.
-   - At the post-force-marker boundary, before the thermostat's
-     `apply_post`, a **coupling** cell of a constrained phase records
-     `constraint.project_velocities_for_coupling(buffers, sim_box, dt,
-     timings)` — the velocity projection alone
-     (`settle_velocities` / `rattle_velocities`), with no virial scatter.
-     A non-coupling cell records no such node.
+   - At the post-force-marker boundary, immediately after the trailing kick
+     and before the thermostat's `apply_post`, **every** cell of a
+     constrained phase records `constraint.apply_after_kick(buffers,
+     sim_box, dt, timings)` — the velocity projection
+     (`settle_velocities` / `rattle_velocities`) *and* its virial scatter
+     (`settle_virial_scatter` / `constraint_virial_scatter`), the step's
+     single publication of the constraint virial. The projection is
+     unconditional, so coupling and non-coupling cells record it alike.
    - The post-force tail, dispatched by the same `run_step` call, records
      each op as a standalone captured launch: `barostat.apply(buffers,
      sim_box, dt, timings)` when the plan carries a terminal
-     `BarostatPoint` (its reductions, box mutation, and per-particle
-     position rescale); then `constraint.apply_after_kick(buffers,
-     sim_box, dt, timings)` when the plan ends with a velocity projection
-     — the last per-particle velocity operation, and the step's single
-     publication of the constraint virial (its `settle_virial_scatter` /
-     `constraint_virial_scatter` node is recorded in coupling and
-     non-coupling cells alike). The constraint kernels
-     are pure launches (the SETTLE / SHAKE builders report
-     `graph_compatible == true`), so a constrained phase is
+     `BarostatPoint` (its reductions — including the virial reduction,
+     which therefore reads the constraint virial published above — box
+     mutation, and per-particle position rescale); then
+     `constraint.reproject_velocities_no_publish(buffers, sim_box, dt,
+     timings)` when the plan ends with a velocity projection — a second
+     `settle_velocities` / `rattle_velocities` node, the last per-particle
+     velocity operation of the step, with **no** second scatter node. The
+     constraint kernels are pure launches (the SETTLE / SHAKE builders
+     report `graph_compatible == true`), so a constrained phase is
      graph-eligible.
    - The displacement-check kernel
      `neighbor_displacement_check_flag` launched by
@@ -620,16 +629,17 @@ When graph mode is active for a phase:
   cell containing it, not necessarily `n_steps`. Stages present in every
   cell carry a sample count equal to the total step count.
 
-  A stage can also carry a *different* `captured_stops_per_replay` in
-  different cells. On a constrained, thermostatted phase the constraint
-  slot's velocity-projection stage (`SettleVelocities` /
-  `RattleVelocities`) has **two** captured stops per replay in a coupling
-  cell — the pre-coupling projection plus the terminal `apply_after_kick`
-  — and **one** in a non-coupling cell. The virial-scatter stage
-  (`SettleVirialScatter` / `ConstraintVirialScatter`) has one in both,
-  because only `apply_after_kick` publishes. The accounting is per cell, so
-  each stage's accumulator is scaled by the stops-per-replay of the cell
-  actually replayed.
+  A stage can carry more than one `captured_stops_per_replay`. On a
+  constrained phase the constraint slot's velocity-projection stage
+  (`SettleVelocities` / `RattleVelocities`) has **two** captured stops per
+  replay — the leading `apply_after_kick` plus the terminal
+  `reproject_velocities_no_publish` — in *every* cell, coupling and
+  non-coupling alike, because the leading projection is unconditional. The
+  virial-scatter stage (`SettleVirialScatter` /
+  `ConstraintVirialScatter`) has exactly **one** stop per replay in every
+  cell, because only the leading `apply_after_kick` publishes. The
+  accounting is per cell, so each stage's accumulator is scaled by the
+  stops-per-replay of the cell actually replayed.
 - **Representativeness.** The calibration measures the *first* few
   steps. For a phase already near steady state (e.g. NPT production) the
   per-kernel values match a full graphs-disabled run to within a few

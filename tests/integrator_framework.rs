@@ -738,14 +738,14 @@ impl heddle_md::integrator::Constraint for RecordingConstraint {
     }
     // Recorded distinctly from `after_kick`: this hook projects but must NOT
     // publish the constraint virial, and the order test below pins exactly that.
-    fn project_velocities_for_coupling(
+    fn reproject_velocities_no_publish(
         &mut self,
         _b: &mut ParticleBuffers,
         _sb: &SimulationBox,
         _dt: Real,
         _t: &mut Timings,
     ) -> Result<(), ConstraintError> {
-        self.log.record("project_for_coupling");
+        self.log.record("reproject");
         Ok(())
     }
 }
@@ -1049,7 +1049,14 @@ fn constraint_point_markers_dispatch_to_matching_hooks() {
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
-    assert_eq!(events, vec!["before_drift", "after_drift", "after_kick"]);
+    // The velocity projection now runs twice: `apply_after_kick` immediately
+    // after the trailing kick (the step's single projection-and-publish), and
+    // the plan's terminal `AfterKick` marker demoted to a repair that does not
+    // re-publish the constraint virial.
+    assert_eq!(
+        events,
+        vec!["before_drift", "after_drift", "after_kick", "reproject"]
+    );
 }
 
 // rq-3b42c2ff
@@ -1099,7 +1106,10 @@ fn repeated_markers_dispatch_once_each_in_plan_order() {
             "after_drift",
             "before_drift",
             "after_drift",
+            // The leading projection-and-publish, then the plan's terminal
+            // marker demoted to a non-publishing repair.
             "after_kick",
+            "reproject",
         ]
     );
 }
@@ -1232,7 +1242,7 @@ fn constraint_point_markers_dispatch_in_the_walk_or_no_op_without_slot() {
     .unwrap();
     assert_eq!(
         *constraint_log.events.lock().unwrap(),
-        vec!["before_drift", "after_drift", "after_kick"]
+        vec!["before_drift", "after_drift", "after_kick", "reproject"]
     );
     // Same plan, no slot: completes Ok with no dispatch.
     let mut stub2 = PlanStub { plan: marker_plan_vv(), log: CallLog::default() };
@@ -1281,7 +1291,8 @@ fn constraint_point_hook_receives_the_markers_own_dt() {
         Some(&mut constraint), None, 0.1, &mut timings,
     )
     .unwrap();
-    assert_eq!(*seen.lock().unwrap(), vec![0.5 as Real]);
+    // Both the leading publish and the terminal repair carry the marker's own dt.
+    assert_eq!(*seen.lock().unwrap(), vec![0.5 as Real, 0.5 as Real]);
 }
 
 // rq-195a6215
@@ -1322,49 +1333,46 @@ fn one_run_step_call_produces_the_whole_canonical_post_force_order() {
         RunStepOptions { coupling_dt: Some(0.1 as Real), runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
-    // apply_pre (before walk) → trailing kick (main walk) → pre-coupling
-    // velocity projection → apply_post → barostat.apply → the plan's terminal
-    // projection, all within the one run_step call. RATTLE-last still holds.
+    // The canonical post-force order, all from one run_step call:
     //
-    // The velocities are projected TWICE, and both are load-bearing. The leading
-    // one exists because the trailing kick leaves them off the constraint
-    // manifold: a thermostat that reduced their kinetic energy there would
-    // couple to energy the projection is about to delete, and the run would
-    // settle below its target temperature by a dt²-scaling margin (31.6 K low at
-    // dt = 2 fs for rigid SPC/E water). Projecting first makes `apply_post` see
-    // the physical full-step kinetic energy — the one whose degrees of freedom
-    // its target is built from. The trailing one costs nothing after that for a
-    // uniform rescale, but stays load-bearing for a per-particle resample
-    // (Andersen) and for the barostat rescale, neither of which preserves the
-    // manifold.
+    //   apply_pre → trailing kick → PROJECT+PUBLISH → apply_post → barostat.apply → REPAIR
     //
-    // The two are DIFFERENT hooks, and that is the point: only the terminal
-    // `apply_after_kick` publishes the constraint virial. It must appear exactly
-    // once — publishing twice would double-count the constraint contribution to
-    // the pressure, and would leave the barostat (which reduces the virial at
-    // `barostat_apply`, between the two) reading a different virial on coupling
-    // and non-coupling steps.
+    // The velocities are projected twice, by two DIFFERENT hooks, and each
+    // position is load-bearing.
+    //
+    // `after_kick` (project + publish the constraint virial) leads, because two
+    // consumers downstream of it need it to have already happened:
+    //   - the thermostat's `apply_post`, which would otherwise reduce
+    //     `K_manifold + ΔK_off` — kinetic energy the projection is about to
+    //     delete — and settle the run below its setpoint by a dt²-scaling margin
+    //     (31.6 K low at dt = 2 fs for rigid SPC/E water);
+    //   - the barostat's `apply`, which reduces `buffers.virials` and would
+    //     otherwise see the force virial alone. For rigid water the constraint
+    //     virial (−456 Ha) nearly cancels the force virial (+412 Ha), so a
+    //     barostat blind to it reads +27,000 atm instead of +59 atm and blows
+    //     the box up.
+    //
+    // `reproject` (project, do NOT re-publish) trails, because the thermostat's
+    // resample (Andersen) and the barostat's rescale can knock the velocities
+    // back off the manifold. It must not publish: the constraint virial has to
+    // reach `buffers.virials` exactly once, or the constraint contribution to
+    // the pressure is double-counted.
     let events = order.events.lock().unwrap().clone();
     assert_eq!(
         events,
         vec![
             "apply_pre",
             "exec_kick_half",
-            "project_for_coupling",
+            "after_kick",
             "apply_post",
             "barostat_apply",
-            "after_kick"
+            "reproject"
         ]
     );
     assert_eq!(
         events.iter().filter(|e| **e == "after_kick").count(),
         1,
         "the constraint virial must be published exactly once per step"
-    );
-    assert!(
-        events.iter().position(|e| *e == "project_for_coupling")
-            < events.iter().position(|e| *e == "apply_post"),
-        "the projection must precede the thermostat's kinetic-energy reduction"
     );
 }
 
@@ -1446,6 +1454,161 @@ impl heddle_md::integrator::Thermostat for KeProbeThermostat {
         *self.ke_at_apply_post.lock().unwrap() = Some(ke);
         Ok(())
     }
+}
+
+/// A constraint slot that *publishes* a virial, like SETTLE and SHAKE do:
+/// `apply_after_kick` adds a known sentinel into `buffers.virials`, and the
+/// non-publishing repair hook leaves it alone.
+#[derive(Debug)]
+struct VirialPublishingConstraint {
+    sentinel: Real,
+}
+
+impl heddle_md::integrator::Constraint for VirialPublishingConstraint {
+    fn apply_before_drift(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        Ok(())
+    }
+    fn apply_after_drift(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        Ok(())
+    }
+    fn apply_after_kick(
+        &mut self,
+        b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        let n = b.particle_count();
+        let mut v = b.device.dtoh_sync_copy(&b.virials).unwrap();
+        for x in v.iter_mut().take(n) {
+            *x += self.sentinel;
+        }
+        b.device.htod_sync_copy_into(&v, &mut b.virials).unwrap();
+        Ok(())
+    }
+    fn reproject_velocities_no_publish(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        // Projection only — publishes nothing.
+        Ok(())
+    }
+}
+
+/// A per-step barostat that reduces `buffers.virials` in its `apply`, the way a
+/// real virial-based barostat (c-rescale, Berendsen) computes its pressure.
+#[derive(Debug)]
+struct VirialReadingBarostat {
+    seen: std::sync::Arc<std::sync::Mutex<Option<f64>>>,
+}
+
+impl Barostat for VirialReadingBarostat {
+    fn periodicity(&self) -> BarostatPeriodicity {
+        BarostatPeriodicity::EveryStep
+    }
+    fn apply(
+        &mut self,
+        b: &mut ParticleBuffers,
+        _sb: &mut SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        let n = b.particle_count();
+        let v = b.device.dtoh_sync_copy(&b.virials).unwrap();
+        let sum: f64 = v.iter().take(n).map(|&x| x as f64).sum();
+        *self.seen.lock().unwrap() = Some(sum);
+        Ok(())
+    }
+}
+
+/// A virial-based barostat computes its pressure by reducing `buffers.virials`
+/// inside its own `apply`, at the plan's terminal `BarostatPoint`. The
+/// constraint slot must therefore have PUBLISHED its constraint virial before
+/// that point — which is why `run_step` fires `apply_after_kick` immediately
+/// after the trailing kick, rather than leaving the publish to the plan's
+/// terminal `ConstraintPoint { AfterKick }` (which now only repairs).
+///
+/// For a rigid molecule this is not a small correction. The constraint virial
+/// very nearly cancels the force virial — −456 Ha against +412 Ha for 8192 rigid
+/// SPC/E waters — so a barostat that cannot see it reads +27,000 atm where the
+/// true pressure is +59 atm, and expands the box without bound (density
+/// collapsed 0.997 → 0.184 g/cm³ in 10 ps).
+///
+/// This cannot be caught by the e2e water scenarios: their `spce_water` preset
+/// is two molecules in a 5 nm box, i.e. vacuum, where the constraint virial is
+/// negligible and the box does not move either way.
+#[test]
+fn barostat_sees_the_constraint_virial_the_constraint_slot_published() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let n = buffers.particle_count();
+    let sentinel: Real = 7.0;
+
+    // Start from a known virial so the barostat's reduction is unambiguous.
+    let base = vec![0.0 as Real; n];
+    gpu.device
+        .htod_sync_copy_into(&base, &mut buffers.virials)
+        .unwrap();
+
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut constraint = VirialPublishingConstraint { sentinel };
+    let mut barostat = VirialReadingBarostat { seen: seen.clone() };
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::KickHalf {
+                    dt: 0.1,
+                    label: "k",
+                    source: heddle_md::integrator::KickSource::Total,
+                },
+                SubStep::BarostatPoint { dt: 0.1 },
+                SubStep::ConstraintPoint {
+                    phase: ConstraintPhase::AfterKick,
+                    dt: 0.1,
+                },
+            ],
+        },
+        log: CallLog::default(),
+    };
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        Some(&mut constraint),
+        None,
+        Some(&mut barostat),
+        0.1,
+        &mut timings,
+        RunStepOptions {
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let observed = seen.lock().unwrap().expect("barostat apply never fired");
+    let expected = sentinel as f64 * n as f64;
+    assert!(
+        (observed - expected).abs() < 1e-4 * expected,
+        "the barostat reduced a virial of {observed}, expected {expected}. Seeing 0 means the \
+         constraint slot had not published its constraint virial yet — the barostat is \
+         estimating the pressure from the force virial alone."
+    );
 }
 
 /// The defect this guards: the trailing kick leaves the velocities *off* the
@@ -1564,24 +1727,46 @@ fn afterkick_projection_fires_after_the_per_step_barostat_rescale() {
         .iter()
         .position(|e| *e == "barostat_apply")
         .expect("barostat apply was dispatched");
-    let after = events
+    let publish = events
         .iter()
         .position(|e| *e == "after_kick")
-        .expect("after_kick projection was dispatched");
-    // RATTLE-last: the barostat velocity rescale precedes the terminal
-    // velocity projection...
+        .expect("the projection-and-publish was dispatched");
+    let repair = events
+        .iter()
+        .position(|e| *e == "reproject")
+        .expect("the terminal repair projection was dispatched");
+
+    // The projection-and-publish MUST precede the barostat. The barostat
+    // reduces `buffers.virials` inside its `apply`, and the constraint virial
+    // is scattered there — so a barostat that ran first would estimate the
+    // pressure from the force virial alone. For rigid water that is
+    // catastrophic, not marginal: the constraint virial (−456 Ha for 8192 SPC/E
+    // molecules) very nearly cancels the force virial (+412 Ha), so the barostat
+    // reads +27,000 atm where the true pressure is +59 atm, and drives the box
+    // away without bound.
     assert!(
-        baro < after,
-        "expected barostat_apply before after_kick, got {:?}",
-        events
+        publish < baro,
+        "the constraint virial must be published before the barostat reduces it, got {events:?}"
     );
-    // ...and the projection is the last per-particle velocity operation
-    // of the step.
+
+    // RATTLE-last still holds: the barostat's velocity rescale precedes the
+    // terminal repair projection, and that repair is the last per-particle
+    // velocity operation of the step.
+    assert!(
+        baro < repair,
+        "expected barostat_apply before the repair projection, got {events:?}"
+    );
     assert_eq!(
         events.last().copied(),
-        Some("after_kick"),
-        "expected after_kick last, got {:?}",
-        events
+        Some("reproject"),
+        "expected the repair projection last, got {events:?}"
+    );
+
+    // And the virial is published exactly once.
+    assert_eq!(
+        events.iter().filter(|e| **e == "after_kick").count(),
+        1,
+        "the constraint virial must be published exactly once per step"
     );
 }
 

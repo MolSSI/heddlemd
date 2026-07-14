@@ -137,26 +137,36 @@ multi-step run with real slots and a real force field.
 ### Slot composition (post-force tail) <!-- rq-9213dcb5 -->
 
 The integrator, thermostat, barostat, and constraint slots interleave in the
-post-force tail, and **two** of their orderings are load-bearing (see
+post-force tail, and **three** of their orderings are load-bearing (see
 `integration/constraint-framework.md`):
 
-- **project-before-couple.** On a coupling step of a constrained run the
-  constraint slot's velocity projection runs *before* the thermostat's
-  `apply_post`, so a kinetic-energy-coupled thermostat couples to the
-  physical, on-manifold full-step kinetic energy rather than to the inflated
-  sum the trailing kick left off the manifold. Get this wrong and the run
-  silently equilibrates *below* its setpoint — a dt²-scaling deficit, ~10%
-  low for rigid SPC/E water at dt = 2 fs.
-- **RATTLE-last.** The plan's terminal `ConstraintPoint { AfterKick }`
-  projection runs *after* the thermostat and barostat rescales, so that a
-  velocity projection is the last per-particle velocity operation of the
-  step. Get this wrong and a per-particle resample or a barostat velocity
-  rescale leaves the system off the manifold.
+- **project-before-couple.** The constraint slot's velocity projection runs
+  *before* the thermostat's `apply_post`, so a kinetic-energy-coupled
+  thermostat couples to the physical, on-manifold full-step kinetic energy
+  rather than to the inflated sum the trailing kick left off the manifold. Get
+  this wrong and the run silently equilibrates *below* its setpoint — a
+  dt²-scaling deficit, ~10% low for rigid SPC/E water at dt = 2 fs.
+- **publish-before-barostat.** That same projection also *publishes* the
+  constraint virial into `buffers.virials`, and it must do so before a
+  virial-based barostat (c-rescale, Berendsen) reduces that buffer inside its
+  own `apply`. For a rigid molecule the constraint virial very nearly cancels
+  the force virial — −456 Ha against +412 Ha for 8192 SPC/E waters — so a
+  barostat that cannot see it does not merely misjudge the pressure, it reads
+  +27,000 atm where the true pressure is +59 atm and expands the box without
+  bound (0.997 → 0.184 g/cm³ in 10 ps). This is why the projection is
+  dispatched on **every** step of a constrained run, not only on the
+  thermostat's coupling steps: the barostat needs the virial every step.
+- **RATTLE-last.** The plan's terminal `ConstraintPoint { AfterKick }` runs a
+  *repair* projection *after* the thermostat and barostat rescales, so that a
+  velocity projection is the last per-particle velocity operation of the step.
+  It must not re-publish the virial (that would double-count the constraint
+  contribution to the pressure). Get the ordering wrong and a per-particle
+  resample or a barostat velocity rescale leaves the system off the manifold.
 
-Only an end-to-end run observes either: the first is a property of the
-long-run mean temperature, the second of the final frame's geometry. The e2e
-layer covers the combinations where a per-particle position or velocity
-update from one slot feeds another:
+Only an end-to-end run observes these: the first is a property of the long-run
+mean temperature, the second of the box trajectory, the third of the final
+frame's geometry. The e2e layer covers the combinations where a per-particle
+position or velocity update from one slot feeds another:
 
 - velocity-Verlet + a rigid-water constraint + a per-step barostat;
 - velocity-Verlet + a thermostat + a per-step barostat + a constraint (all
@@ -167,6 +177,21 @@ update from one slot feeds another:
   only that the run completes and that the final frame lies on the manifold —
   both of which a build with the wrong ordering still satisfies — so this is
   the scenario that pins the ordering down.
+
+**Known coverage gap: publish-before-barostat has no e2e scenario.** <!-- rq-1c9f4d20 -->
+The `spce_water` preset is **two molecules in a 5 nm box** — effectively
+vacuum, where the constraint virial is negligible and the box does not move
+whether the ordering is right or wrong (measured: `V_final / V_initial` =
+0.9975 on both a correct and a broken build). Every constrained-barostat
+scenario above therefore runs on a system that cannot exercise the defect, and
+`assert_mean_pressure_near` cannot see it either — it reads the
+`capture_physics_sample` pressure, which is taken *after* the step and so
+always includes the constraint virial, whereas the value the barostat acts on
+is its own in-`apply` reduction. Closing this gap needs a **dense-water preset**
+(a liquid-density box large enough for the cell list, i.e. every width ≥
+`3 · (r_cut + r_skin)`), asserted on the box trajectory rather than on the
+sampled pressure. Until then the invariant is pinned only at the unit level, by
+`barostat_sees_the_constraint_virial_the_constraint_slot_published`.
 
 ### Reproducibility <!-- rq-ff8b6a9a -->
 

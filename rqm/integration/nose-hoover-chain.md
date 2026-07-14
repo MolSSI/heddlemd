@@ -73,7 +73,7 @@ post-force-marker boundary; the integrator's plan walk — up to and
 including the trailing kick — runs in between. On a constrained run the
 runner additionally projects the velocities back onto the constraint
 manifold between the trailing kick and `apply_post`
-(`Constraint::project_velocities_for_coupling`, see
+(`Constraint::apply_after_kick`, see
 `constraint-framework.md`), so the right factor's kinetic-energy
 reduction sees the physical, on-manifold full-step `K`.
 
@@ -178,7 +178,7 @@ run) and is therefore a fusion barrier.
 
 Both halves apply their cumulative factor through a `rescale_velocities`
 device launch. Because `apply_post` runs after the integrator's trailing
-kick — and, on a constrained run, after the runner's pre-coupling velocity
+kick — and, on a constrained run, after the runner's leading velocity
 projection — its reduction sees the physical full-step kinetic energy, and
 its rescale is a standalone launch rather than a composed fragment.
 
