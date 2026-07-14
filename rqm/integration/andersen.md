@@ -77,7 +77,7 @@ and its collision probability uses the effective timestep
 `dt_couple = coupling_interval · dt`, so resampling less often raises
 the per-attempt collision probability correspondingly.
 
-### Composition with a constraint slot <!-- rq-1c9f4d20 -->
+### Composition with a constraint slot <!-- rq-225a5959 -->
 
 The plan's terminal `ConstraintPoint { AfterKick }` — which runs *after*
 `apply_post` (see `framework.md`, *Per-Step Interface*) — is load-bearing

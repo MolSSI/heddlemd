@@ -9,6 +9,9 @@ pub mod e2e;
 // rq-ec1452c6 — potential consistency harness (ConsistencyFixture, checks).
 pub mod consistency;
 
+// rq-c7f4d96b — slot conformance harness (SlotCase, coverage, checks).
+pub mod slot_conformance;
+
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;

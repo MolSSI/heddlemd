@@ -178,20 +178,29 @@ position or velocity update from one slot feeds another:
   both of which a build with the wrong ordering still satisfies — so this is
   the scenario that pins the ordering down.
 
-**Known coverage gap: publish-before-barostat has no e2e scenario.** <!-- rq-1c9f4d20 -->
-The `spce_water` preset is **two molecules in a 5 nm box** — effectively
-vacuum, where the constraint virial is negligible and the box does not move
-whether the ordering is right or wrong (measured: `V_final / V_initial` =
-0.9975 on both a correct and a broken build). Every constrained-barostat
-scenario above therefore runs on a system that cannot exercise the defect, and
-`assert_mean_pressure_near` cannot see it either — it reads the
-`capture_physics_sample` pressure, which is taken *after* the step and so
-always includes the constraint virial, whereas the value the barostat acts on
-is its own in-`apply` reduction. Closing this gap needs a **dense-water preset**
-(a liquid-density box large enough for the cell list, i.e. every width ≥
-`3 · (r_cut + r_skin)`), asserted on the box trajectory rather than on the
-sampled pressure. Until then the invariant is pinned only at the unit level, by
+**These scenarios cannot see either ordering defect.**
+The `spce_water` preset is **two molecules in a 5 nm box with the charges
+zeroed** — effectively vacuum, where the constraint virial is negligible and the
+box does not move whether the ordering is right or wrong (measured:
+`V_final / V_initial` = 0.9975 on both a correct and a broken build). Every
+constrained-barostat scenario above therefore runs on a system that cannot
+exercise the defect, and `assert_mean_pressure_near` cannot see it either — it
+reads the `capture_physics_sample` pressure, which is taken *after* the step and
+so always includes the constraint virial, whereas the value the barostat acts on
+is its own in-`apply` reduction.
+
+Both orderings are instead covered by the **Slot Conformance Harness**
+(`integration/slot-conformance-harness.md`), which runs every registered
+thermostat and barostat on 729 rigid SPC/E molecules at liquid density. On that
+system the project-before-couple defect shows up as a 7% temperature deficit and
+the publish-before-barostat defect as the density collapsing from 0.997 to
+0.031 g/cm³ — both far outside the harness's tolerances. The invariant is
+additionally pinned at the unit level by
 `barostat_sees_the_constraint_virial_the_constraint_slot_published`.
+
+The `spce_water` preset is retained for what it is good at — cheap composition
+and reproducibility checks, where the point is that the slots compose and the
+bytes match, not that the physics is right.
 
 ### Reproducibility <!-- rq-ff8b6a9a -->
 
@@ -289,7 +298,7 @@ Feature: End-to-end slot composition
     Then the run completes without error
     And the last trajectory frame lies on the constraint manifold within relative tolerance 1e-4
 
-  @rq-1c9f4d20
+  @rq-df25c307
   Scenario: A thermostatted rigid-water run reaches its temperature setpoint
     Given a SystemBuilder from the spce_water preset with SETTLE constraints
       and a CSVR thermostat at a target temperature

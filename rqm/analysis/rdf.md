@@ -59,7 +59,7 @@ n_bins = 100              # required, u64
 Unknown fields for `kind = "rdf"` are rejected at
 `validate_params` time as `AnalyzeError::Parse`.
 
-### Units <!-- rq-1c9f4d20 -->
+### Units <!-- rq-64e75744 -->
 
 `r_max` is a user-facing length and is written in the run's unit system
 (`[simulation].units` of the config the analysis names), exactly like
@@ -324,7 +324,7 @@ Feature: Radial distribution function analysis
   # under units="si": under units="atomic" the conversion is the identity and
   # cannot distinguish the two behaviours.
 
-  @rq-1c9f4d20
+  @rq-74331978
   Scenario: `r_max` is interpreted in the config's unit system
     Given tmp/argon.in.toml declares units = "si"
     And a 2 nm cubic box holding exactly one Ar-Ar pair separated by 3.0e-10 m
@@ -334,7 +334,7 @@ Feature: Radial distribution function analysis
     And that count lies in the bin covering 3.0e-10 m
     And the populated row's `r` column is expressed in metres, not Bohr
 
-  @rq-1c9f4d20
+  @rq-8129be9f
   Scenario: The box guard compares like with like
     Given tmp/argon.in.toml declares units = "si"
     And a 4 nm cubic box

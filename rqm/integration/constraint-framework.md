@@ -204,7 +204,7 @@ impulse), and it remains load-bearing for Andersen's per-particle resample
 and for a barostat velocity rescale, neither of which is guaranteed to
 preserve the manifold.
 
-### The two projections are different hooks <!-- rq-1c9f4d20 -->
+### The two projections are different hooks <!-- rq-b8818dd3 -->
 
 The leading projection dispatches `Constraint::apply_after_kick` — project
 **and publish**. The terminal one, the plan's
@@ -1214,7 +1214,7 @@ Feature: Constraint slot framework
        reproject_velocities_no_publish]
     And no velocity projection is dispatched during run_step's main walk
 
-  @rq-1c9f4d20
+  @rq-16c7957d
   Scenario: The leading publish precedes the per-step barostat's virial reduction
     Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
     And a per-step barostat slot whose apply reduces buffers.virials
@@ -1223,7 +1223,7 @@ Feature: Constraint slot framework
     Then apply_after_kick is recorded before the barostat apply
     And the virial the barostat reduces includes this step's constraint contribution
 
-  @rq-1c9f4d20
+  @rq-2fa29d25
   Scenario: The leading projection fires on a non-coupling step
     Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
     And a thermostat with coupling_interval = 10

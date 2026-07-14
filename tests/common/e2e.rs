@@ -58,6 +58,9 @@ enum Preset {
     DisorderedLj { side: usize, spacing: f64 },
     // Two SPC/E water molecules with rigid-geometry constraint metadata.
     SpceWater,
+    // `side`^3 SPC/E water molecules at liquid density, with real SPC/E
+    // charges and SPME. See `SystemBuilder::dense_spce_water`.
+    DenseSpceWater { side: usize },
     // Simple-cubic lattice of alternating +1e / -1e ions (net-neutral).
     IonicLattice { side: usize, spacing: f64 },
 }
@@ -112,6 +115,28 @@ impl SystemBuilder {
     // rq-a5e72a70
     pub fn disordered_lj_liquid(side: usize, spacing: f64) -> Self {
         Self::base(Preset::DisorderedLj { side, spacing }, 2.0e-15, 120.0)
+    }
+
+    // rq-9254d227 — `side`^3 rigid SPC/E waters at liquid density (0.997 g/cm3),
+    // with the real SPC/E charges and SPME electrostatics.
+    //
+    // This is the preset the slot-conformance harness runs on, and the density is
+    // the whole point of it. The `spce_water` preset below is TWO molecules in a
+    // 5 nm box with the charges zeroed — effectively vacuum — so the quantities a
+    // thermostat and a barostat actually control barely move there, and a broken
+    // slot looks exactly like a working one. Two defects lived through the entire
+    // e2e suite because of that: a thermostat that settled 32 K below its setpoint
+    // under SETTLE, and a barostat that could not see the constraint virial and
+    // expanded the box without bound. On this preset the first shows up as a 10%
+    // temperature deficit and the second as the density collapsing from 0.997 to
+    // 0.034 g/cm3; on `spce_water` neither is visible at all.
+    //
+    // `side = 9` (729 molecules, 2187 atoms) is the smallest cubic box that still
+    // satisfies the cell list's `width >= 3 * (r_cut + r_skin)` at the 7 A cutoff
+    // this preset uses: L = 2.797 nm against a 2.55 nm floor. 2000 steps take
+    // ~0.4 s on an RTX 3070 Ti.
+    pub fn dense_spce_water(side: usize) -> Self {
+        Self::base(Preset::DenseSpceWater { side }, 2.0e-15, 298.15)
     }
 
     // rq-a5e72a70
@@ -169,10 +194,13 @@ impl SystemBuilder {
                 "[phase.thermostat]\nkind = \"csvr\"\ntemperature = {target_temperature}\ntau = 1.0e-13\nseed = {seed}\n"
             ),
             "andersen" => format!(
-                "[phase.thermostat]\nkind = \"andersen\"\ntemperature = {target_temperature}\ncollision_rate = 1.0e12\nseed = {seed}\n"
+                "[phase.thermostat]\nkind = \"andersen\"\ntemperature = {target_temperature}\ncollision_rate = 1.0e13\nseed = {seed}\n"
             ),
             "berendsen" => format!(
                 "[phase.thermostat]\nkind = \"berendsen\"\ntemperature = {target_temperature}\ntau = 1.0e-13\n"
+            ),
+            "nose-hoover-chain" => format!(
+                "[phase.thermostat]\nkind = \"nose-hoover-chain\"\ntemperature = {target_temperature}\ntau = 1.0e-13\n"
             ),
             other => panic!("unsupported thermostat kind in harness: {other}"),
         };
@@ -197,6 +225,15 @@ impl SystemBuilder {
                 ),
                 true,
             ),
+            // BarostatPeriodicity::EveryNSteps: it couples through the runner's
+            // host-orchestrated `apply_move` at a batch boundary, not through a
+            // plan `BarostatPoint`, so `barostat_is_per_step` is false.
+            "monte-carlo" => (
+                format!(
+                    "[phase.barostat]\nkind = \"monte-carlo\"\npressure = {target_pressure}\ntemperature = {temperature}\nfrequency = 25\nseed = {seed}\n"
+                ),
+                false,
+            ),
             other => panic!("unsupported barostat kind in harness: {other}"),
         };
         self.barostat = Some(block);
@@ -217,6 +254,7 @@ impl SystemBuilder {
             Preset::ArgonLattice { side, spacing } => self.write_lj(case, side, spacing, false),
             Preset::DisorderedLj { side, spacing } => self.write_lj(case, side, spacing, true),
             Preset::SpceWater => self.write_water(case),
+            Preset::DenseSpceWater { side } => self.write_dense_water(case, side),
             Preset::IonicLattice { side, spacing } => self.write_ionic(case, side, spacing),
         }
     }
@@ -309,6 +347,222 @@ mode = "all-pairs"
 "#,
             integrator = self.integrator,
             lossless = self.lossless,
+        );
+        let path = case.config_path();
+        std::fs::write(&path, cfg).unwrap();
+        path
+    }
+
+    // rq-9254d227 — `side`^3 rigid SPC/E waters on a simple-cubic lattice at
+    // 0.997 g/cm3, each with a deterministic pseudo-random orientation.
+    //
+    // The orientations matter: an aligned lattice of water dipoles is
+    // ferroelectric, carries a large spurious polarisation, and gives a pressure
+    // nothing like liquid water's. They come from a seeded LCG (not the run's
+    // RNG), so the *input files* are byte-identical on every call and the
+    // reproducibility assertions still hold.
+    fn write_dense_water(&self, case: &Case, side: usize) -> PathBuf {
+        const V_PER_MOLECULE: f64 = 3.0006e-29; // m^3, i.e. 0.997 g/cm3
+        const R_OH: f64 = 1.0e-10;
+        const THETA_HOH: f64 = 1.910_611_931; // 109.47 degrees
+        const R_CUT: f64 = 7.0e-10;
+        const R_SKIN: f64 = 1.5e-10;
+
+        let n_mol = side * side * side;
+        let l = (n_mol as f64 * V_PER_MOLECULE).cbrt();
+        // The cell list needs every width >= 3 * (r_cut + r_skin), or the build
+        // fails at run time with BoxTooSmallForCells.
+        assert!(
+            l >= 3.0 * (R_CUT + R_SKIN),
+            "dense_spce_water(side = {side}) gives L = {l:.3e} m, below the cell-list \
+             minimum {:.3e} m; use a larger side",
+            3.0 * (R_CUT + R_SKIN)
+        );
+        let a = l / side as f64;
+
+        let mut lcg: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut u01 = || {
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((lcg >> 33) as f64) / ((1u64 << 31) as f64)
+        };
+
+        let mut xyz = format!("{}\n", 3 * n_mol);
+        xyz.push_str(&format!(
+            "Lattice=\"{l:.9e} 0 0 0 {l:.9e} 0 0 0 {l:.9e}\" Properties=species:S:1:pos:R:3\n"
+        ));
+        let mut topo = String::from("[constraints]\n");
+        let (h1x, h1y) = (R_OH, 0.0);
+        let (h2x, h2y) = (R_OH * THETA_HOH.cos(), R_OH * THETA_HOH.sin());
+        let mut m = 0usize;
+        for i in 0..side {
+            for j in 0..side {
+                for k in 0..side {
+                    let cx = (i as f64 + 0.5) * a - l / 2.0;
+                    let cy = (j as f64 + 0.5) * a - l / 2.0;
+                    let cz = (k as f64 + 0.5) * a - l / 2.0;
+                    // Shoemake's uniform-on-SO(3) quaternion.
+                    let (u1, u2, u3) = (u01(), u01(), u01());
+                    let tau = 2.0 * std::f64::consts::PI;
+                    let (r1, r2) = ((1.0 - u1).sqrt(), u1.sqrt());
+                    let (q0, q1) = (r1 * (tau * u2).sin(), r1 * (tau * u2).cos());
+                    let (q2, q3) = (r2 * (tau * u3).sin(), r2 * (tau * u3).cos());
+                    let r = [
+                        [
+                            1.0 - 2.0 * (q2 * q2 + q3 * q3),
+                            2.0 * (q1 * q2 - q3 * q0),
+                            2.0 * (q1 * q3 + q2 * q0),
+                        ],
+                        [
+                            2.0 * (q1 * q2 + q3 * q0),
+                            1.0 - 2.0 * (q1 * q1 + q3 * q3),
+                            2.0 * (q2 * q3 - q1 * q0),
+                        ],
+                        [
+                            2.0 * (q1 * q3 - q2 * q0),
+                            2.0 * (q2 * q3 + q1 * q0),
+                            1.0 - 2.0 * (q1 * q1 + q2 * q2),
+                        ],
+                    ];
+                    let rot = |v: [f64; 3]| {
+                        [
+                            r[0][0] * v[0] + r[0][1] * v[1] + r[0][2] * v[2],
+                            r[1][0] * v[0] + r[1][1] * v[1] + r[1][2] * v[2],
+                            r[2][0] * v[0] + r[2][1] * v[1] + r[2][2] * v[2],
+                        ]
+                    };
+                    let h1 = rot([h1x, h1y, 0.0]);
+                    let h2 = rot([h2x, h2y, 0.0]);
+                    xyz.push_str(&format!("O  {cx:.9e} {cy:.9e} {cz:.9e}\n"));
+                    xyz.push_str(&format!(
+                        "H  {:.9e} {:.9e} {:.9e}\n",
+                        cx + h1[0],
+                        cy + h1[1],
+                        cz + h1[2]
+                    ));
+                    xyz.push_str(&format!(
+                        "H  {:.9e} {:.9e} {:.9e}\n",
+                        cx + h2[0],
+                        cy + h2[1],
+                        cz + h2[2]
+                    ));
+                    topo.push_str(&format!("{} {} {} SPCE\n", 3 * m, 3 * m + 1, 3 * m + 2));
+                    m += 1;
+                }
+            }
+        }
+        std::fs::write(case.dir().join("sim.in.xyz"), xyz).unwrap();
+        std::fs::write(case.dir().join("sim.in.topology"), topo).unwrap();
+
+        let constraint_kind = self.constraint_kind.as_deref().unwrap_or("settle");
+        let SystemBuilder {
+            dt,
+            n_steps,
+            log_every,
+            trajectory_every,
+            seed,
+            temperature,
+            ..
+        } = *self;
+        let extra = self.phase_extra();
+        // alpha ~ 3.5 / r_cut_real; the FFT grid is ~1 A per point, rounded to a
+        // small-prime-factored size for cuFFT.
+        let grid = {
+            let want = (l * 1e10).ceil() as usize; // ~1 point per angstrom
+            // round up to the next multiple of 2 with only 2/3/5 factors
+            let ok = |mut n: usize| {
+                for p in [2usize, 3, 5] {
+                    while n % p == 0 {
+                        n /= p;
+                    }
+                }
+                n == 1
+            };
+            let mut g = want.max(16);
+            while !ok(g) {
+                g += 1;
+            }
+            g
+        };
+        let cfg = format!(
+            r#"schema_version = 1
+units = "si"
+init = "sim.in.xyz"
+topology = "sim.in.topology"
+
+[simulation]
+cuda_graphs_disable = true
+seed = {seed}
+temperature = {temperature}
+
+[[phase]]
+name = "run"
+n_steps = {n_steps}
+dt = {dt:e}
+
+[phase.integrator]
+kind = "{integrator}"
+lossless = {lossless}
+
+[phase.output]
+trajectory_every = {trajectory_every}
+log_every = {log_every}
+
+{extra}
+[[particle_types]]
+name = "O"
+mass = 2.6566e-26
+charge = -1.3585e-19
+
+[[particle_types]]
+name = "H"
+mass = 1.6735e-27
+charge = 6.7925e-20
+
+[[pair_interactions]]
+between = ["O", "O"]
+kind = "lennard-jones"
+sigma = 3.166e-10
+epsilon = 1.080e-21
+cutoff = {R_CUT:e}
+r_switch = {R_CUT:e}
+
+[[pair_interactions]]
+between = ["H", "H"]
+kind = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = {R_CUT:e}
+r_switch = {R_CUT:e}
+
+[[pair_interactions]]
+between = ["H", "O"]
+kind = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = {R_CUT:e}
+r_switch = {R_CUT:e}
+
+[spme]
+alpha = {alpha:e}
+r_cut_real = {R_CUT:e}
+grid = [{grid}, {grid}, {grid}]
+spline_order = 4
+
+[[constraint_types]]
+name = "SPCE"
+kind = "{constraint_kind}"
+d_OH = 1.0e-10
+d_HH = 1.633e-10
+
+[neighbor_list]
+mode = "cell-list"
+r_skin = {R_SKIN:e}
+"#,
+            integrator = self.integrator,
+            lossless = self.lossless,
+            alpha = 3.5 / R_CUT,
         );
         let path = case.config_path();
         std::fs::write(&path, cfg).unwrap();
