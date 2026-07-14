@@ -137,14 +137,36 @@ multi-step run with real slots and a real force field.
 ### Slot composition (post-force tail) <!-- rq-9213dcb5 -->
 
 The integrator, thermostat, barostat, and constraint slots interleave in the
-post-force tail, and their ordering is load-bearing (see
-`integration/constraint-framework.md`, RATTLE-last). The e2e layer covers the
-combinations where a per-particle position or velocity update from one slot
-feeds another:
+post-force tail, and **two** of their orderings are load-bearing (see
+`integration/constraint-framework.md`):
+
+- **project-before-couple.** On a coupling step of a constrained run the
+  constraint slot's velocity projection runs *before* the thermostat's
+  `apply_post`, so a kinetic-energy-coupled thermostat couples to the
+  physical, on-manifold full-step kinetic energy rather than to the inflated
+  sum the trailing kick left off the manifold. Get this wrong and the run
+  silently equilibrates *below* its setpoint — a dt²-scaling deficit, ~10%
+  low for rigid SPC/E water at dt = 2 fs.
+- **RATTLE-last.** The plan's terminal `ConstraintPoint { AfterKick }`
+  projection runs *after* the thermostat and barostat rescales, so that a
+  velocity projection is the last per-particle velocity operation of the
+  step. Get this wrong and a per-particle resample or a barostat velocity
+  rescale leaves the system off the manifold.
+
+Only an end-to-end run observes either: the first is a property of the
+long-run mean temperature, the second of the final frame's geometry. The e2e
+layer covers the combinations where a per-particle position or velocity
+update from one slot feeds another:
 
 - velocity-Verlet + a rigid-water constraint + a per-step barostat;
 - velocity-Verlet + a thermostat + a per-step barostat + a constraint (all
-  four slots active at once).
+  four slots active at once);
+- velocity-Verlet + a rigid-water constraint + a kinetic-energy-coupled
+  thermostat, asserted against the temperature setpoint (the
+  project-before-couple ordering). The other constrained scenarios assert
+  only that the run completes and that the final frame lies on the manifold —
+  both of which a build with the wrong ordering still satisfies — so this is
+  the scenario that pins the ordering down.
 
 ### Reproducibility <!-- rq-ff8b6a9a -->
 
@@ -241,6 +263,22 @@ Feature: End-to-end slot composition
     When the simulation is run
     Then the run completes without error
     And the last trajectory frame lies on the constraint manifold within relative tolerance 1e-4
+
+  @rq-1c9f4d20
+  Scenario: A thermostatted rigid-water run reaches its temperature setpoint
+    Given a SystemBuilder from the spce_water preset with SETTLE constraints
+      and a CSVR thermostat at a target temperature
+    And a run long enough to equilibrate and accumulate many log samples
+    When the simulation is run
+    Then the mean temperature over the post-equilibration physics samples is
+      within relative tolerance of the thermostat's target temperature
+    # The constrained trailing kick drives the velocities off the manifold;
+    # the runner projects them back before the thermostat couples, so the
+    # thermostat sees the same on-manifold kinetic energy the run reports and
+    # whose DOF count (3N - n_constraints - 3) its target is built from. A
+    # build that couples before projecting equilibrates ~10% low (266 K against
+    # a 298.15 K setpoint at dt = 2 fs) while still completing and still ending
+    # on the manifold — so neither of the scenarios above catches it.
 
 Feature: End-to-end reproducibility of stochastic and long-range paths
 

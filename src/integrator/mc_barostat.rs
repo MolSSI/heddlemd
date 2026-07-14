@@ -298,9 +298,16 @@ impl Barostat for McBarostat {
 
         if !early_reject {
             let scale = (v_new / v_old).cbrt();
-            // 5/6. Apply the trial: scale box + molecular COMs.
-            sim_box
-                .multiply_lattice_isotropic(scale as Real)?;
+            // 5/6. Apply the trial: scale molecular COMs, then the box.
+            //
+            // COMs first, and deliberately: the kernel must see the PRE-scale
+            // lattice. It reconstructs each molecule contiguously under that
+            // box (atoms are stored wrapped, so a molecule straddling a face
+            // has its atoms on opposite sides), translates it rigidly, and
+            // re-wraps under the post-scale box, which it derives from
+            // `scale`. Handing it the already-scaled lattice would distort the
+            // rigid geometry of every straddling molecule by ΔL — see the
+            // comment at the top of `kernels/mc_barostat.cu`.
             timings.kernel_start(KernelStage::MC_BAROSTAT_SCALE_COM)?;
             mc_barostat_scale_molecule_com(
                 buffers,
@@ -310,6 +317,14 @@ impl Barostat for McBarostat {
                 scale as Real,
             )?;
             timings.kernel_stop(KernelStage::MC_BAROSTAT_SCALE_COM)?;
+            sim_box
+                .multiply_lattice_isotropic(scale as Real)?;
+            // `multiply_lattice_isotropic` scales the *device* lattice and
+            // leaves the host mirror stale. The trial force evaluation below
+            // reads the host box (the cell-list layout goes through
+            // `sim_box.perpendicular_widths()`), so refresh it before the
+            // energy is evaluated against the moved box.
+            sim_box.flush_from_device()?;
 
             // 7. Trial energy at the scaled configuration.
             force_field.step(buffers, sim_box, timings, AggregateLevel::ForcesAndScalars)?;

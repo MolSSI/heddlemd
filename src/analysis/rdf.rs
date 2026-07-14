@@ -18,6 +18,9 @@ use crate::precision::Real;
 #[serde(deny_unknown_fields)]
 struct RdfParams {
     between: [String; 2],
+    /// As written in the `.in.analysis` file — i.e. in the run's *user* unit
+    /// system (`[simulation].units`), not the engine's. `build` converts it to
+    /// atomic units before anything else touches it; see `r_max_au` there.
     r_max: f64,
     n_bins: u64,
 }
@@ -109,14 +112,31 @@ impl AnalysisBuilder for RdfBuilder {
                 ),
             })? as u32;
 
+        // `r_max` arrives in the user's unit system; every distance this
+        // analysis goes on to touch — the frame positions, the box, the bin
+        // width — is in atomic units, because the conversion happens at the
+        // I/O boundary. Convert once, here, and use only `r_max_au` below.
+        // (Comparing a raw SI `r_max` against atomic-unit distances makes
+        // every squared distance exceed it, so nothing bins and the RDF comes
+        // out empty — with the box guard below passing vacuously.)
+        let units = sim_config.units;
+        let r_max_au = units.from_user(crate::units::Dimension::Length, p.r_max);
+        if !(r_max_au > 0.0) {
+            return Err(AnalysisRuntimeError::InvalidValue {
+                field: "r_max".to_string(),
+                reason: format!("r_max must be finite and strictly positive, got {}", p.r_max),
+            });
+        }
+
         // Box check.
         let half_min_perp = header.sim_box.min_perpendicular_width() as f64 / 2.0;
-        if p.r_max > half_min_perp {
+        if r_max_au > half_min_perp {
             return Err(AnalysisRuntimeError::InvalidValue {
                 field: "r_max".to_string(),
                 reason: format!(
-                    "r_max = {:.3e} m exceeds half the box's minimum perpendicular width ({:.3e} m); the minimum-image convention requires r_max <= min_perp_width / 2",
-                    p.r_max, half_min_perp
+                    "r_max = {:.3e} exceeds half the box's minimum perpendicular width ({:.3e}, same units); the minimum-image convention requires r_max <= min_perp_width / 2",
+                    p.r_max,
+                    units.to_user(crate::units::Dimension::Length, half_min_perp)
                 ),
             });
         }
@@ -146,7 +166,9 @@ impl AnalysisBuilder for RdfBuilder {
             });
         }
 
-        let dr = p.r_max / (p.n_bins as f64);
+        // Atomic units throughout: `dr` therefore matches the frame distances
+        // it bins, and `shell_volume / volume` is a ratio of like quantities.
+        let dr = r_max_au / (p.n_bins as f64);
         let volume = header.sim_box.volume() as f64;
         if volume <= 0.0 {
             return Err(AnalysisRuntimeError::InvalidValue {
@@ -161,7 +183,7 @@ impl AnalysisBuilder for RdfBuilder {
             n_a,
             n_b,
             volume,
-            r_max: p.r_max,
+            r_max: r_max_au,
             dr,
             n_bins: p.n_bins as usize,
             histogram: vec![0u64; p.n_bins as usize],
@@ -274,7 +296,7 @@ impl Analysis for RdfAnalysis {
     fn finalize_and_write(
         &mut self,
         output_path: &Path,
-        _sim_config: &Config,
+        sim_config: &Config,
     ) -> Result<(), AnalysisRuntimeError> {
         let file = OpenOptions::new()
             .write(true)
@@ -293,6 +315,8 @@ impl Analysis for RdfAnalysis {
         let frames = self.frames_consumed as f64;
 
         for i in 0..self.n_bins {
+            // Atomic units, matching `self.dr` and `self.volume`, so `ideal` is
+            // a pure count and `g_r` is dimensionless.
             let r_inner = (i as f64) * self.dr;
             let r_outer = ((i + 1) as f64) * self.dr;
             let r_center = (i as f64 + 0.5) * self.dr;
@@ -305,7 +329,12 @@ impl Analysis for RdfAnalysis {
             } else {
                 0.0
             };
-            writeln!(w, "{r_center:.9e},{g_r:.9e},{count}")
+            // `r` goes back out in the user's unit system, the one `r_max` was
+            // written in.
+            let r_out = sim_config
+                .units
+                .to_user(crate::units::Dimension::Length, r_center);
+            writeln!(w, "{r_out:.9e},{g_r:.9e},{count}")
                 .map_err(|e| AnalysisRuntimeError::Io(format!("{e}")))?;
         }
         w.flush().map_err(|e| AnalysisRuntimeError::Io(format!("{e}")))?;

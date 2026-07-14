@@ -736,6 +736,18 @@ impl heddle_md::integrator::Constraint for RecordingConstraint {
         self.log.record("after_kick");
         Ok(())
     }
+    // Recorded distinctly from `after_kick`: this hook projects but must NOT
+    // publish the constraint virial, and the order test below pins exactly that.
+    fn project_velocities_for_coupling(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        self.log.record("project_for_coupling");
+        Ok(())
+    }
 }
 
 /// Stub per-step (or periodic) barostat that records the `dt` of each
@@ -1310,12 +1322,214 @@ fn one_run_step_call_produces_the_whole_canonical_post_force_order() {
         RunStepOptions { coupling_dt: Some(0.1 as Real), runner_needs_scalars: true, ..Default::default() },
     )
     .unwrap();
-    // apply_pre (before walk) → trailing kick (main walk) → apply_post
-    // (post-force-marker boundary) → barostat.apply → apply_after_kick,
-    // all within the one run_step call. RATTLE-last.
+    // apply_pre (before walk) → trailing kick (main walk) → pre-coupling
+    // velocity projection → apply_post → barostat.apply → the plan's terminal
+    // projection, all within the one run_step call. RATTLE-last still holds.
+    //
+    // The velocities are projected TWICE, and both are load-bearing. The leading
+    // one exists because the trailing kick leaves them off the constraint
+    // manifold: a thermostat that reduced their kinetic energy there would
+    // couple to energy the projection is about to delete, and the run would
+    // settle below its target temperature by a dt²-scaling margin (31.6 K low at
+    // dt = 2 fs for rigid SPC/E water). Projecting first makes `apply_post` see
+    // the physical full-step kinetic energy — the one whose degrees of freedom
+    // its target is built from. The trailing one costs nothing after that for a
+    // uniform rescale, but stays load-bearing for a per-particle resample
+    // (Andersen) and for the barostat rescale, neither of which preserves the
+    // manifold.
+    //
+    // The two are DIFFERENT hooks, and that is the point: only the terminal
+    // `apply_after_kick` publishes the constraint virial. It must appear exactly
+    // once — publishing twice would double-count the constraint contribution to
+    // the pressure, and would leave the barostat (which reduces the virial at
+    // `barostat_apply`, between the two) reading a different virial on coupling
+    // and non-coupling steps.
+    let events = order.events.lock().unwrap().clone();
     assert_eq!(
-        *order.events.lock().unwrap(),
-        vec!["apply_pre", "exec_kick_half", "apply_post", "barostat_apply", "after_kick"]
+        events,
+        vec![
+            "apply_pre",
+            "exec_kick_half",
+            "project_for_coupling",
+            "apply_post",
+            "barostat_apply",
+            "after_kick"
+        ]
+    );
+    assert_eq!(
+        events.iter().filter(|e| **e == "after_kick").count(),
+        1,
+        "the constraint virial must be published exactly once per step"
+    );
+    assert!(
+        events.iter().position(|e| *e == "project_for_coupling")
+            < events.iter().position(|e| *e == "apply_post"),
+        "the projection must precede the thermostat's kinetic-energy reduction"
+    );
+}
+
+/// A stand-in for SETTLE's velocity projection: `apply_after_kick` deletes the
+/// y and z velocity components, the way a real projection deletes the component
+/// of the trailing kick that lies along the constrained directions. Idempotent,
+/// like the real thing.
+#[derive(Debug)]
+struct ProjectingConstraint;
+
+impl heddle_md::integrator::Constraint for ProjectingConstraint {
+    fn apply_before_drift(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        Ok(())
+    }
+    fn apply_after_drift(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        Ok(())
+    }
+    fn apply_after_kick(
+        &mut self,
+        b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        let n = b.particle_count();
+        let zeros = vec![0.0 as Real; n];
+        b.device.htod_sync_copy_into(&zeros, &mut b.velocities_y).unwrap();
+        b.device.htod_sync_copy_into(&zeros, &mut b.velocities_z).unwrap();
+        Ok(())
+    }
+}
+
+/// Records the kinetic energy actually visible to `apply_post` — i.e. the
+/// quantity a real KE-coupled thermostat (CSVR, Berendsen, NHC, MTK) would
+/// reduce and build its rescale factor from.
+#[derive(Debug)]
+struct KeProbeThermostat {
+    ke_at_apply_post: std::sync::Arc<std::sync::Mutex<Option<f64>>>,
+}
+
+impl heddle_md::integrator::Thermostat for KeProbeThermostat {
+    fn apply_pre(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ThermostatError> {
+        Ok(())
+    }
+    fn apply_post(
+        &mut self,
+        b: &mut ParticleBuffers,
+        _dt: Real,
+        _t: &mut Timings,
+    ) -> Result<(), ThermostatError> {
+        let vx = b.device.dtoh_sync_copy(&b.velocities_x).unwrap();
+        let vy = b.device.dtoh_sync_copy(&b.velocities_y).unwrap();
+        let vz = b.device.dtoh_sync_copy(&b.velocities_z).unwrap();
+        let ke: f64 = vx
+            .iter()
+            .zip(&vy)
+            .zip(&vz)
+            .map(|((&x, &y), &z)| {
+                0.5 * (x as f64 * x as f64 + y as f64 * y as f64 + z as f64 * z as f64)
+            })
+            .sum();
+        *self.ke_at_apply_post.lock().unwrap() = Some(ke);
+        Ok(())
+    }
+}
+
+/// The defect this guards: the trailing kick leaves the velocities *off* the
+/// constraint manifold, and the terminal projection deletes exactly that
+/// component. A thermostat that reduced the kinetic energy before the
+/// projection would couple to `K_manifold + ΔK_off`, rescale the whole velocity
+/// field to put that inflated sum on its target, and then watch the projection
+/// throw the surplus away — so the run settles at `T_target · (1 − ΔK_off / K)`.
+/// For rigid SPC/E water at dt = 2 fs that is 266 K against a 298.15 K setpoint,
+/// and because `ΔK_off` is set by the forces and the timestep rather than by the
+/// coupling strength, no choice of `tau` recovers it (the deficit scales as dt²:
+/// 31.6 K at 2 fs, 7.9 K at 1 fs, 1.9 K at 0.5 fs).
+///
+/// So `apply_post` must observe the *projected* kinetic energy — the physical
+/// one, whose degrees of freedom (`3N − n_constraints − 3`) its target is built
+/// from, and the one the run reports.
+#[test]
+fn thermostat_apply_post_observes_the_projected_kinetic_energy() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let n = buffers.particle_count();
+
+    // Velocities with energy in every component. The projection below deletes
+    // y and z, so the pre- and post-projection kinetic energies differ sharply
+    // and the test can tell which one the thermostat saw.
+    let vx = vec![3.0 as Real; n];
+    let vy = vec![4.0 as Real; n];
+    let vz = vec![12.0 as Real; n];
+    gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
+
+    // KE if the thermostat is handed the raw post-kick velocities (the bug), vs.
+    // KE if it is handed the projected ones (correct). No force field is
+    // installed, so the kick is a no-op and the velocities reach the boundary
+    // exactly as set above.
+    let ke_unprojected = n as f64 * 0.5 * (9.0 + 16.0 + 144.0);
+    let ke_projected = n as f64 * 0.5 * 9.0;
+
+    let probe = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut thermostat = KeProbeThermostat {
+        ke_at_apply_post: probe.clone(),
+    };
+    let mut constraint = ProjectingConstraint;
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::KickHalf {
+                    dt: 0.1,
+                    label: "k",
+                    source: heddle_md::integrator::KickSource::Total,
+                },
+                SubStep::ConstraintPoint {
+                    phase: ConstraintPhase::AfterKick,
+                    dt: 0.1,
+                },
+            ],
+        },
+        log: CallLog::default(),
+    };
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        Some(&mut constraint),
+        Some(&mut thermostat),
+        None,
+        0.1,
+        &mut timings,
+        RunStepOptions {
+            coupling_dt: Some(0.1 as Real),
+            runner_needs_scalars: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let seen = probe.lock().unwrap().expect("apply_post never fired");
+    assert!(
+        (seen - ke_projected).abs() < 1e-6 * ke_projected,
+        "apply_post saw KE = {seen}, expected the projected KE {ke_projected}; \
+         the unprojected KE is {ke_unprojected}. Seeing the latter means the \
+         thermostat is coupling to kinetic energy the constraint projection is \
+         about to delete."
     );
 }
 

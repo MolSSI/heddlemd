@@ -23,7 +23,8 @@ optional `output_path`.
 name = "ar-ar"
 kind = "rdf"
 between = ["Ar", "Ar"]    # required, [String; 2]
-r_max = 8.5e-10           # required, f64 (m)
+r_max = 8.5e-10           # required, f64 — in the run's unit system
+                          # (metres here; Bohr under units = "atomic")
 n_bins = 100              # required, u64
 ```
 
@@ -37,12 +38,17 @@ n_bins = 100              # required, u64
   `["A", "B"]` and `["B", "A"]` produce identical output. Same-type
   pairs (`["A", "A"]`) are accepted and use the unordered-pair
   counting convention documented in *Algorithm* below.
-- `r_max: f64` — required. Maximum pair distance considered, in
-  Bohr (`a_0`). Finite and strictly positive. Must satisfy
-  `r_max <= sim_box.min_perpendicular_width() / 2` so the minimum-
-  image convention assigns at most one image per pair; violations
-  produce `AnalysisRuntimeError::InvalidValue { field: "r_max",
-  reason }` at builder-`build` time using the first-frame box.
+- `r_max: f64` — required. Maximum pair distance considered, **in the
+  run's user unit system** — metres under `units = "si"`, Bohr under
+  `units = "atomic"` — like every other user-facing length in the
+  configuration. `build` converts it to atomic units before anything
+  else consumes it; see *Units* below. Finite and strictly positive.
+  Must satisfy `r_max <= sim_box.min_perpendicular_width() / 2` so the
+  minimum-image convention assigns at most one image per pair;
+  violations produce `AnalysisRuntimeError::InvalidValue { field:
+  "r_max", reason }` at builder-`build` time using the first-frame box.
+  The comparison is made **after** the conversion, in atomic units —
+  both sides in Bohr.
 - `n_bins: u64` — required. Number of uniform-width radial bins in
   `[0, r_max]`. Must satisfy `1 <= n_bins <= 2^30` (the upper
   bound prevents accidentally allocating a multi-GB histogram).
@@ -52,6 +58,35 @@ n_bins = 100              # required, u64
 
 Unknown fields for `kind = "rdf"` are rejected at
 `validate_params` time as `AnalyzeError::Parse`.
+
+### Units <!-- rq-1c9f4d20 -->
+
+`r_max` is a user-facing length and is written in the run's unit system
+(`[simulation].units` of the config the analysis names), exactly like
+`cutoff`, `sigma`, or `r_skin`. Everything the analysis then touches —
+the frame positions, the box, `Δr` — is in **atomic units**, because the
+conversion happens at the I/O boundary (`rqm/io/unit-system.md`).
+`RdfBuilder::build` is therefore the single conversion point:
+
+```
+r_max_au = units.from_user(Dimension::Length, r_max)
+```
+
+and `r_max_au` is what the box guard, `Δr`, the binning cutoff, and the
+cached `r_max` all use. The output direction is applied once more in
+`finalize_and_write`, so the `r` column comes back out in the same units
+`r_max` went in (see *Columns*).
+
+The `.in.analysis` file has no typed `Config` struct, so
+`Config::from_user`'s recursive pass does not reach it; the kind's
+builder owns the conversion, the same way an integrator or barostat
+builder owns its slot params. **This must not be skipped, and skipping it
+does not fail loudly.** A raw SI `r_max` is compared against Bohr-scale
+distances — an `r_max` of `7.0e-10` (7 Å) becomes an effective cutoff of
+`7.0e-10` *Bohr*, no pair ever falls inside it, and the analysis writes an
+all-zero histogram with no error at all. The `r_max <= min_perp_width / 2`
+guard does not catch it either: unconverted, it compares a raw SI number
+against an atomic-unit width and passes vacuously.
 
 ## Algorithm <!-- rq-c9b62a3c -->
 
@@ -204,12 +239,14 @@ Row count is exactly `n_bins`; header is exactly one line.
     config (so it can be called during `load_analysis_config`).
   - `build(&self, params: &toml::Value, header:
     &TrajectoryFrameHeader, sim_config: &Config) -> Result<Box<dyn
-    Analysis>, AnalysisRuntimeError>` — resolves `between` against
-    `sim_config.particle_types`, counts `N_A` and `N_B` against
-    `header.type_indices`, computes the bin width, caches the
-    box's volume, and verifies `r_max <=
-    header.sim_box.min_perpendicular_width() / 2`. On success,
-    returns a `RdfAnalysis` boxed as `dyn Analysis`.
+    Analysis>, AnalysisRuntimeError>` — **converts `r_max` from
+    `sim_config.units` to atomic units** (see *Units*; this is the sole
+    conversion point, and every subsequent use is of the converted
+    value), resolves `between` against `sim_config.particle_types`,
+    counts `N_A` and `N_B` against `header.type_indices`, computes the
+    bin width, caches the box's volume, and verifies the converted
+    `r_max <= header.sim_box.min_perpendicular_width() / 2` — both sides
+    in Bohr. On success, returns a `RdfAnalysis` boxed as `dyn Analysis`.
 
 - `RdfAnalysis` — per-run handle. Fields are private; the type <!-- rq-e0b5377f -->
   owns:
@@ -279,6 +316,33 @@ Feature: Radial distribution function analysis
     Given a 4 nm cubic box and an RDF entry with r_max = 3.0e-9
     When RdfBuilder::build is called against that header
     Then it returns Err(AnalysisRuntimeError::InvalidValue { field: "r_max", .. })
+
+  # --- Units ---
+  # `r_max` is written in the run's unit system and converted to atomic units in
+  # `build`. Consumed raw under units="si" it becomes a Bohr-scale cutoff, no pair
+  # falls inside it, and the RDF is silently all-zero. Note this scenario must run
+  # under units="si": under units="atomic" the conversion is the identity and
+  # cannot distinguish the two behaviours.
+
+  @rq-1c9f4d20
+  Scenario: `r_max` is interpreted in the config's unit system
+    Given tmp/argon.in.toml declares units = "si"
+    And a 2 nm cubic box holding exactly one Ar-Ar pair separated by 3.0e-10 m
+    And an RDF entry with r_max = 8.0e-10 and n_bins = 8
+    When heddlemd analyze is run
+    Then the histogram contains exactly 1 count
+    And that count lies in the bin covering 3.0e-10 m
+    And the populated row's `r` column is expressed in metres, not Bohr
+
+  @rq-1c9f4d20
+  Scenario: The box guard compares like with like
+    Given tmp/argon.in.toml declares units = "si"
+    And a 4 nm cubic box
+    And an RDF entry with r_max = 3.0e-9
+    When RdfBuilder::build is called against that header
+    Then it returns Err(AnalysisRuntimeError::InvalidValue { field: "r_max", .. })
+    # i.e. the guard converts r_max first; it does not compare a raw SI number
+    # against an atomic-unit width, which would pass vacuously.
 
   @rq-5f1d5034
   Scenario: Reject `n_bins = 0`

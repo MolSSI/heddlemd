@@ -380,23 +380,55 @@ fn com_uses_min_image_for_boundary_straddling_molecule() {
     mc_barostat_scale_molecule_com(&mut buffers, &sb, &offsets, &indices, scale).unwrap();
     let (qx, _, _) = buffers.download_positions().unwrap();
 
-    for a in 0..3 {
-        let applied = qx[a] as f64 - px[a] as f64;
-        // Every atom is translated by exactly (scale - 1) * COM_true.
+    // The move is judged in the SCALED box — that is the box the trial energy,
+    // SETTLE, and the exclusion correction all reconstruct against. Checking
+    // against the pre-move box is what let the wrapped-coordinate bug through:
+    // a plain per-atom translation preserves the raw coordinate differences, so
+    // it looks correct under the old box and only reveals the ΔL distortion
+    // under the new one.
+    let ll_new = ll * scale as f64;
+    let minimg_new = |d: f64| d - ll_new * (d / ll_new + 0.5).floor();
+
+    // 1. Rigid geometry: every intramolecular min-image displacement is
+    //    unchanged. This is the whole premise of a COM volume move, and it is
+    //    what a straddling molecule loses if the kernel translates the stored
+    //    (wrapped) coordinates instead of the reconstructed ones.
+    for a in 1..3 {
+        let before = minimg(px[a] as f64 - px[0] as f64);
+        let after = minimg_new(qx[a] as f64 - qx[0] as f64);
         assert!(
-            (applied - shift_true).abs() < 1e-4 * shift_true.abs().max(1.0),
-            "atom {a}: applied shift {applied} != min-image shift {shift_true}"
-        );
-        // And NOT by the naive (wrapped-average) shift.
-        assert!(
-            (applied - shift_naive).abs() > 1e-3,
-            "atom {a}: shift {applied} must not equal the naive value {shift_naive}"
+            (before - after).abs() < 1e-4,
+            "atom {a}: intramolecular displacement changed under the scale: \
+             {before} -> {after} (a rigid molecule must survive the move intact)"
         );
     }
-    // Intramolecular min-image geometry preserved (rigid translation).
-    let before = minimg(px[1] as f64 - px[0] as f64);
-    let after = minimg(qx[1] as f64 - qx[0] as f64);
-    assert!((before - after).abs() < 1e-4, "intramolecular geometry changed");
+
+    // 2. The COM scales about the origin, and it is the MIN-IMAGE com that does
+    //    so — not the naive wrapped average. Reconstruct the moved molecule in
+    //    the scaled box and take its mass-weighted centre.
+    let com_after = {
+        let ref_x = qx[0] as f64;
+        ref_x
+            + masses
+                .iter()
+                .zip(&qx)
+                .map(|(&m, &x)| m as f64 * minimg_new(x as f64 - ref_x))
+                .sum::<f64>()
+                / mtot
+    };
+    let expected = scale as f64 * com_true;
+    assert!(
+        (com_after - expected).abs() < 1e-4 * expected.abs().max(1.0),
+        "COM after scale {com_after} != scale * min-image COM {expected}"
+    );
+    // And NOT the naive (wrapped-average) COM, which is what a non-min-image
+    // reconstruction would have scaled.
+    let naive = scale as f64 * com_naive;
+    assert!(
+        (com_after - naive).abs() > 1e-3,
+        "COM after scale {com_after} must not equal the naive value {naive}"
+    );
+    let _ = (shift_true, shift_naive);
 }
 
 // ---------- end-to-end ----------

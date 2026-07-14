@@ -9,7 +9,10 @@ pressure-coupling slot. One of the pluggable barostat slots (see
 The barostat's `apply` is dispatched once per timestep at the
 integrator plan's terminal `BarostatPoint` (see `framework.md`,
 *Per-Step Interface*), which the runner fires in its post-walk tail
-after the optional thermostat's `apply_post`. Each invocation
+after the optional thermostat's `apply_post` — and therefore after the
+pre-coupling velocity projection that precedes that `apply_post` on a
+coupling step of a constrained run (`constraint-framework.md`). Each
+invocation
 computes the instantaneous pressure from the kinetic energy and the
 total scalar virial, derives an isotropic scale factor `μ` that
 relaxes the pressure toward the user-specified target on a coupling
@@ -36,11 +39,14 @@ byte-identical trajectories across runs on the same GPU.
 The barostat is invoked through `apply(buffers, sim_box, dt,
 timings)`, dispatched at the plan's terminal `BarostatPoint` after the
 plan walk and after the thermostat's `apply_post` (when a thermostat is
-configured). `apply` performs its per-particle position rescale itself
+configured), and hence after the pre-coupling velocity projection that
+leads that `apply_post` on a coupling step of a constrained run.
+`apply` performs its per-particle position rescale itself
 as a standalone launch at this canonical placement. Both
 `buffers.virials` (per-particle scalar virials populated by the
 in-step force evaluation) and `buffers.velocities_*` (post-step
-velocities, possibly rescaled by the thermostat) are read by this
+velocities, on the constraint manifold when the run is constrained, and
+possibly rescaled by the thermostat) are read by this
 hook.
 
 For each invocation with timestep `dt`:
@@ -52,12 +58,24 @@ For each invocation with timestep `dt`:
 2. Launch `virial_sum_reduce` to write the instantaneous total
    scalar virial `W = Σ_i buffers.virials[i]` into the slot-owned
    `virial_scratch: CudaSlice<f32>` (length 1). The per-particle
-   virials buffer carries every contribution that enters the
-   pressure estimator: force-field pair / bonded / angle / SPME
-   (real + reciprocal) terms populated by `force_field.step`,
-   plus any constraint contribution added by the `Constraint`
-   slot's `apply_after_kick` hook (see `constraint-framework.md`;
-   for SETTLE the contribution is documented in `settle.md`).
+   virials buffer carries the force-field contributions that enter the
+   pressure estimator: pair / bonded / angle / SPME (real +
+   reciprocal) terms populated by `force_field.step`.
+
+   It does **not** carry this step's constraint contribution. A
+   constraint slot publishes its virial exactly once per step, at the
+   plan's terminal `ConstraintPoint { AfterKick }` — which the runner
+   dispatches *after* the terminal `BarostatPoint` (RATTLE-last; see
+   `framework.md`, *Per-Step Interface*). The barostat's in-step
+   reduction therefore runs before the publication and does not observe
+   it. This holds uniformly: it is precisely why the pre-coupling
+   velocity projection accumulates the constraint virial but does not
+   publish it (`constraint-framework.md`), since a publication there —
+   between the trailing kick and the barostat — would make the barostat
+   see the constraint virial on coupling steps and not on non-coupling
+   steps, i.e. two different pressure definitions alternating at the
+   coupling cadence. For the constraint slots' own virial accounting see
+   `constraint-framework.md`, `settle.md`, and `shake.md`.
 
 3. Launch the `berendsen_compute_mu_and_rescale_lattice` kernel
    (described under *CUDA Kernels* below). The kernel reads `K`

@@ -67,8 +67,15 @@ e^(L · dt) ≈ e^(L_chain · dt/2) · e^(L_VV · dt) · e^(L_chain · dt/2)
 where `L_VV` is the velocity-Verlet operator owned by the integrator
 slot (see `velocity-verlet.md`) and `L_chain` is the chain-thermostat
 operator owned by this thermostat slot. The thermostat applies the
-left `e^(L_chain · dt/2)` factor in `apply_pre` and the right factor
-in `apply_post`; the integrator's `step()` fires in between.
+left `e^(L_chain · dt/2)` factor in `apply_pre`, on the step's entry
+velocities, and the right factor in `apply_post`, at the runner's
+post-force-marker boundary; the integrator's plan walk — up to and
+including the trailing kick — runs in between. On a constrained run the
+runner additionally projects the velocities back onto the constraint
+manifold between the trailing kick and `apply_post`
+(`Constraint::project_velocities_for_coupling`, see
+`constraint-framework.md`), so the right factor's kinetic-energy
+reduction sees the physical, on-manifold full-step `K`.
 
 The chain operator is itself approximated by Yoshida-Suzuki
 sub-stepping: each `dt/2` thermostat half-step is split into
@@ -158,20 +165,22 @@ the integrator's `step()`, each receiving the effective timestep
 `coupling_interval · dt`; on the intervening steps NHC does nothing.
 Both halves reduce the kinetic energy and apply their rescale as
 standalone launches — NHC contributes no composed post-force fragment,
-because the `apply_post` reduction reads the full-step
-(post-trailing-kick) velocities and is therefore a fusion barrier.
+because the `apply_post` reduction reads the full-step velocities
+(post-trailing-kick, and post-constraint-projection on a constrained
+run) and is therefore a fusion barrier.
 
 | Hook        | Step               | Kernel / call                                          | Operation                                                       | Stage label              |
 | ----------- | ------------------ | ------------------------------------------------------ | --------------------------------------------------------------- | ------------------------ |
 | `apply_pre` | KE reduce          | `kinetic_energy_reduce`                                | one f32 scalar of `K = ½ Σ m_i \|v_i\|²`                        | `KineticEnergyReduce`    |
 | `apply_pre` | Thermostat ½ rescale | one `rescale_velocities` device launch                | host accumulates `α_pre = ∏ f_i` over `N_sub` chain iters; one device launch rescales `v ← α_pre · v` | `NhcRescaleVelocities`   |
-| `apply_post`| KE reduce          | `kinetic_energy_reduce`                                | refresh `K` from the full-step (post-trailing-kick) velocities  | `KineticEnergyReduce`    |
+| `apply_post`| KE reduce          | `kinetic_energy_reduce`                                | refresh `K` from the full-step velocities (post-trailing-kick, and post-constraint-projection on a constrained run) | `KineticEnergyReduce`    |
 | `apply_post`| Thermostat ½ rescale | one `rescale_velocities` device launch                | host accumulates `α_post = ∏ f_i` over `N_sub` chain iters; one device launch rescales `v ← α_post · v` | `NhcRescaleVelocities`   |
 
 Both halves apply their cumulative factor through a `rescale_velocities`
 device launch. Because `apply_post` runs after the integrator's trailing
-kick, its reduction sees the full-step kinetic energy, and its rescale
-is a standalone launch rather than a composed fragment.
+kick — and, on a constrained run, after the runner's pre-coupling velocity
+projection — its reduction sees the physical full-step kinetic energy, and
+its rescale is a standalone launch rather than a composed fragment.
 
 The integrator's own kernels (`vv_kick_drift`, the force pipeline)
 are launched separately by `integrator.step()` and are not part of

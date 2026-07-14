@@ -17,10 +17,16 @@ dynamics less than Langevin (no per-particle friction term).
 ## Algorithm <!-- rq-062ea284 -->
 
 The thermostat is invoked through `apply_post(buffers, dt, timings)`
-after the integrator's `step()` returns. The integrator has already
-completed its velocity-Verlet substeps; the thermostat operates on
-the post-step velocities. For each invocation with timestep `dt`, let
-`c = exp(−dt/τ)`:
+at the runner's post-force-marker boundary. The integrator has already
+completed its velocity-Verlet substeps, including the trailing kick, and
+on a constrained run the runner has already projected the velocities back
+onto the constraint manifold
+(`Constraint::project_velocities_for_coupling`, see
+`constraint-framework.md`). The thermostat therefore operates on the
+full-step, on-manifold velocities, and the `K` it reduces is the physical
+kinetic energy the run reports — the one whose degree-of-freedom count
+`N_f` its target is built from. For each invocation with timestep `dt`,
+let `c = exp(−dt/τ)`:
 
 1. Compute the instantaneous kinetic energy
    `K = (1/2) Σ_i m_i |v_i|²` using the deterministic GPU reduction
@@ -69,9 +75,10 @@ the post-step velocities. For each invocation with timestep `dt`, let
 5. Apply the rescale as a standalone `rescale_velocities` kernel
    launched from `apply_post`: `v_i ← α · v_i` for every particle `i`
    and axis. CSVR contributes no composed post-force fragment — its
-   kinetic-energy reduction reads the full-step (post-trailing-kick)
-   velocities, a fusion barrier that keeps the rescale out of the
-   composed kernel (`framework.md`, `docs/architecture.md`).
+   kinetic-energy reduction reads the full-step velocities
+   (post-trailing-kick, and post-constraint-projection on a constrained
+   run), a fusion barrier that keeps the rescale out of the composed
+   kernel (`framework.md`, `docs/architecture.md`).
 
 The CSVR Markov kernel is exact in the sense that repeated
 application from any non-zero initial `K` converges to the canonical
@@ -92,9 +99,10 @@ CSVR does nothing.
 ## Per-Step Kernel Sequence <!-- rq-5f59fa80 -->
 
 On a coupling step the CSVR thermostat's `apply_post` runs the
-following three device-side steps as its own kernel launches, after
-the integrator's trailing kick, so the reduction reads the full-step
-velocities:
+following three device-side steps as its own kernel launches, after the
+integrator's trailing kick and after the runner's pre-coupling velocity
+projection (constrained runs only), so the reduction reads the full-step,
+on-manifold velocities:
 
 | Order | Step               | Kernel / call                                    | Operation                                       | Stage label                  |
 | ----- | ------------------ | ------------------------------------------------ | ----------------------------------------------- | ---------------------------- |
@@ -340,8 +348,9 @@ coupling step):
 - `csvr_sample_and_factor`: 1 launch (single block).
 - `rescale_velocities`: 1 launch (`v ← α · v` per particle).
 
-The kinetic-energy reduction reads the full-step (post-trailing-kick)
-velocities, so it is a fusion barrier: CSVR contributes no composed
+The kinetic-energy reduction reads the full-step velocities
+(post-trailing-kick, and post-constraint-projection on a constrained
+run), so it is a fusion barrier: CSVR contributes no composed
 post-force fragment and runs its own rescale (`framework.md`).
 
 All launches go through the default stream of

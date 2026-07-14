@@ -25,9 +25,17 @@ preserving the underlying dynamics.
 ## Algorithm <!-- rq-e15cc5ac -->
 
 The thermostat is invoked through `apply_post(buffers, dt, timings)`
-after the integrator's `step()` returns. The integrator has already
-completed its velocity-Verlet substeps; the thermostat operates on
-the post-step velocities. For each invocation with timestep `dt`:
+at the runner's post-force-marker boundary. The integrator has already
+completed its velocity-Verlet substeps, including the trailing kick, and
+on a constrained run the runner has already projected the velocities back
+onto the constraint manifold
+(`Constraint::project_velocities_for_coupling`, see
+`constraint-framework.md`). Andersen does not couple to the global
+kinetic energy at all — it resamples each particle independently from
+Maxwell-Boltzmann — so that leading projection does not change what the
+thermostat couples to; it does mean the `K_old` reduction below is
+measured on the projected, on-manifold velocities. For each invocation
+with timestep `dt`:
 
 1. Compute the instantaneous kinetic energy `K_old` via the shared
    `compute_kinetic_energy` helper (`nose-hoover-chain.md`).
@@ -68,6 +76,22 @@ coupling steps (every `coupling_interval` steps, `io/config-schema.md`)
 and its collision probability uses the effective timestep
 `dt_couple = coupling_interval · dt`, so resampling less often raises
 the per-attempt collision probability correspondingly.
+
+### Composition with a constraint slot <!-- rq-1c9f4d20 -->
+
+The plan's terminal `ConstraintPoint { AfterKick }` — which runs *after*
+`apply_post` (see `framework.md`, *Per-Step Interface*) — is load-bearing
+for Andersen in a way it is not for the uniform-rescale thermostats. A
+global rescale `v ← α · v` commutes with the velocity projection: it
+scales every constrained-direction component, which the earlier
+pre-coupling projection has already zeroed, so the trailing projection is
+a no-op for CSVR, Berendsen, and NHC. A per-particle Maxwell-Boltzmann
+resample does not commute: each selected particle receives a fresh,
+unconstrained velocity with a generically non-zero component along its
+group's constrained directions, which knocks the group straight back off
+the velocity manifold. The trailing `AfterKick` projection is what repairs
+it, and a constrained Andersen run depends on it (RATTLE-last; see
+`constraint-framework.md`).
 
 ## Per-Step Kernel Sequence <!-- rq-7843f188 -->
 

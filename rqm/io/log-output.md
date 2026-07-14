@@ -102,7 +102,17 @@ value of one atomic unit of the named dimension.
   emitted as-is). Under this convention an equilibrated thermostat at
   setpoint `T_set` produces a long-run mean of `temperature` equal to
   `T_set` in the user's chosen unit system to within sampling
-  fluctuations.
+  fluctuations — on a constrained run as well as an unconstrained one.
+  This holds because the two quantities are reduced from the *same*
+  velocities: on a coupling step the runner projects the velocities back
+  onto the constraint manifold before the thermostat reduces their kinetic
+  energy (see `integration/constraint-framework.md`), so the `K` the
+  thermostat drives to its target is the same on-manifold `K` this column
+  reports, and both divide it by the same `N_thermal_dof`. Coupling to the
+  unprojected post-kick velocities would instead put the *inflated*
+  `K_manifold + ΔK_off` on target and let the projection discard the
+  surplus, leaving the reported mean systematically below `T_set` by a
+  `dt²`-scaling deficit.
 
 Extra columns supplied by the integrator (see *Extra columns* above)
 carry a `Dimension` declared by the integrator alongside the column

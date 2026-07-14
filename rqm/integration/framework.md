@@ -164,7 +164,17 @@ untouched by it). The **effective coupling timestep**
 `dt_couple = coupling_interval · dt` keeps a thermostat's relaxation time
 `τ` physically meaningful regardless of how often it couples. `apply_post`
 reduces the full-step kinetic energy — the velocities after the
-integrator's trailing kick — and applies its rescale from it.
+integrator's trailing kick, and, when the plan carries a terminal
+`ConstraintPoint { AfterKick }` and a constraint slot is installed, after
+those velocities have been projected onto the constraint manifold by
+`Constraint::project_velocities_for_coupling` — and applies its rescale
+from it. The projection must lead the reduction: the trailing kick leaves
+the velocities off the manifold, and a thermostat that reduced their
+kinetic energy would be coupling to energy the projection is about to
+delete. That leading projection does not publish the constraint virial;
+the plan's terminal `ConstraintPoint { AfterKick }` remains the single
+publish point (see `constraint-framework.md`, *Ordering of the terminal
+velocity projection*).
 
 Constraint placement is fully plan-declared: a constraint hook fires
 only where the plan carries a `SubStep::ConstraintPoint` marker (see
@@ -843,10 +853,12 @@ successfully.
     CSVR / Berendsen / Andersen use the full `dt_couple` in their
     relaxation formula and only act on the post side).
   - `apply_post` reduces the kinetic energy of the velocities as they
-    stand when it is called — after the integrator's trailing kick — so
-    the coupling always sees the full-step kinetic energy. It performs
-    that reduction and the subsequent rescale as its own standalone
-    kernel launches.
+    stand when it is called — after the integrator's trailing kick, and
+    after the terminal velocity projection when the run has a constraint
+    slot — so the coupling always sees the full-step *physical* kinetic
+    energy, the one whose degrees of freedom its target is built from. It
+    performs that reduction and the subsequent rescale as its own
+    standalone kernel launches.
   - The thermostat never reads or writes `sim_box`, `force_field`,
     or `buffers.forces_*` / `buffers.virials`.
   - `apply_pre` returns immediately when

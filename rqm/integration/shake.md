@@ -145,11 +145,33 @@ slot contains at least one group:
 | `apply_before_drift` | `shake_snapshot` | Reads current `positions_*`; writes `snapshot_*`. |
 | `apply_after_drift` | `shake_positions` | Reads `snapshot_*`, current `positions_*`, current `velocities_*`. Writes constrained `positions_*`, updated `velocities_*`, position-level half of `constraint_virial`. |
 | `apply_after_kick` | `rattle_velocities`, `constraint_virial_scatter` | Reads current constrained `positions_*` and post-kick `velocities_*`. Writes RATTLE-projected `velocities_*`, accumulates velocity-level half of `constraint_virial`, scatters `constraint_virial` into `particle_virials` for the barostat to consume. |
+| `project_velocities_for_coupling` | `rattle_velocities` | The same RATTLE projection as `apply_after_kick`, accumulating the velocity-level half of `constraint_virial` — but **no** `constraint_virial_scatter`: it does not publish the virial. |
 | `apply_position_projection_only` | `shake_positions_no_velocity` | Reads and writes `positions_*` only; does not touch velocities or virials. |
 
 When the slot has zero groups (e.g. a rigid-water topology with no
 SETTLE-shaped groups, or a config that omits `[constraints]`
 entirely), every hook is a no-op and no kernel is launched.
+
+On a **coupling step** of a thermostatted run the runner drives the
+velocity projection through *two* different hooks (see `framework.md`,
+*Per-Step Interface*): `project_velocities_for_coupling` immediately after
+the trailing kick — putting the velocities on the manifold before the
+thermostat reduces their kinetic energy — and then the plan's terminal
+`ConstraintPoint { AfterKick }`, which calls `apply_after_kick`. The
+launch counts for that step are therefore:
+
+- `rattle_velocities` — **twice**;
+- `constraint_virial_scatter` — **once** (only from `apply_after_kick`).
+
+On a non-coupling step, and on any step of an unthermostatted run, only
+`apply_after_kick` fires: one `rattle_velocities`, one
+`constraint_virial_scatter`. The second projection costs ~nothing
+physically — the velocities the terminal hook receives are already on the
+manifold (a uniform thermostat rescale preserves it), so the RATTLE
+iteration converges immediately and its impulse, and hence its virial
+contribution, is zero. It stays load-bearing for a per-particle Andersen
+resample and for a barostat velocity rescale, neither of which preserves
+the manifold.
 
 ## Constraint Virial <!-- rq-4617c285 -->
 
@@ -173,6 +195,29 @@ and then scattered into the global `particle_virials` array by
 then sums `particle_virials` across all atoms; the result is the
 analytic `−2 K_rot` of a rigid rotor for each group, as required by
 the velocity-Verlet + SHAKE + RATTLE virial decomposition.
+
+**Accumulate at every projection; publish exactly once.** This is the
+contract that splits `project_velocities_for_coupling` from
+`apply_after_kick`. Every velocity projection *accumulates* its
+velocity-level virial onto `constraint_virial`; only `apply_after_kick`
+*publishes* — runs `constraint_virial_scatter` — and it does so exactly
+once per step. Both halves of the split are load-bearing:
+
+- Nothing clears `constraint_virial` between `shake_positions` (which
+  writes the position-level half) and `rattle_velocities` (which
+  accumulates the velocity-level half onto it). A scatter from the
+  pre-coupling projection would therefore publish the position half a
+  second time as well, double-counting the *whole* constraint virial in
+  the pressure.
+- A per-step barostat's own virial reduction runs at the plan's terminal
+  `BarostatPoint`, i.e. *between* the two projections. If the leading
+  projection published, the barostat would see this step's constraint
+  virial on coupling steps and not on non-coupling steps — two different
+  pressure definitions alternating at the coupling cadence.
+
+The terminal `apply_after_kick` is thus the single publication point, on
+coupling and non-coupling steps alike, and the barostat's in-step reduction
+sees the same virial either way.
 
 The arithmetic uses centre-of-mass-relative positions (rather than
 lab-frame absolute positions) for f32 stability. At molecular-cluster

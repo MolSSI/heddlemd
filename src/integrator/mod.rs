@@ -506,13 +506,19 @@ impl Default for RunStepOptions {
 /// 2. The main region `steps[..trailing_post_force_start()]` is walked
 ///    (force evaluations, class/total kicks including the trailing kick,
 ///    interleaved thermostat / constraint / barostat markers).
-/// 3. The wrapped thermostat's `apply_post` fires at the
-///    post-force-marker boundary — after the trailing kick, before the
-///    terminal barostat / projection.
+/// 3. At the post-force-marker boundary — after the trailing kick, before
+///    the terminal barostat / projection — the velocities are projected
+///    onto the constraint manifold (when the plan has a terminal
+///    `ConstraintPoint { AfterKick }` and a constraint slot is
+///    installed), and then the wrapped thermostat's `apply_post` fires.
+///    The projection must lead: the trailing kick leaves the velocities
+///    off the manifold, and a thermostat that reduced their kinetic
+///    energy would couple to a KE the projection is about to discard.
 /// 4. The post-force marker tail `steps[trailing_post_force_start()..]`
 ///    is walked: a terminal `BarostatPoint` runs `barostat.apply`, then a
 ///    plan-final `ConstraintPoint { AfterKick }` runs the velocity
-///    projection (RATTLE-last).
+///    projection (RATTLE-last). That projection is idempotent after
+///    step 3 for a uniform rescale, and repairs a per-particle resample.
 ///
 /// The wrapped-thermostat halves fire only for the default topology (no
 /// `ThermostatHalf` markers); a plan that owns its thermostat placement
@@ -547,6 +553,25 @@ pub fn run_step(
         Some(dt_couple) if !plan.has_thermostat_points() => Some(dt_couple),
         _ => None,
     };
+    // The `dt` of the plan's terminal velocity projection, if it has one.
+    // The trailing kick leaves the velocities *off* the constraint
+    // manifold: it accelerates each atom along the total force, including
+    // the component parallel to the constrained directions, and that
+    // component is deleted by the terminal `ConstraintPoint { AfterKick }`.
+    // A thermostat that reduces the kinetic energy before that projection
+    // therefore couples to `K_manifold + ΔK_off` rather than to the
+    // physical full-step kinetic energy, and rescales the whole velocity
+    // field to put the *inflated* sum on target. The projection then
+    // deletes the off-manifold share, so the run settles at
+    // `T_target · (1 − ΔK_off / K)` — a dt²-scaling deficit (31.6 K low at
+    // dt = 2 fs for rigid SPC/E water). Project first, then couple.
+    let terminal_projection_dt = plan.steps[trailing_start..].iter().find_map(|s| match s {
+        SubStep::ConstraintPoint {
+            phase: ConstraintPhase::AfterKick,
+            dt,
+        } => Some(*dt),
+        _ => None,
+    });
     // rq-b7f9628d — leading wrapped half, on v(t), before the walk.
     if let Some(dt_couple) = wrap_dt {
         if let Some(t) = thermostat.as_mut() {
@@ -559,6 +584,26 @@ pub fn run_step(
         // main-region sub-step) and before the first terminal marker.
         // It reduces the full-step (post-trailing-kick) kinetic energy.
         if wrap_dt.is_some() && idx == trailing_start {
+            // Put the velocities on the constraint manifold first, so the
+            // thermostat couples to the physical kinetic energy.
+            //
+            // This is `project_velocities_for_coupling`, NOT `apply_after_kick`:
+            // it projects and accumulates the velocity-level constraint virial
+            // but does not *publish* it. The plan's terminal `AfterKick` below
+            // is what scatters the accumulated virial into `buffers.virials`,
+            // once per step. Publishing here too would double-count the
+            // constraint contribution to the pressure, and would leave a
+            // per-step barostat — whose virial reduction runs at the terminal
+            // `BarostatPoint`, between the two projections — reading a different
+            // virial on coupling and non-coupling steps.
+            //
+            // The terminal projection still runs: it is a no-op for the uniform
+            // rescale of a KE-coupled thermostat (zero impulse, zero virial),
+            // but it is load-bearing for a per-particle resample (Andersen) and
+            // for a barostat velocity rescale.
+            if let (Some(c), Some(proj_dt)) = (constraint.as_mut(), terminal_projection_dt) {
+                c.project_velocities_for_coupling(buffers, sim_box, proj_dt, timings)?;
+            }
             if let Some(t) = thermostat.as_mut() {
                 t.apply_post(buffers, wrap_dt.unwrap(), timings)?;
             }

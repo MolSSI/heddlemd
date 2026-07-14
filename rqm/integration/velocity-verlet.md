@@ -379,13 +379,20 @@ are present unconditionally and are no-ops when their slot is absent, so
 the same plan drives NVE, NVT, and NPT compositions. The `BarostatPoint`
 and `AfterKick` sub-steps form the plan's post-force tail, and their plan
 order is the order the runner dispatches them: the runner walks the tail
-as a fixed ordered sequence — trailing kick, thermostat `apply_post`,
-barostat `apply`, then constraint velocity projection (see `framework.md`,
-*Per-Step Interface*). The barostat rescale precedes the `AfterKick`
-projection so that the velocity projection is the last per-particle
-velocity operation of the step (RATTLE-last): a barostat velocity rescale
-placed after it would knock the velocities back off the constraint
-manifold. The plan shape is
+as a fixed ordered sequence — trailing kick; then, on a coupling step of a
+constrained run, the pre-coupling velocity projection
+(`Constraint::project_velocities_for_coupling`); then the thermostat's
+`apply_post`; then barostat `apply`; then the `AfterKick` constraint
+velocity projection (see `framework.md`, *Per-Step Interface*). The
+pre-coupling projection leads the thermostat because the trailing kick
+leaves the velocities off the constraint manifold, and a
+kinetic-energy-coupled thermostat that reduced `K` before the projection
+would couple to energy the projection is about to discard (see
+`constraint-framework.md`). The barostat rescale in turn precedes the
+`AfterKick` projection so that a velocity projection is the last
+per-particle velocity operation of the step (RATTLE-last): a barostat
+velocity rescale placed after it would knock the velocities back off the
+constraint manifold. The plan shape is
 identical for the lossy and lossless variants; the `lossless` flag is
 carried on the integrator's `&mut self` and read inside `execute()` to
 choose between the lossy and lossless kernels. (Lossless mode does not
@@ -439,8 +446,15 @@ The runner walks the plan (see `framework.md` and
 marker to the configured constraint slot: `BeforeDrift` before the
 `KickDrift`, `AfterDrift` after it, and `AfterKick` after the trailing
 `KickHalf`. The trailing `AfterKick` runs in the post-force tail, after
-the trailing kick and any thermostat / barostat rescale, so the velocity
-projection is the last per-particle velocity operation of the step.
+the trailing kick and any thermostat / barostat rescale, so a velocity
+projection is the last per-particle velocity operation of the step. It is
+no longer the *only* velocity projection of the step: on a coupling step
+of a constrained run the runner also projects the velocities immediately
+after the trailing kick and before the thermostat's `apply_post`, so that
+the thermostat couples to the on-manifold kinetic energy (see
+`framework.md`, *Per-Step Interface*, and `constraint-framework.md`). That
+leading projection is not a plan sub-step — it re-uses the terminal
+`AfterKick` marker's `dt`, and the marker itself still executes in place.
 Velocity Verlet's `execute()` is unaware of the constraint slot; it
 only places the markers in `plan`.
 

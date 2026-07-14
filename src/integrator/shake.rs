@@ -493,6 +493,43 @@ impl Constraint for ShakeConstraintsState {
         Ok(())
     }
 
+    // The pre-coupling projection: `rattle_velocities` only. It accumulates the
+    // velocity-level half of `constraint_virial` exactly as `apply_after_kick`
+    // does, but does NOT run `constraint_virial_scatter` — the terminal
+    // `apply_after_kick` publishes the accumulated virial into
+    // `buffers.virials`, once per step. See
+    // `Constraint::project_velocities_for_coupling`.
+    fn project_velocities_for_coupling(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        dt: Real,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        if self.group_count == 0 {
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::RATTLE_VELOCITIES)?;
+        rattle_velocities(
+            buffers,
+            &self.group_atoms,
+            &self.group_atom_offset,
+            &self.group_atom_count,
+            &self.group_constraint_offset,
+            &self.group_constraint_count,
+            &self.group_constraints_local_i,
+            &self.group_constraints_local_j,
+            &self.atom_mass,
+            sim_box,
+            dt,
+            &mut self.constraint_virial,
+            self.group_count,
+            self.max_group_atoms,
+        )?;
+        timings.kernel_stop(KernelStage::RATTLE_VELOCITIES)?;
+        Ok(())
+    }
+
     fn apply_initial_velocity_projection(
         &mut self,
         buffers: &mut ParticleBuffers,

@@ -403,6 +403,30 @@ Degenerate cases:
   }
   ```
 
+  **Unit responsibility.** `sim_config` is passed to `build` (and again to
+  `finalize_and_write`) primarily so the builder can carry out the
+  I/O-boundary unit conversion that nothing else will do for it. The
+  `.in.analysis` file has no typed `Config` struct, so
+  `Config::from_user`'s recursive `Convert` pass does not reach it; an
+  `[[analyses]]` entry's `params` is open-shaped, and — exactly like an
+  integrator's or barostat's slot params (`rqm/io/unit-system.md`,
+  *Builder-Owned Slot-Parameter Conversion*) — **the registered builder
+  owns converting its own unit-bearing fields.** Every kind must:
+
+  - in `build`, convert each unit-bearing param from `sim_config.units`
+    into atomic units *before* validating or storing it — the frames, the
+    box, and every distance the analysis sees are already atomic; and
+  - in `finalize_and_write`, convert unit-bearing output columns back to
+    `sim_config.units`, so a value comes out in the units it went in.
+
+  A missed conversion is silent, not loud: an unconverted SI length is
+  simply compared against atomic-unit distances, so no datum ever falls
+  inside it and the analysis writes an empty-but-well-formed result. Any
+  range guard on the raw value passes vacuously, because it compares the
+  same two mismatched units. Tests for a new kind must therefore exercise
+  `units = "si"` — under `units = "atomic"` the conversion is the identity
+  and cannot distinguish a correct implementation from one that skips it.
+
 - `Analysis` — per-run handle returned by an `AnalysisBuilder`. <!-- rq-8464775b -->
   Mirrors the per-step interface used by integrators:
   ```rust

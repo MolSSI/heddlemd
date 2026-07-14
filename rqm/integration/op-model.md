@@ -181,9 +181,15 @@ the schedule declares each operation's reads and writes, and validation
 confirms no operation observes stale state. Because every operation still
 runs as its own kernel launch — the model performs no coalescing — the
 per-step launch sequence, and therefore the engine's bit-wise
-reproducibility, is exactly the schedule walked in order (`framework.md`,
-*Determinism Guarantees*). Validation adds a setup-time check; it changes
-no per-step execution.
+reproducibility, is the schedule walked in order plus the small, fixed set
+of dispatches the runner wraps around that walk (`framework.md`,
+*Determinism Guarantees*). Those wrapped dispatches are the documented
+default-topology thermostat halves (`docs/architecture.md`, *One deliberate
+exception*) and the pre-coupling velocity projection that precedes the
+thermostat's `apply_post` on a constrained coupling step (see *Out of
+Scope*). Neither is a schedule operation, and neither reorders operations
+within the walk or changes which state an operation observes. Validation
+adds a setup-time check; it changes no per-step execution.
 
 ## Out of Scope <!-- rq-506baad0 -->
 
@@ -199,6 +205,18 @@ no per-step execution.
   those reductions first-class barrier operations — with scalar resources
   and their own producer/consumer validation — is a separate layer of the
   Op model, not part of this foundation.
+- **The pre-coupling velocity projection.** On a coupling step of a
+  constrained run the runner projects the velocities onto the constraint
+  manifold between the trailing kick and the wrapped thermostat's
+  `apply_post`, so the thermostat couples to the on-manifold kinetic energy
+  (`framework.md`, *Per-Step Interface*; `constraint-framework.md`). It is
+  **not** a schedule operation: it declares no footprint, appears in no
+  `StepPlan`, and is not validated. It carries no ordering rules of its own
+  either — it re-uses the `dt` of the plan's terminal `ConstraintPoint {
+  AfterKick }` (and fires only when the plan has one), and that marker still
+  executes in place in the post-force tail. Its footprint would in any case
+  be identical to the `AfterKick` marker's, so it can invalidate nothing the
+  validator tracks.
 
 ## Gherkin Scenarios <!-- rq-f3467a4e -->
 

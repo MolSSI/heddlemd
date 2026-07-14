@@ -129,18 +129,74 @@ The projection is, at fixed positions, a linear projection of the
 velocity vector onto the constraint-orthogonal subspace. A global
 uniform velocity rescale (CSVR, Nosé-Hoover chain, Berendsen, and the
 scalar velocity rescale of the c-rescale barostat) commutes with it and
-preserves the manifold, so the relative order of projection and rescale
-is immaterial for those slots. A per-particle velocity resample
-(Andersen) does not preserve the manifold and does not commute; running
-the projection last repairs the constraint after the resample. Firing
-`apply_after_kick` last is thus correct for every thermostat and
-barostat in the default registry, and no thermostat is excluded from
-composition with a constraint slot on ordering grounds.
+preserves the manifold. A per-particle velocity resample (Andersen) does
+not preserve the manifold and does not commute; running the projection
+last repairs the constraint after the resample. Firing `apply_after_kick`
+last is thus correct for every thermostat and barostat in the default
+registry, and no thermostat is excluded from composition with a
+constraint slot on ordering grounds.
 
-The kinetic energy a thermostat couples to is the full-step kinetic
-energy its `apply_post` reduces after the trailing kick (`framework.md`);
-that timing is independent of constraints and unchanged by the presence
-of a constraint slot.
+That commutation argument covers a thermostat's **write** (the rescale).
+It does **not** cover its **read**. `K(v) ≠ K(P v)`: the trailing kick
+accelerates every atom along the total force, including the component
+parallel to the constrained directions, and `apply_after_kick` deletes
+exactly that component. A KE-coupled thermostat that reduces the kinetic
+energy *before* the projection therefore couples to
+`K_manifold + ΔK_off`, rescales the whole velocity field to put that
+inflated sum on its target, and then watches the projection delete the
+off-manifold share. The run settles at `T_target · (1 − ΔK_off / K)` — a
+deficit that scales as `dt²` (measured: 31.6 K low at `dt = 2 fs` for
+rigid SPC/E water, 7.9 K at 1 fs, 1.9 K at 0.5 fs) and that is
+independent of `tau`, since `ΔK_off` is set by the forces and the
+timestep rather than by the coupling strength.
+
+`run_step` therefore projects the velocities onto the constraint manifold
+at the post-force-marker boundary, immediately **before** the wrapped
+thermostat's `apply_post`, so the thermostat couples to the physical
+full-step kinetic energy — the same kinetic energy the run reports, and
+the one whose degrees of freedom (`3N − n_constraints − 3`) the
+thermostat's target is built from. The plan's terminal
+`ConstraintPoint { AfterKick }` still runs last: for a uniform rescale it
+costs nothing after the leading projection (zero impulse), and it remains
+load-bearing for Andersen's per-particle resample and for a barostat
+velocity rescale, neither of which is guaranteed to preserve the manifold.
+
+### The two projections are different hooks <!-- rq-1c9f4d20 -->
+
+The leading projection dispatches
+`Constraint::project_velocities_for_coupling`, **not**
+`apply_after_kick`. The two run the same velocity projection and both
+accumulate the velocity-level constraint virial; they differ in that only
+`apply_after_kick` **publishes** that virial into `buffers.virials`.
+
+The distinction is load-bearing, in two ways:
+
+- **The constraint virial must be published exactly once per step.** Both
+  `settle_positions` (position half) and `settle_velocities` (velocity
+  half) accumulate into a `constraint_virial` scratch buffer that the
+  scatter adds into `buffers.virials`; nothing clears it in between.
+  Scattering from both projections would add the whole accumulated
+  virial — the position half included — a second time, double-counting the
+  constraint contribution to the pressure.
+- **A per-step barostat reduces the virial *between* the two
+  projections.** Its `apply` runs at the plan's terminal `BarostatPoint`,
+  after `apply_post` and before `ConstraintPoint { AfterKick }`. If the
+  leading projection published, the barostat would see the constraint
+  virial on coupling steps and not on non-coupling steps — two different
+  definitions of the pressure alternating at the coupling cadence.
+
+So the accumulation happens at the leading projection (where the impulse
+is real, since the velocities are still off the manifold) and the single
+publish happens at the plan's terminal `AfterKick` (where the impulse is
+zero, and the accumulated total is scattered). The trailing
+`settle_velocities` / `rattle_velocities` therefore contributes nothing to
+the virial; it is there to repair the manifold, not to measure it.
+
+A constrained coupling step consequently launches the velocity projection
+**twice** and the virial scatter **once**. The default
+`project_velocities_for_coupling` delegates to `apply_after_kick`, which
+is correct for any constraint slot that publishes no virial; SETTLE and
+SHAKE override it.
 
 ## Convenience Trait Surface <!-- rq-0e26dde0 -->
 
