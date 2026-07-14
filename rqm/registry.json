@@ -957,6 +957,18 @@
     "title": "Reject [constraints] with an integrator that does not support them",
     "type": "scenario"
   },
+  "rq-064d2401": {
+    "decl": "Scenario: The scalar virial is invariant under the splitting parameter",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The scalar virial is invariant under the splitting parameter",
+    "type": "scenario"
+  },
   "rq-06772617": {
     "decl": "Scenario: Reject non-positive compressibility",
     "file": "integration/berendsen-barostat",
@@ -1889,6 +1901,14 @@
     "refs": [],
     "title": "__device__",
     "type": "api-item"
+  },
+  "rq-0d1e3b7a": {
+    "decl": "### erf evaluation",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "erf evaluation",
+    "type": "section"
   },
   "rq-0d413b82": {
     "decl": "Scenario: mtk_velocity_half_kick with exp_minus_alpha=1.0, phi_v_dt_half=0.5 reduces to a half-VV kick",
@@ -6648,6 +6668,13 @@
     "title": "apply",
     "type": "api-item"
   },
+  "rq-2b42cf54": {
+    "decl": "Scenario: A near-coincident excluded pair tends to the closed-form limit",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "A near-coincident excluded pair tends to the closed-form limit",
+    "type": "scenario"
+  },
   "rq-2b4a324a": {
     "decl": "Scenario: Exclusion scale NaN rejected",
     "file": "forces/topology",
@@ -9250,6 +9277,14 @@
     "title": "Append rows in source order",
     "type": "scenario"
   },
+  "rq-3effe629": {
+    "decl": "### Evaluation",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Evaluation",
+    "type": "section"
+  },
   "rq-3f01c746": {
     "decl": "Scenario: bond_type kind with no claiming builder is rejected",
     "file": "io/config-schema",
@@ -9326,6 +9361,18 @@
     ],
     "title": "NamedSlotConfig",
     "type": "api-item"
+  },
+  "rq-3fea9eed": {
+    "decl": "Scenario: Uncharged atoms carry no correction",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Uncharged atoms carry no correction",
+    "type": "scenario"
   },
   "rq-402b55fc": {
     "decl": "- `KernelArgSchema`, `KernelArg`, `KernelArgType`, `KernelArgBinder`,",
@@ -10449,6 +10496,13 @@
     "title": "A thermostat coupling every step captures only the coupling row",
     "type": "scenario"
   },
+  "rq-49f7f762": {
+    "decl": "Scenario: An entry modified only in its Lennard-Jones scale contributes no Coulomb correction",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "An entry modified only in its Lennard-Jones scale contributes no Coulomb correction",
+    "type": "scenario"
+  },
   "rq-49fe5f2e": {
     "decl": "## Per-Group Storage",
     "file": "integration/settle",
@@ -10991,6 +11045,14 @@
     ],
     "title": "IntegratorStepWithConstraintExt::step_with_constraint installs hooks on a constraint-accepting state",
     "type": "scenario"
+  },
+  "rq-4e5d3508": {
+    "decl": "### Coincident and near-coincident pairs",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Coincident and near-coincident pairs",
+    "type": "section"
   },
   "rq-4e9e09f0": {
     "decl": "Scenario: apply_post launches the expected kernel set",
@@ -16508,6 +16570,13 @@
     "title": "apply_pre and apply_post launch the expected kernel calls for default chain parameters",
     "type": "scenario"
   },
+  "rq-761758ad": {
+    "decl": "Scenario: The erfc and erf fragments compose to the bare Coulomb force",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "The erfc and erf fragments compose to the bare Coulomb force",
+    "type": "scenario"
+  },
   "rq-761f26c6": {
     "decl": "Scenario: Unknown top-level key is permitted",
     "file": "io/config-schema",
@@ -19529,6 +19598,14 @@
     "title": "Test Harness",
     "type": "section"
   },
+  "rq-8d4fb00d": {
+    "decl": "## Excluded-pair correction",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "Excluded-pair correction",
+    "type": "section"
+  },
   "rq-8d5a8d9c": {
     "decl": "Scenario: reduce_angle_forces on zero particles is a no-op",
     "file": "forces/harmonic-angle",
@@ -20725,6 +20802,18 @@
     "title": "MtkNpt builder owns both its thermostat and its barostat",
     "type": "scenario"
   },
+  "rq-95bdc1a2": {
+    "decl": "Scenario: The correction is reproducible run to run",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The correction is reproducible run to run",
+    "type": "scenario"
+  },
   "rq-95be04ff": {
     "decl": "Scenario: settle_positions writes a non-zero position-level constraint virial",
     "file": "integration/settle",
@@ -21858,6 +21947,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-9de687da": {
+    "decl": "- `__device__ __forceinline__ Real Real_erf(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
+  },
   "rq-9df1eedb": {
     "decl": "Scenario: Bond row with wrong column count",
     "file": "forces/topology",
@@ -22708,6 +22804,18 @@
     "title": "Accept the lower boundary -L/2 along an axis (orthorhombic)",
     "type": "scenario"
   },
+  "rq-a37db23a": {
+    "decl": "Scenario: A fully excluded pair has no net Coulomb interaction",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fully excluded pair has no net Coulomb interaction",
+    "type": "scenario"
+  },
   "rq-a39234ba": {
     "decl": "Scenario: A steady-state rebuild copies no interaction count to the host",
     "file": "forces/neighbor-list",
@@ -23142,6 +23250,18 @@
     "title": "Cell counts reflect perpendicular widths for a tilted box",
     "type": "scenario"
   },
+  "rq-a7adc7c9": {
+    "decl": "Scenario: A system with no exclusions carries no correction",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A system with no exclusions carries no correction",
+    "type": "scenario"
+  },
   "rq-a7ecc7be": {
     "decl": "Scenario: A config with no Lennard-Jones input skips pair resolution",
     "file": "io/config-schema",
@@ -23385,6 +23505,14 @@
       }
     ],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-a95634e8": {
+    "decl": "### No cutoff",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "No cutoff",
     "type": "section"
   },
   "rq-a9642241": {
@@ -23783,6 +23911,13 @@
     ],
     "title": "Construct with particle_count = 0",
     "type": "scenario"
+  },
+  "rq-abf2db9a": {
+    "decl": "- `__device__ __forceinline__ Real Real_erfc(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-ac035b90": {
     "decl": "- `ParticleState::particle_count(&self) -> usize`",
@@ -24907,6 +25042,14 @@
     "title": "B-spline correction factors are finite for odd spline orders",
     "type": "scenario"
   },
+  "rq-b3f8bbce": {
+    "decl": "### Reproducibility",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
+  },
   "rq-b3ffde38": {
     "decl": "Scenario: Dihedral row with non-integer index",
     "file": "forces/topology",
@@ -25631,6 +25774,18 @@
     ],
     "title": "Invariants",
     "type": "section"
+  },
+  "rq-ba1b0ef5": {
+    "decl": "Scenario: A modified pair beyond the cutoff is still corrected",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A modified pair beyond the cutoff is still corrected",
+    "type": "scenario"
   },
   "rq-ba281906": {
     "decl": "Scenario: SPME reciprocal stream uses single-precision cuFFT plans in the default build",
@@ -26533,6 +26688,13 @@
     ],
     "title": "Class-Combine Kernel",
     "type": "section"
+  },
+  "rq-c107b97d": {
+    "decl": "- `FragmentPasses` — declares which pair passes evaluate a fragment.",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "FragmentPasses",
+    "type": "api-item"
   },
   "rq-c118d720": {
     "decl": "Scenario: validate_against surfaces a claiming potential builder's validate_params error",
@@ -27526,6 +27688,18 @@
       }
     ],
     "title": "Two independent runs of apply_after_kick produce byte-identical state",
+    "type": "scenario"
+  },
+  "rq-c811e838": {
+    "decl": "Scenario: The total electrostatic energy is invariant under the splitting parameter",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The total electrostatic energy is invariant under the splitting parameter",
     "type": "scenario"
   },
   "rq-c814659f": {
@@ -30526,6 +30700,13 @@
     "title": "A CSVR thermostat run is byte-identical across runs",
     "type": "scenario"
   },
+  "rq-dd6935c7": {
+    "decl": "- `SpmeExclusionFragment` — the correction-pass fragment the reciprocal slot",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SpmeExclusionFragment",
+    "type": "api-item"
+  },
   "rq-dd6fe266": {
     "decl": "Scenario: Reject n_resp = 0",
     "file": "integration/nose-hoover-chain",
@@ -31644,6 +31825,18 @@
       }
     ],
     "title": "log_column_names returns [\"pressure\", \"box_volume\", \"c_rescale_conserved\"]",
+    "type": "scenario"
+  },
+  "rq-e5dd8842": {
+    "decl": "Scenario: A 1-4 pair retains exactly its scaled Coulomb interaction",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A 1-4 pair retains exactly its scaled Coulomb interaction",
     "type": "scenario"
   },
   "rq-e5e3443f": {
@@ -32787,6 +32980,18 @@
     ],
     "title": "`[phase.thermostat]` (optional)",
     "type": "section"
+  },
+  "rq-ee1ce29c": {
+    "decl": "Scenario: Coincident excluded atoms produce no non-finite value",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Coincident excluded atoms produce no non-finite value",
+    "type": "scenario"
   },
   "rq-ee43a3fe": {
     "decl": "## Out of Scope",

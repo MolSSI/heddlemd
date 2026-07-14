@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use cudarc::driver::DeviceSlice;
-use heddle_md::forces::{AggregateLevel, AngleList, Bond, BondList, CutoffHandling, DihedralList, ExclusionList, ForceClass, ForceField, ForceFieldContext, ForceFieldError, ForceLaunchBuilder, JitParticipant, PairForceBindContext, PairForceFragment, PairForcePotential, Potential, PotentialBuildContext, PotentialBuilder, PotentialRegistry, SlotOutputView};
+use heddle_md::forces::{AggregateLevel, AngleList, Bond, BondList, CutoffHandling, FragmentPasses, DihedralList, ExclusionList, ForceClass, ForceField, ForceFieldContext, ForceFieldError, ForceLaunchBuilder, JitParticipant, PairForceBindContext, PairForceFragment, PairForcePotential, Potential, PotentialBuildContext, PotentialBuilder, PotentialRegistry, SlotOutputView};
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig, SpmeConfig,
@@ -294,6 +294,7 @@ struct {n} {{
             entry_point_args: String::new(),
             functor_init_source: String::new(),
             cutoff: CutoffHandling::PerPair,
+            passes: FragmentPasses::NeighbourListAndCorrection,
             consumes_type_index: false,
         }
     }
@@ -944,17 +945,21 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
 
 // rq-053a026c
 #[test]
-fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
+fn registry_with_builtins_exposes_eight_builders_in_evaluation_order() {
     let r = PotentialRegistry::with_builtins();
-    assert_eq!(r.builders().len(), 7);
+    assert_eq!(r.builders().len(), 8);
     let names: Vec<String> = r.builders().iter().map(|b| format!("{:?}", b)).collect();
     assert!(names[0].contains("LennardJones"), "builder 0 = {}", names[0]);
     assert!(names[1].contains("SpmeReal"), "builder 1 = {}", names[1]);
     assert!(names[2].contains("SpmeReciprocal"), "builder 2 = {}", names[2]);
-    assert!(names[3].contains("MorseBonded"), "builder 3 = {}", names[3]);
-    assert!(names[4].contains("HarmonicBond"), "builder 4 = {}", names[4]);
-    assert!(names[5].contains("HarmonicAngle"), "builder 5 = {}", names[5]);
-    assert!(names[6].contains("PeriodicDihedral"), "builder 6 = {}", names[6]);
+    // The excluded-pair correction: SPME's reciprocal mesh carries erf(a*r)/r for
+    // every pair including the excluded ones, and this slot removes the unwanted
+    // share. See `rqm/forces/spme.md`, *Excluded-pair correction*.
+    assert!(names[3].contains("SpmeExclusion"), "builder 3 = {}", names[3]);
+    assert!(names[4].contains("MorseBonded"), "builder 4 = {}", names[4]);
+    assert!(names[5].contains("HarmonicBond"), "builder 5 = {}", names[5]);
+    assert!(names[6].contains("HarmonicAngle"), "builder 6 = {}", names[6]);
+    assert!(names[7].contains("PeriodicDihedral"), "builder 7 = {}", names[7]);
 }
 
 // rq-78ad9477
@@ -969,8 +974,8 @@ fn registry_new_starts_empty() {
 fn register_appends_a_builder_at_the_end() {
     let mut r = PotentialRegistry::with_builtins();
     r.register(Box::new(StubBuilder::new("custom")));
-    assert_eq!(r.builders().len(), 8);
-    let last = format!("{:?}", r.builders()[7]);
+    assert_eq!(r.builders().len(), 9);
+    let last = format!("{:?}", r.builders()[8]);
     assert!(last.contains("custom"), "last builder = {}", last);
 }
 
@@ -1520,6 +1525,7 @@ struct CutoffInspectorFunctor {
             entry_point_args: String::new(),
             functor_init_source: String::new(),
             cutoff: CutoffHandling::PerPair,
+            passes: FragmentPasses::NeighbourListAndCorrection,
             consumes_type_index: false,
         }
     }
@@ -1968,7 +1974,10 @@ fn exclusion_consuming_slots_share_one_device_exclusion_list() {
     let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
     assert!(labels.contains(&"lennard_jones"));
     assert!(labels.contains(&"spme_real"));
-    assert_eq!(Arc::strong_count(&ff.device_exclusions), 3);
+    // Three exclusion-consuming slots hold a clone (lennard_jones, spme_real and
+    // spme_exclusion), plus the ForceField's own handle.
+    assert!(labels.contains(&"spme_exclusion"));
+    assert_eq!(Arc::strong_count(&ff.device_exclusions), 4);
 }
 
 // rq-8c9ec66e — the shared DeviceExclusionList exists even when no slot
@@ -2131,7 +2140,15 @@ fn slot_list_has_lj_then_spme_real_then_spme_reciprocal_under_lj_plus_spme() {
     )
     .unwrap();
     let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
-    assert_eq!(labels, vec!["lennard_jones", "spme_real", "spme_reciprocal"]);
+    assert_eq!(
+        labels,
+        vec![
+            "lennard_jones",
+            "spme_real",
+            "spme_reciprocal",
+            "spme_exclusion"
+        ]
+    );
 }
 
 #[test]

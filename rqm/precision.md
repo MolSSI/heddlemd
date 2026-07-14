@@ -101,6 +101,8 @@ transitively.
 - `__device__ __forceinline__ Real Real_sqrt(Real x);` <!-- rq-c3d3dc8e -->
 - `__device__ __forceinline__ Real Real_rsqrt(Real x);` <!-- rq-24048902 -->
 - `__device__ __forceinline__ Real Real_exp(Real x);` <!-- rq-48e7115e -->
+- `__device__ __forceinline__ Real Real_erf(Real x);` <!-- rq-9de687da -->
+- `__device__ __forceinline__ Real Real_erfc(Real x);` <!-- rq-abf2db9a -->
 - `__device__ __forceinline__ Real Real_log(Real x);` <!-- rq-c6364175 -->
 - `__device__ __forceinline__ Real Real_sin(Real x);` <!-- rq-043796fa -->
 - `__device__ __forceinline__ Real Real_cos(Real x);` <!-- rq-23398f89 -->
@@ -113,7 +115,16 @@ transitively.
 
 Each of these resolves at compile time to the precision-matching CUDA math
 intrinsic: `sqrtf`/`sqrt`, `rsqrtf`/`rsqrt`, `expf`/`exp`, `logf`/`log`,
-`__sincosf`/`sincos`, etc. Every kernel that currently calls a precision-
+`erff`/`erf`, `erfcf`/`erfc`, `__sincosf`/`sincos`, etc.
+
+`Real_erf` and `Real_erfc` are the accurate intrinsics, and a kernel calls them
+when it can afford to. The composed pair-force kernel's real-space SPME fragment
+cannot — it runs in the `O(N · neighbours)` inner loop — so under `f32` it
+evaluates `erfc` from a Hastings polynomial instead (`forces/spme.md`). The SPME
+excluded-pair fragment does call `Real_erf`: it runs once per modified pair,
+which is negligible by comparison, and deriving `erf` as `1 − erfc` from that
+polynomial would cancel catastrophically at the small arguments the correction
+is most sensitive at. Every kernel that currently calls a precision-
 suffixed CUDA intrinsic (`sqrtf`, `expf`, `rsqrtf`, `__sinf`, `__cosf`,
 `__expf`, `rintf`, etc.) calls the shim instead. The shim layer is the
 only place CUDA precision-suffixed names appear.

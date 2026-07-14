@@ -203,7 +203,19 @@ fn fixture_system_carries_exactly_one_slot() {
     let gpu = init_device().unwrap();
     for f in builtin_consistency_fixtures() {
         let (ff, sim_box, _m, _q, _t) = f.build_system(&gpu);
-        assert_eq!(ff.slots.len(), 1, "fixture {} did not build exactly one slot", f.label);
+        // A CorrectionOnly fixture carries a second slot: a zero-epsilon
+        // Lennard-Jones that supplies the neighbour list's cutoff (the fragment
+        // under test declares none) and contributes exactly zero energy and
+        // force, so the measurement stays attributable to the fragment.
+        let expected_slots = if f.unbounded { 2 } else { 1 };
+        assert_eq!(
+            ff.slots.len(),
+            expected_slots,
+            "fixture {} built {} slots, expected {}",
+            f.label,
+            ff.slots.len(),
+            expected_slots
+        );
         let max_reach = f.cutoff.max(f.samples.iter().cloned().fold(0.0, f64::max));
         assert!(
             (sim_box.min_perpendicular_width() as f64) > 2.0 * max_reach,

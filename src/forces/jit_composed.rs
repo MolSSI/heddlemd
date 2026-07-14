@@ -78,6 +78,36 @@ pub enum CutoffHandling {
     /// composer emits the runtime guard around the fragment's
     /// `evaluate` call.
     PerPair,
+    /// The fragment has no cutoff and is evaluated at every separation.
+    /// The composer emits no guard for it and the passes that apply a
+    /// max-cutoff mask evaluate it outside that mask.
+    ///
+    /// A fragment declares this when the quantity it corrects is itself
+    /// cutoff-free. The SPME excluded-pair correction offsets a
+    /// reciprocal-space mesh sum, which has no cutoff, so masking the
+    /// correction at any radius would leave a residue of
+    /// `(1 - scale) * k_C * q_i * q_j / r` — long-ranged, silent, and
+    /// growing with the charges involved. See `rqm/forces/spme.md`.
+    Unbounded,
+}
+
+// rq-c6f4b74d — which of the pipeline's pair passes evaluate a fragment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FragmentPasses {
+    /// The neighbour-list passes evaluate the fragment at full strength for
+    /// every pair they visit, and the correction pass adds
+    /// `(scale - 1) x evaluate` for each modified pair, so the net per modified
+    /// pair is `scale x evaluate`. Every fragment whose interaction the
+    /// neighbour list is responsible for declares this.
+    NeighbourListAndCorrection,
+    /// Only the correction pass evaluates the fragment, as
+    /// `(scale - 1) x evaluate`. There is no full-strength neighbour-list term
+    /// for the correction to complete, because the quantity being corrected was
+    /// contributed by something outside the pair passes entirely.
+    ///
+    /// The SPME excluded-pair fragment declares this: the reciprocal-space mesh
+    /// has already supplied `1 x erf(alpha*r)/r` for every pair, modified or not.
+    CorrectionOnly,
 }
 
 const MODULE_NAME: &str = "heddle_jit_composed_pair_force";
@@ -144,6 +174,9 @@ pub struct PairForceFragment {
     /// compile-time-constant guard when `Uniform(c)` is strictly
     /// less; emit the runtime guard when `PerPair`).
     pub cutoff: CutoffHandling,
+    /// Which of the pipeline's pair passes evaluate this fragment. See
+    /// `FragmentPasses`.
+    pub passes: FragmentPasses,
     /// Whether this fragment's `evaluate` / `cutoff_squared` read the
     /// per-atom `i_type` / `j_type` parameters. The composer ORs this
     /// across active fragments: if any sets it, the outer loop emits
@@ -965,6 +998,12 @@ fn emit_eval_pair_sum(
     s.push_str("{\n");
     s.push_str("    factor = R(0.0); energy = R(0.0);\n");
     for f in fragments {
+        // rq-c6f4b74d — a `CorrectionOnly` fragment has no full-strength
+        // neighbour-list term for the correction to complete; the
+        // neighbour-list evaluator skips it entirely.
+        if !correction && f.passes == FragmentPasses::CorrectionOnly {
+            continue;
+        }
         let field = functor_field_name(f.label);
         // rq-8ae4a9f1 — the correction evaluator weights each fragment by
         // `exclusion_scale(i, j) - 1`; summed with the full-strength
@@ -989,9 +1028,18 @@ fn emit_eval_pair_sum(
             )
         };
         match f.cutoff {
-            // Uniform cutoff matching the outer max: the outer mask
-            // already covers it; omit the per-fragment guard.
-            CutoffHandling::Uniform(c) if c == max_cutoff => {
+            // rq-9d2b0f1a — no cutoff: evaluated at every separation, outside
+            // any max-cutoff mask. The correction loop applies no mask of its
+            // own (see `heddle_jit_correction_loop`), so nothing clips this.
+            CutoffHandling::Unbounded => {
+                s.push_str(&format!("    {{\n        {body}\n    }}\n", body = body));
+            }
+            // Uniform cutoff matching the outer max: in the neighbour-list
+            // evaluator the outer mask already covers it, so omit the
+            // per-fragment guard. The correction evaluator has no outer mask —
+            // it must not clip an `Unbounded` fragment — so it emits the guard
+            // explicitly, like any other bounded fragment.
+            CutoffHandling::Uniform(c) if c == max_cutoff && !correction => {
                 s.push_str(&format!("    {{\n        {body}\n    }}\n", body = body));
             }
             // Uniform cutoff strictly less than the outer max: emit a
@@ -1318,6 +1366,7 @@ __device__ __forceinline__ Real Real_log(Real x) { return log(x); }
 __device__ __forceinline__ Real Real_floor(Real x) { return floor(x); }
 __device__ __forceinline__ Real Real_fma(Real a, Real b, Real c) { return fma(a, b, c); }
 __device__ __forceinline__ Real Real_erfc(Real x) { return erfc(x); }
+__device__ __forceinline__ Real Real_erf(Real x) { return erf(x); }
 __device__ __forceinline__ Real Real_atan2(Real y, Real x) { return atan2(y, x); }
 __device__ __forceinline__ Real Real_sin(Real x) { return sin(x); }
 __device__ __forceinline__ Real Real_cos(Real x) { return cos(x); }
@@ -1332,6 +1381,7 @@ __device__ __forceinline__ Real Real_log(Real x) { return logf(x); }
 __device__ __forceinline__ Real Real_floor(Real x) { return floorf(x); }
 __device__ __forceinline__ Real Real_fma(Real a, Real b, Real c) { return fmaf(a, b, c); }
 __device__ __forceinline__ Real Real_erfc(Real x) { return erfcf(x); }
+__device__ __forceinline__ Real Real_erf(Real x) { return erff(x); }
 __device__ __forceinline__ Real Real_atan2(Real y, Real x) { return atan2f(y, x); }
 __device__ __forceinline__ Real Real_sin(Real x) { return sinf(x); }
 __device__ __forceinline__ Real Real_cos(Real x) { return cosf(x); }
@@ -1932,15 +1982,16 @@ __device__ static inline void heddle_jit_correction_loop(
   Real inv_r = Real_rsqrt(r2);
   Real r = r2 * inv_r;
 
-  Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
-
+  // rq-9d2b0f1a — no whole-sum cutoff mask here. Each bounded fragment carries
+  // its own guard (the composer emits one per fragment in the correction
+  // evaluator), and a `CutoffHandling::Unbounded` fragment must be evaluated at
+  // every separation: the SPME excluded-pair correction offsets a
+  // reciprocal-space mesh sum, which has no cutoff, so a modified pair beyond
+  // the cutoff still carries a reciprocal contribution that still needs
+  // correcting. Masking it here would leave that residue uncorrected.
   Real factor = R(0.0), energy = R(0.0);
   heddle_jit_eval_pair_correction<WriteEv>(
       composite, r2, inv_r, r, qi, qj, i_type, j_type, atom_i, atom_j, factor, energy);
-  factor *= cutoff_mask;
-  if (WriteEv) {
-    energy *= cutoff_mask;
-  }
 
   Real fx = factor * dx;
   Real fy = factor * dy;
@@ -2780,6 +2831,7 @@ struct {n} {{
             entry_point_args: String::new(),
             functor_init_source: String::new(),
             cutoff: CutoffHandling::Uniform(1.0 as Real),
+            passes: FragmentPasses::NeighbourListAndCorrection,
             consumes_type_index: false,
         }
     }
@@ -2957,6 +3009,7 @@ struct {n} {{
             entry_point_args: String::new(),
             functor_init_source: String::new(),
             cutoff: CutoffHandling::Uniform(1.0 as Real),
+            passes: FragmentPasses::NeighbourListAndCorrection,
             consumes_type_index: consumes,
         }
     }
@@ -3055,6 +3108,7 @@ struct {name} {{
             entry_point_args: String::new(),
             functor_init_source: String::new(),
             cutoff: CutoffHandling::Uniform(1.0 as Real),
+            passes: FragmentPasses::NeighbourListAndCorrection,
             consumes_type_index: false,
         }
     }

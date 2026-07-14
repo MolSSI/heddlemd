@@ -285,19 +285,38 @@ separate from the two passes that evaluate the neighbour list:
   no `exclusion_scale` call, no `atom_excl_*` read, and no per-pair scale
   multiply. The construction does not route modified pairs away from
   them; a modified pair simply appears in one of these passes like any
-  other in-range pair and contributes `1 × evaluate`.
+  other in-range pair and contributes `1 × evaluate`. They evaluate only
+  the fragments that declare `FragmentPasses::NeighbourListAndCorrection`
+  (`jit-composed-pair-force.md`).
 - The **correction pass** walks the fixed **modified-pair list** — the
   canonical pairs `(a, b)` (`a < b`) whose scale differs from `1` in some
   fragment, held device-resident. One thread per modified pair. It loads
-  the two atoms' positions, forms the minimum-image displacement,
-  applies the max-cutoff mask, and for each fragment adds
-  `(exclusion_scale(a, b) − 1) × evaluate` to both atoms' fixed-point
-  slots (Newton's 3rd via `±`). Summed with the full-strength `1 ×
-  evaluate` the neighbour-list pass already contributed, the net per
-  fragment is `scale × evaluate`: a full exclusion (`scale = 0`)
-  contributes nothing, a 1-4 pair contributes its scaled force and
-  energy. The per-fragment scale lookup and the `atom_excl_*` reads are
-  confined to the `E` modified pairs.
+  the two atoms' positions, forms the minimum-image displacement, and for
+  each fragment adds `(exclusion_scale(a, b) − 1) × evaluate` to both
+  atoms' fixed-point slots (Newton's 3rd via `±`). Summed with the
+  full-strength `1 × evaluate` the neighbour-list pass already
+  contributed, the net per fragment is `scale × evaluate`: a full
+  exclusion (`scale = 0`) contributes nothing, a 1-4 pair contributes its
+  scaled force and energy. The per-fragment scale lookup and the
+  `atom_excl_*` reads are confined to the `E` modified pairs.
+
+  The pass evaluates **every** fragment, both
+  `FragmentPasses::NeighbourListAndCorrection` and
+  `FragmentPasses::CorrectionOnly`. A `CorrectionOnly` fragment has no
+  full-strength neighbour-list term for the correction to complete — the
+  quantity it corrects was contributed outside the pair passes — so its
+  `(scale − 1) × evaluate` is the whole of its contribution.
+
+  The **max-cutoff mask is applied per fragment, not once for the pass**.
+  A fragment declaring `CutoffHandling::Uniform` or `PerPair` is masked as
+  it is in the neighbour-list passes; a fragment declaring
+  `CutoffHandling::Unbounded` is evaluated at every separation, outside
+  the mask. The distinction is load-bearing rather than cosmetic: the SPME
+  excluded-pair fragment offsets a reciprocal-space mesh sum, which has no
+  cutoff, so a modified pair beyond the cutoff still carries a
+  reciprocal-space contribution that must still be corrected. Masking it
+  would leave a residue of `(1 − scale) · k_C · q_a q_b / r` — long-ranged,
+  silent, and growing with the charges involved (`spme.md`).
 
 This correctness rests on two properties:
 

@@ -41,6 +41,10 @@ __device__ __forceinline__ Real Real_sqrt(Real x) { return sqrt(x); }
 __device__ __forceinline__ Real Real_rsqrt(Real x) { return rsqrt(x); }
 // rq-48e7115e
 __device__ __forceinline__ Real Real_exp(Real x) { return exp(x); }
+// rq-2a0e1c9b
+__device__ __forceinline__ Real Real_erf(Real x) { return erf(x); }
+// rq-6b1d4f77
+__device__ __forceinline__ Real Real_erfc(Real x) { return erfc(x); }
 // rq-c6364175
 __device__ __forceinline__ Real Real_log(Real x) { return log(x); }
 // rq-043796fa
@@ -65,6 +69,8 @@ __device__ __forceinline__ void Real_sincos(Real x, Real *s, Real *c) { sincos(x
 __device__ __forceinline__ Real Real_sqrt(Real x) { return sqrtf(x); }
 __device__ __forceinline__ Real Real_rsqrt(Real x) { return rsqrtf(x); }
 __device__ __forceinline__ Real Real_exp(Real x) { return expf(x); }
+__device__ __forceinline__ Real Real_erf(Real x) { return erff(x); }
+__device__ __forceinline__ Real Real_erfc(Real x) { return erfcf(x); }
 __device__ __forceinline__ Real Real_log(Real x) { return logf(x); }
 __device__ __forceinline__ Real Real_sin(Real x) { return sinf(x); }
 __device__ __forceinline__ Real Real_cos(Real x) { return cosf(x); }

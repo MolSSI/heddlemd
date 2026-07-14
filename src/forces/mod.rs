@@ -29,6 +29,7 @@ pub use dihedral::{PeriodicDihedralBuilder, PeriodicDihedralState};
 pub use jit_composed::{
     AngleForceFragment, AngleScratchView, ArgKind, BondedForceFragment, BondedScratchView,
     CutoffHandling, DihedralForceFragment, DihedralScratchView, ElemTy, ForceLaunchBuilder,
+    FragmentPasses,
     ForceLaunchContext, JitComposedAngleForce, JitComposedBondedForce,
     JitComposedDihedralForce, JitComposedPairForce, KernelArg,
     KernelArgBinder, KernelArgSchema, KernelArgType, KernelElem, PairForceBindContext,
@@ -37,7 +38,7 @@ pub use jit_composed::{
 };
 pub use spme::{
     SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,
-    SpmeRealBuilder, SpmeReciprocalBuilder,
+    SpmeExclusionBuilder, SpmeRealBuilder, SpmeReciprocalBuilder,
 };
 pub use angle::{HARMONIC_ANGLE_KIND, HarmonicAngleParams};
 pub use dihedral::{PERIODIC_DIHEDRAL_KIND, PeriodicDihedralParams};
@@ -389,6 +390,7 @@ impl Builtins for dyn PotentialBuilder {
             Box::new(LennardJonesBuilder),
             Box::new(SpmeRealBuilder),
             Box::new(SpmeReciprocalBuilder),
+            Box::new(SpmeExclusionBuilder),
             Box::new(MorseBondedBuilder),
             Box::new(HarmonicBondBuilder),
             Box::new(HarmonicAngleBuilder),

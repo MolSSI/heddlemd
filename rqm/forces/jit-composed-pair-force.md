@@ -683,6 +683,7 @@ standalone case.
       pub functor_init_source: String,
       pub cutoff: CutoffHandling,
       pub consumes_type_index: bool,
+      pub passes: FragmentPasses,
   }
   ```
 
@@ -704,6 +705,8 @@ standalone case.
   - `cutoff` declares the fragment's per-pair cutoff structure for
     the composer's cutoff-collapse optimisation; see
     `CutoffHandling` below.
+  - `passes` declares which of the pipeline's pair passes evaluate this
+    fragment; see `FragmentPasses` below.
   - `consumes_type_index` declares that the fragment's `evaluate`
     reads the per-atom `i_type` / `j_type` parameters (Lennard-Jones
     sets it `true`; charge-only fragments leave it `false`). The
@@ -724,6 +727,7 @@ standalone case.
   pub enum CutoffHandling {
       Uniform(Real),
       PerPair,
+      Unbounded,
   }
   ```
 
@@ -750,6 +754,38 @@ standalone case.
   reports `Uniform(c)`; a table with mixed entries reports
   `PerPair`. The decision is made once at fragment construction
   time.
+
+  - `Unbounded` — the fragment has no cutoff and is evaluated at every
+    separation. The composer emits no per-fragment guard for it and
+    excludes it from `HEDDLE_JIT_MAX_CUTOFF_SQUARED`, and the passes that
+    apply a max-cutoff mask evaluate it outside that mask. A fragment
+    declares `Unbounded` when the quantity it corrects is itself
+    cutoff-free — the SPME excluded-pair correction offsets a
+    reciprocal-space mesh sum, which has no cutoff, so masking the
+    correction at any radius would leave a long-ranged residue
+    uncorrected (`spme.md`).
+
+- `FragmentPasses` — declares which pair passes evaluate a fragment. <!-- rq-c107b97d -->
+
+  ```rust
+  pub enum FragmentPasses {
+      NeighbourListAndCorrection,
+      CorrectionOnly,
+  }
+  ```
+
+  - `NeighbourListAndCorrection` — the neighbour-list passes (packed-neighbour
+    and single-pair) evaluate the fragment at full strength for every pair they
+    visit, and the correction pass adds `(scale − 1) × evaluate` for each
+    modified pair, so the net per modified pair is `scale × evaluate`
+    (`packed-neighbour-pair-force.md`). Every fragment whose interaction the
+    neighbour list is responsible for declares this.
+  - `CorrectionOnly` — only the correction pass evaluates the fragment, as
+    `(scale − 1) × evaluate`. There is no full-strength neighbour-list term for
+    the correction to complete, because the quantity being corrected was
+    contributed by something outside the pair passes entirely. The SPME
+    excluded-pair fragment declares this: the reciprocal-space mesh has already
+    supplied `1 × erf(α·r)/r` for every pair, modified or not.
 
 - `ForceLaunchBuilder` — opaque argument-builder threaded through <!-- rq-86691f43 -->
   every active slot's bind method. The framework constructs it once
