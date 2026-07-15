@@ -22,7 +22,7 @@ pub use graph::{
 pub use kernels::{
     CSVR_PARTIAL_BLOCKS, ClassForceViews, K_COULOMB_F32, LennardJonesParameterTable,
     SPATIAL_HASH_SCAN_BLOCK_SIZE, class_kick_drift, class_kick_half,
-    andersen_resample, berendsen_compute_factor, berendsen_compute_mu,
+    andersen_resample, andersen_resample_grouped, berendsen_compute_factor, berendsen_compute_mu,
     c_rescale_compute_mu, combine_class_totals,
     compute_block_bbox,
     compute_cell_indices_and_histogram,

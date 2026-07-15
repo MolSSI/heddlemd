@@ -6,7 +6,8 @@
 
 use heddle_md::forces::{AggregateLevel, AngleList, BondList, DihedralList, ExclusionList, ForceField, PotentialRegistry};
 use heddle_md::gpu::{
-    GpuContext, ParticleBuffers, andersen_resample, compute_kinetic_energy, init_device,
+    GpuContext, ParticleBuffers, andersen_resample, andersen_resample_grouped,
+    compute_kinetic_energy, init_device,
 };
 use heddle_md::integrator::IntegratorStepExt;
 use heddle_md::integrator::{
@@ -181,6 +182,73 @@ fn andersen_resample_p_zero_is_identity() {
     assert_eq!(vx, snap_vx);
     assert_eq!(vy, snap_vy);
     assert_eq!(vz, snap_vz);
+}
+
+// The defining invariant of the grouped resample: every atom of a group shares
+// one collision decision. Under holonomic constraints the resample must act on
+// whole rigid molecules — resampling individual atoms and projecting the molecule
+// onto its constraint manifold runs the system cold (see
+// `rqm/integration/andersen.md`). A per-atom resample would let atoms of the same
+// molecule decide independently; this asserts they do not.
+#[test]
+fn andersen_grouped_resample_is_all_or_nothing_per_group() {
+    let gpu = init_device().unwrap();
+    let n_groups = 512usize;
+    let group_size = 3usize;
+    let n = n_groups * group_size;
+    let mass: Real = 1.66e-27;
+    // A sentinel velocity: a resampled atom gets a Maxwell-Boltzmann draw and will
+    // essentially never land exactly on it.
+    let sentinel: Real = 1234.5;
+    let state = ParticleState::new(
+        (0..n).map(|i| (i as Real) * (1.0e-10 / LEN_F) as Real).collect(),
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![sentinel; n],
+        vec![sentinel; n],
+        vec![sentinel; n],
+        vec![mass; n],
+        vec![0.0; n],
+        (0..n as u32).collect(),
+        None,
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+
+    // Contiguous 3-atom groups: offsets [0,3,6,...], indices [0,1,2,3,...].
+    let offsets: Vec<u32> = (0..=n_groups as u32).map(|g| g * group_size as u32).collect();
+    let indices: Vec<u32> = (0..n as u32).collect();
+    let d_offsets = gpu.device.htod_sync_copy(&offsets).unwrap();
+    let d_indices = gpu.device.htod_sync_copy(&indices).unwrap();
+
+    let mut counter = counter_device(&gpu, 1);
+    // p = 0.5 so both outcomes occur across the 512 groups; coherence must hold
+    // for every group regardless.
+    andersen_resample_grouped(
+        &mut buffers, &d_offsets, &d_indices, n_groups, &mut counter, 1,
+        0.5, (300.0 / TEMP_F) as Real,
+    )
+    .unwrap();
+
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let mut fired = 0usize;
+    let mut untouched = 0usize;
+    for g in 0..n_groups {
+        let changed: Vec<bool> = (0..group_size)
+            .map(|a| vx[g * group_size + a] != sentinel)
+            .collect();
+        let all = changed.iter().all(|&c| c);
+        let none = changed.iter().all(|&c| !c);
+        assert!(
+            all || none,
+            "group {g} was partially resampled ({changed:?}) — atoms of a rigid \
+             group must share one collision decision"
+        );
+        if all { fired += 1 } else { untouched += 1 }
+    }
+    // The test is only meaningful if both outcomes actually occurred.
+    assert!(fired > 0 && untouched > 0, "p = 0.5 should fire some groups and not others; got {fired} fired, {untouched} untouched");
 }
 
 // rq-4254b707 rq-299112e9

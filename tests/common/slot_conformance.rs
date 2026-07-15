@@ -109,8 +109,8 @@ pub fn builtin_thermostat_cases() -> Vec<SlotCase> {
         SlotCase {
             kind: "andersen",
             expect: Expect::HoldsTemperature { rel_tol: 0.03 },
-            note: "KNOWN BROKEN: per-atom MB resample injects into constrained DOFs, \
-                   which SETTLE then projects out; settles ~5% cold",
+            note: "stochastic collisions resample whole rigid molecules (per-group), \
+                   so the projection onto the constraint manifold is a correct constrained-MB draw",
         },
     ]
 }

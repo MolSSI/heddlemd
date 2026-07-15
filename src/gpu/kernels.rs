@@ -1276,6 +1276,57 @@ pub fn andersen_resample(
     Ok(())
 }
 
+/// Per-group Andersen resample. One thread per group over `mol_atom_offsets`
+/// (length `n_groups + 1`) and `mol_atom_indices` (length N). A group's
+/// Bernoulli decision fires or skips the whole group together. For singleton
+/// groups this is bit-identical to `andersen_resample`. See
+/// `rqm/integration/andersen.md`.
+#[allow(clippy::too_many_arguments)]
+pub fn andersen_resample_grouped(
+    buffers: &mut ParticleBuffers,
+    mol_atom_offsets: &CudaSlice<u32>,
+    mol_atom_indices: &CudaSlice<u32>,
+    n_groups: usize,
+    draw_counter_device: &mut CudaSlice<u64>,
+    seed: u64,
+    p_collision: Real,
+    kt: Real,
+) -> Result<(), GpuError> {
+    if n_groups == 0 || buffers.particle_count() == 0 {
+        return Ok(());
+    }
+    debug_assert!((0.0..=1.0).contains(&p_collision));
+    debug_assert_eq!(draw_counter_device.len(), 1);
+    let n_groups_u32 = n_groups as u32;
+    let func = buffers.kernels.andersen.andersen_resample_grouped.clone();
+    let cfg = launch_config(n_groups_u32);
+    let seed_lo = seed as u32;
+    let seed_hi = (seed >> 32) as u32;
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.velocities_x,
+                &mut buffers.velocities_y,
+                &mut buffers.velocities_z,
+                &buffers.masses,
+                &buffers.particle_ids,
+                mol_atom_offsets,
+                mol_atom_indices,
+                &*draw_counter_device,
+                seed_lo,
+                seed_hi,
+                p_collision,
+                kt,
+                n_groups_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    increment_u64_device(buffers, draw_counter_device)?;
+    Ok(())
+}
+
 /// Launches the trivial `increment_u64` kernel, which adds 1 to a
 /// single u64 device counter. Used after multi-block Philox kernels
 /// (where reading and writing the counter inside the same kernel is

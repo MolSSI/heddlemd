@@ -1357,17 +1357,26 @@ pub(crate) fn run_md_phase_inner(
         .barostats
         .build_optional(phase.barostat.as_ref(), &setup.gpu, n, n_constraints)
         .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
-    // rq-3e1fba8b — hand the barostat the connectivity-derived molecule
-    // partition and the initial box (the Monte-Carlo barostat uploads
-    // its molecule tables and resolves its default volume step here).
-    if let Some(b) = barostat.as_mut() {
+    // rq-3e1fba8b — hand the slots that need it the connectivity-derived
+    // molecule partition. The Monte-Carlo barostat uploads its molecule tables
+    // and resolves its default volume step here; the Andersen thermostat uploads
+    // the same tables so its stochastic collisions resample whole rigid
+    // molecules rather than individual atoms (required for correctness under
+    // holonomic constraints — see `rqm/integration/andersen.md`).
+    if thermostat.is_some() || barostat.is_some() {
         let molecules = crate::forces::MoleculeList::from_topology(
             n,
             &setup.bond_list,
             &setup.constraint_list,
         );
-        b.init_run(&setup.sim_box, &molecules)
-            .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+        if let Some(t) = thermostat.as_mut() {
+            t.init_run(&molecules)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
+        }
+        if let Some(b) = barostat.as_mut() {
+            b.init_run(&setup.sim_box, &molecules)
+                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+        }
     }
     let mut constraint = setup
         .registries

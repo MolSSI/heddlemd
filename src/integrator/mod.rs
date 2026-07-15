@@ -1057,6 +1057,20 @@ impl Registry<dyn IntegratorBuilder> {
 
 // rq-5d9ed248
 pub trait Thermostat: std::fmt::Debug + Send {
+    /// Hand the thermostat the connectivity-derived molecule partition once,
+    /// at phase setup, before the first step. Mirrors `Barostat::init_run`.
+    ///
+    /// The default is a no-op: most thermostats couple to a global reduction or
+    /// rescale every velocity uniformly and need no per-group structure. A
+    /// thermostat whose action must respect rigid groups overrides this — the
+    /// Andersen thermostat uploads the group tables so its stochastic collisions
+    /// resample whole rigid molecules rather than individual atoms (required for
+    /// correctness under holonomic constraints; see
+    /// `rqm/integration/andersen.md`).
+    fn init_run(&mut self, _molecules: &MoleculeList) -> Result<(), ThermostatError> {
+        Ok(())
+    }
+
     /// Pre-step (leading) coupling half. Called only on coupling steps,
     /// with `dt` already scaled to the effective coupling timestep
     /// `coupling_interval * base_dt`. Default: no-op (post-only

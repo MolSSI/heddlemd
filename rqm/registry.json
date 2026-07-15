@@ -3475,6 +3475,13 @@
     "title": "`kinetic_energy_reduce`",
     "type": "section"
   },
+  "rq-172d6d41": {
+    "decl": "Scenario: The grouped kernel with singletons matches the per-particle kernel",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "The grouped kernel with singletons matches the per-particle kernel",
+    "type": "scenario"
+  },
   "rq-174505f0": {
     "decl": "### Counter packing",
     "file": "integration/mc-barostat",
@@ -3853,6 +3860,13 @@
     ],
     "title": "rescale_positions",
     "type": "api-item"
+  },
+  "rq-19a0f468": {
+    "decl": "Scenario: A group resamples all its atoms or none of them",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "A group resamples all its atoms or none of them",
+    "type": "scenario"
   },
   "rq-19c1c994": {
     "decl": "## Minimal Systems",
@@ -12962,6 +12976,13 @@
     "title": "ResourceSet",
     "type": "api-item"
   },
+  "rq-5d1345d0": {
+    "decl": "Scenario: A constrained rigid-water run reaches its setpoint at every collision rate",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "A constrained rigid-water run reaches its setpoint at every collision rate",
+    "type": "scenario"
+  },
   "rq-5d18fa01": {
     "decl": "Scenario: shake_positions updates half-step velocities consistently with the position correction",
     "file": "integration/shake",
@@ -20874,6 +20895,13 @@
       }
     ],
     "title": "settle_positions converges at production-scale dt with thermal-amplitude displacements",
+    "type": "scenario"
+  },
+  "rq-9642e7c7": {
+    "decl": "Scenario: An unconstrained monatomic run reaches its setpoint at every collision rate",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "An unconstrained monatomic run reaches its setpoint at every collision rate",
     "type": "scenario"
   },
   "rq-964b59fd": {
