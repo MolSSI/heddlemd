@@ -164,57 +164,6 @@ pub struct PackedNeighborData {
     /// Live single-pair count after the most recent rebuild
     /// (`interaction_count[1]` on the device).
     pub single_pairs_count: u32,
-    // rq-03faaf24 — exclusion-tile list. A block pair (bi <= bj) with any
-    // fully-excluded atom pair under the current block membership; the
-    // bulk/single-pair passes omit it and the exclusion-tile pass
-    // computes it with the per-tile bitmask.
-    /// Per-exclusion-tile i-block index. Length `exclusion_tiles_capacity`.
-    pub exclusion_tile_iblocks: CudaSlice<u32>,
-    /// Per-exclusion-tile j-block index (`>= iblock`). Length
-    /// `exclusion_tiles_capacity`.
-    pub exclusion_tile_jblocks: CudaSlice<u32>,
-    /// 1024-bit-per-tile exclusion bitmask, 32 `u32` rows per tile:
-    /// `exclusion_tile_masks[t*32 + i_lane]` bit `j_lane` set = the two
-    /// atoms are fully excluded. Length `exclusion_tiles_capacity * 32`.
-    pub exclusion_tile_masks: CudaSlice<u32>,
-    /// Allocated capacity of the exclusion-tile buffers, in tiles.
-    pub exclusion_tiles_capacity: u32,
-    /// Live exclusion-tile count after the most recent rebuild
-    /// (`interaction_count[2]` on the device).
-    pub exclusion_tiles_count: u32,
-    /// Per-i-block CSR of excluded j-blocks used by
-    /// `find_blocks_with_interactions` to skip exclusion block pairs.
-    /// `excl_jblock_offsets` has length `n_blocks + 1`; the sorted j-block
-    /// indices for i-block `b` are `excl_jblocks[excl_jblock_offsets[b] ..
-    /// excl_jblock_offsets[b+1]]`. Rebuilt each neighbour-list rebuild.
-    pub excl_jblock_offsets: CudaSlice<u32>,
-    /// Flat sorted excluded-j-block indices; see `excl_jblock_offsets`.
-    /// Length `exclusion_tiles_capacity` (each exclusion tile contributes
-    /// one `(bi, bj)` entry to bi's row).
-    pub excl_jblocks: CudaSlice<u32>,
-    // rq-8945395f — per-rebuild device scratch for the on-device
-    // exclusion-tile build. `atom_slot` is the sort inverse (length N);
-    // the `excl_iblock_*` arrays are the counting-sort of modified pairs
-    // by i-block (length n_blocks / n_blocks+1); `excl_pair_bj` /
-    // `excl_pair_lane` hold the per-pair records grouped by i-block
-    // (length = modified-pair count E). None of these grow with the tile
-    // capacity; they are sized once from N, n_blocks, and E.
-    /// Sort inverse `atom_slot[sorted_particle_ids[s]] = s`. Length `N`.
-    pub atom_slot: CudaSlice<u32>,
-    /// Modified pairs per i-block (histogram). Length `n_blocks`.
-    pub excl_iblock_pair_count: CudaSlice<u32>,
-    /// Exclusive scan of `excl_iblock_pair_count`. Length `n_blocks + 1`.
-    pub excl_iblock_pair_offset: CudaSlice<u32>,
-    /// Scatter cursor for the counting-sort. Length `n_blocks`.
-    pub excl_iblock_cursor: CudaSlice<u32>,
-    /// Distinct-j-block (tile) count per i-block. Length `n_blocks`.
-    pub excl_iblock_tile_count: CudaSlice<u32>,
-    /// Per-pair j-block, grouped by i-block. Length `E` (>= 1).
-    pub excl_pair_bj: CudaSlice<u32>,
-    /// Per-pair packed lanes `li | (lj << 6)`, parallel to `excl_pair_bj`.
-    pub excl_pair_lane: CudaSlice<u32>,
-    /// Allocated capacity of `excl_pair_bj` / `excl_pair_lane`, in pairs.
-    pub excl_pair_capacity: u32,
 }
 
 /// Outcome of a `NeighborListState::pre_step` call. `rebuilt` is `true`
@@ -281,16 +230,16 @@ pub struct NeighborListState {
     /// dtoh-free and relies on the per-batch status read for growth.
     /// rq-67a09135
     has_probed: bool,
-    /// Fully-excluded canonical atom pairs `(a, b)` with `a < b`, captured
-    /// once at construction from the exclusion topology. Kept host-side for
+    /// Modified canonical atom pairs `(a, b)` with `a < b`, captured once at
+    /// construction from the exclusion topology. Kept host-side for
     /// diagnostics and for the device upload below. Empty when no slot
     /// consumes exclusions. rq-8945395f
     excluded_pairs: Vec<(u32, u32)>,
     /// Device-resident canonical modified pairs `[a0, b0, a1, b1, …]`
-    /// (`a < b`), uploaded once from `excluded_pairs`. The on-device
-    /// exclusion-tile build maps these through the current
-    /// `sorted_particle_ids` into the exclusion tiles / bitmasks. Length
-    /// `2 * n_modified` (>= 2). rq-8945395f rq-5f871bd5
+    /// (`a < b`), uploaded once from `excluded_pairs`. Consumed by the
+    /// JIT-composed correction pass, which recomputes each modified pair's
+    /// scaled contribution directly. Length `2 * n_modified` (>= 2).
+    /// rq-8945395f rq-5f871bd5
     modified_pairs_dev: CudaSlice<u32>,
     /// Number of canonical modified pairs `E`. rq-8945395f
     n_modified: u32,
@@ -312,10 +261,6 @@ const STATUS_TILES_HIGH_WATER: u32 = 1 << 1;
 const STATUS_SINGLE_PAIRS_HIGH_WATER: u32 = 1 << 2;
 const STATUS_TILES_OVERFLOW: u32 = 1 << 3;
 const STATUS_SINGLE_PAIRS_OVERFLOW: u32 = 1 << 4;
-// rq-67a09135 — exclusion-tile high-water (bit 5) / overflow (bit 6),
-// written by the on-device exclusion-tile build (set_exclusion_status).
-const STATUS_EXCL_TILES_HIGH_WATER: u32 = 1 << 5;
-const STATUS_EXCL_TILES_OVERFLOW: u32 = 1 << 6;
 
 /// O(N) seed capacity for `interacting_tiles`. The buffers are sized
 /// to the *actual* interaction count, never to the `O(n_blocks^2)`
@@ -410,9 +355,8 @@ fn alloc_packed_neighbor_data(
     let interacting_atoms = device
         .alloc_zeros::<u32>(cap_alloc * 32)
         .map_err(GpuError::from)?;
-    // [0] = tile count, [1] = single-pair count, [2] = exclusion-tile
-    // count. rq-03faaf24
-    let interaction_count = device.alloc_zeros::<u32>(3).map_err(GpuError::from)?;
+    // [0] = tile count, [1] = single-pair count.
+    let interaction_count = device.alloc_zeros::<u32>(2).map_err(GpuError::from)?;
     let neighbor_status = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
     let iblock_count = device
         .alloc_zeros::<u32>(n_blocks_alloc)
@@ -439,46 +383,6 @@ fn alloc_packed_neighbor_data(
     let single_pair_atoms = device
         .alloc_zeros::<u32>(2 * single_pairs_capacity as usize)
         .map_err(GpuError::from)?;
-    // rq-03faaf24 — exclusion-tile buffers. Seeded O(N); grown on demand
-    // like the tile list (exclusions are intramolecular, so their count is
-    // a small multiple of n_blocks).
-    let exclusion_tiles_capacity = default_interacting_tiles_capacity(n_blocks).max(1);
-    let exclusion_tile_iblocks = device
-        .alloc_zeros::<u32>(exclusion_tiles_capacity as usize)
-        .map_err(GpuError::from)?;
-    let exclusion_tile_jblocks = device
-        .alloc_zeros::<u32>(exclusion_tiles_capacity as usize)
-        .map_err(GpuError::from)?;
-    let exclusion_tile_masks = device
-        .alloc_zeros::<u32>(exclusion_tiles_capacity as usize * 32)
-        .map_err(GpuError::from)?;
-    let excl_jblock_offsets = device
-        .alloc_zeros::<u32>(n_blocks_alloc + 1)
-        .map_err(GpuError::from)?;
-    let excl_jblocks = device
-        .alloc_zeros::<u32>(exclusion_tiles_capacity as usize)
-        .map_err(GpuError::from)?;
-    // rq-8945395f — on-device exclusion-tile build scratch. The `excl_pair_*`
-    // buffers are seeded to 1 and resized to the modified-pair count `E` by
-    // `set_excluded_pairs` once the topology is known; the n_blocks-sized
-    // scratch is sized here.
-    let atom_slot = device
-        .alloc_zeros::<u32>(particle_count.max(1))
-        .map_err(GpuError::from)?;
-    let excl_iblock_pair_count = device
-        .alloc_zeros::<u32>(n_blocks_alloc)
-        .map_err(GpuError::from)?;
-    let excl_iblock_pair_offset = device
-        .alloc_zeros::<u32>(n_blocks_alloc + 1)
-        .map_err(GpuError::from)?;
-    let excl_iblock_cursor = device
-        .alloc_zeros::<u32>(n_blocks_alloc)
-        .map_err(GpuError::from)?;
-    let excl_iblock_tile_count = device
-        .alloc_zeros::<u32>(n_blocks_alloc)
-        .map_err(GpuError::from)?;
-    let excl_pair_bj = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
-    let excl_pair_lane = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
 
     Ok(PackedNeighborData {
         n_blocks,
@@ -504,21 +408,6 @@ fn alloc_packed_neighbor_data(
         single_pair_atoms,
         single_pairs_capacity,
         single_pairs_count: 0,
-        exclusion_tile_iblocks,
-        exclusion_tile_jblocks,
-        exclusion_tile_masks,
-        exclusion_tiles_capacity,
-        exclusion_tiles_count: 0,
-        excl_jblock_offsets,
-        excl_jblocks,
-        atom_slot,
-        excl_iblock_pair_count,
-        excl_iblock_pair_offset,
-        excl_iblock_cursor,
-        excl_iblock_tile_count,
-        excl_pair_bj,
-        excl_pair_lane,
-        excl_pair_capacity: 1,
     })
 }
 
@@ -566,28 +455,6 @@ impl PackedNeighborData {
         self.single_pair_atoms =
             device.alloc_zeros::<u32>(2 * new_cap as usize)?;
         self.single_pairs_capacity = new_cap;
-        Ok(())
-    }
-
-    /// High-water mark for the exclusion-tile list. rq-67a09135
-    pub fn exclusion_tiles_high_water_mark(&self) -> u32 {
-        ((self.exclusion_tiles_capacity as f64) * self.tile_pair_fill_threshold).floor() as u32
-    }
-
-    /// Grow the exclusion-tile buffers geometrically. Count-free, so it is
-    /// usable in the probe loop and at a steady-state batch boundary.
-    /// rq-67a09135 rq-8945395f
-    pub fn grow_exclusion_tiles(&mut self, device: &Arc<CudaDevice>) -> Result<(), GpuError> {
-        let new_cap_f = (self.exclusion_tiles_capacity as f64) * self.tile_pair_growth_factor;
-        let new_cap = (new_cap_f.ceil() as u32)
-            .max(self.exclusion_tiles_capacity + 1)
-            .max(1);
-        let alloc = new_cap as usize;
-        self.exclusion_tile_iblocks = device.alloc_zeros::<u32>(alloc)?;
-        self.exclusion_tile_jblocks = device.alloc_zeros::<u32>(alloc)?;
-        self.exclusion_tile_masks = device.alloc_zeros::<u32>(alloc * 32)?;
-        self.excl_jblocks = device.alloc_zeros::<u32>(alloc)?;
-        self.exclusion_tiles_capacity = new_cap;
         Ok(())
     }
 }
@@ -878,7 +745,7 @@ impl NeighborListState {
             // The JIT pair-force kernel reads the entry count from device
             // memory (so a captured CUDA graph picks up the live value);
             // mirror the host-side count to interaction_count[0].
-            let count_host = [packed.interacting_tiles_count, 0u32, 0u32];
+            let count_host = [packed.interacting_tiles_count, 0u32];
             device
                 .htod_sync_copy_into(&count_host, &mut packed.interaction_count)
                 .map_err(GpuError::from)?;
@@ -1410,10 +1277,6 @@ impl NeighborListState {
             }
         }
 
-        // interaction_count[2] (the exclusion-tile count) was written on the
-        // device by the step-3b build and preserved through the find_blocks
-        // loop (which zeroes only [0]/[1]); no host write is needed. rq-8945395f
-
         // 5. Sort entries by i-block so the force kernel can process
         //    consecutive same-i-block entries with register carryover
         //    on the i-side accumulator. The scan's trailing sentinel comes
@@ -1512,15 +1375,6 @@ impl NeighborListState {
                     buffer: "single_pair_atoms",
                 });
             }
-            // rq-8945395f — exclusion-tile overflow: the on-device build
-            // produced more tiles than capacity. Halt (unreachable in a
-            // well-behaved run — the tile count is bounded by the fixed
-            // modified-pair count and the probe sizes capacity accordingly).
-            if (status & STATUS_EXCL_TILES_OVERFLOW) != 0 {
-                return Err(NeighborListError::PackedNeighborOverflow {
-                    buffer: "exclusion_tiles",
-                });
-            }
             // High-water: the build came within `tile_pair_fill_threshold`
             // of capacity while dropping nothing. Grow geometrically before
             // the rebuild so the resized buffers are populated this call.
@@ -1534,16 +1388,6 @@ impl NeighborListState {
             if (status & STATUS_SINGLE_PAIRS_HIGH_WATER) != 0 {
                 if let Some(p) = self.packed.as_mut() {
                     p.grow_single_pairs(&self.device)
-                        .map_err(NeighborListError::Gpu)?;
-                    grew = true;
-                }
-                rebuild_required = true;
-            }
-            // rq-8945395f — exclusion-tile high-water: grow the tile buffers
-            // geometrically before the rebuild repopulates them.
-            if (status & STATUS_EXCL_TILES_HIGH_WATER) != 0 {
-                if let Some(p) = self.packed.as_mut() {
-                    p.grow_exclusion_tiles(&self.device)
                         .map_err(NeighborListError::Gpu)?;
                     grew = true;
                 }
@@ -1876,13 +1720,6 @@ crate::gpu_kernels! {
         compute_block_bbox,
         find_blocks_with_interactions,
         set_neighbor_status_bits,
-        build_atom_slot,
-        count_pairs_by_iblock,
-        serial_prefix_scan_u32,
-        scatter_pairs_by_iblock,
-        sort_and_count_tiles_by_iblock,
-        emit_tiles_by_iblock,
-        set_exclusion_status,
         finalize_packed_forces,
         histogram_entries_by_iblock,
         scatter_entries_by_iblock,

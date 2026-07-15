@@ -480,7 +480,7 @@ When `particle_count == 1`:
 - Trivial construction produces a single-element
   `sorted_particle_ids` containing `[0]`. No pair-force kernel work
   runs because no partners exist; the force kernel's diagonal
-  exclusion-tile path covers the self-self case as a skip.
+  self-comparison (`i == j`) is skipped.
 
 When the `ForceField` has zero pair-force consumers and SPME is
 inactive, no `NeighborListState` is built; the framework's

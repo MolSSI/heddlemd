@@ -35,7 +35,6 @@ pub use kernels::{
     finalize_packed_forces,
     find_blocks_with_interactions,
     set_neighbor_status_bits,
-    build_exclusion_tiles_device,
     PrefixScanSentinel,
     histogram_entries_by_iblock,
     scatter_entries_by_iblock,
