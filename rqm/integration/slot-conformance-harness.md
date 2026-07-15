@@ -61,8 +61,21 @@ The harness is table-driven, one `SlotCase` per registered kind:
 Barostat cases pair with CSVR specifically because CSVR's own conformance case
 passes, which makes a failing barostat case attributable to the barostat.
 
-Means are taken over the second half of each run. The preset starts from a
-lattice and carries a relaxation transient, and the run length is set by the
+Every case **minimizes before the dynamics run**. The purpose of the harness is
+to check that a slot holds its setpoint, not that it survives a pathological
+initial condition. A raw random-orientation water lattice is exactly such a
+pathology: its intermolecular close contacts carry enough potential energy that
+its constant-energy temperature runs many times the setpoint as that energy
+converts to kinetic, which is a violent transient no production run would hand a
+thermostat. A steepest-descent minimization relaxes the contacts first, so the
+run starts from a reasonable state. Minimizing does not hide a slot's defect: the
+faults the harness catches — a thermostat coupling to the wrong kinetic energy, a
+barostat blind to the constraint virial — are steady-state biases that the slot
+reaches from any start over the run's measurement window, independent of the
+initial condition (verified: the barostat cases still fail on a build with the
+constraint-virial defect after minimization).
+
+Means are taken over the second half of each run. The run length is set by the
 slowest-coupling slot in the table rather than the fastest: a case that fails a
 conforming slot for not having equilibrated yet reports a defect that does not
 exist.
@@ -277,6 +290,7 @@ Feature: Slot conformance on dense liquid water
   @rq-eb7c5c08
   Scenario: A thermostat holds its setpoint
     Given a registered thermostat at a 298.15 K setpoint and a constant box
+    And the preset is minimized before the dynamics run
     When the conformance case is run
     Then the mean temperature over the run's second half is within its rel_tol of the setpoint
 

@@ -213,10 +213,42 @@ The matching builder deserialises a typed `NoseHooverChainParams` from the `[the
   half-step. Optional; defaults to `3`. Accepted values: `1`, `3`, `5`,
   `7`. Any other value is rejected at config-load time.
 - `n_resp: u32` — number of times each Yoshida sub-step is repeated
-  (the "RESP" sub-cycle count). Optional; defaults to `1`. Must be
+  (the "RESP" sub-cycle count). Optional; defaults to `5`. Must be
   `≥ 1`. Larger values divide the chain step into smaller integration
-  intervals; useful when the chain modes are unusually stiff relative
-  to `dt`.
+  intervals. This is the chain integration's stability knob (see
+  *Stability and the initial condition*): the chain equations of motion
+  are stiff when the thermostat forces are large — far from equilibrium,
+  as when a run starts before the kinetic energy has settled — and a
+  single sub-step (`n_resp = 1`) integrates them too coarsely then,
+  overshooting and diverging. The default of `5` integrates the chain
+  stably from an ordinary minimized start; a strongly non-equilibrium
+  start (an unrelaxed lattice) may need more, but the more robust remedy
+  is to equilibrate first (below).
+
+### Stability and the initial condition <!-- rq-0a0d6c8f -->
+
+The chain is a deterministic feedback controller with inertia (the chain
+masses `Q_j`). Given a kinetic-energy excursion it responds, overshoots,
+and rings back — the standard, correct behaviour near equilibrium, where
+excursions are small. Far from equilibrium the excursion is large: a raw
+random-orientation molecular lattice carries severe intermolecular close
+contacts whose potential energy converts to kinetic energy over the first
+few steps (its constant-energy temperature runs many times the setpoint),
+and the chain, driven that hard, can overshoot past the point where the
+`n_resp = 1` integration stays stable and diverge to a non-finite state.
+
+This is a property of the deterministic chain, not a defect: the
+stochastic (CSVR, Andersen) and strongly-damped (Berendsen) thermostats
+absorb such a transient where the chain does not. Two independent
+mitigations apply, and a run far from equilibrium should use both:
+
+- **Equilibrate before switching to the chain.** Relax the structure with
+  a minimization phase and thermalise with a robust thermostat
+  (Berendsen or CSVR) before the Nosé-Hoover chain production phase. From
+  an equilibrated start the chain holds its setpoint indefinitely.
+- **Raise `n_resp`.** Finer RESP sub-cycling keeps the chain integration
+  stable under a larger transient. The default `5` suffices for an
+  ordinary minimized start.
 
 ## Chain state <!-- rq-71f469ae -->
 
@@ -625,7 +657,7 @@ Feature: Nosé-Hoover chain (NHC) thermostat
   Scenario: Construct NoseHooverChainThermostat with default chain parameters
     Given a ThermostatKind::NoseHooverChain {
       temperature: 300.0, tau: 1.0e-13,
-      chain_length: 3, yoshida_order: 3, n_resp: 1 }
+      chain_length: 3, yoshida_order: 3, n_resp: 5 }
     When registry.build_optional(Some(&kind), device, particle_count=4, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
     And the underlying NoseHooverChainThermostat has chain_length=3

@@ -104,7 +104,8 @@ pub fn builtin_thermostat_cases() -> Vec<SlotCase> {
         SlotCase {
             kind: "nose-hoover-chain",
             expect: Expect::HoldsTemperature { rel_tol: 0.03 },
-            note: "KNOWN BROKEN: diverges to NaN under SETTLE at dt = 2 fs",
+            note: "deterministic chain; needs an equilibrated start (harness minimizes) and \
+                   the default n_resp=5 RESPA sub-cycling to integrate the chain stably",
         },
         SlotCase {
             kind: "andersen",
@@ -322,6 +323,18 @@ pub fn volume_for_density(n_mol: usize, rho: f64) -> f64 {
 /// in the table needs ~10 ps to shed it. A shorter run would fail a working
 /// thermostat for not having equilibrated yet — a test that fails for the wrong
 /// reason is worse than no test.
+/// The MD phase of a run that may be preceded by a minimization phase. The
+/// conformance runs minimize first (see `run_thermostat_case`), so the physics
+/// series lives in the last phase, not `phases[0]`.
+fn md_phase(summary: &heddle_md::runner::RunSummary) -> &PhaseSummary {
+    summary
+        .phases
+        .iter()
+        .rev()
+        .find(|p| !p.physics.is_empty())
+        .expect("no MD phase with a physics series")
+}
+
 pub fn run_thermostat_case(case: &SlotCase) {
     let Expect::HoldsTemperature { rel_tol } = case.expect else {
         panic!("thermostat case `{}` must declare HoldsTemperature", case.kind);
@@ -329,13 +342,14 @@ pub fn run_thermostat_case(case: &SlotCase) {
     let dir = Case::new(&format!("conf_therm_{}", case.kind));
     let cfg = SystemBuilder::dense_spce_water(CONFORMANCE_SIDE)
         .constraints("settle")
+        .minimize(true)
         .thermostat(case.kind, SETPOINT_K)
         .n_steps(10_000)
         .log_every(100)
         .trajectory_every(0)
         .write(&dir);
     let summary = run_case(&cfg);
-    check_mean_temperature(&summary.phases[0], SETPOINT_K, rel_tol, case.kind, case.note);
+    check_mean_temperature(md_phase(&summary), SETPOINT_K, rel_tol, case.kind, case.note);
 }
 
 /// Run one barostat case: dense SPC/E water, SETTLE, CSVR, NPT at 1 atm.
@@ -352,6 +366,7 @@ pub fn run_barostat_case(case: &SlotCase) {
     let dir = Case::new(&format!("conf_baro_{}", case.kind));
     let cfg = SystemBuilder::dense_spce_water(CONFORMANCE_SIDE)
         .constraints("settle")
+        .minimize(true)
         .thermostat("csvr", SETPOINT_K)
         .barostat(case.kind, SETPOINT_PA)
         .n_steps(25_000)
@@ -360,7 +375,7 @@ pub fn run_barostat_case(case: &SlotCase) {
         .write(&dir);
     let summary = run_case(&cfg);
     check_mean_density(
-        &summary.phases[0],
+        md_phase(&summary),
         CONFORMANCE_N_MOL,
         lo,
         hi,

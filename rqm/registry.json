@@ -1478,6 +1478,14 @@
     "title": "ShakeConstraintsState::new rejects a constraint with i == j",
     "type": "scenario"
   },
+  "rq-0a0d6c8f": {
+    "decl": "### Stability and the initial condition",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "Stability and the initial condition",
+    "type": "section"
+  },
   "rq-0a18c7c2": {
     "decl": "Scenario: Missing temperature rejected",
     "file": "integration/c-rescale-barostat",

@@ -2172,7 +2172,7 @@ tau = 1.0e-13"#,
     // params carry the optional fields at their default values.
     assert_eq!(t.params.get("chain_length").and_then(|v| v.as_integer()), Some(3));
     assert_eq!(t.params.get("yoshida_order").and_then(|v| v.as_integer()), Some(3));
-    assert_eq!(t.params.get("n_resp").and_then(|v| v.as_integer()), Some(1));
+    assert_eq!(t.params.get("n_resp").and_then(|v| v.as_integer()), Some(5));
 }
 
 #[test]

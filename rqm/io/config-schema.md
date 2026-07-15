@@ -546,7 +546,12 @@ Fields accepted for `kind = "nose-hoover-chain"`:
   half-step. Optional; defaults to `3`. Accepted values: `1`, `3`,
   `5`, `7`.
 - `n_resp: u32` — chain RESP sub-cycle count. Optional; defaults to
-  `1`. Must be `≥ 1`.
+  `5`. Must be `≥ 1`. This is the chain integration's stability knob:
+  a single sub-cycle (`n_resp = 1`) integrates the chain too coarsely
+  when the thermostat forces are large (far from equilibrium) and can
+  diverge; the default `5` is stable from an ordinary minimized start
+  (see `integration/nose-hoover-chain.md`, *Stability and the initial
+  condition*).
 
 Fields accepted for `kind = "csvr"`:
 

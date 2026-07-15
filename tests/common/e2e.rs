@@ -79,6 +79,7 @@ pub struct SystemBuilder {
     spme: bool,
     dt: f64,
     n_steps: u64,
+    minimize: bool,
     log_every: u64,
     trajectory_every: u64,
     seed: u64,
@@ -98,6 +99,7 @@ impl SystemBuilder {
             spme: false,
             dt,
             n_steps: 100,
+            minimize: false,
             log_every: 1,
             trajectory_every: 1,
             seed: 1,
@@ -173,6 +175,17 @@ impl SystemBuilder {
 
     pub fn n_steps(mut self, n: u64) -> Self {
         self.n_steps = n;
+        self
+    }
+
+    /// Prepend a steepest-descent minimization phase. A raw
+    /// random-orientation water lattice carries severe intermolecular close
+    /// contacts (its NVE temperature runs ~1000 K as that potential energy
+    /// converts to kinetic), which is an unfair starting point for a
+    /// thermostat: it tests surviving a violent transient, not holding a
+    /// setpoint. Minimizing relaxes the contacts first.
+    pub fn minimize(mut self, on: bool) -> Self {
+        self.minimize = on;
         self
     }
 
@@ -465,6 +478,11 @@ mode = "all-pairs"
             temperature,
             ..
         } = *self;
+        let min_phase = if self.minimize {
+            "[[minimization]]\nname = \"min\"\n\n[minimization.algorithm]\nkind = \"steepest-descent\"\nforce_tolerance = 1.0e-9\nenergy_tolerance = 1.0e-5\nmax_iterations = 500\n\n[minimization.output]\nminlog_every = 100\ntrajectory_every = 0\n\n"
+        } else {
+            ""
+        };
         let extra = self.phase_extra();
         // alpha ~ 3.5 / r_cut_real; the FFT grid is ~1 A per point, rounded to a
         // small-prime-factored size for cuFFT.
@@ -496,7 +514,7 @@ cuda_graphs_disable = true
 seed = {seed}
 temperature = {temperature}
 
-[[phase]]
+{min_phase}[[phase]]
 name = "run"
 n_steps = {n_steps}
 dt = {dt:e}

@@ -74,6 +74,10 @@ writes a runnable input set, and a set of assertions over the results of a run.
       (`ionic_lattice`).
     - `.units(system)` — selects `atomic` (default) or `si` for the written
       input and output files.
+    - `.minimize(on)` — prepends a steepest-descent `[[minimization]]` phase
+      before the MD phase, relaxing the preset's initial structure. A run that
+      minimizes has the minimization as its first phase, so its MD physics
+      series is in the second phase, not `phases[0]`.
     - `.dt(dt)`, `.n_steps(n)`, `.log_every(k)`, `.trajectory_every(k)`,
       `.seed(s)` — timestep, step count, output cadences, and the run's RNG
       seed.
