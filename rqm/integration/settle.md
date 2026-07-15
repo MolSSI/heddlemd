@@ -112,13 +112,33 @@ geometry `(ra, rb, rc)`:
    mass exactly and restores all three intramolecular distances to f32
    round-off in a single evaluation — there is no iteration and no convergence
    tolerance. After the reset, the half-step velocity of every atom is updated
-   by `v_i ← v_i + (r_i^constrained − r_i^unconstrained) / dt`, the constrained
-   positions are written back to `positions_*` in the same lattice image the
-   atom occupied before the call, and the per-atom position-level
-   constraint-virial contribution is written into
+   by `v_i ← v_i + (r_i^constrained − r_i^unconstrained) / dt`, each
+   constrained position is wrapped back into the primary image of the
+   simulation box (with `images_x/y/z` advanced on any crossing, exactly as
+   the drift kernel does — see `wrap_and_count_triclinic` in
+   `kernels/pbc.cuh`) before being written to `positions_*`, and the per-atom
+   position-level constraint-virial contribution is written into
    `constraint_virial[base + i]` as
    `(m_i / dt²) · ((r_i^constrained − r_i^unconstrained) · r_i^COM)`, where
    `r_i^COM = r_i^constrained − com`.
+
+   The re-wrap matters. Drift wraps every atom into the primary image, so
+   the raw current position `cur[a]` the correction is applied to sits
+   inside; the correction itself is small (`~1e-3 a_0` RMS at 298 K with
+   `dt = 2 fs`), but for an H that landed just inside a face after drift a
+   correction of that size in the outward direction can push it just past
+   the face. Without the re-wrap the position sits outside the primary
+   image until the *next* step's drift wraps it — long enough for the
+   trajectory writer to catch it, which breaks the "every trajectory frame
+   is a valid init file" round-trip documented in `io/trajectory-output.md`
+   and the primary-image invariant on `positions_x/y/z` in
+   `particle-state.md`. Advancing the image counters on any wrap keeps
+   `unwrapped = wrapped + N·L` exact for unwrapped-coordinate analyses
+   (diffusion, MSD). The re-wrap is a translation by an integer combination
+   of lattice vectors and is therefore invariant under every downstream
+   consumer's minimum-image reconstruction, so it does not perturb the
+   constraint distances or the virial. Bit-exactness is preserved: the wrap
+   uses `floor(s + 0.5)` on the deterministic post-correction position.
 
 3. `apply_after_kick` invokes `settle_velocities`, which projects the
    post-kick velocities onto the velocity manifold of the constrained
@@ -445,6 +465,9 @@ extern "C" __global__ void settle_snapshot(
 
 extern "C" __global__ void settle_positions(
     Real4 *posq,
+    int *images_x,                    // advanced on any wrap of the corrected position
+    int *images_y,
+    int *images_z,
     Real *velocities_x,
     Real *velocities_y,
     Real *velocities_z,
@@ -487,6 +510,9 @@ extern "C" __global__ void settle_virial_scatter(
 
 extern "C" __global__ void settle_positions_no_velocity(
     Real4 *posq,
+    int *images_x,                    // advanced on any wrap of the corrected position
+    int *images_y,
+    int *images_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -707,8 +733,12 @@ Feature: SETTLE rigid-water constraints
     When apply_after_drift is called with dt = 82.68 atu (~ 2 fs)
     Then every constraint distance, computed under minimum image, equals its target r0
       to within 1.0e-4 a_0 relative
-    And the per-atom global positions remain in the same lattice image they occupied
-      before the call (no spurious wrap of any atom)
+    And every atom's written position lies inside the primary image of the simulation
+      box (its fractional coordinates lie in [-1/2, +1/2))
+    And for any atom whose written position crossed a face relative to its pre-call
+      position, the corresponding image counter images_x/y/z has been advanced by the
+      integer number of lattice vectors that were subtracted; other atoms' image
+      counters are unchanged
     And the mass-weighted centre of mass, computed by bringing every atom into atom 0's
       image, equals the COM of the unconstrained post-drift positions to within 1.0e-3 a_0
 

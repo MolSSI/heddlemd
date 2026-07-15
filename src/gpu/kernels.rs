@@ -2772,6 +2772,9 @@ pub fn settle_positions(
         grid: per_element(n_groups),
         args: (
             &mut particle_buffers.posq,
+            &mut particle_buffers.images_x,
+            &mut particle_buffers.images_y,
+            &mut particle_buffers.images_z,
             &mut particle_buffers.velocities_x,
             &mut particle_buffers.velocities_y,
             &mut particle_buffers.velocities_z,
@@ -2865,6 +2868,9 @@ pub fn settle_positions_no_velocity(
         grid: per_element(n_groups),
         args: (
             &mut particle_buffers.posq,
+            &mut particle_buffers.images_x,
+            &mut particle_buffers.images_y,
+            &mut particle_buffers.images_z,
             group_atoms,
             group_atom_offset,
             group_atom_count,
