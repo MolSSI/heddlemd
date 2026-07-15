@@ -495,7 +495,7 @@ time with
   - `"csvr"` — stochastic NVT via canonical sampling velocity
     rescaling (Bussi-Donadio-Parrinello, 2007). See
     `integration/csvr.md`.
-  - `"andersen"` — stochastic NVT via per-particle Maxwell-Boltzmann
+  - `"andersen"` — stochastic NVT via per-group Maxwell-Boltzmann
     resampling (Andersen, 1980). See `integration/andersen.md`.
   - `"berendsen"` — deterministic weak-coupling thermostat (Berendsen
     et al., 1984). Suitable for **equilibration only**; does not

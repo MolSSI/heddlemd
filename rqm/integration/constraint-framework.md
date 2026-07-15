@@ -143,8 +143,9 @@ The projection is, at fixed positions, a linear projection of the
 velocity vector onto the constraint-orthogonal subspace. A global
 uniform velocity rescale (CSVR, Nosé-Hoover chain, Berendsen, and the
 scalar velocity rescale of the c-rescale barostat) commutes with it and
-preserves the manifold. A per-particle velocity resample (Andersen) does
-not preserve the manifold and does not commute; running a projection
+preserves the manifold. A whole-group velocity resample (Andersen — its
+collisions resample rigid molecules, not individual atoms) does not preserve
+the manifold and does not commute; running a projection
 last repairs the constraint after the resample. Firing the terminal
 projection last is thus correct for every thermostat and barostat in the
 default registry, and no thermostat is excluded from composition with a
@@ -200,7 +201,7 @@ projection is unconditional. It is not gated on `coupling_interval`.
 
 The plan's terminal `ConstraintPoint { AfterKick }` still runs last: for a
 uniform rescale it costs nothing after the leading projection (zero
-impulse), and it remains load-bearing for Andersen's per-particle resample
+impulse), and it remains load-bearing for Andersen's whole-group resample
 and for a barostat velocity rescale, neither of which is guaranteed to
 preserve the manifold.
 
@@ -236,7 +237,7 @@ projection (where the impulse is real, since the velocities are still off
 the manifold). The terminal `settle_velocities` / `rattle_velocities`
 contributes nothing to the published virial; it is there to repair the
 manifold, not to measure it. Its own repair impulse is zero for a uniform
-rescale, and for Andersen's per-particle resample the impulse virial it
+rescale, and for Andersen's whole-group resample the impulse virial it
 would carry is simply dropped — an accepted approximation, since that
 impulse answers a stochastic resample rather than a physical force.
 

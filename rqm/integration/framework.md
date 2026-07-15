@@ -79,7 +79,7 @@ The default registry exposes four thermostats:
 | -------------------- | ----------------------------------------------------------- | --------------------- |
 | `nose-hoover-chain`  | deterministic NVT via MKT Nosé-Hoover-chain Trotter step    | `nose-hoover-chain.md`|
 | `csvr`               | stochastic NVT via canonical sampling velocity rescaling    | `csvr.md`             |
-| `andersen`           | stochastic NVT via per-particle Maxwell-Boltzmann resampling| `andersen.md`         |
+| `andersen`           | stochastic NVT via per-group Maxwell-Boltzmann resampling| `andersen.md`         |
 | `berendsen`          | weak-coupling (equilibration only — not canonical)          | `berendsen.md`        |
 
 A thermostat couples on a fixed cadence — every `coupling_interval`

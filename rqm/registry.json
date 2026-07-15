@@ -3478,7 +3478,12 @@
   "rq-172d6d41": {
     "decl": "Scenario: The grouped kernel with singletons matches the per-particle kernel",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "The grouped kernel with singletons matches the per-particle kernel",
     "type": "scenario"
   },
@@ -3864,7 +3869,12 @@
   "rq-19a0f468": {
     "decl": "Scenario: A group resamples all its atoms or none of them",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A group resamples all its atoms or none of them",
     "type": "scenario"
   },

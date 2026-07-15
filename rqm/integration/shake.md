@@ -173,7 +173,7 @@ projection costs ~nothing physically — the velocities it receives are
 already on the manifold (a uniform thermostat or barostat rescale
 preserves it), so the RATTLE iteration converges immediately and its
 impulse, and hence its virial contribution, is zero. It stays load-bearing
-for a per-particle Andersen resample and for a barostat velocity rescale,
+for a whole-group Andersen resample and for a barostat velocity rescale,
 neither of which preserves the manifold.
 
 ## Constraint Virial <!-- rq-4617c285 -->

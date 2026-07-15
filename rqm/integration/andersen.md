@@ -191,8 +191,10 @@ The matching builder deserialises a typed `AndersenParams` from the `[thermostat
   Required. Finite and strictly positive. Independent of
   `simulation.temperature`, which governs the initial-velocity
   sampler.
-- `collision_rate: f64` — per-particle stochastic collision frequency
-  `ν` in inverse atomic time units (`1 / (hbar / E_h)`). Required.
+- `collision_rate: f64` — the stochastic collision frequency `ν` in
+  inverse atomic time units (`1 / (hbar / E_h)`), at which each rigid group
+  (each atom, on a monatomic run) is independently selected for a resample.
+  Required.
   Finite and `≥ 0` (`0` degenerates to NVE — no resampling — and is
   permitted as a diagnostic mode). Typical values for liquid water are
   `10¹¹–10¹² s⁻¹`, i.e. `~2.4e-6 – 2.4e-5` in atomic units (collision
@@ -248,9 +250,10 @@ decisions and produce byte-identical post-step velocities.
 Two runs with identical `(seed, temperature, collision_rate)` and
 identical initial particle state on the same GPU produce
 byte-identical trajectory and log files. Philox is stateless; the
-per-particle Bernoulli decision is a pure function of `(seed,
-draw_counter, particle_id)`; and the Maxwell-Boltzmann draws use the
-same per-axis convention as `langevin-baoab.md`.
+per-group Bernoulli decision is a pure function of `(seed, draw_counter,
+group's first atom's particle_id)` and each atom's Maxwell-Boltzmann draw a
+pure function of `(seed, draw_counter, particle_id)`, using the same
+per-axis convention as `langevin-baoab.md`.
 
 ## Andersen conserved quantity <!-- rq-bfa0cc5a -->
 

@@ -190,7 +190,38 @@ fn andersen_resample_p_zero_is_identity() {
 // onto its constraint manifold runs the system cold (see
 // `rqm/integration/andersen.md`). A per-atom resample would let atoms of the same
 // molecule decide independently; this asserts they do not.
-#[test]
+// With a singleton partition the grouped kernel must be bit-identical to the
+// per-particle kernel: this is what guarantees the per-group fix leaves an
+// unconstrained (monatomic) run unperturbed.
+#[test] // rq-172d6d41
+fn andersen_grouped_with_singletons_matches_per_particle() {
+    let gpu = init_device().unwrap();
+    let n = 256usize;
+    let state = atomic_state(n);
+    let seed = 7u64;
+    let p: Real = 0.5;
+    let kt = (300.0 / TEMP_F) as Real;
+
+    // Per-particle kernel.
+    let mut buf_pp = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut c_pp = counter_device(&gpu, 3);
+    andersen_resample(&mut buf_pp, &mut c_pp, seed, p, kt).unwrap();
+    let pp = gpu.device.dtoh_sync_copy(&buf_pp.velocities_x).unwrap();
+
+    // Grouped kernel with a singleton partition.
+    let mut buf_g = ParticleBuffers::new(&gpu, &state).unwrap();
+    let offsets: Vec<u32> = (0..=n as u32).collect();
+    let indices: Vec<u32> = (0..n as u32).collect();
+    let d_off = gpu.device.htod_sync_copy(&offsets).unwrap();
+    let d_idx = gpu.device.htod_sync_copy(&indices).unwrap();
+    let mut c_g = counter_device(&gpu, 3);
+    andersen_resample_grouped(&mut buf_g, &d_off, &d_idx, n, &mut c_g, seed, p, kt).unwrap();
+    let g = gpu.device.dtoh_sync_copy(&buf_g.velocities_x).unwrap();
+
+    assert_eq!(pp, g, "grouped-with-singletons must match the per-particle kernel byte-for-byte");
+}
+
+#[test] // rq-19a0f468
 fn andersen_grouped_resample_is_all_or_nothing_per_group() {
     let gpu = init_device().unwrap();
     let n_groups = 512usize;
