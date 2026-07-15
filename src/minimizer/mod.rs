@@ -204,6 +204,7 @@ fn ceil_div_block(n: u32) -> u32 {
 
 pub(crate) fn sd_compute_step(
     buffers: &mut ParticleBuffers,
+    sim_box: &SimulationBox,
     step_size: Real,
     inv_f_max: Real,
 ) -> Result<(), GpuError> {
@@ -224,9 +225,13 @@ pub(crate) fn sd_compute_step(
             cfg,
             (
                 &mut buffers.posq,
+                &mut buffers.images_x,
+                &mut buffers.images_y,
+                &mut buffers.images_z,
                 &buffers.forces_x,
                 &buffers.forces_y,
                 &buffers.forces_z,
+                sim_box.lattice_device(),
                 step_size,
                 inv_f_max,
                 n_u32,
@@ -242,6 +247,9 @@ pub(crate) fn sd_snapshot(
     snapshot_x: &mut CudaSlice<Real>,
     snapshot_y: &mut CudaSlice<Real>,
     snapshot_z: &mut CudaSlice<Real>,
+    images_snapshot_x: &mut CudaSlice<i32>,
+    images_snapshot_y: &mut CudaSlice<i32>,
+    images_snapshot_z: &mut CudaSlice<i32>,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -260,9 +268,15 @@ pub(crate) fn sd_snapshot(
             cfg,
             (
                 &buffers.posq,
+                &buffers.images_x,
+                &buffers.images_y,
+                &buffers.images_z,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,
+                images_snapshot_x,
+                images_snapshot_y,
+                images_snapshot_z,
                 n_u32,
             ),
         )
@@ -276,6 +290,9 @@ pub(crate) fn sd_restore(
     snapshot_x: &CudaSlice<Real>,
     snapshot_y: &CudaSlice<Real>,
     snapshot_z: &CudaSlice<Real>,
+    images_snapshot_x: &CudaSlice<i32>,
+    images_snapshot_y: &CudaSlice<i32>,
+    images_snapshot_z: &CudaSlice<i32>,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -294,9 +311,15 @@ pub(crate) fn sd_restore(
             cfg,
             (
                 &mut buffers.posq,
+                &mut buffers.images_x,
+                &mut buffers.images_y,
+                &mut buffers.images_z,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,
+                images_snapshot_x,
+                images_snapshot_y,
+                images_snapshot_z,
                 n_u32,
             ),
         )

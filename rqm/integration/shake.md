@@ -62,13 +62,36 @@ distance):
    ```
 
    After the loop, the half-step velocity for every atom in the group
-   is updated by `v_i ← v_i + (r_i − r_i^{unconstrained}) / dt`, the
-   constrained positions are written back to `positions_*`, and the
+   is updated by `v_i ← v_i + (r_i − r_i^{unconstrained}) / dt`, each
+   constrained position is wrapped back into the primary image of the
+   simulation box (with `images_x/y/z` advanced on any crossing, exactly
+   as the drift kernel does — see `wrap_and_count_triclinic` in
+   `kernels/pbc.cuh`) before being written to `positions_*`, and the
    per-atom position-level constraint-virial contribution is written
    into `constraint_virial[3 * group_offset + i]`. The virial formula
    is `(m_i / dt²) · ((r_i − r_i^{unconstrained}) · r_i^{COM})` where
    `r_i^{COM} = r_i − r_COM` and `r_COM` is the group's mass-weighted
    centre of mass (preserved by SHAKE).
+
+   The re-wrap matters. Drift wraps every atom into the primary image,
+   so the raw current position the SHAKE iteration starts from sits
+   inside; the accumulated per-iteration correction is small (~1e-3 a₀
+   RMS at thermal MD amplitudes with `dt = 2 fs`, larger for
+   minimization trial steps), but for an atom that landed just inside a
+   face after drift a correction of that size in the outward direction
+   can push it just past the face. Without the re-wrap the position
+   sits outside the primary image until the next step's drift wraps it
+   — long enough for the trajectory writer to catch it, which breaks
+   the "every trajectory frame is a valid init file" round-trip
+   documented in `io/trajectory-output.md` and the primary-image
+   invariant on `positions_x/y/z` in `particle-state.md`. Advancing the
+   image counters on any wrap keeps `unwrapped = wrapped + N·L` exact
+   for unwrapped-coordinate analyses (diffusion, MSD). The re-wrap is a
+   translation by an integer combination of lattice vectors and is
+   therefore invariant under every downstream consumer's minimum-image
+   reconstruction, so it does not perturb the constraint distances or
+   the virial. Bit-exactness is preserved: the wrap uses
+   `floor(s + 0.5)` on the deterministic post-iteration position.
 
 3. `apply_after_kick` invokes `rattle_velocities`, which iteratively
    projects post-kick velocities onto the velocity manifold of the
@@ -111,7 +134,14 @@ distance):
    direction `g_k` is evaluated at the *current* (off-manifold)
    positions rather than at a snapshot (minimization has no notion of
    a pre-drift frame), and velocities and the constraint-virial buffer
-   are not modified.
+   are not modified. The re-wrap into the primary image and the
+   `images_x/y/z` update on any crossing are shared with
+   `shake_positions` — see step 2 — for the same reasons: after a
+   minimizer trial step the incoming positions can be well outside the
+   primary image (an oversized step size, or a warm-up state), and the
+   projection can push atoms further; writing back without re-wrapping
+   would leak the invariant violation into the trajectory (when the
+   minimization phase's `[minimization.output].trajectory_every > 0`).
 
 ### Iteration count and convergence <!-- rq-2d336703 -->
 
@@ -465,6 +495,9 @@ extern "C" __global__ void shake_positions(
     float *positions_x,
     float *positions_y,
     float *positions_z,
+    int *images_x,                  // advanced on any wrap of the corrected position
+    int *images_y,
+    int *images_z,
     float *velocities_x,
     float *velocities_y,
     float *velocities_z,
@@ -515,6 +548,9 @@ extern "C" __global__ void shake_positions_no_velocity(
     float *positions_x,
     float *positions_y,
     float *positions_z,
+    int *images_x,                  // advanced on any wrap of the corrected position
+    int *images_y,
+    int *images_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -735,7 +771,7 @@ Feature: SHAKE + RATTLE rigid constraints
     When apply_after_drift is called with dt = 2.0e-15 s
     Then constraint_virial on the device contains three nonzero entries for this group
 
-  @rq-7a0a23e3
+  @rq-9746fb53
   Scenario: shake_positions handles a water group straddling a periodic boundary
     Given a constructed ShakeConstraintsState with one SPC/E water group
     And a small orthorhombic simulation box (Lx = Ly = Lz = 10.0 a₀)
@@ -747,12 +783,46 @@ Feature: SHAKE + RATTLE rigid constraints
       thermal MD timestep)
     Then every constraint distance (O–H1, O–H2, H1–H2), computed under minimum-image,
       equals its target r₀ to within 1.0e-4 a₀ relative
-    And the per-atom global positions remain in the same lattice image they were in
-      before the call (no spurious wrap of any atom)
+    And every atom's written position lies inside the primary image of the simulation
+      box (its fractional coordinates lie in [-1/2, +1/2))
+    And for any atom whose written position crossed a face relative to its pre-call
+      position, the corresponding image counter images_x/y/z has been advanced by the
+      integer number of lattice vectors that were subtracted; other atoms' image
+      counters are unchanged
     And the mass-weighted centre of mass, computed by bringing every atom into atom 0's
       image, equals the same COM of the unconstrained post-drift positions to within
       1.0e-3 a₀
     And the per-group sum Σ_i constraint_virial[i] is finite
+
+  @rq-39ce1e28
+  Scenario: shake_positions writes every atom into the primary image when a correction
+    would otherwise leave it outside
+    Given a constructed ShakeConstraintsState with one SPC/E water group in an
+      orthorhombic box (Lx = Ly = Lz = 10.0 a₀)
+    And pre-call positions placing atom a₁ at fractional coordinate +0.5 − 1.0e-4
+      along +x (just inside the +x face) with images_x[a₁] = 0 initially
+    And unconstrained post-drift positions such that the SHAKE iteration's cumulative
+      correction on a₁ is +1.0e-3 a₀ in the +x direction, sufficient to push its raw
+      corrected position past +Lx/2
+    When apply_after_drift is called with dt = 82.68 atu
+    Then the written position of a₁ has fractional coordinate in [-1/2, +1/2)
+    And images_x[a₁] has been advanced by exactly +1 (from 0 to +1)
+    And images_y[a₁] and images_z[a₁] are unchanged
+    And the sum positions_x[a₁] + images_x[a₁] · Lx is bit-identical to the raw
+      corrected position that would have been written without the re-wrap
+
+  @rq-9910f6e0
+  Scenario: shake_positions_no_velocity re-wraps and updates image counters
+    identically to shake_positions
+    Given the same setup as the preceding "straddling a periodic boundary" scenario,
+      but calling apply_position_projection_only (via shake_positions_no_velocity)
+      instead of apply_after_drift
+    Then every atom's written position lies inside the primary image of the box
+    And for any atom whose written position crossed a face relative to its pre-call
+      position, images_x/y/z has been advanced by the integer number of lattice
+      vectors that were subtracted
+    And velocities_x/y/z and constraint_virial are byte-identical to their pre-call
+      values (this variant does not touch velocities or the virial)
 
   @rq-a0174216
   Scenario: shake_positions converges at production-scale dt with thermal-amplitude

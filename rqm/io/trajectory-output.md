@@ -106,20 +106,22 @@ stores Bohr internally and the writer applies the output-direction
 length conversion before formatting each column. Positions are
 written in their current (live) wrapped value: each particle lies
 inside the primary image of the simulation box (its fractional
-coordinates are in `[-1/2, 1/2)³`; see `simulation-box.md`). The drift
-kernels (`kernels/integrate.cu`) and SETTLE's position-projection kernels
-(`settle_positions` and `settle_positions_no_velocity` in
-`kernels/settle.cu`) each re-wrap into the primary image on write, so
-positions read out for the trajectory are already-wrapped and every
-trajectory frame is a valid init file. For an orthorhombic box this
-reduces to `pos_x ∈ [-lx/2, lx/2)` etc.
+coordinates are in `[-1/2, 1/2)³`; see `simulation-box.md`). Every
+kernel that mutates positions in place re-wraps into the primary image
+on write and advances `images_x/y/z` on any crossing, so positions read
+out for the trajectory are already-wrapped and every trajectory frame
+is a valid init file. The mutators are:
 
-**Known gap:** SHAKE's position projection (`kernels/shake.cu`) does not
-yet re-wrap. A run using SHAKE (rather than SETTLE) can therefore produce
-trajectory frames whose positions sit a few `1e-3 a_0` past a face,
-which the init parser will reject when the frame is fed back in. The
-fix is mechanical — mirror the wrap+image-count update SETTLE now does at
-its writeback — and is tracked separately.
+- the drift kernels in `kernels/integrate.cu`;
+- SETTLE's position-projection kernels `settle_positions` and
+  `settle_positions_no_velocity` in `kernels/settle.cu`;
+- SHAKE's position-projection kernels `shake_positions` and
+  `shake_positions_no_velocity` in `kernels/shake.cu`;
+- the steepest-descent minimizer's `sd_compute_step` in
+  `kernels/minimize.cu`.
+
+For an orthorhombic box the primary-image condition reduces to
+`pos_x ∈ [-lx/2, lx/2)` etc.
 
 Image columns (when `Properties` declares `image:I:3`) are the per-
 particle integer image triple `(images_x[i], images_y[i],

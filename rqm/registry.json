@@ -612,10 +612,6 @@
         "kind": "code"
       },
       {
-        "file": "src/forces/neighbor_list.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/forces/topology.rs",
         "kind": "code"
       }
@@ -4708,6 +4704,13 @@
     "title": "A settle [constraints] row with the wrong atom count is rejected by the parser",
     "type": "scenario"
   },
+  "rq-1ead4839": {
+    "decl": "Scenario: SD accepted trial that crosses a face wraps positions and advances images",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD accepted trial that crosses a face wraps positions and advances images",
+    "type": "scenario"
+  },
   "rq-1eaff437": {
     "decl": "Scenario: collision_rate = 0 leaves velocities unchanged by the resample",
     "file": "integration/andersen",
@@ -8635,6 +8638,13 @@
     "refs": [],
     "title": "Algorithm",
     "type": "section"
+  },
+  "rq-39ce1e28": {
+    "decl": "Scenario: shake_positions writes every atom into the primary image when a correction",
+    "file": "integration/shake",
+    "refs": [],
+    "title": "shake_positions writes every atom into the primary image when a correction",
+    "type": "scenario"
   },
   "rq-3a1eea58": {
     "decl": "Scenario: Scale = 1.0 is equivalent to no exclusion",
@@ -17241,18 +17251,6 @@
     "title": "Builder validate_params rejects an unknown field",
     "type": "scenario"
   },
-  "rq-7a0a23e3": {
-    "decl": "Scenario: shake_positions handles a water group straddling a periodic boundary",
-    "file": "integration/shake",
-    "refs": [
-      {
-        "file": "tests/shake.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "shake_positions handles a water group straddling a periodic boundary",
-    "type": "scenario"
-  },
   "rq-7a124d43": {
     "decl": "- `Thermostat::apply_post(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`",
     "file": "integration/framework",
@@ -18583,6 +18581,13 @@
     "title": "Missing seed rejected",
     "type": "scenario"
   },
+  "rq-84a2c415": {
+    "decl": "Scenario: SD rejected trial with a mid-trial wrap restores both positions and images",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD rejected trial with a mid-trial wrap restores both positions and images",
+    "type": "scenario"
+  },
   "rq-84b2667f": {
     "decl": "## Launch Configuration",
     "file": "integration/c-rescale-barostat",
@@ -19158,10 +19163,6 @@
       },
       {
         "file": "src/forces/neighbor_list.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
         "kind": "code"
       }
     ],
@@ -21036,6 +21037,13 @@
     "title": "TrajectoryFrameHeader",
     "type": "api-item"
   },
+  "rq-9746fb53": {
+    "decl": "Scenario: shake_positions handles a water group straddling a periodic boundary",
+    "file": "integration/shake",
+    "refs": [],
+    "title": "shake_positions handles a water group straddling a periodic boundary",
+    "type": "scenario"
+  },
   "rq-975b5ae0": {
     "decl": "Scenario: Newton's third law is bit-exact for non-boundary displacements",
     "file": "forces/lj-pair-force",
@@ -21239,6 +21247,13 @@
       }
     ],
     "title": "Harmonic slot selects only harmonic bonds from a mixed list",
+    "type": "scenario"
+  },
+  "rq-9910f6e0": {
+    "decl": "Scenario: shake_positions_no_velocity re-wraps and updates image counters",
+    "file": "integration/shake",
+    "refs": [],
+    "title": "shake_positions_no_velocity re-wraps and updates image counters",
     "type": "scenario"
   },
   "rq-9913daee": {
@@ -28520,6 +28535,14 @@
     "title": "Toggling the f64 feature forces a kernel recompile",
     "type": "scenario"
   },
+  "rq-cd4193f0": {
+    "decl": "### Snapshot and restore",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Snapshot and restore",
+    "type": "section"
+  },
   "rq-cd4827b8": {
     "decl": "- `KernelArgType` — the CUDA type of one kernel parameter. Fixes the",
     "file": "forces/jit-composed-pair-force",
@@ -30520,12 +30543,7 @@
     "decl": "## Construction Pipeline",
     "file": "forces/packed-neighbour-pair-force",
     "level": 2,
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Construction Pipeline",
     "type": "section"
   },
@@ -34864,10 +34882,6 @@
       },
       {
         "file": "src/forces/mod.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
         "kind": "code"
       }
     ],
