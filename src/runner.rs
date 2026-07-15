@@ -142,8 +142,17 @@ pub struct PhaseSummary {
     pub kind: &'static str,
     /// For minimization phases: the convergence reason as a short
     /// token (`"force_tolerance"`, `"energy_tolerance"`,
-    /// `"force_zero"`, `"max_iterations"`). `None` for MD phases.
+    /// `"force_zero"`, `"step_floor"`, `"max_iterations"`). `None`
+    /// for MD phases.
     pub convergence: Option<&'static str>,
+    /// For minimization phases: the `max_force` at the final accepted
+    /// state (N). Populated for every minimization phase; consumed by
+    /// the CLI summary formatter to name the residual gradient when
+    /// the convergence reason is `step_floor` (that reason does not
+    /// imply `F_max ≤ force_tolerance`, so surfacing the value lets
+    /// the user judge whether the state is acceptable for downstream
+    /// dynamics). `None` for MD phases.
+    pub min_final_max_force: Option<f64>,
     /// The phase's physics series, one entry per emitted CSV log row and
     /// in the same order; empty when `log_every == 0`. Captured from the
     /// same forces-and-scalars evaluation that produces each log row, so
@@ -1797,6 +1806,7 @@ pub(crate) fn run_md_phase_inner(
         elapsed_micros: phase_elapsed.as_micros(),
         kind: "md",
         convergence: None,
+        min_final_max_force: None,
         // rq-0286c77d
         physics,
     })
@@ -2167,6 +2177,7 @@ pub(crate) fn run_minimization_phase_inner(
         elapsed_micros: phase_elapsed.as_micros(),
         kind: "minimization",
         convergence: Some(reason.token()),
+        min_final_max_force: Some(final_report.max_force),
         // rq-0286c77d — minimization phases capture no physics series.
         physics: Vec::new(),
     })
@@ -3346,10 +3357,26 @@ fn cli_main_run(rest: Vec<String>) -> u8 {
                 };
                 if ps.kind == "minimization" {
                     let conv = ps.convergence.unwrap_or("unknown");
-                    println!(
-                        "[heddlemd] phase `{}`: {} iters in {} (converged: {}, frames: {}, log rows: {})",
-                        ps.name, ps.n_steps, disp, conv, ps.frames_written, ps.log_rows_written
-                    );
+                    // rq-6eb845c5 — StepFloor is a numerical-progress
+                    // exhaustion, not a physical-tolerance convergence.
+                    // Name the final F_max so the user can judge the
+                    // residual gradient at hand-off; every other
+                    // convergence reason implies `F_max ≤
+                    // force_tolerance` or similar physical criterion
+                    // and doesn't need the annotation.
+                    if conv == "step_floor" {
+                        let f_max = ps.min_final_max_force.unwrap_or(f64::NAN);
+                        println!(
+                            "[heddlemd] phase `{}`: {} iters in {} (converged: {}, F_max = {:.3e} N, frames: {}, log rows: {})",
+                            ps.name, ps.n_steps, disp, conv, f_max,
+                            ps.frames_written, ps.log_rows_written
+                        );
+                    } else {
+                        println!(
+                            "[heddlemd] phase `{}`: {} iters in {} (converged: {}, frames: {}, log rows: {})",
+                            ps.name, ps.n_steps, disp, conv, ps.frames_written, ps.log_rows_written
+                        );
+                    }
                 } else {
                     println!(
                         "[heddlemd] phase `{}`: {} steps in {} (frames: {}, log rows: {})",

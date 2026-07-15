@@ -45,6 +45,16 @@ pub enum MinimizerConvergence {
     /// `F_max == 0.0` at the accepted positions (already at minimum,
     /// or `particle_count == 0`).
     ForceZero,
+    /// The adaptive step size fell to or below the algorithm's
+    /// minimum-useful floor. Reached when either a rejection cascade
+    /// shrinks `step` past `STEP_FLOOR` — at which point the trial
+    /// position update `step · F / F_max` is an f32 no-op on the
+    /// max-force atom, so no accept can ever fire — or the
+    /// user-configured `initial_step` is itself already at or below
+    /// the floor. Reported as a successful convergence: the runner
+    /// exits code 0, logs the reason and the final `F_max`, then
+    /// proceeds to the next phase.
+    StepFloor,
     /// Iteration cap reached without any physical criterion firing.
     MaxIterations,
 }
@@ -56,6 +66,7 @@ impl MinimizerConvergence {
             MinimizerConvergence::ForceTolerance => "force_tolerance",
             MinimizerConvergence::EnergyTolerance => "energy_tolerance",
             MinimizerConvergence::ForceZero => "force_zero",
+            MinimizerConvergence::StepFloor => "step_floor",
             MinimizerConvergence::MaxIterations => "max_iterations",
         }
     }

@@ -112,16 +112,29 @@ energy `E_k`, and current step size `step_k`:
      below), set `step_{k+1} = step_decrease · step_k`. Forces are
      re-evaluated at the restored positions before the next iteration's
      trial.
-5. **Check convergence.** A successful step ends the phase when either
-   physical criterion is met:
+5. **Check convergence.** The phase ends when any of three criteria is
+   met after step 4 has finalised `x_{k+1}`, `E_{k+1}`, and `step_{k+1}`:
    - `F_max(x_{k+1}) ≤ force_tolerance` — `MinimizerConvergence::ForceTolerance`.
+     Fires only on an accepted iteration (rejection leaves `F_max`
+     unchanged and re-checking it would be redundant).
    - `|E_k - E_{k+1}| / max(|E_k|, |E_{k+1}|, ε_floor) ≤ energy_tolerance`
      and at least one prior step was accepted —
      `MinimizerConvergence::EnergyTolerance`, with
      `ε_floor = 1.0e-30` to avoid divide-by-zero when both energies
-     are zero.
-   Rejected steps never trigger convergence; the energy-tolerance check
-   compares the last two distinct accepted energies.
+     are zero. Rejected steps never trigger this check; it compares the
+     last two distinct accepted energies.
+   - `step_{k+1} ≤ STEP_FLOOR`, where `STEP_FLOOR = 1.0e-6 a_0`
+     (≈ `5.29e-17 m`) is the smallest step below which the trial
+     position update `step · F/F_max` becomes an f32 no-op on the
+     max-force atom at any physically reasonable position magnitude
+     (positions are stored in `[-L/2, +L/2)` and f32 rounding at 30 `a_0`
+     is ~`3.6e-6 a_0`). Fires on every iteration — accepted or rejected —
+     so that a rejection cascade shrinking `step` below `STEP_FLOOR`
+     terminates the phase immediately with
+     `MinimizerConvergence::StepFloor` rather than looping through the
+     remaining `max_iterations` with a step that cannot move an atom.
+     If the user-configured `initial_step` is itself below `STEP_FLOOR`,
+     the check fires at iteration 0 without any trial evaluation.
 6. **Check iteration cap.** When the iteration counter `k` reaches
    `max_iterations`, the phase ends with a **non-convergence failure**.
    The runner surfaces this as
@@ -296,8 +309,18 @@ per-phase line MD phases emit:
 
 Carries: phase name, accepted-iteration count (or `max_iterations`
 on non-convergence), wall-clock elapsed time, convergence reason
-(`force_tolerance`, `energy_tolerance`, `force_zero`, or
+(`force_tolerance`, `energy_tolerance`, `force_zero`, `step_floor`, or
 `max_iterations`), trajectory frame count, and minlog row count.
+
+When the convergence reason is `step_floor`, the summary line
+additionally names the final `F_max` at the terminating state so the
+user can judge whether the residual gradient is small enough for
+downstream dynamics — the criterion that fired is about numerical
+progress, not physical convergence:
+
+```
+[heddlemd] phase `min`: 145 iters in 320 ms (converged: step_floor, F_max = 3.7e-9 N, frames: 0, log rows: 2)
+```
 
 ## Schema <!-- rq-38d5e7a8 -->
 
@@ -577,6 +600,7 @@ produce byte-identical post-minimization positions and byte-identical
       ForceTolerance,
       EnergyTolerance,
       ForceZero,
+      StepFloor,
       MaxIterations,
   }
   ```
@@ -587,9 +611,28 @@ produce byte-identical post-minimization positions and byte-identical
   - `ForceZero` — `F_max == 0.0` at iteration `k`'s accepted state
     (force evaluation produced an exact-zero gradient). Used for the
     `particle_count == 0` case and for already-converged inputs.
+  - `StepFloor` — `step` fell to or below `STEP_FLOOR = 1.0e-6 a_0`
+    (≈ `5.29e-17 m`), the smallest step at which the trial position
+    update `step · F/F_max` remains a bit-detectable change to at least
+    the max-force atom's f32 position. Reached when either (a) a
+    rejection cascade shrinks `step` past the floor, indicating the
+    algorithm can no longer descend at f32 precision, or (b) the
+    user-configured `initial_step` is itself already at or below the
+    floor. Reported as a successful convergence: the runner logs the
+    reason and the final `F_max`, then proceeds to the next phase.
   - `MaxIterations` — the iteration counter reached
     `max_iterations` without any physical criterion firing. Drives
     `RunnerError::MinimizerNonConvergence`.
+
+  The three "success" variants (`ForceTolerance`, `EnergyTolerance`,
+  `ForceZero`) name a state where the geometry is at least locally
+  optimal by an explicit physical criterion. `StepFloor` names a state
+  where the algorithm has done as well as it can at f32 precision;
+  `F_max` at that state may still exceed `force_tolerance`, but the
+  configuration is stable enough to hand off to the next phase (in
+  practice, MD from such a configuration behaves the same as MD from a
+  strictly force-converged one — the residual gradient is orders of
+  magnitude below thermal-scale forces).
 
 - `MinimizerError` — error type returned by every trait method. <!-- rq-78041a25 -->
   Variants:
@@ -1108,6 +1151,36 @@ Feature: Steepest-descent energy minimizer
     When the minimization phase is invoked
     Then the phase terminates after iteration 0 with reason ForceZero
     And no SD step is taken
+
+  @rq-305fefce
+  Scenario: Rejection cascade shrinks step below STEP_FLOOR and terminates with StepFloor
+    Given a SD slot with force_tolerance = 1.0e-15, energy_tolerance = 1.0e-15,
+      initial_step = 1.0e-12 a_0, step_decrease = 0.5, max_iterations = 1000
+    And a system in a numerical plateau where every trial with any step > STEP_FLOOR
+      produces E_trial >= E_k (every iteration is rejected)
+    When the minimization phase is invoked
+    Then the phase terminates after at most 30 iterations with reason StepFloor
+    And step at termination is <= STEP_FLOOR (1.0e-6 a_0)
+    And the runner's phase summary line contains "converged: step_floor"
+    And the runner's phase summary line names the final F_max
+    And the process exits with code 0
+    And the subsequent phase in the config runs to completion
+
+  @rq-7782386f
+  Scenario: initial_step at or below STEP_FLOOR terminates at iteration 0 with StepFloor
+    Given a SD slot with initial_step = 1.0e-7 a_0 (below STEP_FLOOR = 1.0e-6 a_0)
+    When the minimization phase is invoked
+    Then the phase terminates after iteration 0 with reason StepFloor
+    And no trial force evaluation is performed
+    And the .minlog contains the step-0 row plus the final convergence row
+
+  @rq-391ed193
+  Scenario: StepFloor termination is treated as convergence, not error
+    Given a SD phase followed by an MD [[phase]] in the same config
+    And the SD phase terminates with reason StepFloor
+    When heddlemd run is invoked
+    Then the process exits with code 0
+    And the MD phase runs from the geometry the SD phase produced
 
   # --- Output ---
 

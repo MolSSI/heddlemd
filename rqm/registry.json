@@ -7390,6 +7390,18 @@
     "title": "SlotOutputView",
     "type": "api-item"
   },
+  "rq-305fefce": {
+    "decl": "Scenario: Rejection cascade shrinks step below STEP_FLOOR and terminates with StepFloor",
+    "file": "minimization/steepest-descent",
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Rejection cascade shrinks step below STEP_FLOOR and terminates with StepFloor",
+    "type": "scenario"
+  },
   "rq-306def4b": {
     "decl": "Scenario: Atomic-mode file passes lattice, positions, and velocities through unchanged",
     "file": "io/init-state-file",
@@ -8508,6 +8520,18 @@
       }
     ],
     "title": "Reject when explicit IDs have the wrong length",
+    "type": "scenario"
+  },
+  "rq-391ed193": {
+    "decl": "Scenario: StepFloor termination is treated as convergence, not error",
+    "file": "minimization/steepest-descent",
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "StepFloor termination is treated as convergence, not error",
     "type": "scenario"
   },
   "rq-392ac5d3": {
@@ -15564,7 +15588,12 @@
     "decl": "### Final summary",
     "file": "minimization/steepest-descent",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Final summary",
     "type": "section"
   },
@@ -16816,6 +16845,18 @@
     "refs": [],
     "title": "BondedForceFragment",
     "type": "api-item"
+  },
+  "rq-7782386f": {
+    "decl": "Scenario: initial_step at or below STEP_FLOOR terminates at iteration 0 with StepFloor",
+    "file": "minimization/steepest-descent",
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "initial_step at or below STEP_FLOOR terminates at iteration 0 with StepFloor",
+    "type": "scenario"
   },
   "rq-779092ca": {
     "decl": "- `TimingsError` — error type. Variants:",

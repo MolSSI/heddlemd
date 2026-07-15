@@ -282,6 +282,7 @@ pub fn synthetic_phase(samples: &[(f64, f64)]) -> PhaseSummary {
         elapsed_micros: 0,
         kind: "md",
         convergence: None,
+        min_final_max_force: None,
         physics: samples
             .iter()
             .enumerate()

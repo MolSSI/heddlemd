@@ -17,6 +17,17 @@ use super::{
 };
 use crate::precision::Real;
 
+/// Absolute floor on the adaptive step size, in engine (atomic) units
+/// of length (Bohr radii, `a_0`). Below this value the trial position
+/// update `step · F / F_max` is a bit-level no-op on the max-force atom
+/// at any physically reasonable position magnitude — positions are
+/// stored in `[-L/2, +L/2)` and f32 relative rounding at `~30 a_0` is
+/// `~3.6e-6 a_0`, so `1.0e-6 a_0` is the tightest value at which every
+/// simulation-scale coordinate can still be modified by at least one
+/// f32 ULP. Reaching this floor terminates the SD phase with
+/// `MinimizerConvergence::StepFloor`.
+pub(crate) const STEP_FLOOR: Real = 1.0e-6;
+
 // rq-0a2ca9ac — `[minimization.algorithm]` schema fields
 #[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
@@ -326,6 +337,23 @@ impl Minimizer for SteepestDescentMinimizer {
                         .max(1.0e-30)
         {
             return Some(MinimizerConvergence::EnergyTolerance);
+        }
+        // Step floor: the adaptive step size has decayed (through a
+        // rejection cascade) to or below the smallest value that can
+        // still move the max-force atom's f32 position. Below this
+        // floor every subsequent trial is a bit-identical no-op — the
+        // rejected trial energy equals the accepted energy exactly, so
+        // no accept can ever fire and the phase would otherwise spin
+        // to `max_iterations` on wasted work. This check fires on
+        // accepted iterations too, so a run that legitimately settles
+        // into a plateau at step floor terminates immediately rather
+        // than one iteration later. `self.current_step` is the step
+        // size the NEXT trial would use (already updated by step 4 of
+        // the algorithm — accepted iterations grow it, rejected ones
+        // shrink it), which is exactly what we want to compare against
+        // the floor. At iteration 0 this is `initial_step`.
+        if self.current_step <= STEP_FLOOR {
+            return Some(MinimizerConvergence::StepFloor);
         }
         None
     }
