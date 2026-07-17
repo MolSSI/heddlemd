@@ -1,5 +1,5 @@
 ---
-name: plan-feature
+name: gr-plan
 description: Helps the user plan a feature. Use when the user asks for help designing or planning a feature, or when the user asks for assistance writing, modifying, fleshing out, completing, expanding, or detailing a requirements file.
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Write
 ---
@@ -97,15 +97,23 @@ should look like a from-scratch description of the current intent.
 
 ## Example Requirements Files
 
-A complete example requirements file is available at `.claude/skills/plan-feature/bse.md`. Read this file.
+A complete example requirements file is available at `.guardrails/skills/gr-plan/bse.md`. Read this file.
 
 ## Feature Scope
 
 Features should be as small and self-contained as reasonably possible. Consider whether the user's feature idea can be cleanly subdivided into smaller components. If so, use the AskUserQuestion tool to ask the user if it is acceptable to subdivide the feature into multiple smaller requirements files corresponding to each of these natural subdivisions.
 
-## Ask Clarifying Questions
+## Clarify the Plan
 
-Use the AskUserQuestion tool to ask the user clarifying questions regarding the planned feature. Anticipate edge cases, and ask the user how they should be handled. Batch related questions into a single call. Continue requesting clarification from the user until every identified edge case has an assigned handling strategy and the API surface is fully specified.
+Identify unresolved decisions whose answers would materially change the requirements,
+implementation, compatibility, or user-visible behavior.
+
+If any such ambiguity remains, use AskUserQuestion to ask the user before writing the
+requirements. Batch related questions and continue until every material decision is resolved or
+explicitly deferred.
+
+If the request and existing project context already resolve all material decisions, do not ask
+ceremonial questions. Record any non-obvious assumptions in the requirements and proceed.
 
 ## Markdown File Location
 
@@ -129,6 +137,7 @@ In-place edits to existing files extend whatever API section is already present 
 any). Do not introduce a Feature API section solely to document a small behaviour
 tweak; the section structure of an in-place edit should match the size and shape of
 the change.
+
 
 For example, a feature that implements a function in Rust might include:
 
@@ -162,6 +171,7 @@ For example, a feature that implements a function in Rust might include:
   - `InvalidResponse(String)` — the BSE returned a response that could not be parsed as valid JSON.
 ```
 
+
 ## Gherkin Scenarios Section
 
 A new requirements file must include a section for Gherkin Scenarios. These scenarios
@@ -176,6 +186,7 @@ do not add one solely because of a small in-place edit.
 When the feature is later implemented, these scenarios will be used to construct unit tests, and they should therefore be designed to be suitable for this purpose. It should ideally be straightforward and reasonable to construct a single unit test corresponding to each scenario.
 
 The following provides a subset of the Gherkin scenarios that might be included in the Gherkin Scenarios section:
+
 
 ```gherkin
 Feature: Fetch basis set from Basis Set Exchange
@@ -210,6 +221,7 @@ Feature: Fetch basis set from Basis Set Exchange
     And no file is written to disk
 ```
 
+
 ## Other Sections
 
 Add any other sections that are useful for specifying the feature requirements. Examples:
@@ -227,7 +239,7 @@ file must declare; see *Current-State Framing*.
 ## Traceability IDs
 
 Every requirements file uses stable opaque IDs (e.g. `rq-3a7f1c2e`) to tag headings, API items,
-and Gherkin scenarios. These IDs are managed by `.claude/skills/plan-feature/rqm.sh`.
+and Gherkin scenarios. These IDs are managed by `.guardrails/skills/gr-plan/rqm.sh`.
 
 **Do not write placeholder IDs.** When drafting new requirements, leave all headings, API items,
 and Gherkin scenarios without any `rq-` annotation. Do not use `@rq-PENDING`,
@@ -237,8 +249,8 @@ automatically; placeholder text prevents it from doing so and must be cleaned up
 **After writing or modifying any requirements file**, run these two commands in order:
 
 ```
-.claude/skills/plan-feature/rqm.sh stamp <path-to-file>
-.claude/skills/plan-feature/rqm.sh index
+.guardrails/skills/gr-plan/rqm.sh stamp <path-to-file>
+.guardrails/skills/gr-plan/rqm.sh index
 ```
 
 `stamp` assigns fresh IDs to any entities that do not yet have one; it never changes existing IDs.
@@ -248,10 +260,15 @@ automatically; placeholder text prevents it from doing so and must be cleaned up
 ID and need more context about what it refers to, use:
 
 ```
-.claude/skills/plan-feature/rqm.sh show rq-XXXXXXXX
+.guardrails/skills/gr-plan/rqm.sh show rq-XXXXXXXX
 ```
 
 This prints the type, file, title, declaration line, and source references for that ID. Use this
 whenever you find an `rq-` token in a source file comment and need to understand the requirement it
 implements before proposing changes.
 
+
+## Project-Specific Extensions
+
+Read `.guardrails/skills/gr-plan/local.md` and follow any instructions it contains. Where those
+instructions conflict with the instructions above, `local.md` takes precedence.

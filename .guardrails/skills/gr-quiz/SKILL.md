@@ -1,5 +1,5 @@
 ---
-name: quiz
+name: gr-quiz
 description: Gives the user a quick quiz to test code comprehension.
 allowed-tools: Read, Grep, Glob
 ---
@@ -15,3 +15,8 @@ Question.
 **3.** Answer 3
 **4.** Answer 4
 
+
+## Project-Specific Extensions
+
+Read `.guardrails/skills/gr-quiz/local.md` and follow any instructions it contains. Where those
+instructions conflict with the instructions above, `local.md` takes precedence.

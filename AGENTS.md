@@ -1,4 +1,5 @@
 # Project Philosophy
+
 - Prefer standard idioms
 - Avoid anti-patterns
 - Avoid security vulnerabilities
@@ -8,4 +9,5 @@
 - Be hesitant to introduce dependencies for small tasks
 
 # Architecture
-- See @rqm/ARCHITECTURE.md for high-level system design
+
+- See `rqm/ARCHITECTURE.md` for the high-level system design.

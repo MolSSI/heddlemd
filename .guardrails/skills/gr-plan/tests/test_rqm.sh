@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/test_rqm.sh — tests for rqm.sh (one test per Gherkin scenario)
+# tests/test_rqm.sh — agent-neutral tests for rqm.sh (one test per Gherkin scenario)
 set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/rqm.sh"
@@ -127,12 +127,7 @@ EOF
   rqm stamp rqm/test.md
   assert_file_contains rqm/test.md '@rq-[0-9a-f]{8}'
   # Tag must appear before Scenario:
-  python3 -c "
-lines=open('rqm/test.md').readlines()
-for i,l in enumerate(lines):
-    if 'Scenario:' in l:
-        assert '@rq-' in lines[i-1], 'tag not before Scenario:'
-"
+  awk '/Scenario:/{ if (previous !~ /@rq-/) exit 1 } { previous=$0 }' rqm/test.md
 }
 
 t_stamp_does_not_change_tagged_scenario() {
@@ -221,6 +216,24 @@ pub fn my_fn() {}
 EOF
   rqm index
   assert_file_contains rqm/registry.json '"src/lib.rs"'
+}
+
+t_index_records_python_source_ref() {
+  cat > rqm/test.md <<'EOF'
+# Feature: Test <!-- rq-aaaaaaaa -->
+## Feature API <!-- rq-bbbbbbbb -->
+- `my_fn()` <!-- rq-9b4d2f1a -->
+## Gherkin Scenarios
+```gherkin
+Feature: X
+```
+EOF
+  cat > src/lib.py <<'EOF'
+# rq-9b4d2f1a
+def my_fn(): ...
+EOF
+  rqm index
+  assert_file_contains rqm/registry.json '"src/lib.py"'
 }
 
 t_index_deduplicates_refs_from_same_file() {
@@ -540,6 +553,7 @@ tests=(
   t_stamp_no_duplicate_ids
   t_index_builds_registry
   t_index_records_source_ref
+  t_index_records_python_source_ref
   t_index_deduplicates_refs_from_same_file
   t_index_records_cross_ref_in_md
   t_index_is_idempotent

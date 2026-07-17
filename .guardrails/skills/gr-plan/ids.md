@@ -2,7 +2,7 @@
 
 This feature defines a scheme for assigning stable, opaque identifiers to requirements entities
 (files, sections, API items, and Gherkin scenarios) and provides a standalone bash script,
-`rqm.sh`, located at `.claude/skills/plan-feature/rqm.sh`, that stamps, indexes, and validates
+`rqm.sh`, located at `.guardrails/skills/gr-plan/rqm.sh`, that stamps, indexes, and validates
 those identifiers across the codebase. The goal is to make it straightforward to locate every
 affected artefact when a requirement changes.
 
@@ -70,8 +70,9 @@ An ID is "referenced" by a source file whenever any comment line contains the to
 `rq-XXXXXXXX` (matching the regex `rq-[0-9a-f]{8}`). Multiple references to the same ID in the
 same file at different lines are each recorded as a separate reference entry.
 
-Source file types scanned for references: `.rs` files under `src/`, and `.md` files under `rqm/`
-(to capture cross-references between requirements documents).
+Source file types scanned for references: `.rs` and `.py` files under `src/` (and under `tests/`
+when that directory exists), and `.md` files under `rqm/` (to capture cross-references between
+requirements documents).
 
 Example (Rust):
 ```rust
@@ -80,6 +81,15 @@ pub fn guess_hcore(...) { ... }
 
 #[test] // rq-7c1e5d3b
 fn two_by_two_c_is_orthonormal() { ... }
+```
+
+Example (Python):
+```python
+# rq-9b4d2f1a
+def guess_hcore(...): ...
+
+# rq-7c1e5d3b
+def test_two_by_two_c_is_orthonormal(): ...
 ```
 
 ---
@@ -140,14 +150,14 @@ Fields per entry:
 
 ## Tool: rqm.sh
 
-A standalone bash script located at `.claude/skills/plan-feature/rqm.sh`. Requires `bash` (≥ 4.0),
+A standalone bash script located at `.guardrails/skills/gr-plan/rqm.sh`. Requires `bash` (≥ 4.0),
 standard POSIX utilities (`grep`, `find`, `sed`, `awk`), and `jq` (for reading and writing the
-JSON registry). A companion test suite lives at `.claude/skills/plan-feature/tests/test_rqm.sh`.
+JSON registry). A companion test suite lives at `.guardrails/skills/gr-plan/tests/test_rqm.sh`.
 
 ### Invocation
 
 ```
-.claude/skills/plan-feature/rqm.sh <subcommand> [args]
+.guardrails/skills/gr-plan/rqm.sh <subcommand> [args]
 ```
 
 Subcommands: `stamp`, `index`, `check`, `clean`.
@@ -178,13 +188,14 @@ any unresolvable conflicts remain.
 
 ### `index`
 
-Re-scans all `rqm/**/*.md` files and all `.rs` files under `src/` from scratch and writes a fresh
-`rqm/registry.json`, overwriting any previous file. Never modifies markdown source files.
+Re-scans all `rqm/**/*.md` files and all `.rs` and `.py` files under `src/` (and under `tests/`
+when that directory exists) from scratch and writes a fresh `rqm/registry.json`, overwriting any
+previous file. Never modifies markdown source files.
 
 If any `rq-XXXXXXXX` ID appears in more than one entity in the scanned markdown files, `index`
 reports each conflict, identifies which copy is likely the original (by comparing live declarations
 against the `decl` stored in the existing registry, if present), and suggests running
-`.claude/skills/plan-feature/rqm.sh stamp --fix-duplicates`. It exits non-zero and does not write the registry.
+`.guardrails/skills/gr-plan/rqm.sh stamp --fix-duplicates`. It exits non-zero and does not write the registry.
 
 The index operation is otherwise idempotent.
 

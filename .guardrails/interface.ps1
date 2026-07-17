@@ -1,24 +1,21 @@
 param(
-    [string]$Image
+    [string]$Image,
+    [Parameter(Mandatory=$true)][string]$ProjectId
 )
 
 if (-not $Image) {
     $Image = (Get-Content .guardrails/podman/image_name -Raw).Trim()
 }
 
-$claudeDir = Join-Path $HOME ".claude"
-$claudeJson = Join-Path $HOME ".claude.json"
-
-# Without this, podman would auto-create ~/.claude.json as a directory
-# on first run, breaking Claude (which expects a file at that path).
-if (-not (Test-Path $claudeJson)) {
-    New-Item -ItemType File -Path $claudeJson | Out-Null
-}
-
+# Claude stores its top-level configuration file (.claude.json), which records the
+# authenticated account and onboarding state, outside its credential directory by
+# default. Point CLAUDE_CONFIG_DIR at the mounted Claude volume so that both the
+# configuration file and the credentials persist across removal of this container.
 podman run --rm -it `
     -v "${PWD}:/work" `
-    -v "${claudeDir}:/root/.claude:cached" `
-    -v "${claudeJson}:/root/.claude.json" `
+    -v "guardrails-${ProjectId}-claude:/root/.claude" `
+    -v "guardrails-${ProjectId}-codex:/root/.codex" `
+    -e CLAUDE_CONFIG_DIR=/root/.claude `
     -w /work `
     $Image `
     bash
