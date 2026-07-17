@@ -97,11 +97,15 @@ pub trait Potential: std::fmt::Debug + Send {
     /// the device's default stream with no host-side state mutation
     /// and no use of secondary streams. Determines whether phases
     /// using this potential run under CUDA graph mode; see
-    /// `cuda-graphs.md`. Default `true`. Potentials that launch
-    /// kernels on streams other than the default (e.g. SPME
-    /// reciprocal's `recip_stream`) override to `false`: work on
-    /// uncaptured streams executes immediately and is not part of the
-    /// captured graph, so replays would produce stale forces.
+    /// `cuda-graphs.md`. Default `true`, kept by every in-tree
+    /// potential — including `spme_reciprocal`, whose cuFFT plans and
+    /// kernels are all bound to the device's default stream, so its
+    /// whole pipeline is captured. A potential overrides to `false`
+    /// when its `compute` launches kernels on a secondary stream (work
+    /// on uncaptured streams executes immediately and is not part of
+    /// the captured graph, so replays would produce stale forces) or
+    /// performs host-side work between launches (a host<->device copy
+    /// or host arithmetic on a read-back value).
     fn graph_compatible(&self) -> bool {
         true
     }

@@ -154,12 +154,9 @@ pub struct SimulationConfig {
     #[serde(default = "default_graph_batch_size")]
     pub graph_batch_size: u32,
     /// When `true`, every MD phase runs the per-step launch loop with
-    /// full per-kernel `Timings`. Default `true` — Phase 3's CUDA
-    /// graph capture is currently incompatible with the SPME
-    /// reciprocal pipeline's multi-stream + cuFFT topology. Opt in
-    /// with `cuda_graphs_disable = false` only for configurations
-    /// whose force field does not include SPME (or once SPME's
-    /// graph-capture compatibility is in place).
+    /// full per-kernel `Timings`. Default `false`: graph mode is the
+    /// default for every eligible phase. Provided as a diagnostic
+    /// escape hatch for graph-related issues. See `cuda-graphs.md`.
     #[serde(default)]
     pub cuda_graphs_disable: bool,
     /// When `true`, JIT-compiled CUDA kernels are built with
