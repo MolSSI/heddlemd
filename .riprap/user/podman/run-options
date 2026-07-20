@@ -37,5 +37,5 @@
 #   Replace "all" with a device index, for example "nvidia.com/gpu=0", to expose a
 #   single GPU.
 #
-# --device=nvidia.com/gpu=all
+ --device=nvidia.com/gpu=all
 # --security-opt=label=disable
