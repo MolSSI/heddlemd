@@ -1,34 +1,70 @@
 # HeddleMD
 
-A GPU-accelerated molecular dynamics engine in Rust + CUDA, designed for
-**bit-wise reproducibility**: identical inputs produce byte-identical
-trajectory and log files across runs on the same GPU.
+A GPU-accelerated molecular dynamics engine for condensed-phase systems —
+liquids, solutions, and solvated biomolecules — on a single NVIDIA GPU.
+Written in Rust with CUDA compute kernels, and designed around one
+distinguishing property: **bit-wise reproducibility**. Rerun the same
+input on the same GPU and you get a byte-identical trajectory and log,
+every time.
 
-## What it does
+You describe a system with a force field, a starting configuration, and a
+thermodynamic ensemble in a human-readable TOML file; the engine
+propagates it in time and writes a trajectory you can analyse.
 
-- Lennard-Jones pair forces (O(N²) kernel) with the minimum-image convention
-  for periodic boundary conditions.
-- Velocity Verlet integration in either an ordinary `f32` mode (lossy) or a
-  compensated `(f32, f64)` mode (lossless) that supports bit-exact time
-  reversal.
-- Single-stream CUDA execution and a deterministic segmented reduction so
-  that floating-point sums are performed in the same order on every run.
-- Extended-XYZ trajectory output, CSV diagnostic log (step, time, KE, T),
-  and a per-stage performance summary measured with CUDA events plus
-  host wall-clocks.
+## What you can do
 
-See [`docs/architecture.md`](docs/architecture.md) for the data flow,
-reproducibility strategy, and per-kernel design. Every behaviour the engine
+- **Ensembles.** NVE, NVT, and NPT dynamics. Compose a `velocity-verlet`
+  integrator with a thermostat and/or barostat, or pick a self-contained
+  integrator (`langevin-baoab` for NVT, `mtk-npt` for NPT).
+  - **Thermostats:** Nosé–Hoover chains, CSVR (Bussi), Andersen, and
+    Berendsen (equilibration only).
+  - **Barostats:** stochastic cell-rescale (C-rescale), Monte-Carlo, and
+    Berendsen (equilibration only).
+- **Force fields.** Lennard-Jones van der Waals with a smooth switching
+  function, smooth particle-mesh Ewald (SPME) electrostatics, and bonded
+  terms — harmonic and Morse bonds, harmonic angles, and periodic
+  torsions — with automatic 1-2/1-3 exclusions and scaled 1-4
+  interactions.
+- **Rigid constraints.** SETTLE (analytic, for three-site rigid water such
+  as SPC/E and TIP3P) and SHAKE/RATTLE (iterative, arbitrary rigid
+  clusters), so you can take the longer timesteps rigid water models
+  assume.
+- **Energy minimization.** Adaptive steepest descent, constraint-aware,
+  as a phase that chains freely with MD phases (minimize → equilibrate →
+  produce in a single run).
+- **Analysis.** `heddlemd analyze` post-processes a trajectory in place;
+  the radial distribution function (RDF) between any two particle types
+  ships built-in.
+- **Boundary conditions.** Orthorhombic and triclinic periodic boxes with
+  the minimum-image convention; wrapped trajectory output with optional
+  image flags for exact unwrapping.
+
+Every quantity that affects the physics lives in the TOML config, in
+**SI units by default** (set `units = "atomic"` for Hartree atomic units).
+Inputs can be checked on a login node with `heddlemd lint` before a job
+reaches the queue.
+
+**Documentation.** The full user guide is the mdBook under
+[`book/`](book/) — install, first simulation, configuration reference,
+init and output file formats, analysis, and the precise scope of the
+reproducibility guarantee. Start at
+[`book/src/introduction.md`](book/src/introduction.md) (or render it with
+`mdbook serve book`). For the internal design — the GPU compute pipeline
+and the deterministic-reduction strategy — see
+[`docs/architecture.md`](docs/architecture.md). Every behaviour the engine
 ships with is canonically described under [`rqm/`](rqm/); the source tree
-references those entities by stable IDs (`rq-XXXXXXXX`).
+references those requirements by stable IDs (`rq-XXXXXXXX`).
 
 ## Prerequisites
 
-- **An NVIDIA GPU** with a recent driver.
+- **An NVIDIA GPU** with a recent driver. The engine is GPU-only; there is
+  no CPU or non-NVIDIA execution path.
 - **CUDA Toolkit 11.8 or newer** on `PATH` so `nvcc` can compile the
-  device kernels at build time.
-- **Rust** (the project uses Cargo edition 2024; install via
-  [rustup](https://rustup.rs/)).
+  device kernels at build time (`nvcc --version` to check).
+- **Rust** (Cargo edition 2024; install via [rustup](https://rustup.rs/)).
+
+A `Containerfile` is included for Podman/Docker if you prefer a
+known-good, pinned toolchain over installing CUDA on the host.
 
 ## Build
 
@@ -42,131 +78,97 @@ embeds the resulting PTX, and produces the `heddlemd` binary at
 
 ## Run the example
 
-A complete 10,000-atom Lennard-Jones argon example lives at
+A complete 10,000-atom Lennard-Jones argon system lives at
 [`examples/lj-10000-argon/`](examples/lj-10000-argon/). It runs 100
-integration timesteps in roughly a second on a recent NVIDIA GPU.
-
-From the project root:
+NVE timesteps in roughly a second on a recent NVIDIA GPU. From the
+project root:
 
 ```
 ./target/release/heddlemd run examples/lj-10000-argon/argon.in.toml
 ```
 
 (Or `cargo run --release -- run examples/lj-10000-argon/argon.in.toml`.)
+On success it prints one `[heddlemd] complete: ...` line and exits `0`.
 
-A run produces three files alongside the config:
+Output filenames are derived from the config root and each phase's `name`,
+so the config's `.in.` becomes `.out.<phase>.`. For this example (phase
+`name = "run"`) a run produces three files alongside the config:
 
-- **`argon.out.xyz`** — 11 trajectory frames (steps 0, 10, …, 100) in
-  extended-XYZ format. Each frame is self-describing (lattice vectors,
-  column layout, simulation time). The trajectory frames can be re-loaded
-  as an init file.
-- **`argon.out.log`** — CSV with `step,time,kinetic_energy,temperature`;
-  one header line plus 21 data rows.
-- **`argon.out.timings`** — a fixed-width text table with one row per
-  instrumented stage: per-kernel timings (CUDA events) and host stages
-  (`config_load`, `init_load`, `gpu_init`, `host_to_device_upload`,
-  `device_to_host_download`, `trajectory_write`, `log_write`,
-  `velocity_generation`, `total_runtime`). Columns: `count`,
-  `total_ms`, `mean_us`, `min_us`, `max_us`.
+- **`argon.out.run.xyz`** — extended-XYZ trajectory frames. Each frame is
+  self-describing (lattice vectors, column layout, step, simulation time)
+  and is itself a valid init file, so any frame can be lifted out to
+  restart a run.
+- **`argon.out.run.log`** — CSV of `step,time,kinetic_energy,temperature`
+  (plus any conserved-quantity columns the chosen thermostat or barostat
+  contributes). Loads directly into pandas.
+- **`argon.out.run.timings`** — a per-stage wall-clock performance summary.
+  This file is intentionally **not** reproducible; the trajectory and log
+  are.
 
-By convention, config filenames end in `.in.toml` and the loader
-derives the default output paths from the filename root and each
-phase's `name` (`argon.in.toml` with phase `name = "run"` →
-`argon.out.run.{xyz,log,timings}`). The runner rejects a config path
-that does not match the suffix. The example's
-[`README.md`](examples/lj-10000-argon/README.md) describes the lattice
-layout and how to regenerate `argon.in.xyz`.
+The runner refuses to overwrite existing outputs, so delete or move these
+three files before re-running. See [`examples/`](examples/) for more input
+bundles (SPC/E water, ethane, chignolin, an RDF analysis).
 
 ## Writing your own simulation
 
-A simulation is fully specified by two files:
+A simulation is specified by two files (plus an optional topology file for
+bonded or constrained systems):
 
-- A **TOML config** that pins everything affecting the trajectory:
-  RNG seed, target temperature, particle-type masses, per-pair
-  Lennard-Jones coefficients, and one or more `[[phase]]` blocks —
-  each carrying its own `n_steps`, `dt`, integrator mode, and optional
-  thermostat/barostat/output. SI units throughout (metres, kilograms,
-  seconds, joules, kelvin). Per-phase output paths and cadences live
-  in the optional `[phase.output]` sub-table; see
-  [`rqm/io/config-schema.md`](rqm/io/config-schema.md) for the full
-  field reference.
-- An **extended-XYZ init file** carrying the particle count, simulation
-  box (orthorhombic `Lattice="lx 0 0 0 ly 0 0 0 lz"`), per-particle
-  type names, positions, and optionally velocities. Positions must lie
-  inside the primary cell `[-L/2, L/2)` per axis. Velocities are
-  optional; absent velocities are sampled from a Maxwell-Boltzmann
-  distribution at the configured temperature using a deterministic
-  ChaCha8 RNG seeded by the config seed, with the centre-of-mass drift
-  removed. See [`rqm/io/init-state-file.md`](rqm/io/init-state-file.md).
-
-The runner currently accepts one particle type per simulation; the
-schema is forward-compatible with multi-type runs once the kernel
-supports them.
+- A **TOML config** (`*.in.toml`) pinning everything that affects the
+  trajectory: RNG seed, particle-type masses and charges, force-field
+  parameters, neighbor scheme, and one or more `[[phase]]` /
+  `[[minimization]]` blocks — each with its own steps, timestep,
+  integrator, and optional thermostat/barostat/output. See the
+  [Configuration Reference](book/src/guide/configuration.md).
+- An **extended-XYZ init file** (`*.in.xyz`) carrying the particle count,
+  simulation box, per-particle type names, positions, and optionally
+  velocities. Absent velocities are sampled from a Maxwell-Boltzmann
+  distribution at the configured temperature using a deterministic RNG,
+  with centre-of-mass drift removed. See the
+  [Init Files guide](book/src/guide/init-files.md).
 
 ## Validating without running
 
 `heddlemd lint <config>` runs every input-validation check the runner
-would perform — TOML parse, init-file load, topology load,
-output-path collisions, box-vs-cutoff geometry — without touching the
-GPU or writing any files. Designed for HPC contexts where a long
-queue makes ad-hoc trial-and-error iteration expensive: lint on a
-login node and fix the report up front. Add `--with-gpu` to extend
-the lint through `init_device`, slot construction, and force-field
-allocation when a GPU is available. See the
-[CLI Reference](book/src/reference/cli.md) chapter for the full
-specification.
+would perform — TOML parse, init-file load, topology load, output-path
+collisions, box-vs-cutoff geometry — without touching the GPU or writing
+any files. Designed for HPC contexts where a long queue makes
+trial-and-error iteration expensive: lint on a login node and fix the
+report up front. Add `--with-gpu` to extend the lint through device
+initialisation and force-field allocation when a GPU is available. See the
+[CLI Reference](book/src/reference/cli.md) for the full specification.
 
 ## Reproducibility
 
-The `<root>.out.xyz` trajectory and the `<root>.out.log` log are
-byte-identical across two runs of the same config on the same GPU.
-The `<root>.out.timings` file is intentionally **not** reproducible:
-wall-clock measurements vary run-to-run and would corrupt the
-comparison if mixed with the deterministic outputs.
-Cross-hardware reproducibility is not a goal; CUDA permits FMA
-contraction differences between GPUs.
+The trajectory (`*.out.<phase>.xyz`) and log (`*.out.<phase>.log`) are
+byte-identical across two runs of the same config on the same GPU. This
+covers the trajectory, the log, initial-velocity generation, and any
+stochastic thermostat or barostat (each seeded explicitly in the config).
+The `*.out.<phase>.timings` file is intentionally **not** reproducible:
+wall-clock measurements vary run-to-run and would corrupt the comparison
+if mixed with the deterministic outputs. Cross-hardware reproducibility is
+not a goal; CUDA permits FMA-contraction differences between GPUs. The
+full scope and its limits are documented in the
+[Reproducibility guide](book/src/guide/reproducibility.md).
+
+## Precision
+
+Positions, velocities, and forces use `f32` end to end — well suited to
+short-range condensed-phase workloads and maximising GPU throughput. A
+double-precision build path is reserved for the future. Independently, the
+velocity-Verlet integrator has an opt-in `lossless` mode (compensated,
+Kahan-style summation of the integrator bookkeeping) that makes a run
+exactly invertible for bit-exact time reversal; this is not a
+double-precision simulation and does not change the `f32` physics.
 
 ## Project structure
 
 ```
-src/                Rust host code: I/O, runner, GPU buffer wrappers
-kernels/            CUDA C source for the device kernels (compiled to PTX)
+src/                  Rust host code: I/O, runner, GPU buffer wrappers
+kernels/              CUDA C source for the device kernels (compiled to PTX)
+book/                 User guide (mdBook) — start here
 docs/architecture.md  System design and data flow
-rqm/                Canonical requirements, by feature
-examples/           Ready-to-run input bundles
-tests/              Integration tests (one per requirements file)
+rqm/                  Canonical requirements, by feature
+examples/             Ready-to-run input bundles
+tests/                Integration tests (one per requirements file)
 ```
-
-## Development workflow
-
-This repository follows a **requirements-driven** workflow: every
-feature has a canonical description under `rqm/` with Gherkin scenarios,
-and every type, function, and test in `src/` and `tests/` carries the
-stable `rq-XXXXXXXX` ID of the requirement it implements. The traceability
-registry at `rqm/registry.json` is rebuilt by
-`./.claude/skills/plan-feature/rqm.sh index`.
-
-Two skills assist this loop:
-
-- **`/plan-feature`** drafts or extends a requirements file, asks
-  clarifying questions, and stamps stable IDs on every heading, API
-  item, and scenario.
-- **`/implement`** writes the code and tests for an existing
-  requirements file. One test per Gherkin scenario, annotated with the
-  scenario's `rq-` ID.
-
-When iterating on a feature, edit the requirements file first, then ask
-the assistant to update the implementation. This keeps `rqm/` as the
-source of truth: if `src/` were deleted, the requirements files would
-be enough to reproduce the engine.
-
-## Safety notes for AI-assisted development
-
-LLMs are susceptible to prompt injection and data poisoning. When using
-this repo with an agentic assistant:
-
-- Run the assistant inside a sandboxed container (the included Podman
-  setup blocks the assistant from running outside one).
-- Never expose private SSH keys, credentials, or write access to remote
-  repositories.
-- Review every generated change before pushing.

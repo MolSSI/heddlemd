@@ -30,12 +30,12 @@ opens the file. The convention has two purposes:
 
 Examples:
 
-| Config filename       | `<root>` | Default output paths                                                |
+| Config filename       | `<root>` | Default output paths (per phase `<phase>`)                          |
 | --------------------- | -------- | ------------------------------------------------------------------- |
-| `argon.in.toml`       | `argon`  | `argon.out.xyz`, `argon.out.log`, `argon.out.timings`               |
-| `spc.in.toml`         | `spc`    | `spc.out.xyz`, `spc.out.log`, `spc.out.timings`                     |
-| `run-01.in.toml`      | `run-01` | `run-01.out.xyz`, `run-01.out.log`, `run-01.out.timings`            |
-| `foo.in.in.toml`      | `foo.in` | `foo.in.out.xyz`, `foo.in.out.log`, `foo.in.out.timings`            |
+| `argon.in.toml`       | `argon`  | `argon.out.<phase>.{xyz,log,timings}`                               |
+| `spc.in.toml`         | `spc`    | `spc.out.<phase>.{xyz,log,timings}`                                 |
+| `run-01.in.toml`      | `run-01` | `run-01.out.<phase>.{xyz,log,timings}`                              |
+| `foo.in.in.toml`      | `foo.in` | `foo.in.out.<phase>.{xyz,log,timings}`                              |
 
 The suffix match is case-sensitive on the whole `.in.toml` string.
 `argon.IN.toml` is rejected. Filenames whose `<root>` derivation would

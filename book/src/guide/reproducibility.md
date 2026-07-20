@@ -8,7 +8,7 @@ step further (bit-exact time reversal).
 ## The guarantee
 
 > Two runs of the same config and init file, on the same GPU, produce
-> byte-identical `*.out.xyz` and `*.out.log` files.
+> byte-identical `*.out.<phase>.xyz` and `*.out.<phase>.log` files.
 
 "Byte-identical" is meant literally — `diff` and `sha256sum` both say
 zero. The guarantee covers:
@@ -136,12 +136,12 @@ Run the bundled example, save the outputs, delete and re-run:
 
 ```
 ./target/release/heddlemd run examples/lj-10000-argon/argon.in.toml
-mv examples/lj-10000-argon/argon.out.xyz     /tmp/traj.ref
-mv examples/lj-10000-argon/argon.out.log     /tmp/log.ref
-mv examples/lj-10000-argon/argon.out.timings /tmp/timings.ref
+mv examples/lj-10000-argon/argon.out.run.xyz     /tmp/traj.ref
+mv examples/lj-10000-argon/argon.out.run.log     /tmp/log.ref
+mv examples/lj-10000-argon/argon.out.run.timings /tmp/timings.ref
 ./target/release/heddlemd run examples/lj-10000-argon/argon.in.toml
-diff examples/lj-10000-argon/argon.out.xyz /tmp/traj.ref
-diff examples/lj-10000-argon/argon.out.log /tmp/log.ref
+diff examples/lj-10000-argon/argon.out.run.xyz /tmp/traj.ref
+diff examples/lj-10000-argon/argon.out.run.log /tmp/log.ref
 ```
 
 Both `diff` invocations should print nothing. A `diff` on the timings
