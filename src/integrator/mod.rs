@@ -506,13 +506,23 @@ impl Default for RunStepOptions {
 /// 2. The main region `steps[..trailing_post_force_start()]` is walked
 ///    (force evaluations, class/total kicks including the trailing kick,
 ///    interleaved thermostat / constraint / barostat markers).
-/// 3. The wrapped thermostat's `apply_post` fires at the
-///    post-force-marker boundary — after the trailing kick, before the
-///    terminal barostat / projection.
+/// 3. At the post-force-marker boundary — after the trailing kick, before
+///    the terminal barostat / projection — the velocities are projected
+///    onto the constraint manifold and the constraint virial is published
+///    (`constraint.apply_after_kick`, when the plan has a terminal
+///    `ConstraintPoint { AfterKick }` and a constraint slot is installed).
+///    Then the wrapped thermostat's `apply_post` fires. Both downstream
+///    consumers need the projection to have already happened: a KE-coupled
+///    thermostat would otherwise reduce kinetic energy the projection is
+///    about to discard, and the barostat in step 4 would otherwise reduce
+///    a virial missing its constraint contribution.
 /// 4. The post-force marker tail `steps[trailing_post_force_start()..]`
-///    is walked: a terminal `BarostatPoint` runs `barostat.apply`, then a
-///    plan-final `ConstraintPoint { AfterKick }` runs the velocity
-///    projection (RATTLE-last).
+///    is walked: a terminal `BarostatPoint` runs `barostat.apply` — which
+///    reduces `buffers.virials`, and so must see the constraint virial
+///    published in step 3 — then a plan-final `ConstraintPoint { AfterKick }`
+///    runs a *repair* projection (`reproject_velocities_no_publish`), putting
+///    the velocities back on the manifold after the thermostat's and
+///    barostat's rescales (RATTLE-last) without re-publishing the virial.
 ///
 /// The wrapped-thermostat halves fire only for the default topology (no
 /// `ThermostatHalf` markers); a plan that owns its thermostat placement
@@ -547,6 +557,42 @@ pub fn run_step(
         Some(dt_couple) if !plan.has_thermostat_points() => Some(dt_couple),
         _ => None,
     };
+    // The `dt` of the plan's terminal velocity projection, if it has one.
+    //
+    // The trailing kick leaves the velocities *off* the constraint manifold:
+    // it accelerates each atom along the total force, including the component
+    // parallel to the constrained directions. The velocity projection deletes
+    // exactly that component, and publishes the constraint virial. Both of the
+    // step's consumers need it to have happened before they run:
+    //
+    // - A KE-coupled thermostat that reduced the kinetic energy first would
+    //   couple to `K_manifold + ΔK_off` rather than to the physical full-step
+    //   kinetic energy, rescale the whole velocity field to put the *inflated*
+    //   sum on target, and then watch the projection throw the surplus away.
+    //   The run settles at `T_target · (1 − ΔK_off / K)` — a dt²-scaling
+    //   deficit, 31.6 K low at dt = 2 fs for rigid SPC/E water.
+    // - A per-step barostat reduces the virial at the plan's terminal
+    //   `BarostatPoint`. Without the constraint virial its pressure is badly
+    //   wrong: for 8192 rigid SPC/E molecules the constraint virial (−456 Ha)
+    //   very nearly cancels the force virial (+412 Ha), so a barostat that
+    //   cannot see it reads +27,000 atm where the true pressure is +59 atm,
+    //   and drives the box away without bound.
+    //
+    // So the projection-and-publish runs FIRST, right after the trailing kick,
+    // on every step. The plan's terminal `ConstraintPoint { AfterKick }` is
+    // then demoted to a repair — `reproject_velocities_no_publish` — which puts
+    // the velocities back on the manifold after whatever the thermostat and
+    // barostat did, without re-publishing the virial (RATTLE-last).
+    let terminal_projection_dt = plan.steps[trailing_start..].iter().find_map(|s| match s {
+        SubStep::ConstraintPoint {
+            phase: ConstraintPhase::AfterKick,
+            dt,
+        } => Some(*dt),
+        _ => None,
+    });
+    // Whether the leading projection fired, and therefore whether the plan's
+    // terminal `AfterKick` is a repair rather than the step's single publish.
+    let leading_projection = constraint.is_some() && terminal_projection_dt.is_some();
     // rq-b7f9628d — leading wrapped half, on v(t), before the walk.
     if let Some(dt_couple) = wrap_dt {
         if let Some(t) = thermostat.as_mut() {
@@ -558,6 +604,16 @@ pub fn run_step(
         // main/tail boundary: after the trailing kick (the last
         // main-region sub-step) and before the first terminal marker.
         // It reduces the full-step (post-trailing-kick) kinetic energy.
+        if idx == trailing_start {
+            // The step's single velocity projection-and-publish. Unconditional
+            // (not gated on the thermostat's coupling cadence): the barostat's
+            // virial reduction at the terminal `BarostatPoint` needs the
+            // constraint virial on EVERY step, not only on coupling steps, or
+            // its pressure would alternate between two different definitions.
+            if let (Some(c), Some(proj_dt)) = (constraint.as_mut(), terminal_projection_dt) {
+                c.apply_after_kick(buffers, sim_box, proj_dt, timings)?;
+            }
+        }
         if wrap_dt.is_some() && idx == trailing_start {
             if let Some(t) = thermostat.as_mut() {
                 t.apply_post(buffers, wrap_dt.unwrap(), timings)?;
@@ -636,8 +692,21 @@ pub fn run_step(
                         ConstraintPhase::AfterDrift => {
                             c.apply_after_drift(buffers, sim_box, *sub_dt, timings)?
                         }
+                        // When the leading projection already ran, this marker is
+                        // the step's *repair*: it puts the velocities back on the
+                        // manifold after the thermostat's and barostat's rescales
+                        // (RATTLE-last) without re-publishing the constraint
+                        // virial, which has already been scattered exactly once.
+                        // With no leading projection (no constraint slot, or a
+                        // plan whose AfterKick is not terminal) it is the publish.
                         ConstraintPhase::AfterKick => {
-                            c.apply_after_kick(buffers, sim_box, *sub_dt, timings)?
+                            if leading_projection {
+                                c.reproject_velocities_no_publish(
+                                    buffers, sim_box, *sub_dt, timings,
+                                )?
+                            } else {
+                                c.apply_after_kick(buffers, sim_box, *sub_dt, timings)?
+                            }
                         }
                     }
                 }
@@ -988,6 +1057,20 @@ impl Registry<dyn IntegratorBuilder> {
 
 // rq-5d9ed248
 pub trait Thermostat: std::fmt::Debug + Send {
+    /// Hand the thermostat the connectivity-derived molecule partition once,
+    /// at phase setup, before the first step. Mirrors `Barostat::init_run`.
+    ///
+    /// The default is a no-op: most thermostats couple to a global reduction or
+    /// rescale every velocity uniformly and need no per-group structure. A
+    /// thermostat whose action must respect rigid groups overrides this — the
+    /// Andersen thermostat uploads the group tables so its stochastic collisions
+    /// resample whole rigid molecules rather than individual atoms (required for
+    /// correctness under holonomic constraints; see
+    /// `rqm/integration/andersen.md`).
+    fn init_run(&mut self, _molecules: &MoleculeList) -> Result<(), ThermostatError> {
+        Ok(())
+    }
+
     /// Pre-step (leading) coupling half. Called only on coupling steps,
     /// with `dt` already scaled to the effective coupling timestep
     /// `coupling_interval * base_dt`. Default: no-op (post-only

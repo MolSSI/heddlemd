@@ -140,6 +140,20 @@ Input-side conversion targets:
   Conversion*).
 - The `Lattice` attribute, position columns, and velocity columns of
   the `.in.xyz` initial-state file passed to `load_init_state`.
+- The unit-bearing fields of every `[[analyses]]` entry's open-shaped
+  `params: toml::Value` in the `.in.analysis` file — notably the RDF's
+  `r_max`, a `Length`. The `.in.analysis` file is a user-facing input
+  like any other, so it is written in the run's unit system (the
+  `units` selector of the `[simulation]` config it names), and the
+  analysis kind's registered builder converts its own params in `build`,
+  exactly as an integrator/thermostat/barostat builder does.
+
+  This surface is easy to overlook — the analysis file has no typed
+  `Config` struct for `Config::from_user` to walk recursively, so
+  nothing converts it implicitly. Skipping the conversion does not
+  fail loudly: a raw SI `r_max` is simply compared against Bohr-scale
+  distances, no pair ever falls inside it, and the analysis emits an
+  all-zero result. See `rqm/analysis/rdf.md`, *Units*.
 
 Output-side conversion targets:
 
@@ -151,6 +165,11 @@ Output-side conversion targets:
   algorithm-declared extra-diagnostic columns written by the
   minimization log (`MinlogWriter::write_row` in
   `rqm/minimization/steepest-descent.md`).
+- The unit-bearing columns of every analysis output written by
+  `Analysis::finalize_and_write` — notably the RDF's `r` column, a
+  `Length`. The engine bins in atomic units; the writer converts back
+  to the user's system, so `r` comes out in the same units `r_max` went
+  in (`rqm/analysis/rdf.md`, *Columns*).
 
 Each writer is constructed with a `UnitSystem` chosen by the caller
 (`config.units` for trajectory and CSV log writers attached to a

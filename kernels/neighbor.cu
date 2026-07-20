@@ -472,6 +472,9 @@ extern "C" __global__ void find_blocks_with_interactions(
   // counted once; self-block (b, b) is included.
   for (unsigned int j_base = b; j_base < n_blocks; j_base += 32u) {
     unsigned int j_block = j_base + lane;
+    // Every block pair is emitted; modified pairs pass through the bulk /
+    // single-pair output at full strength and the correction pass adjusts
+    // them afterwards. rq-350b8807
     bool j_in_range = j_block < n_blocks;
     bool prune_pass = false;
     if (j_in_range) {

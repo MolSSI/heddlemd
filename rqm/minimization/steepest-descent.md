@@ -74,13 +74,28 @@ energy `E_k`, and current step size `step_k`:
 1. **Build trial.** Compute `F_max = max_i ||F_i(x_k)||`. If
    `F_max == 0.0`, declare convergence with reason
    `MinimizerConvergence::ForceZero` and stop. Otherwise compute
-   `x_trial = x_k + step_k · (F(x_k) / F_max)`.
+   `x_trial = x_k + step_k · (F(x_k) / F_max)`; each atom's trial
+   position is wrapped back into the primary image of the simulation
+   box on write (with `images_x/y/z` advanced on any crossing, exactly
+   as the drift kernel does — see `wrap_and_count_triclinic` in
+   `kernels/pbc.cuh`). This keeps the primary-image invariant on
+   `positions_x/y/z` (see `particle-state.md`) intact across trials,
+   so consumers that read the trial state — the constraint slot's
+   `apply_position_projection_only`, the force pipeline, the
+   trajectory writer if the phase writes trial frames — always see
+   positions inside `[-L/2, +L/2)`. A trial step whose magnitude
+   `step_k / F_max · ||F_i||` exceeds `L/2` for some axis can cross
+   more than one lattice vector; the wrap handles any integer number
+   of crossings.
 2. **Project constraints (if enabled).** When the run carries a
    `Constraint` slot, call
    `constraint.apply_position_projection_only(buffers, sim_box,
    timings)` on `x_trial` (see `integration/constraint-framework.md`).
    The projection mutates `x_trial` in place; velocities are not
-   touched.
+   touched. Every registered position-projection kernel maintains the
+   primary-image invariant (re-wraps and advances image counters on
+   any crossing it induces), so `x_trial` remains inside the primary
+   image after this step.
 3. **Evaluate trial energy.** Run
    `force_field.step(buffers, sim_box, timings)` to populate
    `buffers.forces_*` at `x_trial` and to compute the trial potential
@@ -88,21 +103,38 @@ energy `E_k`, and current step size `step_k`:
 4. **Accept or reject.**
    - If `E_trial < E_k`: **accept**. Set `x_{k+1} = x_trial`,
      `E_{k+1} = E_trial`, `step_{k+1} = min(step_increase · step_k,
-     max_step)`, increment the accepted-step counter.
-   - If `E_trial >= E_k`: **reject**. Discard `x_trial` (restore the
-     accepted positions from the iteration's pre-trial snapshot), set
-     `step_{k+1} = step_decrease · step_k`. Forces are re-evaluated at
-     the restored positions before the next iteration's trial.
-5. **Check convergence.** A successful step ends the phase when either
-   physical criterion is met:
+     max_step)`, increment the accepted-step counter. Image counters
+     `images_x/y/z` are the ones advanced by step 1 and step 2; they
+     become the accepted state.
+   - If `E_trial >= E_k`: **reject**. Discard `x_trial` (restore both
+     the accepted positions **and** the accepted image counters from
+     the iteration's pre-trial snapshot — see *Snapshot and restore*
+     below), set `step_{k+1} = step_decrease · step_k`. Forces are
+     re-evaluated at the restored positions before the next iteration's
+     trial.
+5. **Check convergence.** The phase ends when any of three criteria is
+   met after step 4 has finalised `x_{k+1}`, `E_{k+1}`, and `step_{k+1}`:
    - `F_max(x_{k+1}) ≤ force_tolerance` — `MinimizerConvergence::ForceTolerance`.
+     Fires only on an accepted iteration (rejection leaves `F_max`
+     unchanged and re-checking it would be redundant).
    - `|E_k - E_{k+1}| / max(|E_k|, |E_{k+1}|, ε_floor) ≤ energy_tolerance`
      and at least one prior step was accepted —
      `MinimizerConvergence::EnergyTolerance`, with
      `ε_floor = 1.0e-30` to avoid divide-by-zero when both energies
-     are zero.
-   Rejected steps never trigger convergence; the energy-tolerance check
-   compares the last two distinct accepted energies.
+     are zero. Rejected steps never trigger this check; it compares the
+     last two distinct accepted energies.
+   - `step_{k+1} ≤ STEP_FLOOR`, where `STEP_FLOOR = 1.0e-6 a_0`
+     (≈ `5.29e-17 m`) is the smallest step below which the trial
+     position update `step · F/F_max` becomes an f32 no-op on the
+     max-force atom at any physically reasonable position magnitude
+     (positions are stored in `[-L/2, +L/2)` and f32 rounding at 30 `a_0`
+     is ~`3.6e-6 a_0`). Fires on every iteration — accepted or rejected —
+     so that a rejection cascade shrinking `step` below `STEP_FLOOR`
+     terminates the phase immediately with
+     `MinimizerConvergence::StepFloor` rather than looping through the
+     remaining `max_iterations` with a step that cannot move an atom.
+     If the user-configured `initial_step` is itself below `STEP_FLOOR`,
+     the check fires at iteration 0 without any trial evaluation.
 6. **Check iteration cap.** When the iteration counter `k` reaches
    `max_iterations`, the phase ends with a **non-convergence failure**.
    The runner surfaces this as
@@ -114,6 +146,29 @@ energy `E_k`, and current step size `step_k`:
 The iteration counter advances on every loop body iteration (accepted
 **or** rejected), so `max_iterations` caps total force evaluations.
 A rejected step counts as one iteration.
+
+### Snapshot and restore <!-- rq-cd4193f0 -->
+
+The pre-trial snapshot captures **both** the accepted positions and
+the accepted image counters. On a rejected trial the restore rolls
+both back together, so the `(positions, images)` pair is always
+mutually consistent — the invariant
+`unwrapped_i = positions_i + images_i · L` continues to identify the
+same physical unwrapped position across every accept/reject cycle.
+This matters because step 1's wrap and step 2's constraint-projection
+wrap can each advance `images_x/y/z` during a trial that later gets
+rejected; snapshotting positions alone would leave those advances
+stranded, silently corrupting unwrapped coordinates for the rest of
+the minimization phase (and beyond, since the minimization phase's
+final `(positions, images)` pair is what the following phase inherits
+— see `simulation-runner.md`, *Phase state carry-forward*).
+
+Concretely, the minimizer holds six per-particle snapshot buffers on
+the device — `snapshot_x/y/z` for positions and
+`images_snapshot_x/y/z` for the image counters. The `sd_snapshot`
+kernel copies all six streams; the `sd_restore` kernel restores all
+six. Both run one thread per particle; snapshot storage adds three
+`i32` buffers of length `particle_count` per SD phase.
 
 ### Initial iteration <!-- rq-39ab27d9 -->
 
@@ -254,8 +309,18 @@ per-phase line MD phases emit:
 
 Carries: phase name, accepted-iteration count (or `max_iterations`
 on non-convergence), wall-clock elapsed time, convergence reason
-(`force_tolerance`, `energy_tolerance`, `force_zero`, or
+(`force_tolerance`, `energy_tolerance`, `force_zero`, `step_floor`, or
 `max_iterations`), trajectory frame count, and minlog row count.
+
+When the convergence reason is `step_floor`, the summary line
+additionally names the final `F_max` at the terminating state so the
+user can judge whether the residual gradient is small enough for
+downstream dynamics — the criterion that fired is about numerical
+progress, not physical convergence:
+
+```
+[heddlemd] phase `min`: 145 iters in 320 ms (converged: step_floor, F_max = 3.7e-9 N, frames: 0, log rows: 2)
+```
 
 ## Schema <!-- rq-38d5e7a8 -->
 
@@ -535,6 +600,7 @@ produce byte-identical post-minimization positions and byte-identical
       ForceTolerance,
       EnergyTolerance,
       ForceZero,
+      StepFloor,
       MaxIterations,
   }
   ```
@@ -545,9 +611,28 @@ produce byte-identical post-minimization positions and byte-identical
   - `ForceZero` — `F_max == 0.0` at iteration `k`'s accepted state
     (force evaluation produced an exact-zero gradient). Used for the
     `particle_count == 0` case and for already-converged inputs.
+  - `StepFloor` — `step` fell to or below `STEP_FLOOR = 1.0e-6 a_0`
+    (≈ `5.29e-17 m`), the smallest step at which the trial position
+    update `step · F/F_max` remains a bit-detectable change to at least
+    the max-force atom's f32 position. Reached when either (a) a
+    rejection cascade shrinks `step` past the floor, indicating the
+    algorithm can no longer descend at f32 precision, or (b) the
+    user-configured `initial_step` is itself already at or below the
+    floor. Reported as a successful convergence: the runner logs the
+    reason and the final `F_max`, then proceeds to the next phase.
   - `MaxIterations` — the iteration counter reached
     `max_iterations` without any physical criterion firing. Drives
     `RunnerError::MinimizerNonConvergence`.
+
+  The three "success" variants (`ForceTolerance`, `EnergyTolerance`,
+  `ForceZero`) name a state where the geometry is at least locally
+  optimal by an explicit physical criterion. `StepFloor` names a state
+  where the algorithm has done as well as it can at f32 precision;
+  `F_max` at that state may still exceed `force_tolerance`, but the
+  configuration is stable enough to hand off to the next phase (in
+  practice, MD from such a configuration behaves the same as MD from a
+  strictly force-converged one — the residual gradient is orders of
+  magnitude below thermal-scale forces).
 
 - `MinimizerError` — error type returned by every trait method. <!-- rq-78041a25 -->
   Variants:
@@ -647,6 +732,13 @@ produce byte-identical post-minimization positions and byte-identical
   - `snapshot_x: CudaSlice<f32>`, `snapshot_y: CudaSlice<f32>`,
     `snapshot_z: CudaSlice<f32>` — per-particle position snapshot
     captured before each trial and used to roll back on rejection.
+  - `images_snapshot_x: CudaSlice<i32>`,
+    `images_snapshot_y: CudaSlice<i32>`,
+    `images_snapshot_z: CudaSlice<i32>` — per-particle image-counter
+    snapshot captured together with the position snapshot. Restored
+    together with positions on a rejected trial so the
+    `(positions, images)` pair stays mutually consistent across
+    every accept/reject cycle (see *Snapshot and restore*).
   - `f_max_scratch: CudaSlice<f32>` — length-1 device buffer for the
     deterministic `F_max` reduction.
   - `pe_scratch: CudaSlice<f32>` — length-1 device buffer for the
@@ -750,19 +842,26 @@ kernels in `kernels/minimize.cu`:
 ```c
 extern "C" __global__ void sd_compute_step(
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     const float *forces_x, const float *forces_y, const float *forces_z,
+    const float *lattice,              // length 6: [lx, ly, lz, xy, xz, yz]
     float step_size,
     float inv_f_max,
     unsigned int n);
 
 extern "C" __global__ void sd_snapshot(
     const float *positions_x, const float *positions_y, const float *positions_z,
+    const int *images_x, const int *images_y, const int *images_z,
     float *snapshot_x, float *snapshot_y, float *snapshot_z,
+    int *images_snapshot_x, int *images_snapshot_y, int *images_snapshot_z,
     unsigned int n);
 
 extern "C" __global__ void sd_restore(
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     const float *snapshot_x, const float *snapshot_y, const float *snapshot_z,
+    const int *images_snapshot_x, const int *images_snapshot_y,
+    const int *images_snapshot_z,
     unsigned int n);
 ```
 
@@ -771,13 +870,21 @@ exposed by the existing reduction utilities, a deterministic
 single-block reduction kernel with the same fixed left-to-right
 index order as `compute_total_potential_energy`).
 
-- `sd_compute_step` reads `(positions_*, forces_*)`, computes
+- `sd_compute_step` reads `(positions_*, images_*, forces_*)`, computes
   `positions_d ← positions_d + step_size · forces_d · inv_f_max` per
-  axis, and writes back to `positions_*`. One thread per particle.
-- `sd_snapshot` copies `positions_*` into the slot's snapshot
-  buffers; called before each trial.
-- `sd_restore` copies snapshot buffers back into `positions_*`;
-  called after a rejected trial.
+  axis, wraps the resulting position back into the primary image of
+  the simulation box, and writes both the wrapped position and the
+  updated image counter back to `positions_*` and `images_*`. One
+  thread per particle. Uses `wrap_and_count_triclinic` from
+  `kernels/pbc.cuh`, matching the drift kernel and SETTLE's
+  position-projection kernels.
+- `sd_snapshot` copies `(positions_*, images_*)` into the slot's
+  snapshot buffer pair `(snapshot_*, images_snapshot_*)`; called before
+  each trial.
+- `sd_restore` copies both snapshot streams back into
+  `(positions_*, images_*)`; called after a rejected trial. Restoring
+  both together keeps the accepted `(positions, images)` pair mutually
+  consistent (see *Snapshot and restore* above).
 
 All three kernels run with block size 256, grid size
 `ceil(n / 256)`, zero shared memory, on the default stream of the
@@ -962,11 +1069,39 @@ Feature: Steepest-descent energy minimizer
   Scenario: SD halves the step on rejected iteration and restores positions
     Given a SD slot with initial_step=1.0e-12, step_decrease=0.5
     And a snapshot of positions before the call
+    And a snapshot of images_x, images_y, images_z before the call
     And a trial that increases the energy (e.g. via an artificially large initial_step over a Morse well)
     When one minimizer.step is invoked
     Then the report has accepted == false
     And the next iteration's step size is 5.0e-13 m within absolute tolerance 1.0e-20
     And positions_x, positions_y, positions_z are byte-identical to the snapshot
+    And images_x, images_y, images_z are byte-identical to the snapshot,
+      even if the trial step's wrap advanced them mid-trial
+
+  @rq-1ead4839
+  Scenario: SD accepted trial that crosses a face wraps positions and advances images
+    Given a SD slot (no constraint) with initial_step chosen so the max-force atom
+      moves by 0.6 · Lx along +x in a single trial
+    And an atom whose pre-trial fractional coordinate is +0.2 along +x and whose
+      images_x is 0
+    And an energy landscape such that the trial is accepted
+    When one minimizer.step is invoked
+    Then the accepted position of that atom has fractional coordinate in [-1/2, +1/2)
+    And images_x for that atom has been advanced by exactly +1
+    And the raw sum positions_x[atom] + images_x[atom] · Lx equals the
+      unwrapped trial position bit-for-bit
+
+  @rq-84a2c415
+  Scenario: SD rejected trial with a mid-trial wrap restores both positions and images
+    Given the same trial-step geometry as the preceding "accepted trial that crosses a
+      face" scenario
+    And an energy landscape such that the trial is REJECTED
+    When one minimizer.step is invoked
+    Then the report has accepted == false
+    And positions_x, positions_y, positions_z are byte-identical to the pre-trial
+      snapshot
+    And images_x, images_y, images_z are byte-identical to the pre-trial snapshot,
+      i.e. the mid-trial image advance has been undone by sd_restore
 
   @rq-020ff80e
   Scenario: SD does not modify velocities
@@ -1016,6 +1151,36 @@ Feature: Steepest-descent energy minimizer
     When the minimization phase is invoked
     Then the phase terminates after iteration 0 with reason ForceZero
     And no SD step is taken
+
+  @rq-305fefce
+  Scenario: Rejection cascade shrinks step below STEP_FLOOR and terminates with StepFloor
+    Given a SD slot with force_tolerance = 1.0e-15, energy_tolerance = 1.0e-15,
+      initial_step = 1.0e-12 a_0, step_decrease = 0.5, max_iterations = 1000
+    And a system in a numerical plateau where every trial with any step > STEP_FLOOR
+      produces E_trial >= E_k (every iteration is rejected)
+    When the minimization phase is invoked
+    Then the phase terminates after at most 30 iterations with reason StepFloor
+    And step at termination is <= STEP_FLOOR (1.0e-6 a_0)
+    And the runner's phase summary line contains "converged: step_floor"
+    And the runner's phase summary line names the final F_max
+    And the process exits with code 0
+    And the subsequent phase in the config runs to completion
+
+  @rq-7782386f
+  Scenario: initial_step at or below STEP_FLOOR terminates at iteration 0 with StepFloor
+    Given a SD slot with initial_step = 1.0e-7 a_0 (below STEP_FLOOR = 1.0e-6 a_0)
+    When the minimization phase is invoked
+    Then the phase terminates after iteration 0 with reason StepFloor
+    And no trial force evaluation is performed
+    And the .minlog contains the step-0 row plus the final convergence row
+
+  @rq-391ed193
+  Scenario: StepFloor termination is treated as convergence, not error
+    Given a SD phase followed by an MD [[phase]] in the same config
+    And the SD phase terminates with reason StepFloor
+    When heddlemd run is invoked
+    Then the process exits with code 0
+    And the MD phase runs from the geometry the SD phase produced
 
   # --- Output ---
 

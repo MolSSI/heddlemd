@@ -1696,6 +1696,23 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
             self.log.lock().unwrap().push("after_kick");
             Ok(())
         }
+        // Recorded distinctly from `after_kick`. The step projects velocities
+        // twice, by two different hooks: `apply_after_kick` right after the
+        // trailing kick (projects AND publishes the constraint virial), and this
+        // one at the plan's terminal `ConstraintPoint { AfterKick }` (repairs the
+        // manifold after the thermostat/barostat rescales, without re-publishing).
+        // Overriding it here is what keeps the two distinguishable — the trait
+        // default delegates to `apply_after_kick`.
+        fn reproject_velocities_no_publish(
+            &mut self,
+            _b: &mut ParticleBuffers,
+            _sb: &SimulationBox,
+            _dt: Real,
+            _t: &mut Timings,
+        ) -> Result<(), ConstraintError> {
+            self.log.lock().unwrap().push("reproject");
+            Ok(())
+        }
     }
 
     let gpu = init_device().unwrap();
@@ -1729,7 +1746,10 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
         .step_with_constraint(&mut buffers, &mut sim_box, &mut ff, &mut rec, PROD_DT, &mut timings)
         .unwrap();
     let order = log.lock().unwrap().clone();
-    assert_eq!(order, vec!["before_drift", "after_drift", "after_kick"]);
+    assert_eq!(
+        order,
+        vec!["before_drift", "after_drift", "after_kick", "reproject"]
+    );
 }
 
 // rq-7047ea32

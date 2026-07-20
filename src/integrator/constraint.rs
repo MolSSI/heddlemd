@@ -62,7 +62,8 @@ pub trait Constraint: std::fmt::Debug + Send {
 
     /// Project the integrator's final velocities onto the constraint
     /// manifold (the time-derivative of every constraint is zero at the
-    /// new positions).
+    /// new positions), and **publish** the step's accumulated constraint
+    /// virial into `buffers.virials`.
     fn apply_after_kick(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -70,6 +71,51 @@ pub trait Constraint: std::fmt::Debug + Send {
         dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError>;
+
+    /// The same velocity projection as [`Constraint::apply_after_kick`], but
+    /// **without publishing** the constraint virial into `buffers.virials`.
+    ///
+    /// This is the step's *repair* projection. `apply_after_kick` has already
+    /// run — the runner fires it immediately after the trailing kick — so the
+    /// velocities are already on the manifold and the constraint virial has
+    /// already been published. What runs after that point can knock them back
+    /// off: a per-particle resample (Andersen), or a barostat velocity rescale.
+    /// The plan's terminal `ConstraintPoint { AfterKick }` dispatches this hook
+    /// to put them back (RATTLE-last).
+    ///
+    /// It must not publish, for two reasons:
+    ///
+    /// - The constraint virial must reach `buffers.virials` **exactly once**.
+    ///   `settle_positions` writes the position half and `settle_velocities`
+    ///   accumulates the velocity half onto it, and nothing clears the buffer in
+    ///   between; a second scatter would re-add the whole accumulated total —
+    ///   position half included — and double-count the constraint contribution
+    ///   to the pressure.
+    /// - The publish has to happen *before* a per-step barostat reduces the
+    ///   virial at the plan's terminal `BarostatPoint`. That is the whole point
+    ///   of publishing at the leading `apply_after_kick`: for rigid water the
+    ///   constraint virial very nearly cancels the force virial (−456 Ha against
+    ///   +412 Ha for 8192 SPC/E molecules), so a barostat that cannot see it
+    ///   estimates tens of thousands of atmospheres instead of tens, and drives
+    ///   the box away without bound.
+    ///
+    /// For a uniform rescale this projection is a no-op (zero impulse), so its
+    /// discarded virial contribution is zero. For Andersen it is a real repair,
+    /// and its impulse virial is dropped — an accepted approximation, since that
+    /// impulse answers a stochastic resample rather than a physical force.
+    ///
+    /// The default delegates to `apply_after_kick`, which is correct for any
+    /// slot that publishes no constraint virial. A slot that does publish one
+    /// (SETTLE, SHAKE) must override it.
+    fn reproject_velocities_no_publish(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        dt: Real,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        self.apply_after_kick(buffers, sim_box, dt, timings)
+    }
 
     /// Project the runner's freshly-sampled initial velocities onto
     /// the constraint velocity manifold. Called once by the runner

@@ -495,7 +495,7 @@ time with
   - `"csvr"` — stochastic NVT via canonical sampling velocity
     rescaling (Bussi-Donadio-Parrinello, 2007). See
     `integration/csvr.md`.
-  - `"andersen"` — stochastic NVT via per-particle Maxwell-Boltzmann
+  - `"andersen"` — stochastic NVT via per-group Maxwell-Boltzmann
     resampling (Andersen, 1980). See `integration/andersen.md`.
   - `"berendsen"` — deterministic weak-coupling thermostat (Berendsen
     et al., 1984). Suitable for **equilibration only**; does not
@@ -507,16 +507,30 @@ cadence:
 
 - `coupling_interval: u32` — the thermostat couples every
   `coupling_interval` steps (on steps where `step % coupling_interval
-  == 0`). Optional; defaults to `1` (couple every step). Must be
-  `≥ 1`; `0` is rejected. On a coupling step the thermostat acts with
-  the effective timestep `coupling_interval · dt`, so raising the
-  interval reduces how often the thermostat couples without changing
-  the physical meaning of the kind's coupling time `tau`. Coupling
-  every step (`1`) samples the thermostat's kinetic energy each step;
-  a larger interval amortizes that reduction and rescale over the
-  intervening steps. See `integration/framework.md` for the
-  coupling-step semantics (full-step kinetic energy; the composed
-  post-force kernel is bypassed on coupling steps).
+  == 0`). Optional; defaults to `25`. Must be `≥ 1`; `0` is rejected.
+  On a coupling step the thermostat acts with the effective timestep
+  `coupling_interval · dt`, so raising the interval reduces how often
+  the thermostat couples without changing the physical meaning of the
+  kind's coupling time `tau`. Coupling every step (`1`) samples the
+  thermostat's kinetic energy each step; a larger interval amortizes
+  that reduction and rescale over the intervening steps. The default
+  of `25` reflects that a stochastic global thermostat (CSVR) samples
+  the canonical ensemble regardless of cadence, so coupling every step
+  is unnecessary and needlessly forces the full-step kinetic-energy
+  reduction and rescale — and the forces+scalars pair kernel — onto
+  every step. On a run that also carries a `[constraints]` section the
+  interval does **not** govern the constraint slot's velocity
+  projections: the runner projects the velocities onto the constraint
+  manifold immediately after the trailing kick on *every* step (so that
+  a coupling step's reduction sees the physical, on-manifold full-step
+  `K`, and so that a per-step barostat's virial reduction sees the
+  constraint virial), and the plan's terminal projection likewise runs
+  every step. Both `settle_velocities` / `rattle_velocities` launches are
+  therefore a fixed per-step cost that raising `coupling_interval` does
+  not amortize. See `integration/framework.md` for the coupling-step
+  semantics (full-step kinetic energy; the composed post-force kernel is
+  bypassed on coupling steps) and
+  `integration/constraint-framework.md` for the projections.
 
 Fields accepted for `kind = "nose-hoover-chain"`:
 
@@ -532,7 +546,12 @@ Fields accepted for `kind = "nose-hoover-chain"`:
   half-step. Optional; defaults to `3`. Accepted values: `1`, `3`,
   `5`, `7`.
 - `n_resp: u32` — chain RESP sub-cycle count. Optional; defaults to
-  `1`. Must be `≥ 1`.
+  `5`. Must be `≥ 1`. This is the chain integration's stability knob:
+  a single sub-cycle (`n_resp = 1`) integrates the chain too coarsely
+  when the thermostat forces are large (far from equilibrium) and can
+  diverge; the default `5` is stable from an ordinary minimized start
+  (see `integration/nose-hoover-chain.md`, *Stability and the initial
+  condition*).
 
 Fields accepted for `kind = "csvr"`:
 
@@ -3132,13 +3151,13 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::MissingField { field: "thermostat.seed" })
 
   @rq-732daa1b
-  Scenario: [thermostat] coupling_interval defaults to 1 when omitted
+  Scenario: [thermostat] coupling_interval defaults to 25 when omitted
     Given the Background config with [integrator] kind="velocity-verlet"
     And a [thermostat] section with kind="csvr", temperature=300.0, tau=1.0e-13, seed=42
       (no coupling_interval)
     When load_config is called
     Then it returns Ok(config)
-    And the thermostat's coupling_interval equals 1
+    And the thermostat's coupling_interval equals 25
 
   @rq-908e8418
   Scenario: [thermostat] coupling_interval accepts a value greater than 1

@@ -90,4 +90,24 @@ __device__ static inline void triclinic_wrap_with_image(
   k_c = (int) kc;
 }
 
+// Wrap a position back into the primary image of the simulation box and
+// advance the three per-direction image counters by the integer triple
+// returned by the triclinic wrap. Matches the host-side
+// wrap_position_with_image_count formula on SimulationBox. Any kernel that
+// mutates positions in place must call this before writing back, so the
+// primary-image invariant (positions_state.md) is preserved and unwrapped
+// coordinates stay exact.
+__device__ static inline void wrap_and_count_triclinic(
+    Real &px, Real &py, Real &pz,
+    int &nx, int &ny, int &nz,
+    Real lx, Real ly, Real lz,
+    Real xy, Real xz, Real yz)
+{
+  int ka, kb, kc;
+  triclinic_wrap_with_image(px, py, pz, ka, kb, kc, lx, ly, lz, xy, xz, yz);
+  nx += ka;
+  ny += kb;
+  nz += kc;
+}
+
 #endif // DYNAMICS_KERNELS_PBC_CUH

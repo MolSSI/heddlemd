@@ -25,36 +25,31 @@ the same fixed-point accumulators:
 
 - The **packed-neighbour pass** (the main pair-force kernel) walks
   every entry of `interacting_tiles` / `interacting_atoms` and
-  evaluates each pair as scale 1.0. Excluded pairs are treated like
-  any other in this pass.
+  evaluates each pair at full strength. It does no exclusion work at
+  all — every pair it sees, modified or not, is evaluated as if its
+  scale were `1`.
 - The **single-pair pass** walks `single_pairs` — individual
-  (atom_i, atom_j) pairs extracted at neighbour-list build time
-  from sparse (i-block, j-block) candidates. One thread per pair
-  evaluates the pair with each fragment's `exclusion_scale(i, j)`
-  applied inline (so excluded pairs contribute
-  `scale × evaluate`). Same accumulator, same fixed-point
-  semantics.
+  (atom_i, atom_j) pairs extracted at neighbour-list build time from
+  sparse (i-block, j-block) candidates. One thread per pair; it too
+  evaluates every pair at full strength and reads no exclusion data.
+- The **correction pass** walks the fixed list of **modified pairs**
+  (every pair whose scale differs from `1` in some fragment, a pure
+  function of the topology). One thread per modified pair; it adds each
+  fragment's `(scale − 1) × evaluate` so that, summed with the
+  full-strength contribution the bulk or single-pair pass already
+  added, the net is `scale × evaluate`.
 
-Both passes apply the per-fragment exclusion scale inline via
-`exclusion_scale(i, j)`, which reads the per-atom exclusion table
-(`atom_excl_offsets`, `atom_excl_partners`, `atom_excl_scales`).
-Non-excluded pairs get a multiply-by-1.0 (a no-op); fully
-excluded pairs (`scale = 0`) contribute zero; OPLS-style
-fractional pairs (`scale = 0.5`) contribute half. No separate
-cancellation launch is issued.
-
-The exclusion-scale-in-main design keeps the pair-force output
-robust against the class of double-count failure modes where a
-separate cancellation pass would leave a spurious residual on
-the accumulator: because each pair-visit applies the pair's
-scale factor directly to the fragment contribution, an excluded
-pair (`scale = 0`) contributes zero regardless of the visit
-count.
-The complementary mechanism — a Newton's-3rd double-count for
-self-block-like pairs sharing an entry with cross-block pairs —
-is handled inside `heddle_jit_outer_loop` via the per-lane
-`my_j_in_iblock` flag documented in `neighbor-list.md` *Mixed-
-entry Newton's-3rd double-count*.
+Exclusion scales are **per fragment**: each fragment's contribution to a
+pair is scaled by a value in `[0, 1]` (`0` a full exclusion, `1` full
+strength, intermediate for OPLS/AMBER 1-4). Scaling is applied only in
+the correction pass, confined to the modified-pair list; the
+packed-neighbour and single-pair passes never read the exclusion tables.
+The full-strength term (from a neighbour-list pass) and the correction
+term (from the correction pass) are computed through different
+displacement code paths, so a full exclusion (`scale = 0`) nets to a
+small, bounded residual (order `1e-5` atomic units, far below MD-relevant
+forces) rather than exactly zero; the residual is deterministic for fixed
+inputs. See *Exclusion Handling*.
 
 This file specifies the data model, the block layout, the
 neighbour-list construction pipeline, the force kernel, the
@@ -241,40 +236,129 @@ single-pair pass amortises a full 32×32 = 1024-pair tile loop over
 just a handful of true interactions; above it the packed-
 neighbour pass is cheaper.
 
+The packed-neighbour and single-pair lists may contain modified pairs
+like any other in-range pair; the correction pass adjusts them
+afterwards (see *Exclusion Handling*). Modified pairs are carried by a
+device-resident **modified-pair list**, a pure function of the topology
+uploaded once at construction and never rebuilt:
+
+- `modified_pairs: CudaSlice<u32>` of length `2 · E` — the canonical
+  modified pairs interleaved `[a₀, b₀, a₁, b₁, …]` with `a < b`, where
+  `E` is the number of pairs whose scale differs from `1` in some
+  fragment. The correction pass reads this list; each entry's
+  per-fragment scale is looked up through `exclusion_scale(a, b)` at
+  evaluation time.
+
 The interaction counts are held on a small device counter array:
 
 - `interaction_count: CudaSlice<u32>` of length 2 —
   `interaction_count[0]` is the live entry count of
-  `interacting_tiles` / `interacting_atoms`;
-  `interaction_count[1]` is the live entry count of
-  `single_pair_atoms` (i.e., one less than twice the slot index
-  available for the next pair).
+  `interacting_tiles` / `interacting_atoms`; `interaction_count[1]` is
+  the live entry count of `single_pair_atoms`. The modified-pair count
+  `E` is a host-side constant (the list is fixed), not a device counter.
 
-`interaction_count` is reset to `(0, 0)` at the start of every
-rebuild.
+`interaction_count` is reset to `(0, 0)` at the start of every rebuild.
 
 ## Exclusion Handling <!-- rq-03faaf24 -->
 
-The packed-neighbour data model carries no exclusion-tile, bitmask,
-or per-pair scale table on the neighbour-list side. The
-construction kernel does not filter excluded pairs out of
-`interacting_atoms`; doing so would require per-pair partner-list
-memory traffic at build time.
+Nonbonded interactions between certain intramolecular atom pairs are
+**scaled per fragment**. Every exclusion topology entry carries a scale
+in `[0, 1]` for each fast-class fragment independently (a Lennard-Jones
+scale and a Coulomb scale): `0` removes that fragment's contribution
+entirely (a full exclusion, as for 1-2 bonded and 1-3 angle pairs), `1`
+leaves it at full strength, and an intermediate value scales it (as for
+OPLS/AMBER 1-4 pairs — typically a Lennard-Jones scale of `0.5` and a
+Coulomb scale of `0.833`). The two fragment scales are independent, so a
+pair may, for example, drop its Lennard-Jones contribution (scale `0`)
+while keeping its Coulomb contribution (scale `1`).
 
-Instead, both pair passes apply the per-fragment exclusion scale
-inline: each fragment's `evaluate(i, j)` output is multiplied by
-that fragment's `exclusion_scale(i, j)` before being folded into
-the fixed-point accumulator. Non-excluded pairs get a
-multiply-by-1.0; excluded pairs contribute
-`scale × evaluate(i, j)` directly, with no separate cancellation
-launch and no second pass over `atom_excl_partners`.
+A **modified pair** is an atom pair whose scale differs from `1` in at
+least one fragment. A pair whose every fragment scale is `1` is not
+modified and carries no exclusion entry. The set of modified pairs is a
+pure function of the topology, fixed for the lifetime of a run.
 
-Per-fragment exclusion scales are preserved end-to-end — an
-OPLS-style 1-4 exclusion where the Lennard-Jones contribution
-scales by `0.5` while the Coulomb contribution scales by `0.833`
-threads through each fragment's own `exclusion_scale(i, j)`
-lookup, so the two contributions land on the accumulator with
-their respective scales without any cross-fragment coupling.
+Modified pairs are handled by a **correction pass** that is entirely
+separate from the two passes that evaluate the neighbour list:
+
+- The **packed-neighbour pass** and the **single-pair pass** evaluate
+  every pair they see — modified or not — at full strength. They carry
+  no `exclusion_scale` call, no `atom_excl_*` read, and no per-pair scale
+  multiply. The construction does not route modified pairs away from
+  them; a modified pair simply appears in one of these passes like any
+  other in-range pair and contributes `1 × evaluate`. They evaluate only
+  the fragments that declare `FragmentPasses::NeighbourListAndCorrection`
+  (`jit-composed-pair-force.md`).
+- The **correction pass** walks the fixed **modified-pair list** — the
+  canonical pairs `(a, b)` (`a < b`) whose scale differs from `1` in some
+  fragment, held device-resident. One thread per modified pair. It loads
+  the two atoms' positions, forms the minimum-image displacement, and for
+  each fragment adds `(exclusion_scale(a, b) − 1) × evaluate` to both
+  atoms' fixed-point slots (Newton's 3rd via `±`). Summed with the
+  full-strength `1 × evaluate` the neighbour-list pass already
+  contributed, the net per fragment is `scale × evaluate`: a full
+  exclusion (`scale = 0`) contributes nothing, a 1-4 pair contributes its
+  scaled force and energy. The per-fragment scale lookup and the
+  `atom_excl_*` reads are confined to the `E` modified pairs.
+
+  The pass evaluates **every** fragment, both
+  `FragmentPasses::NeighbourListAndCorrection` and
+  `FragmentPasses::CorrectionOnly`. A `CorrectionOnly` fragment has no
+  full-strength neighbour-list term for the correction to complete — the
+  quantity it corrects was contributed outside the pair passes — so its
+  `(scale − 1) × evaluate` is the whole of its contribution.
+
+  The **max-cutoff mask is applied per fragment, not once for the pass**.
+  A fragment declaring `CutoffHandling::Uniform` or `PerPair` is masked as
+  it is in the neighbour-list passes; a fragment declaring
+  `CutoffHandling::Unbounded` is evaluated at every separation, outside
+  the mask. The distinction is load-bearing rather than cosmetic: the SPME
+  excluded-pair fragment offsets a reciprocal-space mesh sum, which has no
+  cutoff, so a modified pair beyond the cutoff still carries a
+  reciprocal-space contribution that must still be corrected. Masking it
+  would leave a residue of `(1 − scale) · k_C · q_a q_b / r` — long-ranged,
+  silent, and growing with the charges involved (`spme.md`).
+
+This correctness rests on two properties:
+
+1. **Unique emission.** Each unordered pair appears exactly once across
+   the union of the packed-neighbour and single-pair outputs (the
+   construction's ordered block-pair sweep plus its `aid < jid`
+   self-block dedup guarantee this — see *Construction Pipeline* and the
+   uniqueness scenarios). So a modified pair receives exactly one
+   full-strength `1 × evaluate` for the correction pass's single
+   `(scale − 1) × evaluate` to complete.
+2. **Bounded-residual cancellation.** The force accumulator is 64-bit
+   integer fixed-point, so accumulation itself is order-independent and
+   exact. A modified pair's full-strength term is computed by whichever
+   neighbour-list pass owns it — the packed-neighbour pass (the diagonal
+   shuffle, possibly under the single-periodic-copy fast path) or the
+   single-pair pass (per-pair min-image) — while the correction term is
+   computed by the correction pass through its own per-pair min-image
+   evaluation. These are different displacement code paths, so the two
+   terms are equal only to `f32` precision, not bit-for-bit; a full
+   exclusion (`scale = 0`) nets to a small residual rather than exactly
+   zero. The residual is bounded by roughly `f32` precision times the
+   pair's pre-cancellation force magnitude (order `1e-5` atomic units for
+   a typical excluded bond, below `1e-4` atomic units and far below
+   MD-relevant force magnitudes of `~1e-2` atomic units). It is
+   **deterministic**: for byte-identical inputs the same pass owns each
+   modified pair, so the forces are bit-identical run to run (preserving
+   the GPU-vs-GPU reproducibility invariant of `architecture.md`). It is
+   **routing-dependent**: which pass owns a modified pair follows the
+   neighbour-list layout, so the residual — and therefore the exclusion
+   forces — can vary within its bound across different `r_skin` values or
+   atom orderings that route the pair differently. Exclusion forces are
+   thus reproducible for fixed inputs but agree only to the residual bound
+   across neighbour-list routing.
+
+The correction pass reads the exclusion-topology index tables
+`atom_excl_offsets` / `atom_excl_partners` and the per-fragment scale
+arrays (see `topology.md`) only for the `E` modified pairs; the
+packed-neighbour and single-pair passes read none of them. Because the
+correction pass is a per-pair pass keyed on the fixed modified-pair list
+and never touches the neighbour-list block structure, it is independent
+of the neighbour-list mode and applies equally to cell-list and
+all-pairs (`Trivial`) neighbour lists.
 
 ## Construction Pipeline <!-- rq-dbffee81 -->
 
@@ -394,6 +478,10 @@ multiple of `n_blocks`, clamped down to the all-pairs reference
 `n_blocks²` for tiny systems. There is no configuration knob for the
 initial capacity; the probe rebuild (below) determines it.
 
+The modified-pair list has no capacity of its own: it is a fixed
+device buffer of length `2 · E` uploaded once at construction (`E` is a
+host-side constant), never grown and never rebuilt.
+
 **Device-resident counts.** A steady-state rebuild copies no count
 to the host. The construction kernel writes the live counts to the
 two-element device buffer `interaction_count` (`[0]` = packed-tile
@@ -410,6 +498,9 @@ grid sized by a host-known capacity and reads the live count from
 - The packed-neighbour force pass launches over `n_blocks`; the
   single-pair force pass launches over `single_pairs_capacity` and
   reads `interaction_count[1]` on the device (see *Single-Pair Pass*).
+- The correction pass launches over `E` (the fixed modified-pair count),
+  one thread per modified pair; it reads no device count (see
+  *Correction Pass*).
 
 **Status word.** `CellListData` carries the single-`u32` device
 buffer `neighbor_status` (see `neighbor-list.md` *Displacement Check*)
@@ -423,9 +514,9 @@ whose bits are:
 | 3 | `tiles_overflow` | construction kernel |
 | 4 | `single_pairs_overflow` | construction kernel |
 
-After the construction sweep, a single device thread compares each
-live count `interaction_count[c]` against the capacity `capacity_c`
-and sets bits via `atomicOr(neighbor_status, …)`:
+The construction sweep sets its bits from a single designated device
+thread that compares the live count `interaction_count[c]` against the
+capacity `capacity_c` via `atomicOr(neighbor_status, …)`:
 
 - `interaction_count[c] > floor(capacity_c · tile_pair_fill_threshold)`
   sets the matching `*_high_water` bit. The build is **complete** — no
@@ -551,11 +642,51 @@ class-zero kernel does that).
 
 ## Force Kernel <!-- rq-6083409b -->
 
-The fast-class pair-force pipeline has three JIT-composed kernels.
-Each pass writes into the same per-particle fixed-point
+The fast-class pair-force pipeline has three JIT-composed pair-force
+passes — the packed-neighbour (bulk) pass, the single-pair pass, and the
+correction pass. Each writes into the same per-particle fixed-point
 accumulators (`fast_total_forces_fp_*`,
 `fast_total_potential_energies_fp`, `fast_total_virials_fp`); the
-finaliser converts to `Real` after all three have run.
+finaliser converts to `Real` after all passes have run. Only the
+correction pass consults exclusion data; the packed-neighbour and
+single-pair passes evaluate `heddle_jit_eval_pair_sum` with no exclusion
+lookup or scale multiply (see *Exclusion Handling*).
+
+### Correction Pass <!-- rq-fa0b3d10 -->
+
+For every modified pair `k` in `[0, E)` — one thread per pair:
+
+- `a = modified_pairs[2·k]`, `b = modified_pairs[2·k + 1]` (`a < b`,
+  original atom IDs).
+- Load `posq[a]` and `posq[b]`, form `dx = p_a − p_b`, wrap it with
+  `heddle_jit_triclinic_min_image`, and compute `r²`, `inv_r`, `r` and the
+  max-cutoff mask the same way the single-pair pass does. (A modified pair is
+  intramolecular and short-range, so its min-image displacement matches the
+  displacement the packed-neighbour or single-pair pass computed for the same
+  pair to `f32` precision, not bit-for-bit — the packed-neighbour pass reaches
+  it through the diagonal shuffle, possibly under the SPC fast path, rather
+  than this per-pair min-image — leaving the bounded correction residual
+  described in *Exclusion Handling* and *Determinism*.)
+- For each fragment, invoke the composer's **correction evaluator**
+  `heddle_jit_eval_pair_correction`, which computes each fragment's
+  `(factor, energy)` and multiplies it by `exclusion_scale(a, b) − 1`
+  (the per-fragment scale minus one). It adds the resulting
+  `(scale − 1) · factor · d` to atom `a` and its negation to atom `b`
+  (Newton's 3rd via `±`), and the correspondingly scaled energy and virial
+  shares. The max-cutoff mask zeroes the contribution for a modified pair
+  beyond the cutoff.
+- Summed with the `1 · evaluate` the packed-neighbour or single-pair pass
+  already added for this pair, the net per fragment is `scale · evaluate` to
+  within the correction residual: the full-strength term (from a neighbour-list
+  pass) and the correction term (this pass) are evaluated through different
+  displacement code paths, so a full exclusion (`scale = 0`) nets to a bounded
+  residual (order `1e-5` atomic units) rather than an exact integer
+  cancellation, and a 1-4 pair to its scaled contribution within the same
+  bound. The residual is deterministic for fixed inputs (see *Determinism*).
+
+The pass is launched only when `E > 0`. It reads no neighbour-list block
+structure and no interaction count; its grid is sized from the host-known
+constant `E`.
 
 ### Packed-Neighbour Pass <!-- rq-a4b9e702 -->
 
@@ -571,10 +702,11 @@ For every entry `pos` in `[0, interaction_count[0])`:
   partial-tail padding; treat as inactive.
 - Run the 32-iteration diagonal shuffle (described in *Diagonal
   Shuffle* below). For each pair the lane invokes the composer's
-  per-pair evaluator (`heddle_jit_eval_pair_sum`, see
+  per-pair evaluator `heddle_jit_eval_pair_sum` (see
   `jit-composed-pair-force.md`), which sums each fragment's
-  `evaluate(r², inv_r, r, i, j, …)` and multiplies the result by
-  that fragment's `exclusion_scale(i, j)` inline.
+  `evaluate(r², inv_r, r, i, j, …)`. **No `exclusion_scale` is applied**:
+  the construction guarantees no bulk entry contains a modified pair,
+  so every pair here is a full-strength interaction.
 - AtomicAdd per-lane accumulators to the fixed-point buffer using
   i-atom and j-atom original IDs.
 
@@ -586,12 +718,11 @@ For every entry `k` in `[0, interaction_count[1])`:
   `atom_j = single_pair_atoms[2k + 1]`.
 - One thread per pair. The thread loads both positions, computes
   `(dx, dy, dz, r², inv_r, r)`, invokes the same
-  `heddle_jit_eval_pair_sum` evaluator (which multiplies each
-  fragment's contribution by that fragment's
-  `exclusion_scale(i, j)` inline), and atomicAdds the per-fragment
-  contribution to both atoms' fixed-point slots. Newton's 3rd is
-  observed by adding `+(factor · d)` to atom `i` and
-  `−(factor · d)` to atom `j` per component.
+  `heddle_jit_eval_pair_sum` evaluator (again with **no exclusion
+  scale** — single pairs are exclusion-free by construction), and
+  atomicAdds the per-fragment contribution to both atoms' fixed-point
+  slots. Newton's 3rd is observed by adding `+(factor · d)` to atom `i`
+  and `−(factor · d)` to atom `j` per component.
 
 ### Diagonal Shuffle <!-- rq-18847c46 -->
 
@@ -636,13 +767,15 @@ gating is by `j_atom_id < N` (and by the optional
 
 ### Single-Periodic-Copy Fast Path <!-- rq-5ce17997 -->
 
-The packed-neighbour pass evaluates a per-i-block
-single-periodic-copy (SPC) predicate at the top of the outer loop
-and branches on the result. The predicate is uniform across the
-warp (all 32 lanes processing one i-block compute the same value
-from `i_block`, the lattice constants, and the compile-time max
-cutoff), so there is no per-pair warp divergence and only one
-warp-wide control flow path executes per i-block per launch.
+The packed-neighbour pass evaluates a per-i-block single-periodic-copy
+(SPC) predicate at the top of the outer loop and branches on the
+result. The predicate is uniform across the warp (all 32 lanes
+processing one i-block compute the same value from the block's bbox,
+the lattice constants, and the compile-time max cutoff), so there is
+no per-pair warp divergence and only one warp-wide control flow path
+executes per i-block per launch. The single-pair and correction passes
+are per-pair (one thread per pair) with no block centre, so they always
+take the min-image path.
 
 The two code paths are:
 
@@ -651,13 +784,13 @@ The two code paths are:
   `dx = pi - pj` into the canonical `[-L/2, L/2)` displacement
   per lattice direction before the `r²` evaluation.
 - **SPC path.** Before entering the inner loop, each lane wraps
-  its own `pi` (loaded from `tile_sorted_posq`) and its own `pj`
-  (loaded from `posq`) into the periodic image closest to the
-  i-block centre `block_centre[i_block]`, using
+  its own `pi` and its own `pj` into the periodic image closest to
+  the i-block centre `block_centre[i_block]`, using
   `triclinic_wrap_against_center(pos, centre, lattice)`. After
   both wraps, the inner loop computes `dx = pi - pj` and **does
   not call** `heddle_jit_triclinic_min_image` — `dx` is already
-  the canonical min-image displacement.
+  the canonical min-image displacement. (`pi` comes from
+  `tile_sorted_posq` and `pj` from `posq`.)
 
 The wrap helper `triclinic_wrap_against_center(pos, centre,
 lattice)` shifts `pos` to the periodic image closest to `centre`:
@@ -698,34 +831,39 @@ where:
 Correctness rationale. For an i-block whose bbox half-extent
 along axis `d` is `B_d`, every i-atom is within `B_d` of the
 centre along that axis. After wrapping `pj` against the centre,
-`|pj − centre|_d ≤ L_d / 2`. The candidate j-atom passes the
-construction-kernel distance test against some i-atom, so under
-min-image relative to that i-atom its position is within
-`MAX_CUTOFF + B_d` of the centre. When
-`0.5 · L_d − B_d ≥ MAX_CUTOFF`, the centre-image wrap and the
-min-image wrap select the same periodic copy, so `pi − pj` is
-already the canonical min-image displacement. Out-of-cutoff
-candidates (the small fraction that the bbox-prune lets through
-even though no real interaction survives) are zeroed by the
-existing `cutoff_mask` whether the wrap matched min-image or
-not, so the predicate only needs to be safe for in-cutoff pairs.
+`|pj − centre|_d ≤ L_d / 2`. The predicate only needs to be safe
+for **in-cutoff** pairs — an in-cutoff pair is one whose true
+min-image separation is `≤ MAX_CUTOFF`, so its j-atom is within
+`MAX_CUTOFF` of some i-atom and therefore within `MAX_CUTOFF + B_d`
+of the centre. When `0.5 · L_d − B_d ≥ MAX_CUTOFF`, the
+centre-image wrap and the min-image wrap select the same periodic
+copy for such a j-atom, so `pi − pj` is already the canonical
+min-image displacement. Out-of-cutoff pairs are zeroed by the
+existing `cutoff_mask` regardless of which image the wrap selected:
+the centre-wrapped separation is never smaller than the true
+min-image separation (the min-image is the closest of all images,
+so any other image is at least as far), so a pair whose min-image
+separation exceeds the cutoff cannot be pulled below it by the
+centre wrap. The packed-neighbour pass's j-atoms reach the kernel
+already filtered to within-search candidates by the construction
+sweep, so only in-cutoff pairs contribute and the predicate is safe.
 
 #### Triclinic Boxes <!-- rq-412fea28 -->
 
 The predicate gates SPC on `orthorhombic`. Triclinic boxes (any
 of `xy`, `xz`, `yz` non-zero) take the min-image path on every
-i-block regardless of bbox extent. Extending SPC to triclinic
-boxes is future work that would replace the per-axis box-length
-check with a projection of the i-block bbox onto each face
-normal; the kernel helper `triclinic_wrap_against_center` already
-handles arbitrary lattice geometry, so the change would be
-confined to the eligibility predicate.
+i-block regardless of bbox extent. Extending SPC to triclinic boxes is future work that would replace
+the per-axis box-length check with a projection of the i-block
+bbox onto each face normal; the kernel helper
+`triclinic_wrap_against_center` already handles arbitrary lattice
+geometry, so the change would be confined to the eligibility
+predicate.
 
 #### Box-Geometry Transitions <!-- rq-1ccb6e53 -->
 
 Under NPT or NPH the box and the per-block bbox both change
 across a step. The predicate is evaluated freshly at every
-i-block of every launch, reading the current lattice constants
+i-block of every packed-neighbour launch, reading the current lattice constants
 (passed as a kernel argument) and the current `block_bbox` (one
 of the buffers populated by the per-rebuild
 `compute_block_bbox`). No host-side cache or CUDA-graph
@@ -775,21 +913,25 @@ The per-slot `PairForceFragment` source contract is documented in
 `functor_struct`, `functor_source`, `entry_point_args`,
 `functor_init_source`, and a `cutoff: CutoffHandling`
 declaration. The functor's interface is
-`cutoff_squared(i_type, j_type, i, j) -> Real`,
+`cutoff_squared(i_type, j_type, i, j) -> Real` and
 `evaluate(r2, inv_r, r, qi, qj, i_type, j_type, i, j, factor,
-energy)`, and `exclusion_scale(i, j) -> Real`. The composer
-emits one per-pair evaluator:
+energy)`. Each fragment provides an `exclusion_scale(i, j) -> Real`
+method reading the per-fragment scale tables (see `topology.md`); it is
+consulted only by the correction pass. The composer emits two per-pair
+evaluators:
 
 - `heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r, i,
-  j, factor, energy)` — sums each fragment's
-  contribution and multiplies the fragment's `(factor, energy)`
-  by that fragment's `exclusion_scale(i, j)` inline.
-  Used by the packed-neighbour pass's diagonal-shuffle inner
-  loop and by the single-pair pass's per-thread evaluation. The
-  caller derives the per-pair scalar virial as `factor * r²` from
-  the summed, exclusion-scaled `factor`.
+  j, factor, energy)` — sums each fragment's contribution at full
+  strength, applying no exclusion scale. Used by the packed-neighbour
+  and single-pair passes.
+- `heddle_jit_eval_pair_correction<WriteEv>(composite, r2, inv_r, r, i,
+  j, factor, energy)` — sums each fragment's contribution multiplied by
+  that fragment's `exclusion_scale(i, j) − 1`. Used by the correction
+  pass; summed with the full-strength contribution the neighbour-list
+  pass added, the net is `scale × evaluate`.
 
-The evaluator applies the cutoff handling described in
+Both derive the per-pair scalar virial as `factor * r²` from the summed
+`factor`, and both apply the cutoff handling described in
 `jit-composed-pair-force.md` (the per-fragment cutoff guard,
 collapsed when `CutoffHandling::Uniform(c)` matches the outer
 max-cutoff mask).
@@ -878,11 +1020,15 @@ every step:
 | 3 | `cudaMemsetAsync` zeroing fast fixed-point buffers | Every step (or only when re-evaluating the Fast class) |
 | 4 | `heddle_jit_composed_pair_force_{f,fev}` (packed-neighbour pass) | Once per step; per-i-block SPC predicate inside the kernel selects between the min-image branch and the centre-wrap branch |
 | 5 | `heddle_jit_composed_pair_force_single_{f,fev}` (single-pair pass) | Once per step (only if `interaction_count[1] > 0`) |
-| 6 | `finalize_fast_class_forces` | Once per step; converts fixed-point to Real and adds into `ParticleBuffers.forces_*` |
+| 6 | `heddle_jit_composed_pair_force_correct_{f,fev}` (correction pass) | Once per step (only if `E > 0`) |
+| 7 | `finalize_fast_class_forces` | Once per step; converts fixed-point to Real and adds into `ParticleBuffers.forces_*` |
 
-When step 2 triggers a rebuild, the rebuild pipeline (steps 1–6 of
-*Construction Pipeline*, including the second `scatter` since
-`sorted_particle_ids` has changed) runs before step 3.
+The three pair passes (4–6) all accumulate into the same fixed-point
+buffers and may run in any order; the finaliser (7) follows them.
+
+When step 2 triggers a rebuild, the rebuild pipeline (the *Construction
+Pipeline* steps, plus the second `scatter` since `sorted_particle_ids`
+has changed) runs before step 3.
 
 ## Configuration <!-- rq-9527bd2d -->
 
@@ -908,6 +1054,15 @@ so there is no initial-capacity field to tune.
 The field `max_neighbors` is **not** part of `NeighborListConfig`.
 Specifying it in the configuration file is a load-time error with
 an explanatory message that the field is no longer used.
+
+Exclusion scales are per fragment (see *Exclusion Handling*). Each
+fragment scale is a value in `[0, 1]`; the two fragment scales of a pair
+are independent, so full exclusions (`0`), fractional 1-4 scaling
+(e.g. a Lennard-Jones scale of `0.5` with a Coulomb scale of `0.833`),
+and per-fragment combinations (e.g. `0` Lennard-Jones with `1` Coulomb)
+all load. Scale-range validation lives in the topology parser (see
+`topology.md`): a scale outside `[0, 1]` or a NaN is a load-time error
+naming the offending pair, and the run does not start.
 
 ## Determinism <!-- rq-db98d977 -->
 
@@ -947,6 +1102,31 @@ supporting this:
    the integer sum; the final `Real` addition into
    `ParticleBuffers.forces_*` happens in a kernel that reads each
    atom's slot exactly once.
+7. **Deterministic correction.** The correction pass walks the fixed
+   modified-pair list (a pure function of the topology, in a fixed order)
+   and adds `(exclusion_scale − 1) × evaluate` per fragment through the
+   same fixed-point accumulators, so its per-atom result is
+   permutation-invariant like every other pass. For byte-identical inputs
+   the neighbour-list layout is identical, so the same neighbour-list pass
+   owns each modified pair's full-strength term on every run; the
+   full-strength and correction terms are therefore evaluated through the
+   same code paths run to run, and their (non-zero) residual is
+   bit-identical across runs. Run-to-run determinism is thus fully
+   preserved.
+
+   The residual itself is **not zero**. A modified pair's full-strength
+   term comes from whichever neighbour-list pass owns it — the
+   packed-neighbour diagonal shuffle (possibly under the SPC fast path) or
+   the single-pair min-image — while the correction term is the correction
+   pass's own per-pair min-image. These are different displacement code
+   paths, equal only to `f32` precision, so a full exclusion nets to a
+   bounded residual (order `1e-5` atomic units, below `1e-4` atomic units
+   and far below MD-relevant forces) rather than exactly zero. Because the
+   owning pass depends on the neighbour-list layout, the residual — and
+   hence the exclusion forces — can vary within that bound across `r_skin`
+   values or atom orderings that route a pair differently. Exclusion forces
+   are therefore reproducible for fixed inputs but only routing-agreeing to
+   the residual bound, not routing-independent. See *Exclusion Handling*.
 
 The reproducibility scope is GPU-vs-GPU on the same hardware,
 matching `architecture.md`. CPU-vs-GPU is not promised.
@@ -957,9 +1137,10 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
 
 - `NeighborListState` adds the fields documented under *Atom <!-- rq-b5c18e6b -->
   Blocks*, *Tile-Sorted Position View*, *Block Bounding Boxes*,
-  *Sorted-Blocks-by-Volume*, and *Neighbour List* above. The
-  per-particle padded `neighbor_list` and `neighbor_counts` fields
-  are not present.
+  *Sorted-Blocks-by-Volume*, and *Neighbour List* above — including the
+  device-resident `modified_pairs` buffer (length `2 · E`, uploaded once at
+  construction) and its host-side count `E`. The per-particle padded
+  `neighbor_list` and `neighbor_counts` fields are not present.
 - `ForceField` adds the fixed-point class accumulator fields <!-- rq-e6b37d18 -->
   documented under *Fixed-Point Force Buffers*. The per-class
   `fast_total_forces_x/y/z` (and the `_potential_energies` /
@@ -977,10 +1158,10 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `PackedNeighborOverflow { buffer: &'static str }` — returned by
   `NeighborListState::pre_step` when a steady-state build set a
   `*_overflow` bit of `neighbor_status`, meaning a packed-neighbour
-  buffer would have dropped within-`r_search` entries. `buffer` names
-  the buffer that overflowed (`"interacting_tiles"` or
-  `"single_pair_atoms"`). This is the only neighbour-overflow error;
-  there is no per-particle neighbour cap to exceed.
+  buffer would have dropped within-`r_search` entries. `buffer` names the
+  buffer that overflowed (`"interacting_tiles"` or `"single_pair_atoms"`).
+  This is the only neighbour-overflow error; there is no per-particle
+  neighbour cap to exceed.
 - `PairSnapshot` — host-side owned enumeration of the pair set <!-- rq-a0ab0088 -->
   represented by a `NeighborListState` at the time the snapshot
   was taken. Constructed by
@@ -1026,13 +1207,27 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   `floor(capacity · tile_pair_fill_threshold)`, computed on the host
   from the current capacities. The `MAX_BITS_FOR_PAIRS = 3` threshold
   is a compile-time `#define`.
+- The device-resident `modified_pairs` buffer (length `2 · E`) is <!-- rq-8945395f -->
+  uploaded once at construction from the topology's modified-pair set
+  (every canonical pair `(a, b)`, `a < b`, whose scale differs from `1` in
+  some fragment). It is fixed for the run — no per-rebuild build and no
+  device-to-host transfer. The correction pass reads it and looks up each
+  pair's per-fragment scale via `exclusion_scale(a, b)` at evaluation time.
 - `heddle_jit_composed_pair_force_f` / <!-- rq-42e29605 -->
   `heddle_jit_composed_pair_force_fev` — JIT-composed packed-
   neighbour entry points; argument list documented under
   *Packed-Neighbour Entry-Point Arguments*. Each evaluates the
   per-i-block SPC predicate at runtime and branches between the
   centre-wrap fast path and the per-pair min-image path; the
-  branch is uniform across the warp.
+  branch is uniform across the warp. They apply no exclusion scale.
+- `heddle_jit_composed_pair_force_correct_f` / <!-- rq-9d34c158 -->
+  `heddle_jit_composed_pair_force_correct_fev` — JIT-composed correction
+  entry points; one thread per modified pair over `[0, E)`. Read the pair
+  `(a, b)` from `modified_pairs`, load `posq[a]` / `posq[b]`, form the
+  per-pair min-image displacement, apply the max-cutoff mask, and add each
+  fragment's `(exclusion_scale(a, b) − 1) × evaluate` to both atoms'
+  fixed-point slots (Newton's 3rd via `±`). Launched only when `E > 0`
+  (see *Correction Pass*).
 - `heddle_jit_composed_pair_force_single_f` / <!-- rq-3ddf259b -->
   `heddle_jit_composed_pair_force_single_fev` — JIT-composed
   single-pair entry points; argument list documented under
@@ -1464,27 +1659,87 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then no pair contribution is accumulated for that lane
 
   @rq-b49bfdff
-  Scenario: Packed-neighbour pass applies exclusion_scale inline
+  Scenario: Packed-neighbour and single-pair passes do no exclusion work
     Given a ForceField with at least one fast-class pair-force fragment
-    And the JIT-composed packed-neighbour kernel source captured for inspection
-    Then the packed-neighbour pass's inner loop dispatches to heddle_jit_eval_pair_sum
-    And every fragment's exclusion_scale(i, j) is loaded and multiplied into that fragment's (factor, energy) exactly once per pair inside heddle_jit_eval_pair_sum
+    And the JIT-composed packed-neighbour and single-pair kernel sources captured for inspection
+    Then neither source contains a call to exclusion_scale or a read of atom_excl_offsets / atom_excl_partners
+    And each dispatches to heddle_jit_eval_pair_sum with no per-pair scale multiply
+
+  # --- Exclusion handling: correction pass ---
 
   @rq-80c6a964
-  Scenario: Fully-excluded pair nets to zero on the fixed-point accumulator
-    Given a pair (i, j) where every active fragment's exclusion_scale(i, j) returns 0.0
-    And the pair is within HEDDLE_JIT_MAX_CUTOFF_SQUARED
-    When the packed-neighbour pass runs
-    Then it adds 0.0 × evaluate(i, j) to both atoms' fixed-point slots for the pair
-    And the per-atom fixed-point slots receive no net contribution from the pair
+  Scenario: A fully-excluded pair nets to within the correction residual
+    Given atoms a and b are a modified pair with every fragment scale 0, within the cutoff
+    When the packed-neighbour or single-pair pass evaluates (a, b) at full strength
+    And the correction pass processes the modified pair (a, b)
+    Then the correction pass adds (0 - 1) x evaluate for each fragment
+    And the full-strength and correction contributions cancel to within the
+      correction residual bound (absolute 1e-4 au or 1e-4 relative to the
+      unscaled pair force, whichever is more permissive), the two terms being
+      evaluated through different displacement code paths
+    And the net force, energy, and virial each atom carries from the (a, b)
+      pair is bounded by that residual rather than exactly zero
 
-  @rq-8840662f
-  Scenario: Per-fragment exclusion scale yields per-fragment net contribution
-    Given a pair (i, j) where the LJ fragment's exclusion_scale(i, j) returns 0.5
-    And the Coulomb fragment's exclusion_scale(i, j) returns 0.833
-    When the packed-neighbour pass runs
-    Then the LJ contribution to atoms i and j is exactly 0.5 × the unexcluded LJ pair value
-    And the Coulomb contribution to atoms i and j is exactly 0.833 × the unexcluded Coulomb pair value
+  @rq-4aad39c8
+  Scenario: A fractional 1-4 pair nets a scaled force
+    Given atoms a and d are a modified pair with a Lennard-Jones scale of 0.5, within the cutoff
+    When the neighbour-list pass evaluates (a, d) at full strength and the correction pass adds (0.5 - 1) x evaluate
+    Then each atom's net Lennard-Jones force from (a, d) is half the unscaled pair force to within the correction residual bound
+    And the cell-list total forces match an all-pairs run that applies the same
+      per-fragment scales within absolute 1e-4 au or 1e-4 relative, whichever is more permissive
+
+  @rq-27add068
+  Scenario: A per-fragment exclusion applies each fragment's scale independently
+    Given atoms a and e are a modified pair with a Lennard-Jones scale of 0 and a Coulomb scale of 1
+    When the correction pass processes (a, e)
+    Then the (a, e) pair carries no net Lennard-Jones force beyond the correction residual bound
+    And it carries its full Coulomb force
+
+  @rq-ea4617e1
+  Scenario: A fractional exclusion scale loads without error
+    Given a topology whose exclusion for pair (i, j) has a Lennard-Jones scale of 0.5 and a Coulomb scale of 0.833
+    When the simulation loads
+    Then loading succeeds
+    And (i, j) is recorded as a modified pair carrying those per-fragment scales
+
+  @rq-350b8807
+  Scenario: A modified pair appears at full strength in the neighbour-list output
+    Given block pair (bi, bj) contains at least one modified atom pair within the cutoff
+    When NeighborListState::rebuild completes
+    Then that modified pair appears exactly once across the union of the
+      interacting_atoms and single_pair_atoms outputs
+    And the construction does not route it away from those outputs
+
+  @rq-26734dec
+  Scenario: Modified pairs in the neighbour-list output are unique
+    Given a multi-molecule system whose intramolecular pairs are all modified
+      and all within r_search
+    When NeighborListState::rebuild completes
+    Then every modified pair appears exactly once across the union of the
+      packed-neighbour and single-pair outputs, so the single correction term
+      completes it
+
+  @rq-37d3cd28
+  Scenario: The correction pass is skipped when no pair is modified
+    Given a topology with no modified pairs (every fragment scale is 1)
+    When the force-evaluation pipeline runs
+    Then E equals 0
+    And heddle_jit_composed_pair_force_correct_f is not launched
+
+  @rq-c057bf03
+  Scenario: The modified-pair list is uploaded once and never rebuilt
+    Given a CUDA-graph-captured phase past its pre-capture probe rebuild
+    And a batch boundary on which the displacement bit triggers a rebuild
+    When NeighborListState::rebuild runs the construction pipeline
+    Then no exclusion data is copied to or from the host
+    And the device-resident modified_pairs buffer is the same buffer uploaded at construction
+
+  @rq-50967ef2
+  Scenario: Two GPU runs produce byte-identical forces with exclusions
+    Given two simulations with modified pairs started from byte-identical initial state
+    When both run ForceField::step(Fast) once
+    Then ParticleBuffers.forces_x, forces_y, forces_z compare byte-identical
+      across the two runs after finalize_fast_class_forces
 
   # --- Single-pair pass ---
 
@@ -1707,6 +1962,13 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Given any simulation step
     When the single-pair pass runs
     Then it invokes heddle_jit_triclinic_min_image for every pair it evaluates
+    And it does not read block_centre or block_bbox
+
+  @rq-077f82c6
+  Scenario: Correction pass takes the min-image path
+    Given any simulation step with modified pairs
+    When the correction pass evaluates a modified pair
+    Then it invokes heddle_jit_triclinic_min_image for that pair
     And it does not read block_centre or block_bbox
 
   # --- PairSnapshot: canonical pair enumeration ---

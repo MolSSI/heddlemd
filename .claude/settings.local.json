@@ -28,7 +28,9 @@
       "Bash(rm -f ethane.out.*)",
       "Bash(../../target/release/heddlemd run *)",
       "Bash(git --no-pager diff HEAD -- src/integrator/mod.rs)",
-      "Bash(.claude/skills/plan-feature/rqm.sh show *)"
+      "Bash(.claude/skills/plan-feature/rqm.sh show *)",
+      "Bash(.claude/skills/plan-feature/rqm.sh stamp *)",
+      "Bash(.claude/skills/plan-feature/rqm.sh index *)"
     ]
   }
 }

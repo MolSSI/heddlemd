@@ -17,6 +17,17 @@ use super::{
 };
 use crate::precision::Real;
 
+/// Absolute floor on the adaptive step size, in engine (atomic) units
+/// of length (Bohr radii, `a_0`). Below this value the trial position
+/// update `step · F / F_max` is a bit-level no-op on the max-force atom
+/// at any physically reasonable position magnitude — positions are
+/// stored in `[-L/2, +L/2)` and f32 relative rounding at `~30 a_0` is
+/// `~3.6e-6 a_0`, so `1.0e-6 a_0` is the tightest value at which every
+/// simulation-scale coordinate can still be modified by at least one
+/// f32 ULP. Reaching this floor terminates the SD phase with
+/// `MinimizerConvergence::StepFloor`.
+pub(crate) const STEP_FLOOR: Real = 1.0e-6;
+
 // rq-0a2ca9ac — `[minimization.algorithm]` schema fields
 #[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
 #[serde(deny_unknown_fields)]
@@ -86,6 +97,14 @@ pub struct SteepestDescentMinimizer {
     snapshot_x: CudaSlice<Real>,
     snapshot_y: CudaSlice<Real>,
     snapshot_z: CudaSlice<Real>,
+    // Companion snapshot of the image counters, captured with the position
+    // snapshot before every trial and restored together with positions on
+    // rejection. Keeps the `(positions, images)` pair mutually consistent
+    // across every accept/reject cycle — see
+    // `rqm/minimization/steepest-descent.md` *Snapshot and restore*.
+    images_snapshot_x: CudaSlice<i32>,
+    images_snapshot_y: CudaSlice<i32>,
+    images_snapshot_z: CudaSlice<i32>,
     f_max_scratch: CudaSlice<Real>,
     pe_scratch: CudaSlice<Real>,
 }
@@ -100,6 +119,9 @@ impl SteepestDescentMinimizer {
         let snapshot_x = gpu.device.alloc_zeros::<Real>(snapshot_len)?;
         let snapshot_y = gpu.device.alloc_zeros::<Real>(snapshot_len)?;
         let snapshot_z = gpu.device.alloc_zeros::<Real>(snapshot_len)?;
+        let images_snapshot_x = gpu.device.alloc_zeros::<i32>(snapshot_len)?;
+        let images_snapshot_y = gpu.device.alloc_zeros::<i32>(snapshot_len)?;
+        let images_snapshot_z = gpu.device.alloc_zeros::<i32>(snapshot_len)?;
         let f_max_scratch = gpu.device.alloc_zeros::<Real>(1)?;
         let pe_scratch = gpu.device.alloc_zeros::<Real>(1)?;
         Ok(SteepestDescentMinimizer {
@@ -115,6 +137,9 @@ impl SteepestDescentMinimizer {
             snapshot_x,
             snapshot_y,
             snapshot_z,
+            images_snapshot_x,
+            images_snapshot_y,
+            images_snapshot_z,
             f_max_scratch,
             pe_scratch,
         })
@@ -190,20 +215,28 @@ impl Minimizer for SteepestDescentMinimizer {
             });
         }
 
-        // Snapshot positions for rejection rollback.
+        // Snapshot positions AND image counters for rejection rollback.
+        // Both streams are captured together so a rejected trial's
+        // sd_restore can put the (positions, images) pair back in a
+        // mutually consistent state — see the type-doc comment on
+        // `images_snapshot_*`.
         timings.kernel_start(KernelStage::SD_SNAPSHOT)?;
         sd_snapshot(
             buffers,
             &mut self.snapshot_x,
             &mut self.snapshot_y,
             &mut self.snapshot_z,
+            &mut self.images_snapshot_x,
+            &mut self.images_snapshot_y,
+            &mut self.images_snapshot_z,
         )?;
         timings.kernel_stop(KernelStage::SD_SNAPSHOT)?;
 
-        // Apply the trial step: x_trial = x + step · F / F_max.
+        // Apply the trial step: x_trial = x + step · F / F_max, then wrap
+        // into the primary image (advancing images_x/y/z on any crossing).
         let inv_f_max = 1.0 / f_max;
         timings.kernel_start(KernelStage::SD_COMPUTE_STEP)?;
-        sd_compute_step(buffers, step_used, inv_f_max)?;
+        sd_compute_step(buffers, sim_box, step_used, inv_f_max)?;
         timings.kernel_stop(KernelStage::SD_COMPUTE_STEP)?;
 
         // Project constraints (if any) before evaluating trial energy.
@@ -251,6 +284,9 @@ impl Minimizer for SteepestDescentMinimizer {
                 &self.snapshot_x,
                 &self.snapshot_y,
                 &self.snapshot_z,
+                &self.images_snapshot_x,
+                &self.images_snapshot_y,
+                &self.images_snapshot_z,
             )?;
             timings.kernel_stop(KernelStage::SD_RESTORE)?;
             force_field.step(
@@ -301,6 +337,23 @@ impl Minimizer for SteepestDescentMinimizer {
                         .max(1.0e-30)
         {
             return Some(MinimizerConvergence::EnergyTolerance);
+        }
+        // Step floor: the adaptive step size has decayed (through a
+        // rejection cascade) to or below the smallest value that can
+        // still move the max-force atom's f32 position. Below this
+        // floor every subsequent trial is a bit-identical no-op — the
+        // rejected trial energy equals the accepted energy exactly, so
+        // no accept can ever fire and the phase would otherwise spin
+        // to `max_iterations` on wasted work. This check fires on
+        // accepted iterations too, so a run that legitimately settles
+        // into a plateau at step floor terminates immediately rather
+        // than one iteration later. `self.current_step` is the step
+        // size the NEXT trial would use (already updated by step 4 of
+        // the algorithm — accepted iterations grow it, rejected ones
+        // shrink it), which is exactly what we want to compare against
+        // the floor. At iteration 0 this is `initial_step`.
+        if self.current_step <= STEP_FLOOR {
+            return Some(MinimizerConvergence::StepFloor);
         }
         None
     }

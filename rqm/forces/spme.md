@@ -2,19 +2,32 @@
 
 Smooth particle-mesh Ewald is the long-range electrostatics method
 configured by the `[spme]` table in the simulation config. The SPME
-algorithm partitions the Coulomb energy `U_total = k_C · Σ_{i<j} q_i q_j / r_ij`
-into three contributions:
+algorithm partitions the Coulomb energy `U_total = k_C · Σ_{i<j} s_ij · q_i q_j / r_ij`
+— where `s_ij` is the pair's Coulomb scale, `1` for an ordinary pair — into
+four contributions:
 
 ```
-U_total = U_real + U_reciprocal − U_self
+U_total = U_real + U_reciprocal − U_self + U_excl
 ```
 
 where
 - `U_real` is a short-range pairwise sum with screening `erfc(α · r)`,
-  evaluated on the shared neighbor list,
+  evaluated on the shared neighbor list and scaled per pair by `s_ij`,
 - `U_reciprocal` is a long-range smooth sum evaluated on a 3D FFT grid,
 - `U_self = k_C · (α/√π) · Σ_i q_i²` corrects for each particle's
-  self-interaction introduced by the charge spreading step.
+  self-interaction introduced by the charge spreading step,
+- `U_excl = Σ_{modified (i,j)} (s_ij − 1) · k_C · q_i q_j · erf(α · r_ij) / r_ij`
+  corrects the reciprocal sum over modified pairs.
+
+The reciprocal sum is a mesh sum over the charge density. It cannot be told
+which pairs are excluded, so it carries the smooth `erf(α · r) / r` part of
+*every* pair at full strength — modified pairs included. Scaling only the
+real-space term therefore leaves a modified pair at
+`s_ij · erfc(α·r)/r + erf(α·r)/r`, which is not `s_ij / r`; `U_excl` supplies
+the missing `(s_ij − 1) · erf(α·r)/r` and the four terms sum to `s_ij / r`
+exactly. `U_excl` is what makes `U_total` independent of `α`, which is the
+defining property of an Ewald splitting and the sharpest test of the
+implementation.
 
 `α` is the Ewald splitting parameter; it controls the partitioning of
 work between real and reciprocal space. `k_C = 1/(4π ε₀) ≈ 8.987 551 787 × 10⁹
@@ -115,8 +128,8 @@ For a pair `(i, j)` with `j` not equal to `i`:
    erfc_ar = erfcf(ar)
    gauss   = expf(-(ar * ar))
    energy  = k_C * qq * erfc_ar * inv_r
-   factor  = k_C * qq * inv_r * (erfc_ar * inv_r2
-                                 + (2.0f * α / sqrtf(π)) * gauss * inv_r2)
+   factor  = k_C * qq * inv_r2 * (erfc_ar * inv_r
+                                  + (2.0f * α / sqrtf(π)) * gauss)
    ```
 
    `factor · r_ij` is the screened-Coulomb force on particle `i` due to
@@ -818,6 +831,138 @@ Summing `energy_per_particle` over all particles yields
 Charges are immutable for the lifetime of a run in v1, so the buffer is
 computed once at construction and never updated.
 
+## Excluded-pair correction <!-- rq-8d4fb00d -->
+
+The reciprocal-space mesh sum carries the smooth `erf(α · r) / r` part of every
+pair at full strength, including pairs whose Coulomb interaction is scaled or
+removed by the topology (`topology.md`). `U_excl` removes the unwanted share:
+
+```text
+U_excl = Σ_{modified (i,j)} (s_ij − 1) · k_C · q_i q_j · erf(α · r_ij) / r_ij
+```
+
+where `s_ij` is the pair's `scale_coul` and `r_ij` is its minimum-image
+separation. For a full exclusion (`s = 0`) the term cancels the reciprocal
+contribution exactly; for a 1-4 pair (`s = 0.833`) it leaves the scaled
+fraction; for `s = 1` it vanishes, so an entry that is modified only in its
+Lennard-Jones scale contributes nothing here.
+
+### Evaluation <!-- rq-3effe629 -->
+
+`U_excl` is evaluated by the **correction pass** of the packed-neighbour
+pair-force pipeline (`packed-neighbour-pair-force.md`), which already walks the
+fixed modified-pair list one thread per pair, forms the minimum-image
+displacement, accumulates into the 64-bit fixed-point force slots, and derives
+the pair's scalar virial as `factor · r²`.
+
+The correction is its own `Potential` slot, `spme_exclusion`, built from the
+same `[spme]` table as the other two. It exists as a slot rather than as a
+second fragment of the reciprocal slot because the framework evaluates a
+JIT-composed fragment *in place of* its slot's `compute` (`framework.md`): a
+slot that contributed a pair fragment would have its own kernels skipped, and
+the reciprocal slot's spread / FFT / gather pipeline is exactly what must not be.
+`spme_exclusion` contributes only a fragment, so having no `compute` of its own
+costs it nothing. It reports no `max_cutoff`: it has none, and reporting one
+would inflate the shared neighbour list's search radius for an interaction the
+neighbour list never evaluates.
+
+The fragment's `evaluate` returns the unscaled term
+
+```text
+energy = k_C · qq · erf(α·r) / r
+factor = k_C · qq · inv_r2 · (erf_ar · inv_r − (2α/√π) · gauss)
+```
+
+and the pass forms `(scale_coul − 1) × evaluate`, which is `U_excl`'s summand.
+`factor · r_ij` is the force on `i` due to `j`, in the sign convention of the
+real-space slot.
+
+The fragment's `factor` is the exact negation of the Gaussian term of the
+real-space fragment's, so the two compose to the bare Coulomb force:
+
+```text
+factor_erfc + factor_erf = k_C · qq · inv_r2 · inv_r = k_C · q_i q_j / r³
+```
+
+which is the identity `erfc + erf = 1` expressed in the force. It is the
+cheapest available check that the two fragments are mutually consistent.
+
+The fragment participates in the **correction pass only**. It has no
+full-strength neighbour-list term for the correction to complete: the mesh
+already supplied `1 × erf(α·r)/r` for every pair, so the correction pass's
+`(s − 1) × evaluate` is the whole of the fragment's contribution.
+
+### No cutoff <!-- rq-a95634e8 -->
+
+The fragment declares `CutoffHandling::Unbounded`, and the correction pass
+evaluates it outside the max-cutoff mask it applies to every other fragment.
+
+This is not an optimisation detail. The mesh sum has no cutoff, so it carries
+`erf(α·r)/r` for a modified pair at *any* separation; masking the correction at
+the cutoff would leave that contribution uncorrected. Since `erf(α·r) → 1` at
+large `α·r`, the uncorrected residue would be a full `(1 − s) · k_C q_i q_j / r`
+— long-ranged, silent, and growing with the charges involved. Codes that
+evaluate the correction inside a cutoff-limited pair loop must instead require
+every modified pair to lie within the cutoff, a constraint this pipeline does
+not carry because its correction pass is keyed on the topology's modified-pair
+list rather than on the neighbour list.
+
+In practice 1-2, 1-3 and 1-4 pairs sit far inside any usable cutoff. The
+unbounded evaluation costs nothing — the pass visits exactly the `E` modified
+pairs either way — and removes a class of silent error rather than trading
+against it.
+
+### Coincident and near-coincident pairs <!-- rq-4e5d3508 -->
+
+`erf(α·r)/r` is finite as `r → 0`, tending to `2α/√π`, and the force tends to
+zero. The direct expressions are not: `energy` divides by `r`, and `factor`
+subtracts two terms that are each `O(1/r²)` and cancel to `O(α³)`, so under
+`f32` the subtraction loses all significance once `(α·r)²` falls below the
+`f32` epsilon.
+
+The fragment therefore branches on `α·r` against a threshold `EXCL_MIN_ALPHA_R`
+of `1e-6`, and takes the closed-form limit below it:
+
+```text
+if (ar > EXCL_MIN_ALPHA_R) {
+    erf_ar = Real_erf(ar);
+    energy = k_C · qq · erf_ar · inv_r;
+    factor = k_C · qq · inv_r2 · (erf_ar · inv_r − (2α/√π) · gauss);
+} else {
+    energy = k_C · qq · (2α/√π);   // the exact r → 0 limit
+    factor = 0;
+}
+```
+
+The branch is taken **before** `inv_r` is consumed, so a coincident pair
+(`r = 0`, `inv_r = ∞`) never propagates a non-finite value into either output.
+Setting `factor = 0` below the threshold is exact in effect: the force is
+`factor · r_ij` and the virial is `factor · r²`, and both vanish with `r_ij`
+regardless of the value `factor` would have taken.
+
+Between the threshold and the point where the `f32` cancellation becomes
+significant, `factor` loses relative precision. Its absolute contribution to
+the force is bounded by `|k_C · q_i q_j| · (4α³ / 3√π) · r`, which vanishes with
+`r`, so the absolute error it can introduce is negligible against MD-relevant
+force magnitudes.
+
+### erf evaluation <!-- rq-0d1e3b7a -->
+
+The fragment calls `Real_erf` (`precision.md`), which resolves to the hardware
+`erff` / `erf` intrinsic. It does not reuse the real-space fragment's Hastings
+polynomial for `erfc`: deriving `erf = 1 − erfc` cancels catastrophically as
+`α·r → 0`, which is the regime this correction is most sensitive in, and the
+correction pass runs one thread per modified pair — `O(E)`, negligible against
+the `O(N · neighbours)` inner loop — so it can afford the accurate intrinsic.
+
+### Reproducibility <!-- rq-b3f8bbce -->
+
+The correction pass accumulates into the same 64-bit fixed-point force slots as
+every other fragment, so the sum is order-independent and exact, and the
+per-pair evaluation is a pure function of the pair's minimum-image displacement.
+`U_excl` therefore inherits the pass's determinism: byte-identical inputs
+produce byte-identical forces run to run on the same GPU.
+
 ## cuFFT determinism precondition <!-- rq-017a61a4 -->
 
 `init_device` runs a smoke test that confirms cuFFT produces
@@ -854,6 +999,18 @@ only inside the `SpmeReciprocalState` construction path.
   - `r_cut_real: f64`
   - `grid: [u32; 3]`
   - `spline_order: u32`
+
+- `SpmeExclusionFragment` — the correction-pass fragment the reciprocal slot <!-- rq-dd6935c7 -->
+  contributes for `U_excl`. Its `PairForceFragment` declares
+  `cutoff: CutoffHandling::Unbounded` and
+  `passes: FragmentPasses::CorrectionOnly`
+  (`jit-composed-pair-force.md`), and its `consumes_type_index` is `false`.
+  Its `evaluate` returns the unscaled
+  `(factor, energy)` of `k_C · q_i q_j · erf(α·r) / r`, branching to the
+  closed-form `r → 0` limit below `EXCL_MIN_ALPHA_R`. The correction pass
+  multiplies by `scale_coul − 1`. It carries `α` and `k_C` as functor fields and
+  reads no per-atom parameters beyond the charges the composer already threads
+  in.
 
 - `SpmeRealSpaceState` — implements `Potential` with <!-- rq-22171569 -->
   `label() == "spme_real"`. Reports
@@ -1271,12 +1428,13 @@ atomic-add or any non-deterministic device-side reduction.
   guarantees for the engine. That tradeoff is intentionally not
   taken here; the determinism guarantee is treated as load-bearing
   for the long-running production runs the engine is designed for.
-- Excluded-pair real-space correction. The 1-2 and 1-3 bonded pairs are
-  zero-scaled in `atom_excl_coul_scales` (the standard convention for
-  excluded pairs in PME). Codes that retain a portion of the bonded
-  Coulomb (e.g. via 1-4 scaling) use the `scale_coul` field of
-  `topology.md`'s exclusion entries; no special PME-only excluded-pair
-  treatment is added.
+- Long-range dispersion (LJ-PME). The Lennard-Jones interaction is
+  evaluated entirely in real space with a hard cutoff, so it has no
+  reciprocal-space counterpart and needs no excluded-pair correction of
+  its own. Only the Coulomb scale `scale_coul` participates in `U_excl`.
+- A neutralising background for a net-charged system. The `k = 0` entry of
+  the influence function is fixed at zero, which is the correct convention
+  only for a charge-neutral cell.
 - Non-tinfoil boundary conditions. The `k = 0` entry of the influence
   function is fixed at zero; conductive ("tinfoil") boundary conditions
   are the only supported convention.
@@ -1898,4 +2056,88 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When each runs one full ForceField::step on the same GPU
     And each pipeline's ParticleBuffers.forces_x, forces_y, forces_z, potential_energies, virials are downloaded
     Then run A and run B agree byte-for-byte on every f32
+
+  # --- Excluded-pair correction ---
+
+  @rq-c811e838
+  Scenario: The total electrostatic energy is invariant under the splitting parameter
+    Given a charged system carrying exclusions and a converged FFT grid
+    When the total electrostatic energy is evaluated at alpha = 3.0e9, 3.5e9, 4.0e9 and 4.5e9 /m
+    Then the four totals agree to within 1e-3 relative
+    # The Ewald splitting is an identity: alpha partitions work between real and
+    # reciprocal space and cannot move the answer. Omitting U_excl breaks this,
+    # which makes it the sharpest available check on the correction.
+
+  @rq-064d2401
+  Scenario: The scalar virial is invariant under the splitting parameter
+    Given the same system evaluated at two different values of alpha
+    When the total scalar virial is reduced
+    Then the two agree to within 1e-3 relative
+
+  @rq-a37db23a
+  Scenario: A fully excluded pair has no net Coulomb interaction
+    Given two charges separated by r, carrying an exclusion entry with scale_coul = 0
+    When the full SPME pipeline runs
+    Then the net Coulomb energy of the pair is zero to within the exclusion residual bound
+    And the net Coulomb force on each atom is zero to the same bound
+
+  @rq-e5dd8842
+  Scenario: A 1-4 pair retains exactly its scaled Coulomb interaction
+    Given two charges separated by r, carrying an exclusion entry with scale_coul = 0.8333
+    When the full SPME pipeline runs
+    Then the net Coulomb energy of the pair equals 0.8333 * k_C * q_i * q_j / r
+      to within 1e-3 relative
+
+  @rq-49f7f762
+  Scenario: An entry modified only in its Lennard-Jones scale contributes no Coulomb correction
+    Given an exclusion entry with scale_lj = 0.5 and scale_coul = 1.0
+    When the correction pass runs
+    Then the SPME exclusion fragment contributes zero energy and zero force for that pair
+
+  @rq-761758ad
+  Scenario: The erfc and erf fragments compose to the bare Coulomb force
+    Given a pair at separation r with charges q_i and q_j
+    When the real-space fragment's factor and the exclusion fragment's factor are evaluated
+    Then their sum equals k_C * q_i * q_j / r^3 to within f32 round-off
+
+  @rq-ba1b0ef5
+  Scenario: A modified pair beyond the cutoff is still corrected
+    Given an exclusion entry whose two atoms are separated by more than r_cut_real
+    When the correction pass runs
+    Then the SPME exclusion fragment is evaluated for that pair
+    And its energy equals (scale_coul - 1) * k_C * q_i * q_j * erf(alpha*r) / r
+
+  @rq-ee1ce29c
+  Scenario: Coincident excluded atoms produce no non-finite value
+    Given an exclusion entry whose two atoms occupy the same position
+    When the correction pass runs
+    Then the fragment's energy equals (scale_coul - 1) * k_C * q_i * q_j * 2*alpha/sqrt(pi)
+    And the fragment's factor is zero
+    And no force, energy or virial component is NaN or infinite
+
+  @rq-2b42cf54
+  Scenario: A near-coincident excluded pair tends to the closed-form limit
+    Given an exclusion entry whose two atoms are separated by r with alpha*r below EXCL_MIN_ALPHA_R
+    When the correction pass runs
+    Then the fragment's energy agrees with the r -> 0 limit to within f32 round-off
+    And the force contribution on each atom is zero
+
+  @rq-a7adc7c9
+  Scenario: A system with no exclusions carries no correction
+    Given a charged system whose topology declares no modified pairs
+    When the full SPME pipeline runs
+    Then the correction pass evaluates zero pairs
+    And the total electrostatic energy equals U_real + U_reciprocal - U_self
+
+  @rq-3fea9eed
+  Scenario: Uncharged atoms carry no correction
+    Given an exclusion entry between two atoms both of charge zero
+    When the correction pass runs
+    Then the fragment contributes zero energy and zero force for that pair
+
+  @rq-95bdc1a2
+  Scenario: The correction is reproducible run to run
+    Given a charged system with exclusions
+    When two runs are performed on the same GPU with identical inputs
+    Then the per-particle forces, energies and virials agree byte-for-byte
 ```

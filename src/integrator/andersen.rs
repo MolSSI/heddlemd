@@ -5,7 +5,8 @@ use std::sync::Arc;
 use cudarc::driver::CudaDevice;
 use serde::Deserialize;
 
-use crate::gpu::{GpuContext, GpuError, ParticleBuffers, andersen_resample};
+use crate::forces::MoleculeList;
+use crate::gpu::{GpuContext, GpuError, ParticleBuffers, andersen_resample_grouped};
 use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
 
@@ -65,12 +66,20 @@ pub struct AndersenThermostat {
     /// draws, so successive launches — including across runs — draw a
     /// fresh Philox sequence. Persists across the run.
     pub draw_counter_device: cudarc::driver::CudaSlice<u64>,
+    /// The connectivity-derived rigid-group partition, uploaded in
+    /// `init_run`. Collisions are decided and applied per group: a firing
+    /// group resamples all its atoms together. Singletons until `init_run`
+    /// installs the real partition (a monatomic run leaves them singletons,
+    /// making the grouped kernel identical to a per-atom resample).
+    mol_atom_offsets: cudarc::driver::CudaSlice<u32>,
+    mol_atom_indices: cudarc::driver::CudaSlice<u32>,
+    n_groups: usize,
 }
 
 impl AndersenThermostat {
     fn new(
         gpu: &GpuContext,
-        _particle_count: usize,
+        particle_count: usize,
         temperature: f64,
         collision_rate: f64,
         seed: u64,
@@ -79,6 +88,22 @@ impl AndersenThermostat {
         let kt = temperature;
         let draw_counter_device =
             gpu.device.alloc_zeros::<u64>(1).map_err(GpuError::from)?;
+        // Singleton partition until `init_run`: atom i is group i. A run with no
+        // bonds and no constraints keeps this, so the grouped kernel reduces to a
+        // per-atom resample.
+        let offsets: Vec<u32> = (0..=particle_count as u32).collect();
+        let indices: Vec<u32> = (0..particle_count as u32).collect();
+        let mol_atom_offsets = gpu
+            .device
+            .htod_sync_copy(&offsets)
+            .map_err(GpuError::from)?;
+        let mol_atom_indices = if indices.is_empty() {
+            gpu.device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
+        } else {
+            gpu.device
+                .htod_sync_copy(&indices)
+                .map_err(GpuError::from)?
+        };
         Ok(AndersenThermostat {
             temperature,
             collision_rate,
@@ -87,6 +112,9 @@ impl AndersenThermostat {
             kt,
             cumulative_injection: 0.0,
             draw_counter_device,
+            mol_atom_offsets,
+            mol_atom_indices,
+            n_groups: particle_count,
         })
     }
 
@@ -105,6 +133,28 @@ impl AndersenThermostat {
 }
 
 impl Thermostat for AndersenThermostat {
+    // Upload the connectivity-derived rigid-group partition. A firing group
+    // resamples all its atoms together; the step's terminal velocity projection
+    // then maps that fresh full-MB group velocity onto the group's constraint
+    // manifold, which is the correct constrained-MB equilibrium. Resampling
+    // individual atoms instead runs the constrained system cold (see
+    // `rqm/integration/andersen.md`).
+    fn init_run(&mut self, molecules: &MoleculeList) -> Result<(), ThermostatError> {
+        let device = &self.draw_counter_device.device();
+        self.mol_atom_offsets = device
+            .htod_sync_copy(&molecules.mol_atom_offsets)
+            .map_err(GpuError::from)?;
+        self.mol_atom_indices = if molecules.mol_atom_indices.is_empty() {
+            device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
+        } else {
+            device
+                .htod_sync_copy(&molecules.mol_atom_indices)
+                .map_err(GpuError::from)?
+        };
+        self.n_groups = molecules.molecule_count;
+        Ok(())
+    }
+
     // rq-7a124d43 rq-a060db3f — Andersen contributes no composed fragment;
     // on a coupling step `apply_post` launches the standalone
     // `andersen_resample` kernel, which performs the per-particle Bernoulli
@@ -124,8 +174,11 @@ impl Thermostat for AndersenThermostat {
         let p_collision =
             ((self.collision_rate as f64) * (dt as f64)).clamp(0.0, 1.0) as Real;
         timings.kernel_start(KernelStage::ANDERSEN_RESAMPLE)?;
-        andersen_resample(
+        andersen_resample_grouped(
             buffers,
+            &self.mol_atom_offsets,
+            &self.mol_atom_indices,
+            self.n_groups,
             &mut self.draw_counter_device,
             self.seed,
             p_collision,
@@ -231,7 +284,7 @@ crate::gpu_kernels! {
     module: "andersen",
     ptx: crate::kernels::ANDERSEN,
     struct: AndersenKernels,
-    kernels: [andersen_resample],
+    kernels: [andersen_resample, andersen_resample_grouped],
     stages: {
         ANDERSEN_RESAMPLE = "andersen_resample",
     },

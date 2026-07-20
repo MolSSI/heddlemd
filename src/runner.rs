@@ -142,8 +142,17 @@ pub struct PhaseSummary {
     pub kind: &'static str,
     /// For minimization phases: the convergence reason as a short
     /// token (`"force_tolerance"`, `"energy_tolerance"`,
-    /// `"force_zero"`, `"max_iterations"`). `None` for MD phases.
+    /// `"force_zero"`, `"step_floor"`, `"max_iterations"`). `None`
+    /// for MD phases.
     pub convergence: Option<&'static str>,
+    /// For minimization phases: the `max_force` at the final accepted
+    /// state (N). Populated for every minimization phase; consumed by
+    /// the CLI summary formatter to name the residual gradient when
+    /// the convergence reason is `step_floor` (that reason does not
+    /// imply `F_max ≤ force_tolerance`, so surfacing the value lets
+    /// the user judge whether the state is acceptable for downstream
+    /// dynamics). `None` for MD phases.
+    pub min_final_max_force: Option<f64>,
     /// The phase's physics series, one entry per emitted CSV log row and
     /// in the same order; empty when `log_every == 0`. Captured from the
     /// same forces-and-scalars evaluation that produces each log row, so
@@ -1357,17 +1366,26 @@ pub(crate) fn run_md_phase_inner(
         .barostats
         .build_optional(phase.barostat.as_ref(), &setup.gpu, n, n_constraints)
         .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
-    // rq-3e1fba8b — hand the barostat the connectivity-derived molecule
-    // partition and the initial box (the Monte-Carlo barostat uploads
-    // its molecule tables and resolves its default volume step here).
-    if let Some(b) = barostat.as_mut() {
+    // rq-3e1fba8b — hand the slots that need it the connectivity-derived
+    // molecule partition. The Monte-Carlo barostat uploads its molecule tables
+    // and resolves its default volume step here; the Andersen thermostat uploads
+    // the same tables so its stochastic collisions resample whole rigid
+    // molecules rather than individual atoms (required for correctness under
+    // holonomic constraints — see `rqm/integration/andersen.md`).
+    if thermostat.is_some() || barostat.is_some() {
         let molecules = crate::forces::MoleculeList::from_topology(
             n,
             &setup.bond_list,
             &setup.constraint_list,
         );
-        b.init_run(&setup.sim_box, &molecules)
-            .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+        if let Some(t) = thermostat.as_mut() {
+            t.init_run(&molecules)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
+        }
+        if let Some(b) = barostat.as_mut() {
+            b.init_run(&setup.sim_box, &molecules)
+                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+        }
     }
     let mut constraint = setup
         .registries
@@ -1578,17 +1596,16 @@ pub(crate) fn run_md_phase_inner(
     // the phase eligible (its `apply` runs in the captured post-force
     // tail as standalone launches).
     let plan_has_interleaved_barostat = probe_plan.has_interleaved_barostat_point();
-    // rq-ee10237d — a thermostat couples on a cadence, and on coupling
-    // steps the whole post-force region runs eagerly (the full-step KE
-    // reduction is a fusion barrier) with host-side thermostat work that
-    // cannot be captured. A thermostatted phase therefore runs on the
-    // per-step launch path; the coupling interval's fusion benefit is
-    // still realised there, because non-coupling steps use the composed
-    // post-force kernel and skip the thermostat reduction and rescale.
+    // rq-3c78ea7d — a graph-eligible thermostat's coupling is a device-side
+    // kernel sequence recorded into the coupling-variant graph; the replay
+    // loop selects that variant on coupling steps and a non-coupling variant
+    // otherwise. This holds for any `coupling_interval >= 1`, so the
+    // thermostat does not gate eligibility beyond its `graph_compatible`
+    // hook (checked by `phase_slots_graph_compatible`, which rejects a
+    // thermostat whose coupling is not a pure device sequence).
     let graph_eligible = !setup.config.simulation.cuda_graphs_disable
         && !plan_has_thermostat_points
         && !plan_has_interleaved_barostat
-        && thermostat.is_none()
         && phase_slots_graph_compatible(setup, phase);
 
     // Graph-timing calibration: CUDA forbids `cuEventElapsedTime` on the
@@ -1642,8 +1659,11 @@ pub(crate) fn run_md_phase_inner(
             &mut setup.sim_box,
             &mut setup.force_field,
             integrator.as_mut(),
+            &mut thermostat,
             &mut barostat,
-            &mut constraint,            dt,
+            &mut constraint,
+            coupling_interval,
+            dt,
             &mut timings,
             &setup.gpu.device,
         ) {
@@ -1672,10 +1692,13 @@ pub(crate) fn run_md_phase_inner(
             phase_index,
             calib,
             &mut graph_loop,
-            integrator.as_mut(),
+            &mut integrator,
             &mut thermostat,
             &mut barostat,
-            &mut constraint,            dt,
+            &mut constraint,
+            plan_has_thermostat_points,
+            coupling_interval,
+            dt,
             &mut timings,
             &mut frame,
             &mut traj_writer,
@@ -1783,6 +1806,7 @@ pub(crate) fn run_md_phase_inner(
         elapsed_micros: phase_elapsed.as_micros(),
         kind: "md",
         convergence: None,
+        min_final_max_force: None,
         // rq-0286c77d
         physics,
     })
@@ -2153,9 +2177,18 @@ pub(crate) fn run_minimization_phase_inner(
         elapsed_micros: phase_elapsed.as_micros(),
         kind: "minimization",
         convergence: Some(reason.token()),
+        min_final_max_force: Some(final_report.max_force),
         // rq-0286c77d — minimization phases capture no physics series.
         physics: Vec::new(),
     })
+}
+
+// rq-3c78ea7d — a physical step couples (replays the coupling-variant
+// graph) when it is a multiple of `coupling_interval`. At
+// `coupling_interval == 1` every step couples; the batched replay loop uses
+// this to pick the coupling variant per step.
+fn step_couples(step: u64, coupling_interval: u64) -> bool {
+    step % coupling_interval == 0
 }
 
 /// Returns `true` iff every active slot for the phase reports
@@ -2181,11 +2214,24 @@ fn phase_slots_graph_compatible(
     if !int_ok {
         return false;
     }
-    // rq-ee10237d — a thermostat never runs inside a captured graph: the
-    // graph records non-coupling steps (no thermostat work) and coupling
-    // steps run on the per-step path, so a thermostat's own
-    // graph-compatibility does not gate eligibility (the
-    // `coupling_interval == 1` case is handled by the caller).
+    // rq-26c9b8cb — a thermostat gates eligibility only when it is not
+    // cadence-inert. csvr / berendsen / andersen do their per-step work
+    // solely on coupling steps (through the runner's apply_pre / apply_post),
+    // so they report graph_compatible == true and the captured non-coupling
+    // steps are pure device sequences; nose-hoover-chain reports false (its
+    // Yoshida chain and per-step KE dtoh cannot be captured). The
+    // `coupling_interval == 1` condition is applied by the caller.
+    if let Some(t) = phase.thermostat.as_ref() {
+        let ok = setup
+            .registries
+            .thermostats
+            .lookup(&t.kind)
+            .map(|builder| builder.graph_compatible(&t.params))
+            .unwrap_or(false);
+        if !ok {
+            return false;
+        }
+    }
     if let Some(b) = phase.barostat.as_ref() {
         let ok = setup
             .registries
@@ -2312,10 +2358,12 @@ fn packed_capacities(force_field: &ForceField) -> Option<(u32, u32)> {
 }
 
 // rq-766c88fb rq-e35fa835
-/// Captures the phase's executable graphs: the forces+scalars graph
-/// always, and the forces-only graph unless a barostat is active. Both
+/// Captures the phase's executable graphs: the non-coupling forces+scalars
+/// graph and (unless a per-step barostat is active) the non-coupling
+/// forces-only graph when the phase has non-coupling steps, plus the
+/// coupling-variant graph when a graph-eligible thermostat is present. All
 /// are recorded from the same pre-capture device state; stream capture
-/// records without executing, so neither advances the simulation. See
+/// records without executing, so none advances the simulation. See
 /// `cuda-graphs.md` *Capture Lifecycle*.
 #[allow(clippy::too_many_arguments)]
 fn capture_phase_graph(
@@ -2323,49 +2371,69 @@ fn capture_phase_graph(
     sim_box: &mut crate::pbc::SimulationBox,
     force_field: &mut crate::forces::ForceField,
     integrator: &mut dyn crate::integrator::Integrator,
+    thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    coupling_interval: u64,
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
 ) -> Result<crate::gpu::GraphLoop, crate::gpu::GraphError> {
-    let forces_and_scalars = capture_one_graph(
-        buffers,
-        sim_box,
-        force_field,
-        integrator,
-        barostat,
-        constraint,
-        dt,
-        timings,
-        device,
-        true,
-        GraphVariant::ForcesAndScalars,
-    )?;
-    // A barostat consumes the per-step virial inside the captured
-    // sequence, so a barostat phase evaluates scalars on every step and
-    // does not capture a forces-only graph.
-    let forces_only = if captures_forces_only_graph(barostat_couples_per_step(barostat)) {
-        Some(capture_one_graph(
-            buffers,
-            sim_box,
-            force_field,
-            integrator,
-            barostat,
-            constraint,
-            dt,
-            timings,
-            device,
-            false,
-            GraphVariant::ForcesOnly,
-        )?)
-    } else {
-        None
-    };
-    Ok(crate::gpu::GraphLoop {
-        forces_and_scalars,
-        forces_only,
-    })
+    // rq-6887c76d — the cells of the coupling × scalars matrix that this
+    // phase produces. The non-coupling row exists iff the phase has
+    // non-coupling steps (no thermostat, or coupling_interval > 1); the
+    // coupling row iff a thermostat is present; the forces-only column iff no
+    // per-step barostat consumes the per-step virial (every step then needs
+    // scalars).
+    let has_non_coupling = thermostat.is_none() || coupling_interval > 1;
+    let has_coupling = thermostat.is_some();
+    let has_forces_only = captures_forces_only_graph(barostat_couples_per_step(barostat));
+    let coupling_dt = coupling_interval as Real * dt;
+
+    // graphs[coupling as usize][scalars as usize]
+    let mut graphs: [[Option<crate::gpu::CudaGraphExec>; 2]; 2] = [[None, None], [None, None]];
+
+    // Non-coupling row (thermostat inert; coupling_dt = None).
+    if has_non_coupling {
+        graphs[0][1] = Some(capture_one_graph(
+            buffers, sim_box, force_field, integrator, None, barostat, constraint, None, dt,
+            timings, device, true, GraphVariant::ForcesAndScalars,
+        )?);
+        if has_forces_only {
+            graphs[0][0] = Some(capture_one_graph(
+                buffers, sim_box, force_field, integrator, None, barostat, constraint, None, dt,
+                timings, device, false, GraphVariant::ForcesOnly,
+            )?);
+        }
+    }
+
+    // rq-c4ba5005 — coupling row: the thermostat's device-side coupling
+    // recorded at `coupling_dt = coupling_interval * dt`, at both
+    // force-evaluation levels so a non-log coupling step replays the cheap
+    // forces-only cell.
+    if has_coupling {
+        let therm_arg: Option<&mut dyn crate::integrator::Thermostat> = match thermostat.as_mut() {
+            Some(t) => Some(t.as_mut()),
+            None => None,
+        };
+        graphs[1][1] = Some(capture_one_graph(
+            buffers, sim_box, force_field, integrator, therm_arg, barostat, constraint,
+            Some(coupling_dt), dt, timings, device, true, GraphVariant::CouplingForcesAndScalars,
+        )?);
+        if has_forces_only {
+            let therm_arg: Option<&mut dyn crate::integrator::Thermostat> =
+                match thermostat.as_mut() {
+                    Some(t) => Some(t.as_mut()),
+                    None => None,
+                };
+            graphs[1][0] = Some(capture_one_graph(
+                buffers, sim_box, force_field, integrator, therm_arg, barostat, constraint,
+                Some(coupling_dt), dt, timings, device, false, GraphVariant::CouplingForcesOnly,
+            )?);
+        }
+    }
+
+    Ok(crate::gpu::GraphLoop { graphs })
 }
 
 /// Captures and instantiates a single one-step graph with the force
@@ -2378,8 +2446,14 @@ fn capture_one_graph(
     sim_box: &mut crate::pbc::SimulationBox,
     force_field: &mut crate::forces::ForceField,
     integrator: &mut dyn crate::integrator::Integrator,
+    // rq-3c78ea7d — the coupling variant is captured with the thermostat
+    // and `coupling_dt = Some(coupling_interval * dt)` so `run_step` records
+    // the thermostat's device-side coupling; non-coupling variants pass
+    // `thermostat = None` and `coupling_dt = None`.
+    thermostat: Option<&mut dyn crate::integrator::Thermostat>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    coupling_dt: Option<Real>,
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
@@ -2422,27 +2496,29 @@ fn capture_one_graph(
         // `true` records the forces+scalars (`_fev`) graph, `false` the
         // forces-only (`_f`) graph. The replay loop launches the
         // forces-only graph on steps that need no scalars (see
-        // `cuda-graphs.md` *Batched Replay Loop*). An eligible phase has
-        // no thermostat (an eligible phase has none), so `coupling_dt` is
-        // `None` and no `apply_pre` / `apply_post` is recorded. `run_step`
-        // walks the whole plan — the trailing kick, a terminal
-        // BarostatPoint's `apply`, and the terminal velocity projection
-        // are all captured by this one call. Marker-bearing (thermostat)
-        // and interleaved-barostat plans never reach capture.
+        // `cuda-graphs.md` *Batched Replay Loop*). For the coupling variant
+        // `thermostat` is `Some` and `coupling_dt = Some(coupling_interval *
+        // dt)`, so `run_step` records the thermostat's `apply_pre` /
+        // `apply_post` device-side coupling; non-coupling variants pass
+        // `None` and record the thermostat as inert. `run_step` walks the
+        // whole plan — the trailing kick, a terminal BarostatPoint's
+        // `apply`, and the terminal velocity projection are all captured by
+        // this one call. Marker-bearing (ThermostatHalf) and
+        // interleaved-barostat plans never reach capture.
         let result = crate::integrator::run_step(
             integrator,
             buffers,
             sim_box,
             force_field,
             constraint_arg,
-            None,
+            thermostat,
             barostat_arg,
             dt,
             timings,
             crate::integrator::RunStepOptions {
                 run_neighbor_pre_step: false,
                 runner_needs_scalars: needs_scalars,
-                coupling_dt: None,
+                coupling_dt,
             },
         );
         if let Err(e) = result {
@@ -2718,10 +2794,18 @@ fn run_batched_graph_loop(
     _phase_index: usize,
     start_step: u64,
     graph_loop: &mut crate::gpu::GraphLoop,
-    integrator: &mut dyn crate::integrator::Integrator,
+    integrator: &mut Box<dyn crate::integrator::Integrator>,
     thermostat: &mut Option<Box<dyn crate::integrator::Thermostat>>,
     barostat: &mut Option<Box<dyn crate::integrator::Barostat>>,
     constraint: &mut Option<Box<dyn crate::integrator::Constraint>>,
+    // rq-3c78ea7d — a plan-owned ThermostatHalf suppresses runner-wrapped
+    // coupling; such phases are graph-ineligible, so `plan_owns_thermostat`
+    // is always false here, but it is threaded for the single-coupling-step
+    // per-step call, which shares `run_per_step_range`.
+    plan_owns_thermostat: bool,
+    // rq-3c78ea7d — the thermostat coupling cadence. Non-coupling steps
+    // replay the graph; every `coupling_interval`-th step runs per-step.
+    coupling_interval: u64,
     dt: Real,
     timings: &mut Timings,
     frame: &mut ParticleState,
@@ -2760,6 +2844,13 @@ fn run_batched_graph_loop(
     // exactly on a batch boundary.
     let move_frequency = barostat_move_frequency(barostat).map(|f| f as u64);
 
+    // rq-3c78ea7d — a graph-eligible thermostat's coupling is recorded into
+    // the coupling-variant graph; the loop selects that variant on coupling
+    // steps (`step % coupling_interval == 0`) and a non-coupling variant
+    // otherwise. Coupling steps are ordinary graph replays, not batch
+    // boundaries.
+    let thermostatted = thermostat.is_some() && !plan_owns_thermostat;
+
     while step < n_steps {
         let remaining = n_steps - step;
         let next_log = if log_every > 0 {
@@ -2782,18 +2873,22 @@ fn run_batched_graph_loop(
             .min(next_traj)
             .min(next_move);
         let barostat_active = barostat_couples_per_step(barostat);
-        let mut forces_only_launches: u32 = 0;
-        let mut forces_and_scalars_launches: u32 = 0;
+        // rq-6887c76d — one replay counter per cell of the coupling × scalars
+        // matrix: [coupling][scalars].
+        let mut cell_launches: [[u32; 2]; 2] = [[0, 0], [0, 0]];
         for i in 1..=batch {
             let s = step + i;
+            // rq-c4ba5005 — a coupling step replays a coupling cell (which
+            // carries the thermostat's device-side coupling), and within the
+            // row the forces-only cell unless the step needs scalars.
+            let couples = thermostatted && step_couples(s, coupling_interval);
             // rq-76db55bb — a step needs force-kernel scalars (total PE +
-            // virial) only when it produces a log row or a barostat
-            // consumes the per-step virial. Other steps replay the
-            // forces-only graph.
+            // virial) only when it produces a log row or a barostat consumes
+            // the per-step virial. Other steps replay a forces-only cell.
             let needs_scalars =
                 step_needs_force_scalars(log_every > 0 && s % log_every == 0, barostat_active)
                     || move_frequency.is_some_and(|f| f > 0 && s % f == 0);
-            graph_loop.launch(needs_scalars).map_err(|e| {
+            graph_loop.launch(couples, needs_scalars).map_err(|e| {
                 (
                     RunnerError::Gpu(crate::gpu::GpuError(match e {
                         crate::gpu::GraphError::LaunchFailed(d) => d,
@@ -2805,23 +2900,31 @@ fn run_batched_graph_loop(
                     ExitPhase::Loop,
                 )
             })?;
-            if needs_scalars {
-                forces_and_scalars_launches += 1;
-            } else {
-                forces_only_launches += 1;
+            cell_launches[couples as usize][needs_scalars as usize] += 1;
+        }
+        // rq-9ec19227 — advance per-stage sample counts per matrix cell, so a
+        // stage present only in some cells (the scalar reductions and `_fev`
+        // kernel in the forces+scalars cells; the thermostat kernels in the
+        // coupling cells) accrues samples only from the steps that replay a
+        // cell containing it. Durations are the calibrated representatives
+        // (see `cuda-graphs.md`). A step selecting a forces-only cell that
+        // was not captured (per-step barostat) launches its row's
+        // forces+scalars cell via the `launch` fallback, so the fallback is
+        // impossible here — the forces-only column is captured exactly when
+        // `needs_scalars` can be false.
+        let variants = [
+            [GraphVariant::ForcesOnly, GraphVariant::ForcesAndScalars],
+            [
+                GraphVariant::CouplingForcesOnly,
+                GraphVariant::CouplingForcesAndScalars,
+            ],
+        ];
+        for c in 0..2 {
+            for sc in 0..2 {
+                if cell_launches[c][sc] > 0 {
+                    timings.record_graph_replays(variants[c][sc], cell_launches[c][sc]);
+                }
             }
-        }
-        // rq-9ec19227 — advance per-stage sample counts per graph variant,
-        // so a stage present only in the forces+scalars graph (the scalar
-        // reductions, the `_fev` pair-force kernel) accrues samples only
-        // from the scalar steps. Durations are the calibrated
-        // representatives (see `cuda-graphs.md`).
-        if forces_only_launches > 0 {
-            timings.record_graph_replays(GraphVariant::ForcesOnly, forces_only_launches);
-        }
-        if forces_and_scalars_launches > 0 {
-            timings
-                .record_graph_replays(GraphVariant::ForcesAndScalars, forces_and_scalars_launches);
         }
         step += batch;
 
@@ -2869,9 +2972,12 @@ fn run_batched_graph_loop(
                 &mut setup.buffers,
                 &mut setup.sim_box,
                 &mut setup.force_field,
-                integrator,
+                integrator.as_mut(),
+                thermostat,
                 barostat,
-                constraint,                dt,
+                constraint,
+                coupling_interval,
+                dt,
                 timings,
                 &device,
             ) {
@@ -3251,10 +3357,26 @@ fn cli_main_run(rest: Vec<String>) -> u8 {
                 };
                 if ps.kind == "minimization" {
                     let conv = ps.convergence.unwrap_or("unknown");
-                    println!(
-                        "[heddlemd] phase `{}`: {} iters in {} (converged: {}, frames: {}, log rows: {})",
-                        ps.name, ps.n_steps, disp, conv, ps.frames_written, ps.log_rows_written
-                    );
+                    // rq-6eb845c5 — StepFloor is a numerical-progress
+                    // exhaustion, not a physical-tolerance convergence.
+                    // Name the final F_max so the user can judge the
+                    // residual gradient at hand-off; every other
+                    // convergence reason implies `F_max ≤
+                    // force_tolerance` or similar physical criterion
+                    // and doesn't need the annotation.
+                    if conv == "step_floor" {
+                        let f_max = ps.min_final_max_force.unwrap_or(f64::NAN);
+                        println!(
+                            "[heddlemd] phase `{}`: {} iters in {} (converged: {}, F_max = {:.3e} N, frames: {}, log rows: {})",
+                            ps.name, ps.n_steps, disp, conv, f_max,
+                            ps.frames_written, ps.log_rows_written
+                        );
+                    } else {
+                        println!(
+                            "[heddlemd] phase `{}`: {} iters in {} (converged: {}, frames: {}, log rows: {})",
+                            ps.name, ps.n_steps, disp, conv, ps.frames_written, ps.log_rows_written
+                        );
+                    }
                 } else {
                     println!(
                         "[heddlemd] phase `{}`: {} steps in {} (frames: {}, log rows: {})",
@@ -3380,6 +3502,42 @@ fn cli_main_analyze(rest: Vec<String>) -> u8 {
                 | crate::analysis::AnalyzeError::Analysis { .. } => 2,
                 _ => 1,
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod coupling_variant_tests {
+    use super::step_couples;
+
+    // rq-5b2a1cde — with coupling_interval = 25 over steps 1..=100, the
+    // coupling steps (which replay the coupling variant) are exactly 25, 50,
+    // 75, 100; every other step replays a non-coupling variant.
+    #[test]
+    fn coupling_steps_are_the_interval_multiples() {
+        let ci = 25;
+        let coupling: Vec<u64> = (1..=100).filter(|&s| step_couples(s, ci)).collect();
+        assert_eq!(coupling, vec![25, 50, 75, 100]);
+        // 96 non-coupling steps replay a non-coupling variant.
+        let non_coupling = (1..=100u64).filter(|&s| !step_couples(s, ci)).count();
+        assert_eq!(non_coupling, 96);
+    }
+
+    // rq-dce6f4cf — coupling_interval = 4 over 8 steps: coupling steps are 4
+    // and 8; the six others (1,2,3,5,6,7) replay a non-coupling variant.
+    #[test]
+    fn coupling_variant_selected_on_interval_boundaries() {
+        let ci = 4;
+        let coupling: Vec<u64> = (1..=8).filter(|&s| step_couples(s, ci)).collect();
+        assert_eq!(coupling, vec![4, 8]);
+    }
+
+    // rq-49f6bbfb — at coupling_interval == 1 every step couples, so every
+    // step replays the coupling variant.
+    #[test]
+    fn interval_one_couples_every_step() {
+        for s in 1..=10u64 {
+            assert!(step_couples(s, 1));
         }
     }
 }

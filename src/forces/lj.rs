@@ -8,7 +8,7 @@ use crate::timings::Timings;
 use super::topology::DeviceExclusionList;
 use super::{
     AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
-    JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
+    FragmentPasses, JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
     PairForceBindContext, PairForceFragment, PairForcePotential, Potential,
     PotentialBuildContext, PotentialBuilder, PotentialConfigEntry, PotentialParamsCategory,
     PotentialParamsClaim, SlotOutputView,
@@ -472,6 +472,7 @@ struct LjPairFunctor {{
         entry_point_args: schema.entry_point_args(),
         functor_init_source: schema.functor_init_source(),
         cutoff,
+        passes: FragmentPasses::NeighbourListAndCorrection,
         // rq-08f7531f — LJ resolves its per-type-pair tables from the
         // per-atom type indices, so the composer must load them.
         consumes_type_index: true,

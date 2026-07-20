@@ -87,6 +87,14 @@ system by one force-and-scalars evaluation, and asserts:
   are exactly zero for `r > cutoff`. It catches a discontinuous or
   non-vanishing switching function.
 
+  The check is skipped for a fixture whose fragment declares
+  `CutoffHandling::Unbounded` (`jit-composed-pair-force.md`). Such a fragment has
+  no cutoff to be continuous across and is required *not* to vanish beyond one:
+  the SPME excluded-pair correction offsets a cutoff-free reciprocal-space mesh
+  sum, so a non-zero force at large `r` is the specified behaviour rather than a
+  defect (`spme.md`). It is skipped on the same grounds as a fixture whose
+  `r_switch` equals its `cutoff`, which has no switching region to sweep.
+
 In addition, a fixture may declare **analytic reference points**: coordinate
 values with an expected total energy and/or an expected coordinate-conjugate
 force `−dU/dq`. The harness evaluates the potential at each and asserts the
@@ -104,6 +112,14 @@ the `Potential::label()` of every fast-class fragment-composed slot that
 `PotentialRegistry::with_builtins()` can produce. A built-in potential without a
 matching fixture fails this coverage assertion, so a newly added potential
 cannot be silently omitted from the harness.
+
+Coverage is keyed on the fragment, not on the pass that evaluates it, so a
+fragment declaring `FragmentPasses::CorrectionOnly` carries a fixture like any
+other. The SPME excluded-pair fragment is one: its `evaluate` is an ordinary
+pair function of `(r, q_i, q_j)`, so the finite-difference, Newton and virial
+invariants all apply to it unchanged, and its `r → 0` closed-form limit is a
+natural analytic reference point — one that no finite-difference check could
+supply, since the limit is exactly where the direct expression is inevaluable.
 
 ## Tolerances and f32 <!-- rq-61232d64 -->
 

@@ -56,18 +56,23 @@ marker's `dt`. No structural inference is made from the plan's kick /
 drift shape. Integrators never reference the constraint slot; they only
 declare where the hooks belong.
 
-The three MD hooks map one-to-one to `ConstraintPhase` variants; a
-fourth hook is driven separately by the minimization runner:
+`BeforeDrift` and `AfterDrift` map one-to-one to their hooks. The
+velocity projection runs **twice** per constrained step and so has two
+hooks: `apply_after_kick` (leading — project *and* publish the virial)
+and `reproject_velocities_no_publish` (terminal — project only), the
+second of which is what a terminal `ConstraintPoint { AfterKick }`
+dispatches once the leading one has run. A fifth hook is driven
+separately by the minimization runner:
 
 | Hook                              | Marker phase / driver                                     | What the slot does                                                                                                                            |
 | --------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apply_before_drift`              | `ConstraintPoint { phase: BeforeDrift }`                  | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                                |
 | `apply_after_drift`               | `ConstraintPoint { phase: AfterDrift }`                   | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
-| `apply_after_kick`                | `ConstraintPoint { phase: AfterKick }`                    | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.                     |
+| `apply_after_kick`                | Fired by `run_step` at the post-force-marker boundary, immediately after the trailing kick, whenever the plan has a terminal `ConstraintPoint { AfterKick }` | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions, **and publishes** the step's accumulated constraint virial into `buffers.virials`. |
+| `reproject_velocities_no_publish` | `ConstraintPoint { phase: AfterKick }` (terminal)          | The same velocity projection, **without** the virial publish — the step's *repair* projection, putting the velocities back on the manifold after the thermostat's and barostat's rescales (RATTLE-last).       |
 | `apply_position_projection_only`  | Minimization runner (see `rqm/minimization/steepest-descent.md`) | Applies a minimal-displacement, descent-compatible projection (a retraction) that moves the current positions back onto the constraint manifold without modifying velocities or virials. Does not consume `dt`. |
 
-The first three hooks fire only during the integrator's plan walk in
-MD phases, once per marker of the corresponding phase. The fourth hook
+The first four hooks fire only in MD phases. `apply_position_projection_only`
 fires only during minimization phases; the minimization loop drives it
 directly and it is never expressed as a `ConstraintPoint` marker (a
 minimization phase has no integrator plan).
@@ -80,23 +85,31 @@ ForceEval, KickHalf, ConstraintPoint { AfterKick }]` (see
 All of the following runs inside a single `run_step` call:
 
 ```text
+thermostat.apply_pre(...)                                      # on a coupling step
 constraint.apply_before_drift(buffers, sim_box, dt, timings)   # main-region walk
 integrator.execute(SubStep::KickDrift { .. }, buffers, sim_box, timings)
 constraint.apply_after_drift(buffers, sim_box, dt, timings)
 force_field.step(buffers, sim_box, timings)
-# post-force tail (fixed order, still within the same run_step call):
-integrator.execute(SubStep::KickHalf { .. }, buffers, sim_box, timings)
+integrator.execute(SubStep::KickHalf { .. }, buffers, sim_box, timings)  # trailing kick
+# post-force marker boundary (fixed order, still within the same run_step call):
+constraint.apply_after_kick(buffers, sim_box, dt, timings)     # project AND publish the virial
 thermostat.apply_post(...)                                     # on a coupling step
 barostat.apply(...)                                            # if a terminal BarostatPoint
-constraint.apply_after_kick(buffers, sim_box, dt, timings)
+constraint.reproject_velocities_no_publish(buffers, sim_box, dt, timings)
 ```
 
 The `BeforeDrift` and `AfterDrift` hooks dispatch in `run_step`'s
-main-region walk; the trailing `AfterKick` projection dispatches in
-`run_step`'s post-force tail, after the trailing kick and any thermostat /
-barostat velocity rescale, so it is the last per-particle velocity
-operation of the step (see *Ordering of the terminal velocity
-projection*).
+main-region walk. The velocity projection then runs twice. The **leading**
+one — `apply_after_kick` — fires at the post-force-marker boundary, right
+after the trailing kick and *before* the thermostat's `apply_post` and the
+barostat's `apply`, and it is the step's single publish of the constraint
+virial. It fires on **every** step, not only on the thermostat's coupling
+steps. The **terminal** one — the plan's `ConstraintPoint { AfterKick }`,
+dispatched to `reproject_velocities_no_publish` — fires last, after the
+thermostat's and barostat's velocity rescales, so a velocity projection is
+still the last per-particle velocity operation of the step; it repairs the
+manifold without re-publishing the virial (see *Ordering of the velocity
+projections*).
 
 When the constraint slot is `None`, or when the plan carries no
 `ConstraintPoint` markers, no hook fires and the plan walk reduces to
@@ -116,31 +129,124 @@ finer-grained stages within those brackets.
 receive `&SimulationBox` (immutably) to read lattice parameters for
 minimum-image distance evaluation; none mutates the box.
 
-### Ordering of the terminal velocity projection <!-- rq-6b22e2c4 -->
+### Ordering of the velocity projections <!-- rq-6b22e2c4 -->
 
-`apply_after_kick` is the last per-particle velocity operation of the
-timestep. `run_step` dispatches it at the end of the post-force tail —
-after the integrator's trailing kick and after any thermostat rescale and
-per-step barostat rescale — so it always runs last, regardless of which
-slots are configured.
+A velocity projection is the last per-particle velocity operation of the
+timestep. `run_step` dispatches the plan's terminal
+`ConstraintPoint { AfterKick }` at the end of the post-force tail — after
+the integrator's trailing kick and after any thermostat rescale and
+per-step barostat rescale — so a projection always runs last, regardless of
+which slots are configured.
 
-Placing the velocity projection last is the physically general choice.
+Placing a velocity projection last is the physically general choice.
 The projection is, at fixed positions, a linear projection of the
 velocity vector onto the constraint-orthogonal subspace. A global
 uniform velocity rescale (CSVR, Nosé-Hoover chain, Berendsen, and the
 scalar velocity rescale of the c-rescale barostat) commutes with it and
-preserves the manifold, so the relative order of projection and rescale
-is immaterial for those slots. A per-particle velocity resample
-(Andersen) does not preserve the manifold and does not commute; running
-the projection last repairs the constraint after the resample. Firing
-`apply_after_kick` last is thus correct for every thermostat and
-barostat in the default registry, and no thermostat is excluded from
-composition with a constraint slot on ordering grounds.
+preserves the manifold. A whole-group velocity resample (Andersen — its
+collisions resample rigid molecules, not individual atoms) does not preserve
+the manifold and does not commute; running a projection
+last repairs the constraint after the resample. Firing the terminal
+projection last is thus correct for every thermostat and barostat in the
+default registry, and no thermostat is excluded from composition with a
+constraint slot on ordering grounds.
 
-The kinetic energy a thermostat couples to is the full-step kinetic
-energy its `apply_post` reduces after the trailing kick (`framework.md`);
-that timing is independent of constraints and unchanged by the presence
-of a constraint slot.
+That commutation argument covers a thermostat's **write** (the rescale).
+It does **not** cover its **read**, and it says nothing at all about a
+barostat's read of the *virial*. Both of those force a **second,
+leading** projection — `apply_after_kick`, fired immediately after the
+trailing kick, before the thermostat and barostat run.
+
+The thermostat's read: `K(v) ≠ K(P v)`. The trailing kick
+accelerates every atom along the total force, including the component
+parallel to the constrained directions, and `apply_after_kick` deletes
+exactly that component. A KE-coupled thermostat that reduces the kinetic
+energy *before* the projection therefore couples to
+`K_manifold + ΔK_off`, rescales the whole velocity field to put that
+inflated sum on its target, and then watches the projection delete the
+off-manifold share. The run settles at `T_target · (1 − ΔK_off / K)` — a
+deficit that scales as `dt²` (measured: 31.6 K low at `dt = 2 fs` for
+rigid SPC/E water, 7.9 K at 1 fs, 1.9 K at 0.5 fs) and that is
+independent of `tau`, since `ΔK_off` is set by the forces and the
+timestep rather than by the coupling strength.
+
+The barostat's read: a per-step barostat (c-rescale, Berendsen) reduces
+`buffers.virials` inside its own `apply` at the plan's terminal
+`BarostatPoint`. If the constraint virial has not been published by then,
+the barostat reduces the **force virial alone**. For rigid molecules that
+is not a marginal error but a catastrophic one: for 8192 rigid SPC/E water
+molecules the constraint virial (−456 Ha) very nearly cancels the force
+virial (+412 Ha), so a barostat that cannot see it reads **+27,000 atm**
+where the true pressure is about +59 atm (verified independently against
+`−3V · dU/dV`), and drives the box away without bound — density collapsing
+from 0.997 to 0.184 g/cm³ in 10 ps.
+
+`run_step` therefore projects the velocities onto the constraint manifold
+**and publishes the constraint virial** at the post-force-marker boundary,
+immediately after the trailing kick and **before** both the wrapped
+thermostat's `apply_post` and the terminal `BarostatPoint`. The thermostat
+then couples to the physical full-step kinetic energy — the same kinetic
+energy the run reports, and the one whose degrees of freedom
+(`3N − n_constraints − 3`) the thermostat's target is built from — and the
+barostat reduces a virial that carries this step's constraint
+contribution. Under this ordering, c-rescale NPT on rigid SPC/E water
+holds 0.9874 ± 0.0025 g/cm³ at −8 ± 131 atm, agreeing with the
+(virial-free, energy-based) Monte-Carlo barostat's independent
+0.9928 g/cm³.
+
+Because the barostat needs the constraint virial on **every** step — not
+only on the thermostat's coupling steps, or its pressure would alternate
+between two different definitions at the coupling cadence — the leading
+projection is unconditional. It is not gated on `coupling_interval`.
+
+The plan's terminal `ConstraintPoint { AfterKick }` still runs last: for a
+uniform rescale it costs nothing after the leading projection (zero
+impulse), and it remains load-bearing for Andersen's whole-group resample
+and for a barostat velocity rescale, neither of which is guaranteed to
+preserve the manifold.
+
+### The two projections are different hooks <!-- rq-b8818dd3 -->
+
+The leading projection dispatches `Constraint::apply_after_kick` — project
+**and publish**. The terminal one, the plan's
+`ConstraintPoint { AfterKick }`, dispatches
+`Constraint::reproject_velocities_no_publish` — the same velocity
+projection with **no** publish into `buffers.virials`. (With no constraint
+slot installed, or on a plan whose `AfterKick` marker is not terminal, no
+leading projection fires and the marker dispatches `apply_after_kick`
+itself, which is then the step's single publish.)
+
+The distinction is load-bearing, in two ways:
+
+- **The publish must happen before the barostat reduces the virial.** The
+  barostat's `apply` runs at the plan's terminal `BarostatPoint`, which
+  sits *between* the two projections. A publish at the terminal projection
+  would land after that reduction, leaving the barostat with the force
+  virial alone — the +27,000 atm estimate and the runaway box described
+  above.
+- **The constraint virial must be published exactly once per step.** Both
+  `settle_positions` (position half) and `settle_velocities` (velocity
+  half) accumulate into a `constraint_virial` scratch buffer that the
+  scatter adds into `buffers.virials`; nothing clears it in between. A
+  second scatter, from the terminal projection, would re-add the whole
+  accumulated total — the position half included — and double-count the
+  constraint contribution to the pressure.
+
+So both the accumulation and the single publish happen at the leading
+projection (where the impulse is real, since the velocities are still off
+the manifold). The terminal `settle_velocities` / `rattle_velocities`
+contributes nothing to the published virial; it is there to repair the
+manifold, not to measure it. Its own repair impulse is zero for a uniform
+rescale, and for Andersen's whole-group resample the impulse virial it
+would carry is simply dropped — an accepted approximation, since that
+impulse answers a stochastic resample rather than a physical force.
+
+A constrained step consequently launches the velocity projection **twice**
+and the virial scatter **once** — and, because the leading projection is
+unconditional, that is true of every step, not just coupling steps. The
+default `reproject_velocities_no_publish` delegates to `apply_after_kick`,
+which is correct for any constraint slot that publishes no virial; SETTLE
+and SHAKE override it.
 
 ## Convenience Trait Surface <!-- rq-0e26dde0 -->
 
@@ -428,6 +534,10 @@ second receives an empty index set and contributes no slot.
           timings: &mut Timings,
       ) -> Result<(), ConstraintError>;
 
+      /// Project the final velocities onto the constraint manifold and
+      /// **publish** the step's accumulated constraint virial into
+      /// `buffers.virials`. Fired by `run_step` immediately after the
+      /// trailing kick, ahead of the thermostat and the barostat.
       fn apply_after_kick(
           &mut self,
           buffers: &mut ParticleBuffers,
@@ -435,6 +545,23 @@ second receives an empty index set and contributes no slot.
           dt: f32,
           timings: &mut Timings,
       ) -> Result<(), ConstraintError>;
+
+      /// The same velocity projection as `apply_after_kick`, but
+      /// **without** publishing the constraint virial. This is the
+      /// step's *repair* projection, dispatched by the plan's terminal
+      /// `ConstraintPoint { AfterKick }` after the thermostat's and
+      /// barostat's rescales (RATTLE-last). The default delegates to
+      /// `apply_after_kick` — correct for any slot that publishes no
+      /// virial; SETTLE and SHAKE override it.
+      fn reproject_velocities_no_publish(
+          &mut self,
+          buffers: &mut ParticleBuffers,
+          sim_box: &SimulationBox,
+          dt: f32,
+          timings: &mut Timings,
+      ) -> Result<(), ConstraintError> {
+          self.apply_after_kick(buffers, sim_box, dt, timings)
+      }
 
       /// Apply a minimal-displacement, descent-compatible projection
       /// (a retraction) that moves the current positions back onto the
@@ -469,9 +596,12 @@ second receives an empty index set and contributes no slot.
     hooks and to allow future hooks that need to mutate state.
   - `apply_after_kick` is permitted to mutate `buffers.virials` to
     add the constraint slot's contribution to the total scalar
-    virial used by the barostat's pressure estimate. The
-    contribution is *added* (not assigned): each constraint slot
-    adds in-place, so the force evaluation that runs between
+    virial used by the barostat's pressure estimate — and it is the
+    *only* hook that may, so that the contribution reaches
+    `buffers.virials` exactly once per step, and does so before the
+    barostat reduces them. `reproject_velocities_no_publish` must
+    not. The contribution is *added* (not assigned): each constraint
+    slot adds in-place, so the force evaluation that runs between
     `apply_after_drift` and `apply_after_kick` populates virials
     first and the constraint contribution is folded in afterward.
     Concrete algorithms document the exact form of their
@@ -781,8 +911,9 @@ second receives an empty index set and contributes no slot.
   dispatching `plan()`, `execute()`, or any kernel. Otherwise it
   calls `run_step(self, …, constraint = Some(constraint), …,
   RunStepOptions { runner_needs_scalars: true, ..Default::default()
-  })` for the main walk, then fires the terminal `AfterKick` projection
-  in the post-force tail.
+  })`, which walks the whole plan: the main region, then the leading
+  `apply_after_kick` at the post-force-marker boundary, then the
+  post-force tail with its terminal repair projection.
 
 - `StepError` — unified error type returned by `run_step` and both <!-- rq-52e52d7b -->
   convenience-trait methods. Defined in `src/integrator/mod.rs`.
@@ -817,9 +948,10 @@ second receives an empty index set and contributes no slot.
   — as described above.
 
 - `Constraint::apply_before_drift`, `Constraint::apply_after_drift`, <!-- rq-e538c545 -->
-  `Constraint::apply_after_kick` — as described above. Each returns
-  `Ok(())` without launching any kernel when the slot's group count
-  is zero.
+  `Constraint::apply_after_kick`,
+  `Constraint::reproject_velocities_no_publish` — as described above.
+  Each returns `Ok(())` without launching any kernel when the slot's
+  group count is zero.
 
 ## Construction and Lifetime <!-- rq-2523992c -->
 
@@ -862,11 +994,11 @@ algorithm individually guarantees:
   streams are introduced.
 - The intra-step hook order (`apply_before_drift`, then drift, then
   `apply_after_drift`, then force evaluation, then kick, then
-  `apply_after_kick`) is fixed by the integrator's `ConstraintPoint`
-  marker sequence and is identical across runs. `apply_after_kick` is
-  the last per-particle velocity operation of the step — the runner
-  fires it at the end of the post-force tail (see *Ordering of the
-  terminal velocity projection*).
+  `apply_after_kick`, then — after the thermostat and barostat —
+  `reproject_velocities_no_publish`) is fixed by the integrator's
+  `ConstraintPoint` marker sequence and is identical across runs. A
+  velocity projection is the last per-particle velocity operation of the
+  step (see *Ordering of the velocity projections*).
 - Group order in the device-side group buffers matches `groups` in
   the host-side `ConstraintList`, which is sorted by each group's
   minimum particle index. Two independently-constructed
@@ -1015,12 +1147,13 @@ Feature: Constraint slot framework
   # --- Per-step dispatch ---
 
   @rq-90538790
-  Scenario: Dispatch loop calls all three constraint hooks in marker order
+  Scenario: Dispatch loop calls every constraint hook in marker order
     Given a velocity-Verlet integrator (lossless=false) with constraints
     And a recording wrapper that timestamps every Constraint hook call
     When the runner executes one timestep
     Then the recorded order is exactly
-      [apply_before_drift, apply_after_drift, apply_after_kick]
+      [apply_before_drift, apply_after_drift, apply_after_kick,
+       reproject_velocities_no_publish]
     And each hook fires exactly once
 
   @rq-7047ea32
@@ -1039,7 +1172,8 @@ Feature: Constraint slot framework
     And a recording Constraint slot
     When the runner executes one timestep
     Then the recorded order is exactly
-      [apply_before_drift, apply_after_drift, apply_after_kick]
+      [apply_before_drift, apply_after_drift, apply_after_kick,
+       reproject_velocities_no_publish]
 
   @rq-3b42c2ff
   Scenario: Repeated markers dispatch once each in plan order
@@ -1051,16 +1185,18 @@ Feature: Constraint slot framework
     When the runner executes one timestep
     Then apply_before_drift fires exactly twice
     And apply_after_drift fires exactly twice
-    And apply_after_kick fires exactly once, last
+    And apply_after_kick fires exactly once, immediately after the trailing kick
+    And reproject_velocities_no_publish fires exactly once, last
 
   @rq-a90e4189
-  Scenario: A plan with no AfterKick marker never fires apply_after_kick
+  Scenario: A plan with no AfterKick marker fires no velocity projection at all
     Given a stub integrator whose plan(dt) returns
       [ConstraintPoint { phase: BeforeDrift }, Drift, ConstraintPoint { phase: AfterDrift },
        ForceEval, KickHalf]
     And a recording Constraint slot
     When the runner executes one timestep
     Then apply_after_kick is not recorded
+    And reproject_velocities_no_publish is not recorded
 
   @rq-c3b3ec99
   Scenario: A plan with no ConstraintPoint markers fires no constraint hooks
@@ -1070,22 +1206,42 @@ Feature: Constraint slot framework
     Then no constraint hooks are recorded
 
   @rq-a78ba267
-  Scenario: The AfterKick projection fires in the post-force tail after the trailing kick
+  Scenario: The leading projection-and-publish fires immediately after the trailing kick
     Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
     And a recording wrapper that timestamps every Constraint hook call and the trailing kick launch
     When the runner executes one timestep
     Then the recorded order is exactly
-      [apply_before_drift, apply_after_drift, trailing_kick, apply_after_kick]
-    And apply_after_kick is not dispatched during run_step's main walk
+      [apply_before_drift, apply_after_drift, trailing_kick, apply_after_kick,
+       reproject_velocities_no_publish]
+    And no velocity projection is dispatched during run_step's main walk
+
+  @rq-16c7957d
+  Scenario: The leading publish precedes the per-step barostat's virial reduction
+    Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
+    And a per-step barostat slot whose apply reduces buffers.virials
+    And a recording wrapper that timestamps the barostat apply and every Constraint hook call
+    When the runner executes one timestep
+    Then apply_after_kick is recorded before the barostat apply
+    And the virial the barostat reduces includes this step's constraint contribution
+
+  @rq-2fa29d25
+  Scenario: The leading projection fires on a non-coupling step
+    Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
+    And a thermostat with coupling_interval = 10
+    And a recording wrapper that timestamps every Constraint hook call
+    When the runner executes a step that is not a coupling step
+    Then apply_after_kick is recorded exactly once
+    And the constraint virial scatter is recorded exactly once
 
   @rq-24e3c49a
-  Scenario: The AfterKick projection fires after the per-step barostat rescale (RATTLE-last)
+  Scenario: The terminal repair projection fires after the per-step barostat rescale (RATTLE-last)
     Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
     And a per-step barostat slot whose apply rescales positions, velocities, and the box
     And a recording wrapper that timestamps the barostat apply and every Constraint hook call
     When the runner executes one timestep
-    Then apply_after_kick is recorded after the barostat apply
-    And apply_after_kick is the last per-particle velocity operation of the step
+    Then reproject_velocities_no_publish is recorded after the barostat apply
+    And it is the last per-particle velocity operation of the step
+    And it launches no constraint virial scatter
 
   @rq-77f959b2
   Scenario: apply_position_projection_only is not fired during the MD plan walk
@@ -1343,7 +1499,9 @@ Feature: Constraint slot framework
     And a recording Constraint slot
     When integrator.step_with_constraint(buffers, sim_box, force_field, &mut slot, dt, timings) is called
     Then the call returns Ok(())
-    And the recorded hook order is exactly [apply_before_drift, apply_after_drift, apply_after_kick]
+    And the recorded hook order is exactly
+      [apply_before_drift, apply_after_drift, apply_after_kick,
+       reproject_velocities_no_publish]
 
   @rq-e9706f76
   Scenario: step_with_constraint short-circuits on a constraint-rejecting state

@@ -144,6 +144,9 @@ __device__ static inline void settle_project_positions(
 // rq-709c8eb5 rq-fa14a87f rq-4617c285
 extern "C" __global__ void settle_positions(
     Real4 *posq,
+    int *images_x,
+    int *images_y,
+    int *images_z,
     Real *velocities_x,
     Real *velocities_y,
     Real *velocities_z,
@@ -330,7 +333,33 @@ extern "C" __global__ void settle_positions(
     pq.x = cur[a][0] + corr0;
     pq.y = cur[a][1] + corr1;
     pq.z = cur[a][2] + corr2;
+    // Re-wrap into the primary image. Drift wraps every atom into the
+    // primary image, so `cur[a]` sits inside; but the SETTLE correction can
+    // nudge an atom that landed near a face just past it (typical corr
+    // magnitude ~1e-3 a_0 at 298 K with dt=2 fs, sufficient to cross a
+    // boundary an atom drifted within). Without this wrap the position sits
+    // outside the primary cell until the *next* step's drift wraps it —
+    // long enough for the trajectory writer to catch it, breaking the
+    // "every trajectory frame is a valid init file" round-trip.
+    //
+    // Advancing the image counters on any wrap keeps the invariant
+    // `unwrapped = wrapped + N·L` exact, which unwrapped-coordinate
+    // analyses (diffusion, MSD) depend on. See rqm/particle-state.md.
+    //
+    // The correction is a *scaled sum of physical bond vectors* whose
+    // components are always well below one lattice vector, so at most one
+    // wrap per direction can fire per call — the same bound the drift wrap
+    // relies on. Position-level constraint virial reads the pre-wrap
+    // `corr*`, which is image-invariant, so the wrap does not perturb it.
+    int nx = images_x[idx[a]];
+    int ny = images_y[idx[a]];
+    int nz = images_z[idx[a]];
+    wrap_and_count_triclinic(pq.x, pq.y, pq.z, nx, ny, nz,
+                             lx, ly, lz, xy, xz, yz);
     posq[idx[a]] = pq;
+    images_x[idx[a]] = nx;
+    images_y[idx[a]] = ny;
+    images_z[idx[a]] = nz;
     // Position-level constraint virial. r_i^COM = constrained_i − COM = rcom[a].
     Real scale = m_atom[a] * inv_dt2;
     constraint_virial[off + a] =
@@ -518,6 +547,9 @@ extern "C" __global__ void settle_virial_scatter(
 // σ gate skips every constraint), matching SHAKE. rq-709c8eb5
 extern "C" __global__ void settle_positions_no_velocity(
     Real4 *posq,
+    int *images_x,
+    int *images_y,
+    int *images_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -579,6 +611,18 @@ extern "C" __global__ void settle_positions_no_velocity(
     pq.x = xr[a] + (xc[a] - xu[a]);
     pq.y = yr[a] + (yc[a] - yu[a]);
     pq.z = zr[a] + (zc[a] - zu[a]);
+    // Re-wrap into the primary image and advance the image counters on any
+    // crossing. See the matching comment in `settle_positions` above — the
+    // minimizer's off-manifold displacements are typically larger than
+    // production's, so this wrap is more likely to fire here.
+    int nx = images_x[idx[a]];
+    int ny = images_y[idx[a]];
+    int nz = images_z[idx[a]];
+    wrap_and_count_triclinic(pq.x, pq.y, pq.z, nx, ny, nz,
+                             lx, ly, lz, xy, xz, yz);
     posq[idx[a]] = pq;
+    images_x[idx[a]] = nx;
+    images_y[idx[a]] = ny;
+    images_z[idx[a]] = nz;
   }
 }

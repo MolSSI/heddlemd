@@ -32,14 +32,28 @@ hold:
 - Every active slot for the phase (integrator, optional thermostat,
   optional barostat, optional constraint) reports
   `graph_compatible(&params) == true`.
-- No thermostat is configured. A thermostat couples on a cadence and
-  runs host-side arithmetic (chain integration, sampling) on coupling
-  steps that stream capture cannot record, so a thermostatted phase runs
-  on the per-step launch path (see *Batched Replay Loop*). Every
-  post-force per-particle operation — the integrator's trailing kick and
-  a per-step barostat's rescale — is a standalone kernel launch captured
-  into the graph like any other launch; there is no composed post-force
-  kernel and no per-slot fragment requirement.
+- Any configured thermostat reports `graph_compatible == true`. Such a
+  thermostat's coupling is a device-side kernel sequence — the kinetic-
+  energy reduction, the rescale-factor computation (deterministic or
+  device-RNG sampled), and the per-particle velocity rescale — with no
+  host arithmetic and no device-to-host copy between launches, so it is
+  capturable. The phase captures a **coupling** row (the step with the
+  thermostat's coupling sequence recorded) and a **non-coupling** row (the
+  same step with the thermostat inert), each at both force-evaluation
+  levels (forces-only and forces+scalars) — the cells of a coupling ×
+  scalars matrix. The replay loop launches a coupling cell on coupling steps
+  — the steps where `step % coupling_interval == 0` — and a non-coupling
+  cell otherwise, and within a row the forces+scalars cell on log / barostat
+  steps and the forces-only cell on the rest (see *Batched Replay Loop*).
+  This holds for any `coupling_interval >= 1`; at `coupling_interval == 1`
+  every step is a coupling step and always replays a coupling cell. A
+  thermostat reporting `graph_compatible == false` (it carries host-side
+  arithmetic on every step, not a pure device sequence) makes the whole
+  phase run on the per-step launch path. Every captured post-force
+  per-particle operation — the integrator's trailing kick, the thermostat's
+  rescale on a coupling step, and a per-step barostat's rescale — is a
+  standalone kernel launch recorded like any other; there is no composed
+  post-force kernel and no per-slot fragment requirement.
 
 - The integrator's plan has no `ThermostatHalf` sub-step and no
   *interleaved* (non-terminal) `BarostatPoint`. Both dispatch host-side
@@ -66,19 +80,34 @@ Each in-tree slot's builder reports its `graph_compatible` value:
 | Integrator  | `velocity-verlet`       | `true`             |
 | Integrator  | `langevin-baoab`        | `true`             |
 | Integrator  | `mtk-npt`               | `false`            |
+| Thermostat  | `csvr`                  | `true`             |
+| Thermostat  | `berendsen`             | `true`             |
+| Thermostat  | `andersen`              | `true`             |
+| Thermostat  | `nose-hoover-chain`     | `false`            |
 | Barostat    | `c-rescale`             | `true`             |
 | Barostat    | `berendsen`             | `true`             |
 | Barostat    | `monte-carlo`           | `true`             |
 | Constraint  | `shake`                 | `true`             |
 | Constraint  | `settle`                | `true`             |
 
-Thermostats are absent from the table: a configured thermostat makes
-the phase graph-ineligible regardless of kind (its coupling-step
-arithmetic runs on the per-step path). `mtk-npt` reports
-`graph_compatible == false` because it carries host-side chain
-arithmetic (`eps`, `xi` / `p_xi`) inside its per-step plan executor
-that a captured graph cannot reproduce; it runs on the per-step launch
-path until that arithmetic is ported to device kernels.
+A thermostat is graph-eligible when its coupling is a pure device-kernel
+sequence — the kinetic-energy reduction, the rescale-factor computation,
+and the velocity rescale all run on the device with no host arithmetic and
+no `dtoh` between launches — so it can be recorded into the phase's
+coupling cells. `csvr` applies a stochastic full-step
+kinetic-energy rescale (its factor is sampled by a device kernel from the
+device-reduced kinetic energy and a device RNG counter), `berendsen`
+applies a deterministic full-step rescale (its factor computed by a device
+kernel), and `andersen` launches its stochastic resample
+(`andersen_resample`) directly on the device; all three report
+`graph_compatible == true`. `nose-hoover-chain` reports `graph_compatible
+== false`: it integrates its extended-system variables (`xi` / `p_xi`)
+with a host-side Yoshida chain and a per-step kinetic-energy `dtoh` on
+every step, so its coupling is not a pure device sequence and its phase
+runs entirely on the per-step launch path. `mtk-npt` reports
+`graph_compatible == false` for the same reason on the integrator side —
+host-side chain arithmetic (`eps`, `xi` / `p_xi`) inside its per-step
+plan executor that a captured graph cannot reproduce.
 
 All in-tree potentials (`lennard_jones`, `coulomb`, `spme_real`,
 `spme_reciprocal`, `morse_bond`, `harmonic_angle`) report
@@ -119,20 +148,72 @@ by `flush_pending_injection` (alongside the conserved-quantity log
 columns it already drains). The host field is used only for
 diagnostic log columns; it is never an input to a kernel arg.
 
+## Reproducibility Scope <!-- rq-cbf4f13e -->
+
+The enforced bit-exact invariant is **run-to-run within one execution
+path**: two runs of the same configuration on the same GPU — both in graph
+mode, or both with `cuda_graphs_disable = true` — produce byte-identical
+trajectories, logs, forces, and box. This is the invariant that surfaces a
+race: a scheduling-dependent bug (an unordered float `atomicAdd`, a missing
+`__syncthreads`) breaks it the moment scheduling varies between runs. The
+per-particle force accumulator is 64-bit integer fixed-point, so it is
+invariant to the order in which tile entries and warps contribute, which is
+what makes this invariant hold despite the warp-scheduling-dependent
+neighbour-list entry order (see
+`forces/packed-neighbour-pair-force.md` *Determinism*).
+
+The graph-replay path and the per-step launch path are **two floating-point
+summation orders**, not two spellings of one order. They run the same
+kernels and agree to f32 rounding, and they are bit-exact for a
+regularly-packed neighbour list. On a disordered system they can differ by
+an f32 quantum (order `1e-6`): the packed-neighbour build groups j-atoms
+into 32-atom tiles in a warp-scheduling-dependent order, the pair kernel
+sums each tile's contributions in float before the per-entry fixed-point
+conversion, and the two paths' scheduling produces different tile
+partitions. This is a benign summation-order difference, physically
+negligible and non-compounding beyond f32 noise — **not** a race, and it
+does not weaken the run-to-run signal above. Cross-path agreement
+(graph-vs-per-step) is therefore an f32-order property, not a bit-exact
+guarantee; do not use one path as a bit-exact oracle for the other on a
+disordered system.
+
 ## Post-Force Per-Particle Launches in the Captured Sequence <!-- rq-1db7cf2a -->
 
-An eligible phase has no thermostat (a thermostatted phase runs on the
-per-step path). Its post-force per-particle work is the integrator's
-trailing kick (`vv_kick` / `vv_kick_lossless`, or a class kick) and,
-when a per-step barostat is configured, the barostat's standalone
-position rescale (`rescale_positions_device_factor`). Each is an
-ordinary `cuLaunchKernel` recorded as its own node in the captured
-graph; replays re-issue them exactly once per physical step. There is
-no composed post-force kernel.
+The captured graphs' post-force per-particle work is the integrator's
+trailing kick (`vv_kick` / `vv_kick_lossless`, or a class kick) and, when
+a per-step barostat is configured, the barostat's standalone position
+rescale (`rescale_positions_device_factor`). Each is an ordinary
+`cuLaunchKernel` recorded as its own node; replays re-issue them exactly
+once per physical step. There is no composed post-force kernel. The
+**coupling** cells of the matrix additionally record the thermostat's
+coupling sequence — its kinetic-energy reduction, factor computation, and
+velocity rescale — as standalone nodes; the **non-coupling** cells record
+none of them. On a **constrained** phase, **every** cell — coupling and
+non-coupling alike — records the constraint slot's leading velocity
+projection (`settle_velocities` / `rattle_velocities`, from
+`Constraint::apply_after_kick`) plus its virial-scatter node
+(`settle_virial_scatter` / `constraint_virial_scatter`) immediately after
+the trailing kick, ahead of any thermostat and barostat node. That
+projection puts the velocities on the manifold so the thermostat's
+reduction sees the physical full-step kinetic energy, and publishes the
+constraint virial so the barostat's virial reduction sees the constraint
+contribution (`integration/constraint-framework.md`). It is unconditional,
+which is why it is in the non-coupling cells too. The plan's terminal
+`ConstraintPoint { AfterKick }` then records a *second*
+`settle_velocities` / `rattle_velocities` node in the post-force tail —
+the repair projection (`Constraint::reproject_velocities_no_publish`) —
+with **no** second scatter. Within a row the forces+scalars and forces-only cells differ
+only in the force-evaluation `AggregateLevel` (the `_fev` scalar
+reductions present or absent). The replay loop launches the coupling row on
+coupling steps and the non-coupling row otherwise, and the forces+scalars
+cell on log / barostat steps and the forces-only cell on the rest (see
+*Batched Replay Loop*).
 
 The non-graph per-step launch loop (`cuda_graphs_disable = true` or a
-graph-ineligible phase) issues the identical launches directly per
-step; both paths produce byte-identical results.
+graph-ineligible phase) issues the identical launches directly per step.
+The two paths run the same kernels and agree to f32 summation order; they
+are bit-exact for regularly-packed neighbour lists but can differ by an f32
+quantum on a disordered system (see *Reproducibility Scope*).
 
 ### Slot apply-method contract <!-- rq-781966e6 -->
 
@@ -141,10 +222,11 @@ per-step work as standalone launches — reductions, device scalar
 kernels, box mutation, per-step accumulator bookkeeping, and the
 per-particle rescale — with no composed kernel. A per-step barostat's
 `apply` therefore performs its own position rescale
-(`rescale_positions_device_factor`) as its final launch. A thermostat's
-`apply_post` performs its own velocity rescale, but only on the per-step
-path — a thermostatted phase is graph-ineligible, so no thermostat
-launch is ever captured.
+(`rescale_positions_device_factor`) as its final launch. A graph-eligible
+thermostat's `apply_pre` / `apply_post` runs its coupling as standalone
+device launches; those launches are recorded into the coupling cells when
+they are captured and re-issued whenever a coupling cell is replayed (on
+coupling steps). The non-coupling cells record no thermostat launch.
 
 ## Capture Lifecycle <!-- rq-766c88fb -->
 
@@ -170,54 +252,83 @@ sequence:
    `CudaGraph`, and instantiating it with `CudaGraph::instantiate()`
    to obtain a `CudaGraphExec`. Stream capture records the kernel
    sequence without executing it, so capturing a graph advances no
-   simulation state. Up to two graphs are captured from the same
-   post-probe device state:
-   - **forces+scalars graph** — the recorded sequence with the force
-     evaluation at `AggregateLevel::ForcesAndScalars`: the `_fev`
+   simulation state. Up to four graphs — the cells of the coupling ×
+   scalars matrix — are captured from the same post-probe device state:
+   - **non-coupling forces+scalars** — a step with the thermostat inert and
+     the force evaluation at `AggregateLevel::ForcesAndScalars`: the `_fev`
      composed pair-force kernel plus the per-step potential-energy and
-     virial reductions. Always captured.
-   - **forces-only graph** — the same sequence with the force
-     evaluation at `AggregateLevel::ForcesOnly`: the `_f` composed
-     pair-force kernel, with the scalar reductions absent. Captured
-     unless a *per-step* barostat is active for the phase.
+     virial reductions. Captured when the phase has non-coupling steps (no
+     thermostat, or `coupling_interval > 1`).
+   - **non-coupling forces-only** — the same inert step at
+     `AggregateLevel::ForcesOnly`: the `_f` composed pair-force kernel, with
+     the scalar reductions absent. Captured when the phase has non-coupling
+     steps and no *per-step* barostat.
+   - **coupling forces+scalars** — a step at `AggregateLevel::ForcesAndScalars`
+     with the graph-eligible thermostat's coupling recorded (its `apply_pre`
+     before the walk and `apply_post` at the post-force boundary — the
+     kinetic-energy reduction, factor computation, and velocity rescale),
+     preceded at that boundary, on a constrained phase, by the constraint
+     slot's leading projection-and-publish (`settle_velocities` /
+     `rattle_velocities` plus the virial scatter), which the non-coupling
+     cells record too. Captured when the phase has a graph-eligible
+     thermostat.
+   - **coupling forces-only** — the same coupling step at
+     `AggregateLevel::ForcesOnly`. Captured when the phase has a
+     graph-eligible thermostat and no *per-step* barostat.
 
-   A per-step barostat consumes the per-step scalar virial inside the
-   captured sequence (`barostat.apply` in step 3), so a per-step-barostat
-   phase evaluates scalars on every step and captures only the
-   forces+scalars graph. A periodic (Monte-Carlo) barostat puts no node
-   in the captured sequence and consumes no per-step virial, so its phase
-   captures both graphs exactly as an NVT phase does; its volume move runs
-   on the host between batches (see *Periodic-barostat moves*). When no
-   per-step barostat is active the per-particle force, position, and
-   velocity results of the two graphs are bit-identical — the scalar
-   reductions are diagnostic outputs that do not feed back into the
-   dynamics — so replaying either graph for a given step produces the
-   same trajectory.
-3. The recorded one-step kernel sequence, run under capture once per
-   graph with `force_field.step_no_neighbor_check(...)` in place of the
-   ordinary `force_field.step(...)`, is (an eligible phase has no
-   thermostat, so no `apply_pre` / `apply_post` appears):
+   The replay loop launches the coupling row on coupling steps and the
+   non-coupling row otherwise, and within a row the forces+scalars cell on
+   log / barostat steps and the forces-only cell on the rest (see *Batched
+   Replay Loop*). A per-step barostat consumes the per-step scalar virial
+   inside the captured sequence (`barostat.apply` in step 3), so a
+   per-step-barostat phase evaluates scalars on every step and captures no
+   forces-only cell in either row. A periodic (Monte-Carlo) barostat puts no
+   node in the captured sequence and consumes no per-step virial, so its
+   phase keeps the forces-only cells; its volume move runs on the host
+   between batches (see *Periodic-barostat moves*). Within a row the
+   per-particle force, position, and velocity results of the forces-only and
+   forces+scalars cells are bit-identical (the scalar reductions are
+   diagnostic outputs that do not feed back into the dynamics), so replaying
+   either for a given step produces the same trajectory.
+3. The recorded one-step kernel sequence, run under capture once per cell
+   with `force_field.step_no_neighbor_check(...)` in place of the ordinary
+   `force_field.step(...)`:
    - `run_step(integrator, buffers, sim_box, force_field, constraint,
-     None, barostat, dt, timings, RunStepOptions {
-     run_neighbor_pre_step: false, runner_needs_scalars,
-     coupling_dt: None })`, where `runner_needs_scalars` is `true` while
-     recording the forces+scalars graph and `false` while recording the
-     forces-only graph. `coupling_dt` is `None` because an eligible phase
-     has no thermostat. `run_step` walks the **entire** plan — routing
-     every `force_field.step` to `force_field.step_no_neighbor_check`,
+     thermostat, barostat, dt, timings, RunStepOptions {
+     run_neighbor_pre_step: false, runner_needs_scalars, coupling_dt })`,
+     where `runner_needs_scalars` is the cell's scalars index (`true` for a
+     forces+scalars cell, `false` for a forces-only cell). For a
+     non-coupling cell the `thermostat` argument is `None` and `coupling_dt`
+     is `None`, recording the thermostat as inert; for a coupling cell the
+     thermostat slot is passed and `coupling_dt = Some(coupling_interval as
+     Real * dt)`, so `run_step` records the thermostat's `apply_pre` /
+     `apply_post` coupling launches at their canonical full-step positions.
+   - In every cell, `run_step` walks the **entire** plan — routing every
+     `force_field.step` to `force_field.step_no_neighbor_check`,
      dispatching interleaved `ConstraintPoint` markers to the constraint
      slot (a no-op when the slot is `None`), the integrator's trailing
      kick (via `execute`), and then the post-force tail. See
      `integration/framework.md` for `RunStepOptions`.
+   - At the post-force-marker boundary, immediately after the trailing kick
+     and before the thermostat's `apply_post`, **every** cell of a
+     constrained phase records `constraint.apply_after_kick(buffers,
+     sim_box, dt, timings)` — the velocity projection
+     (`settle_velocities` / `rattle_velocities`) *and* its virial scatter
+     (`settle_virial_scatter` / `constraint_virial_scatter`), the step's
+     single publication of the constraint virial. The projection is
+     unconditional, so coupling and non-coupling cells record it alike.
    - The post-force tail, dispatched by the same `run_step` call, records
      each op as a standalone captured launch: `barostat.apply(buffers,
      sim_box, dt, timings)` when the plan carries a terminal
-     `BarostatPoint` (its reductions, box mutation, and per-particle
-     position rescale); then `constraint.apply_after_kick(buffers,
-     sim_box, dt, timings)` when the plan ends with a velocity projection
-     — the last per-particle velocity operation. The constraint kernels
-     are pure launches (the SETTLE / SHAKE builders report
-     `graph_compatible == true`), so a constrained phase is
+     `BarostatPoint` (its reductions — including the virial reduction,
+     which therefore reads the constraint virial published above — box
+     mutation, and per-particle position rescale); then
+     `constraint.reproject_velocities_no_publish(buffers, sim_box, dt,
+     timings)` when the plan ends with a velocity projection — a second
+     `settle_velocities` / `rattle_velocities` node, the last per-particle
+     velocity operation of the step, with **no** second scatter node. The
+     constraint kernels are pure launches (the SETTLE / SHAKE builders
+     report `graph_compatible == true`), so a constrained phase is
      graph-eligible.
    - The displacement-check kernel
      `neighbor_displacement_check_flag` launched by
@@ -228,9 +339,10 @@ sequence:
      minimum-image displacement exceeds `r_skin / 2`. The flag is
      sticky across replays of the captured graph until cleared by
      the host between batches.
-4. Both instantiated graphs are stored in the phase's `GraphLoop`
-   (the forces-only graph as an `Option`, absent for per-step-barostat
-   phases).
+4. The instantiated graphs are stored in the phase's `GraphLoop.graphs`
+   matrix, each cell an `Option` — the coupling row absent for a
+   thermostat-free phase, and the forces-only column absent for a
+   per-step-barostat phase.
 
 Capture records but does not execute, so capturing the graphs
 advances no simulation state; every physical step of the phase is
@@ -263,23 +375,24 @@ the run normally; the warning is informational.
 
 ## Batched Replay Loop <!-- rq-76db55bb -->
 
-A thermostat couples on a cadence, and on coupling steps runs host-side
-work (e.g. NHC chain integration) that cannot be captured; its full-step
-kinetic-energy reduction is a fusion barrier (`framework.md`,
-`docs/architecture.md`). A **thermostatted phase therefore runs on the
-per-step launch path**, not the batched graph loop — it is
-graph-ineligible. The coupling interval's benefit is still realised on
-that path: on a non-coupling step (`step % coupling_interval != 0`) the
-thermostat is inert (no reduction, no rescale) and only the integrator
-kick and any barostat rescale run, while a coupling step runs the full
-post-force region. Only a phase with no thermostat is eligible for the
-batched graph loop.
+A graph-eligible thermostat (see *Slot eligibility*) has its device-side
+coupling sequence — the kinetic-energy reduction (a fusion barrier;
+`framework.md`, `docs/architecture.md`), the factor computation, and the
+velocity rescale — recorded into the **coupling-variant** graph; the
+**non-coupling** variants record the same step with the thermostat inert.
+The batched replay loop selects, per physical step, the coupling variant
+on coupling steps (`step % coupling_interval == 0`) and a non-coupling
+variant on every other step. Coupling steps are ordinary graph replays,
+not batch boundaries; at `coupling_interval == 1` every step replays the
+coupling variant. A phase whose thermostat reports `graph_compatible ==
+false` runs entirely on the per-step launch path and captures no graph.
 
-For an eligible (thermostat-free) phase with
-`[simulation].graph_batch_size = K`, the per-phase loop has the shape:
+For a phase with `[simulation].graph_batch_size = K`, the per-phase loop
+has the shape:
 
 ```text
 needs_scalars(s) = (log_every > 0 and s % log_every == 0) or per_step_barostat_active
+couples(s)       = thermostatted and s % coupling_interval == 0
 while remaining > 0:
     next_log    = if log_every  > 0 then log_every  - (step % log_every)  else remaining
     next_traj   = if traj_every > 0 then traj_every - (step % traj_every) else remaining
@@ -288,7 +401,10 @@ while remaining > 0:
 
     for i in 1..=batch:
         s = step + i
-        graph_loop.launch(stream, scalars = needs_scalars(s))   // forces+scalars graph iff needs_scalars(s), else forces-only
+        graph_loop.launch(stream, coupling = couples(s), scalars = needs_scalars(s))
+        // launches graphs[couples(s)][needs_scalars(s)] — the coupling row on
+        // coupling steps, and within a row forces+scalars on log/barostat
+        // steps, forces-only otherwise
 
     step      += batch
     remaining -= batch
@@ -298,7 +414,7 @@ while remaining > 0:
 
     outcome = nl.pre_step(sim_box, buffers, timings)    // 4-byte dtoh of neighbor_status; rebuild iff non-zero
     if outcome.reallocated and remaining > 0:           // a rebuild grew (reallocated) a packed-neighbour buffer
-        graph_loop = capture_phase_graph(...)           // re-capture against new pointers / grid dims; records, does not execute
+        graph_loop = capture_phase_graph(...)           // re-capture all variants against new pointers / grid dims
     if step % traj_every == 0:
         sim_box.flush_from_device()
         download positions (and velocities when configured)
@@ -410,7 +526,9 @@ At the typical setting `r_skin = 0.3 * r_cut` and `K = 50`, the
 per-step displacement bound is `0.003 * r_cut`. Liquid MD at room
 temperature with `r_cut ≈ 9 Å` and `dt = 1 fs` rarely exceeds
 `0.001 * r_cut` per step, leaving a 3× safety margin at the default
-batch size.
+batch size. A thermostatted phase does not change this: coupling steps
+replay a coupling cell in-batch and are not batch boundaries,
+so the flag-download cadence remains `K`.
 
 If users tune `K` or `r_skin` outside the safe regime the skin
 contract degrades silently: particles may drift past `r_skin / 2`
@@ -490,20 +608,38 @@ When graph mode is active for a phase:
   which records each stage's mean calibrated duration as its
   representative per-replay value. `GRAPH_TIMING_CALIBRATION_STEPS` is a
   small constant (8). The captured graph then covers the remaining
-  steps. Because the per-step path is bit-identical to the graph replay
-  (forces accumulate in order-invariant fixed point), running these
-  steps per-step does not perturb the trajectory.
-- **Replay accounting.** For each batch the runner records, per graph
-  variant launched, the number of forces-only replays and the number of
-  forces+scalars replays. `Timings::record_graph_replays` folds the
-  representative duration into every stage's accumulator scaled by that
-  graph's `captured_stops_per_replay × (its replay count)`. A stage that
-  appears only in the forces+scalars graph — the potential-energy and
-  virial reductions, and the `_fev` pair-force kernel — therefore
-  accrues samples only from forces+scalars replays, so its `.timings`
-  sample count tracks the number of scalar steps rather than `n_steps`.
-  Stages present in both graphs carry a sample count equal to the total
-  step count.
+  steps. The calibration steps run the same kernels the graph replays, so
+  the trajectory they produce agrees with graph replay to f32 summation
+  order (bit-exact for regularly-packed neighbour lists; the two paths can
+  differ by an f32 quantum on a disordered system — see *Reproducibility
+  Scope*). The dynamics are physically continuous across the
+  calibration boundary; the run stays bit-exact **run-to-run** because a
+  given configuration always takes the same path.
+- **Replay accounting.** For each batch the runner records, per matrix
+  cell launched (coupling × scalars), the replay count of each of the four
+  variants. `Timings::record_graph_replays` folds the representative
+  duration into every stage's accumulator scaled by that cell's
+  `captured_stops_per_replay × (its replay count)`. A stage that appears
+  only in the forces+scalars cells — the potential-energy and virial
+  reductions, and the `_fev` pair-force kernel — accrues samples only from
+  forces+scalars replays; a stage that appears only in the coupling cells —
+  the thermostat's kinetic-energy reduction, factor computation, and
+  velocity rescale — accrues samples only from coupling replays. A stage's
+  `.timings` sample count therefore tracks the number of steps that replay a
+  cell containing it, not necessarily `n_steps`. Stages present in every
+  cell carry a sample count equal to the total step count.
+
+  A stage can carry more than one `captured_stops_per_replay`. On a
+  constrained phase the constraint slot's velocity-projection stage
+  (`SettleVelocities` / `RattleVelocities`) has **two** captured stops per
+  replay — the leading `apply_after_kick` plus the terminal
+  `reproject_velocities_no_publish` — in *every* cell, coupling and
+  non-coupling alike, because the leading projection is unconditional. The
+  virial-scatter stage (`SettleVirialScatter` /
+  `ConstraintVirialScatter`) has exactly **one** stop per replay in every
+  cell, because only the leading `apply_after_kick` publishes. The
+  accounting is per cell, so each stage's accumulator is scaled by the
+  stops-per-replay of the cell actually replayed.
 - **Representativeness.** The calibration measures the *first* few
   steps. For a phase already near steady state (e.g. NPT production) the
   per-kernel values match a full graphs-disabled run to within a few
@@ -565,17 +701,33 @@ rejected as `ConfigError::InvalidValue { field:
     invokes `cuGraphLaunch`.
 
 - `GraphLoop` — phase-owned executable graphs + replay state. Carries: <!-- rq-6887c76d -->
-  - `forces_and_scalars: CudaGraphExec` — the instantiated
-    forces+scalars graph for one physical step. Always present.
-  - `forces_only: Option<CudaGraphExec>` — the instantiated
-    forces-only graph for one physical step. `Some` when no per-step
-    barostat is active for the phase (including periodic Monte-Carlo
-    barostat phases), `None` otherwise.
+  - `graphs: [[Option<CudaGraphExec>; 2]; 2]` — the instantiated one-step
+    graphs of the coupling × scalars matrix, indexed
+    `graphs[coupling][scalars]`. The first index selects the coupling
+    variant (`1`, the step with the thermostat's device-side coupling
+    recorded) or the non-coupling variant (`0`, the step with the
+    thermostat inert); the second selects forces+scalars (`1`, the `_fev`
+    pair kernel plus the potential-energy and virial reductions) or
+    forces-only (`0`, the `_f` pair kernel with the scalar reductions
+    absent). A cell is `Some` only when the phase produces that step shape:
+    - `graphs[0][*]` (non-coupling) — `Some` when the phase has
+      non-coupling steps (no thermostat, or `coupling_interval > 1`).
+    - `graphs[1][*]` (coupling) — `Some` when the phase has a graph-eligible
+      thermostat.
+    - `graphs[*][0]` (forces-only) — `Some` only when no per-step barostat
+      is active (a per-step barostat consumes the per-step virial, so every
+      step evaluates scalars). Periodic Monte-Carlo barostat phases keep the
+      forces-only cells.
+    - `graphs[*][1]` (forces+scalars) — `Some` whenever the row's coupling
+      class exists (a log step always needs scalars).
   - `batch_size: u32` — the phase's `graph_batch_size`.
-  - `launch(&self, stream: &CudaStream, scalars: bool) -> Result<(),
-    GraphError>` — forwards to `forces_and_scalars.launch(stream)`
-    when `scalars` is `true` or when `forces_only` is `None`,
-    otherwise to `forces_only`'s `launch(stream)`.
+  - `launch(&self, stream: &CudaStream, coupling: bool, scalars: bool) ->
+    Result<(), GraphError>` — launches `graphs[coupling][scalars]`, falling
+    back to `graphs[coupling][1]` (the row's forces+scalars cell) when the
+    forces-only cell is `None`. The selected cell is always `Some` for the
+    step shape the replay loop requests (`coupling` steps occur only when a
+    thermostat is configured; non-coupling steps only when a non-coupling
+    row was captured).
 
   The runner holds the phase's `GraphLoop` in a mutable binding so it
   can replace it mid-phase: when `nl.pre_step` reports a
@@ -609,14 +761,18 @@ rejected as `ConfigError::InvalidValue { field:
   Thermostat>, barostat: Option<&mut dyn Barostat>, constraint:
   Option<&mut dyn Constraint>, timings: &mut Timings) ->
   Result<Option<GraphLoop>, GraphError>` — runs the capture procedure
-  described under *Capture Lifecycle*, capturing the forces+scalars
-  graph and, when no per-step barostat is active, the forces-only graph,
-  and returning them in one `GraphLoop`. Returns `Ok(None)`
-  when any of the supplied slots reports `graph_compatible = false`
-  or when `[simulation].cuda_graphs_disable = true`. Returns
-  `Err(...)` only when a CUDA driver call fails during capture or
-  instantiate. The runner invokes it both at phase start and, in the
-  batched replay loop, whenever a packed-neighbour buffer is
+  described under *Capture Lifecycle*, capturing the cells of the coupling
+  × scalars matrix that the phase produces: the non-coupling row whenever
+  the phase has non-coupling steps, the coupling row whenever a
+  graph-eligible thermostat is supplied (recorded with `coupling_dt =
+  phase.coupling_interval * dt` and the thermostat passed to `run_step`),
+  and within each captured row the forces-only cell unless a per-step
+  barostat is active — returning them in one `GraphLoop`. Returns `Ok(None)`
+  when any of the supplied slots reports
+  `graph_compatible = false` or when `[simulation].cuda_graphs_disable =
+  true`. Returns `Err(...)` only when a CUDA driver call fails during
+  capture or instantiate. The runner invokes it both at phase start and,
+  in the batched replay loop, whenever a packed-neighbour buffer is
   reallocated mid-phase (see *Neighbor-List Pre-Step Decomposition*).
   Stream capture records the kernel sequence without executing it, so a
   re-capture consumes no physical step.
@@ -628,7 +784,14 @@ rejected as `ConfigError::InvalidValue { field:
   when the slot's per-step plan executor reads device state into
   host scalars or mutates host fields between sub-steps.
 - `ThermostatBuilder::graph_compatible(&self, params: &toml::Value) <!-- rq-1aa94cd6 -->
-  -> bool` — default `true`. Same opt-out criteria.
+  -> bool` — default `true`. A thermostat overrides to `false` when its
+  coupling is not a pure device-kernel sequence — when it runs host
+  arithmetic or a device-to-host copy between launches rather than only
+  device launches. `csvr`, `berendsen`, and `andersen` keep the default
+  (`true`); `nose-hoover-chain` overrides to `false`. A `graph_compatible`
+  thermostat's coupling is captured into the coupling cells and
+  the phase is eligible at any `coupling_interval >= 1` (see *Activation
+  Policy*).
 - `BarostatBuilder::graph_compatible(&self, params: &toml::Value) -> <!-- rq-cf4a2e05 -->
   bool` — default `true`. Same opt-out criteria.
 - `ConstraintBuilder::graph_compatible(&self, params: &toml::Value) <!-- rq-6bbf6545 -->
@@ -668,19 +831,19 @@ Feature: CUDA graph capture and replay
     And [simulation].graph_batch_size = 50
 
   @rq-acc595b8
-  Scenario: Eligible phase captures a graph at phase start
-    Given an MD phase with integrator "velocity-verlet" and thermostat "csvr"
+  Scenario: Eligible thermostatted NVT phase captures all four matrix cells at phase start
+    Given an MD phase with integrator "velocity-verlet", thermostat "csvr" with coupling_interval = 25, and no barostat
     When the runner enters the phase
     Then nl.pre_step is called once before begin_stream_capture
-    And begin_stream_capture is called on the default stream with CaptureMode::Global
-    And one physical step's worth of kernels is launched on the default stream
-    And end_stream_capture returns a CudaGraph
-    And CudaGraph::instantiate returns a CudaGraphExec
-    And the GraphLoop is stored on the phase
+    And all four cells graphs[coupling][scalars] are captured and stored in the phase's GraphLoop
+    And the two non-coupling cells launch no thermostat reduction or rescale kernel
+    And the two coupling cells launch the thermostat's kinetic-energy reduction and velocity rescale
+    And the two forces-only cells launch the _f pair-force kernel and no potential-energy or virial reduction
+    And the two forces+scalars cells launch the _fev pair-force kernel and the scalar reductions
 
   @rq-1a85bb52
   Scenario: Graph replays cover every step after the calibration prefix
-    Given a phase with n_steps = 100 enters graph mode
+    Given a thermostat-free phase with n_steps = 100 enters graph mode
     And GRAPH_TIMING_CALIBRATION_STEPS = 8
     When the timestep loop runs to completion
     Then the first 8 steps run on the per-step launch path
@@ -691,7 +854,7 @@ Feature: CUDA graph capture and replay
     Given an eligible MD phase runs to completion in graph mode
     When the phase's .timings file is written
     Then every per-kernel KernelStage row reports a non-zero representative duration
-    And a stage present in both graphs reports a sample count equal to the step count
+    And a stage present in every matrix cell reports a sample count equal to the step count
     And the per-phase total_runtime row is populated normally
 
   @rq-882db733
@@ -710,10 +873,57 @@ Feature: CUDA graph capture and replay
 
   @rq-6f09d7e3
   Scenario: nose-hoover-chain phase falls back to per-step launches
-    Given an MD phase with thermostat "nose-hoover-chain"
+    Given an MD phase with thermostat "nose-hoover-chain" with coupling_interval = 25
     When the runner enters the phase
     Then no graph is captured
     And the per-step launch loop runs with full Timings
+    # nose-hoover-chain reports graph_compatible == false: its coupling is
+    # not a pure device sequence (host Yoshida chain + per-step KE dtoh).
+
+  @rq-5b2a1cde
+  Scenario: Coupling steps replay a coupling cell, non-coupling steps a non-coupling cell
+    Given an MD phase with integrator "velocity-verlet" and thermostat "csvr" with coupling_interval = 25
+    And n_steps = 100, graph_batch_size = 50, and no log or trajectory output
+    And the calibration prefix is 0 steps
+    When the timestep loop runs to completion
+    Then steps 25, 50, 75, and 100 replay a coupling cell
+    And every other step replays a non-coupling cell
+    And cuGraphLaunch is invoked 100 times in total, one launch per step
+
+  @rq-c4ba5005
+  Scenario: A non-log coupling step replays the coupling forces-only cell
+    Given an MD phase with thermostat "csvr", coupling_interval = 5, log_every = 10, no barostat
+    And n_steps = 20 in graph mode past the calibration prefix
+    When the timestep loop runs to completion
+    Then coupling steps 5 and 15 (not log steps) replay graphs[coupling][forces-only]
+    And coupling steps 10 and 20 (also log steps) replay graphs[coupling][forces+scalars]
+    And the coupling forces-only cell launches no potential-energy or virial reduction
+
+  @rq-673e25a5
+  Scenario: A coupling step is not a batch boundary
+    Given an MD phase with thermostat "csvr" with coupling_interval = 25
+    And graph_batch_size = 50 with no log or trajectory output before step 50
+    When the runner replays from step 0
+    Then the first graph batch replays 50 steps spanning coupling step 25
+    And step 25 replays a coupling cell inside that batch
+    And nl.pre_step is consulted once after the 50-step batch, not at step 25
+
+  @rq-9c1eb803
+  Scenario: Graph run with a coupling variant matches the fully per-step run bit-for-bit on a regular packing
+    Given a regularly-packed system (crystalline lattice) with a "csvr" thermostat and coupling_interval = 25
+    And two runs of the same config, the first with cuda_graphs_disable = false and the second with true
+    When both runs complete on the same GPU
+    Then their forces_x, forces_y, forces_z, and box compare byte-identical at every logged step
+    # Cross-path (graph-vs-per-step) byte-identity is exact only for a
+    # regularly-packed neighbour list; on a disordered system the two
+    # summation orders may differ by an f32 quantum (see Reproducibility Scope).
+
+  @rq-4625ed82
+  Scenario: A thermostatted phase does not shorten the displacement-flag cadence
+    Given an MD phase with thermostat "csvr" with coupling_interval = 10 and graph_batch_size = 50
+    When the batched replay loop runs with no output or barostat cadence below 50
+    Then nl.pre_step is invoked once every 50 steps
+    And coupling steps do not force additional flag downloads
 
   @rq-dadec448
   Scenario: Capture-time CUDA driver error falls back gracefully
@@ -731,12 +941,16 @@ Feature: CUDA graph capture and replay
     And both phase trajectory files compare byte-identical
 
   @rq-e954f09e
-  Scenario: Graph-mode and non-graph-mode runs are byte-identical (GPU)
-    Given a config with seed S
+  Scenario: Graph-mode and non-graph-mode runs agree on a regularly-packed system (GPU)
+    Given a regularly-packed system (crystalline lattice) with seed S
     When run A sets cuda_graphs_disable = false
     And run B sets cuda_graphs_disable = true
     Then run A and run B produce byte-identical phase log files
     And run A and run B produce byte-identical phase trajectory files
+    # The two paths are two f32 summation orders; they are bit-exact for a
+    # regularly-packed neighbour list but may differ by an f32 quantum on a
+    # disordered system (see Reproducibility Scope). The bit-exact invariant
+    # is run-to-run within one path (rq-4c0ddae3).
 
   @rq-b4f36b2a
   Scenario: Log cadence shrinks the effective batch
@@ -753,23 +967,34 @@ Feature: CUDA graph capture and replay
     And trajectory frames are written at steps 4, 8
 
   @rq-dce6f4cf
-  Scenario: A thermostatted phase is graph-ineligible and runs on the per-step path
-    Given graph_batch_size = 5, log_every = 0, traj_every = 0
-    And an active thermostat with coupling_interval = 4
+  Scenario: A thermostatted phase replays a coupling cell on coupling steps
+    Given graph_batch_size = 50, log_every = 0, traj_every = 0, no barostat
+    And an active "csvr" thermostat with coupling_interval = 4
     When the timestep loop runs 8 steps
-    Then the phase runs on the per-step launch path (no phase graph is replayed)
-    And on the six non-coupling steps the thermostat is inert (no reduction,
-      no rescale) and the integrator's trailing kick runs standalone
-    And the two coupling steps (4, 8) run the trailing kick standalone and
-      the thermostat's reduction and rescale
+    Then the non-coupling and coupling rows are captured
+    And the six non-coupling steps (1, 2, 3, 5, 6, 7) replay the non-coupling forces-only cell
+      with the thermostat inert (no reduction, no rescale)
+    And the two coupling steps (4, 8) replay the coupling forces-only cell, which carries the
+      thermostat's kinetic-energy reduction and velocity rescale
+    And all 8 steps are replays; no step runs on the per-step launch path
 
   @rq-49f6bbfb
-  Scenario: A thermostat coupling every step also runs on the per-step path
-    Given graph_batch_size = 50 and an active thermostat with coupling_interval = 1
+  Scenario: A thermostat coupling every step captures only the coupling row
+    Given graph_batch_size = 50 and an active "csvr" thermostat with coupling_interval = 1 and no barostat
     When the phase runs
-    Then every step runs on the per-step launch path (no phase graph is replayed)
-    And every step is a coupling step; the thermostat's reduction and rescale
-      run standalone each step
+    Then the coupling row cells graphs[1][0] and graphs[1][1] are captured
+    And both non-coupling cells graphs[0][0] and graphs[0][1] are None
+    And every step replays a coupling cell — the coupling forces-only cell on non-log steps
+
+  @rq-5fc7b67f
+  Scenario: Unit-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing
+    Given a regularly-packed system (crystalline lattice) with thermostat "csvr" at coupling_interval = 1
+    And two runs of the same config on the same GPU, one with cuda_graphs_disable = false and one with true
+    When both runs complete
+    Then the graph-mode run captures the coupling row and replays a coupling cell every step
+    And their forces_x, forces_y, forces_z, and box compare byte-identical at every logged step
+    # Cross-path byte-identity is exact only for a regularly-packed neighbour
+    # list; see Reproducibility Scope.
 
   @rq-1c8a6d37
   Scenario: nl.pre_step is called once per batch boundary
@@ -806,12 +1031,14 @@ Feature: CUDA graph capture and replay
     And the re-capture replaces the GraphLoop without advancing the step counter
 
   @rq-f986ba18
-  Scenario: Graph-mode run with a mid-phase re-capture is byte-identical to per-step
-    Given a config with seed S whose phase grows a packed-neighbour buffer mid-phase
+  Scenario: Graph-mode run with a mid-phase re-capture matches per-step on a regular packing
+    Given a regularly-packed system with seed S whose phase grows a packed-neighbour buffer mid-phase
     When run A executes the phase in graph mode (with the re-capture)
     And run B executes the same phase with cuda_graphs_disable = true
     Then run A and run B produce byte-identical phase log files
     And run A and run B produce byte-identical phase trajectory files
+    # Cross-path byte-identity is exact only for a regularly-packed neighbour
+    # list; see Reproducibility Scope.
 
   @rq-65c0327d
   Scenario: Failed re-capture falls back to per-step launches
@@ -972,13 +1199,13 @@ Feature: CUDA graph capture and replay
     And both runs produce byte-identical phase log and trajectory files
 
   @rq-91c02dd8
-  Scenario: A thermostatted phase is graph-ineligible and runs per-step
-    Given an MD phase with any thermostat
+  Scenario: A device-side thermostat other than csvr also captures a coupling row
+    Given an MD phase with thermostat "andersen" with coupling_interval = 25
     When the runner enters the phase
-    Then no graph is captured
-    And the per-step launch loop runs with full Timings
-    And the thermostat's reduction and rescale run as standalone launches
-      on coupling steps
+    Then the non-coupling and coupling rows are captured
+    And andersen_resample is absent from the non-coupling cells
+    And the coupling cells launch andersen_resample
+    And coupling steps replay a coupling cell
 
   @rq-c0548f4c
   Scenario: MTK-NPT phase runs per-step with standalone launches
@@ -995,35 +1222,40 @@ Feature: CUDA graph capture and replay
     Then there is no post_force_per_particle accessor and no composed
       post-force kernel; every post-force pointwise op is a standalone launch
 
-  # --- Forces-only / forces+scalars graph selection ---
+  # --- Coupling × scalars matrix selection ---
 
   @rq-26dce0f6
-  Scenario: A phase without a barostat captures both graphs
-    Given an MD phase with a thermostat and no barostat
+  Scenario: A thermostatted phase without a per-step barostat captures all four cells
+    Given an MD phase with a thermostat, coupling_interval > 1, and no per-step barostat
     When the runner captures the phase graphs
-    Then the GraphLoop's forces_and_scalars graph is present
-    And the GraphLoop's forces_only graph is Some
+    Then all four cells graphs[coupling][scalars] are Some
 
   @rq-c6c56cdc
-  Scenario: A phase with a barostat captures only the forces+scalars graph
-    Given an MD phase with a c-rescale barostat
+  Scenario: A per-step-barostat phase captures no forces-only cell
+    Given an MD phase with a c-rescale barostat and no thermostat
     When the runner captures the phase graphs
-    Then the GraphLoop's forces_and_scalars graph is present
-    And the GraphLoop's forces_only graph is None
+    Then graphs[0][1] (non-coupling forces+scalars) is Some
+    And graphs[0][0] (non-coupling forces-only) is None
 
   @rq-867630af
-  Scenario: GraphLoop.launch routes by the scalars flag
-    Given a GraphLoop whose forces_only graph is Some
-    When launch(stream, scalars = false) is called
-    Then the forces_only graph is launched
-    When launch(stream, scalars = true) is called
-    Then the forces_and_scalars graph is launched
+  Scenario: GraphLoop.launch routes by the coupling and scalars indices
+    Given a GraphLoop whose four cells graphs[coupling][scalars] are all Some
+    When launch(stream, coupling = false, scalars = false) is called
+    Then graphs[0][0] is launched
+    When launch(stream, coupling = false, scalars = true) is called
+    Then graphs[0][1] is launched
+    When launch(stream, coupling = true, scalars = false) is called
+    Then graphs[1][0] is launched
+    When launch(stream, coupling = true, scalars = true) is called
+    Then graphs[1][1] is launched
 
   @rq-8c24f057
-  Scenario: GraphLoop.launch ignores the scalars flag when forces_only is None
-    Given a GraphLoop whose forces_only graph is None
-    When launch(stream, scalars = false) is called
-    Then the forces_and_scalars graph is launched
+  Scenario: GraphLoop.launch falls back to the forces+scalars cell when the forces-only cell is None
+    Given a GraphLoop whose forces-only cells are None and forces+scalars cells are Some
+    When launch(stream, coupling = false, scalars = false) is called
+    Then graphs[0][1] is launched
+    When launch(stream, coupling = true, scalars = false) is called
+    Then graphs[1][1] is launched
 
   @rq-009eed1b
   Scenario: NVT graph phase evaluates force-kernel scalars only on log steps

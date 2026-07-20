@@ -27,6 +27,7 @@ use super::topology::DeviceExclusionList;
 use super::neighbor_list::{alloc_scan_block_totals, NeighborListError};
 use super::{
     AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, ForceLaunchBuilder,
+    FragmentPasses,
     JitParticipant, KernelArg, KernelArgBinder, KernelArgSchema, KernelArgType,
     PairForceBindContext, PairForceFragment, PairForcePotential, Potential,
     PotentialBuildContext, PotentialBuilder, SlotOutputView,
@@ -770,8 +771,204 @@ struct SpmeRealPairFunctor {
         entry_point_args: schema.entry_point_args(),
         functor_init_source: schema.functor_init_source(),
         cutoff: CutoffHandling::Uniform(r_cut_real),
+        passes: FragmentPasses::NeighbourListAndCorrection,
         // SPME-real has no per-type parameters; it ignores i_type / j_type.
         consumes_type_index: false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Excluded-pair correction. See `rqm/forces/spme.md`, *Excluded-pair correction*.
+// ---------------------------------------------------------------------------
+
+/// The excluded-pair correction slot's stable label, shared by
+/// `Potential::label`, the fragment, and the argument schema.
+const SPME_EXCLUSION_LABEL: &str = "spme_exclusion";
+
+/// Threshold on `alpha * r` below which the correction takes its closed-form
+/// `r -> 0` limit. Matches OpenMM's `pmeExclusions` kernel.
+const EXCL_MIN_ALPHA_R: f64 = 1.0e-6;
+
+fn spme_exclusion_arg_schema() -> KernelArgSchema {
+    use KernelArgType::{ConstPtrReal, ConstPtrU32, ScalarReal};
+    KernelArgSchema::pair_force(
+        SPME_EXCLUSION_LABEL,
+        vec![
+            KernelArg::new("spme_excl_k_coulomb", ScalarReal, "k_coulomb"),
+            KernelArg::new("spme_excl_alpha", ScalarReal, "alpha"),
+            KernelArg::new("spme_excl_offsets", ConstPtrU32, "excl_offsets"),
+            KernelArg::new("spme_excl_partners", ConstPtrU32, "excl_partners"),
+            KernelArg::new("spme_excl_scales", ConstPtrReal, "excl_scales"),
+        ],
+    )
+}
+
+/// The excluded-pair correction fragment.
+///
+/// The reciprocal-space mesh sum is a sum over the charge density: it cannot be
+/// told which pairs are excluded, so it carries the smooth `erf(alpha*r)/r` part
+/// of *every* pair at full strength, modified pairs included. Scaling only the
+/// real-space term leaves a modified pair at
+/// `s*erfc(alpha*r)/r + erf(alpha*r)/r`, which is not `s/r`.
+///
+/// `evaluate` returns the UNSCALED `k_C * q_i q_j * erf(alpha*r)/r`; the
+/// correction pass forms `(scale_coul - 1) x evaluate`, and the four Ewald terms
+/// then sum to `s/r` exactly. That is what makes the total energy independent of
+/// `alpha`, which is the defining property of an Ewald splitting.
+pub fn spme_exclusion_pair_force_fragment() -> PairForceFragment {
+    // `Real_erf` is the hardware intrinsic, not the real-space fragment's
+    // Hastings polynomial for erfc: deriving `erf = 1 - erfc` cancels
+    // catastrophically as alpha*r -> 0, which is precisely the regime this
+    // correction is most sensitive in. The pass runs one thread per modified
+    // pair -- O(E), negligible against the O(N * neighbours) inner loop -- so it
+    // can afford the accurate call.
+    let functor_source = format!(
+        r#"
+struct SpmeExclusionPairFunctor {{
+    Real k_coulomb;
+    Real alpha;
+    const unsigned int *excl_offsets;
+    const unsigned int *excl_partners;
+    const Real *excl_scales;
+
+    __device__ inline void evaluate(
+        Real r2, Real inv_r, Real r,
+        Real qi, Real qj,
+        unsigned int /*i_type*/, unsigned int /*j_type*/,
+        unsigned int i, unsigned int j,
+        Real &factor, Real &energy) const
+    {{
+        Real qq = qi * qj;
+        Real ar = alpha * r;
+        Real one_over_sqrt_pi = R(0.5641895835477563);
+        // The branch is taken BEFORE inv_r is consumed. A coincident pair gives
+        // r2 = 0, hence inv_r = +inf and r = 0 * inf = NaN; `ar > EPS` is false
+        // for NaN, so the limit branch is taken and no non-finite value can
+        // reach either output.
+        if (ar > R({eps:.17e})) {{
+            Real inv_r2 = inv_r * inv_r;
+            Real gauss = Real_exp(-(ar * ar));
+            Real erf_ar = Real_erf(ar);
+            energy = k_coulomb * qq * erf_ar * inv_r;
+            factor = k_coulomb * qq * inv_r2
+                     * (erf_ar * inv_r - R(2.0) * alpha * one_over_sqrt_pi * gauss);
+        }} else {{
+            // The exact r -> 0 limit: erf(alpha*r)/r -> 2*alpha/sqrt(pi).
+            // `factor = 0` is exact in effect -- the force is factor * r_ij and
+            // the virial factor * r2, and both vanish with r_ij regardless.
+            energy = k_coulomb * qq * R(2.0) * alpha * one_over_sqrt_pi;
+            factor = R(0.0);
+        }}
+    }}
+
+    __device__ inline Real exclusion_scale(unsigned int i, unsigned int j) const {{
+        return heddle_jit_exclusion_scale(i, j, excl_offsets, excl_partners, excl_scales);
+    }}
+}};
+"#,
+        eps = EXCL_MIN_ALPHA_R
+    );
+    let schema = spme_exclusion_arg_schema();
+    PairForceFragment {
+        label: SPME_EXCLUSION_LABEL,
+        functor_struct_name: "SpmeExclusionPairFunctor",
+        functor_source,
+        entry_point_args: schema.entry_point_args(),
+        functor_init_source: schema.functor_init_source(),
+        // No cutoff: the mesh sum this corrects has none, so a modified pair
+        // beyond the cutoff still carries a reciprocal contribution that still
+        // needs correcting. Masking it would leave a residue of
+        // `(1 - s) * k_C * q_i q_j / r` -- long-ranged and silent.
+        cutoff: CutoffHandling::Unbounded,
+        // The mesh already supplied `1 x erf(alpha*r)/r` for every pair, so
+        // there is no full-strength neighbour-list term for the correction to
+        // complete; `(s - 1) x evaluate` is the whole contribution.
+        passes: FragmentPasses::CorrectionOnly,
+        consumes_type_index: false,
+    }
+}
+
+/// The excluded-pair correction slot. It contributes only a fragment to the
+/// JIT-composed pair-force pipeline's correction pass; the framework skips
+/// `compute()` for every JIT participant.
+#[derive(Debug)]
+pub struct SpmeExclusionState {
+    exclusions: Arc<DeviceExclusionList>,
+    alpha: Real,
+}
+
+impl SpmeExclusionState {
+    pub fn new(alpha: Real, exclusions: Arc<DeviceExclusionList>) -> Self {
+        SpmeExclusionState { exclusions, alpha }
+    }
+}
+
+impl Potential for SpmeExclusionState {
+    fn label(&self) -> &'static str {
+        SPME_EXCLUSION_LABEL
+    }
+
+    /// No cutoff. Reporting one here would inflate the shared neighbour list's
+    /// search radius for an interaction the neighbour list never evaluates.
+    fn max_cutoff(&self) -> Option<Real> {
+        None
+    }
+
+    fn compute(
+        &mut self,
+        buffers: &ParticleBuffers,
+        sim_box: &SimulationBox,
+        mut output: SlotOutputView<'_>,
+        cx: &ForceFieldContext<'_>,
+        timings: &mut Timings,
+        level: AggregateLevel,
+    ) -> Result<(), ForceFieldError> {
+        let _ = (buffers, sim_box, &mut output, cx, &mut *timings, level);
+        unreachable!("SpmeExclusionState is JIT-composed; compute() is never invoked")
+    }
+
+    fn jit_participant(&self) -> Option<JitParticipant<'_>> {
+        Some(JitParticipant::PairForce(self))
+    }
+}
+
+impl PairForcePotential for SpmeExclusionState {
+    fn pair_force_fragment(&self) -> PairForceFragment {
+        spme_exclusion_pair_force_fragment()
+    }
+
+    fn bind_pair_force_args(
+        &self,
+        _ctx: &PairForceBindContext<'_>,
+        builder: &mut ForceLaunchBuilder,
+    ) {
+        let schema = spme_exclusion_arg_schema();
+        let mut b = KernelArgBinder::new(&schema, SPME_EXCLUSION_LABEL, builder);
+        b.scalar_real("spme_excl_k_coulomb", K_COULOMB_F32);
+        b.scalar_real("spme_excl_alpha", self.alpha);
+        b.buffer("spme_excl_offsets", &self.exclusions.atom_excl_offsets);
+        b.buffer("spme_excl_partners", &self.exclusions.atom_excl_partners);
+        b.buffer("spme_excl_scales", &self.exclusions.atom_excl_coul_scales);
+        b.finish();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SpmeExclusionBuilder;
+
+impl PotentialBuilder for SpmeExclusionBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        let Some(spme_cfg) = cx.spme_config else {
+            return Ok(None);
+        };
+        let params = SpmeParameters::from(spme_cfg);
+        Ok(Some(Box::new(SpmeExclusionState::new(
+            params.alpha,
+            cx.device_exclusions.clone(),
+        ))))
     }
 }
 

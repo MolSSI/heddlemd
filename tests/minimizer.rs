@@ -444,10 +444,15 @@ name = "min"
 
 [minimization.algorithm]
 kind = "steepest-descent"
-# Tiny step and tight force tolerance so 3 iterations can't possibly
-# satisfy the criterion.
-initial_step = 1.0e-20
-max_step = 1.0e-20
+# initial_step is orders of magnitude above STEP_FLOOR so the loop
+# runs without triggering step-floor convergence; step_increase = 1.0
+# and 3 rejections at step_decrease = 0.5 leave `step` at
+# initial_step / 8 = 1.25e-15 m, still >> STEP_FLOOR (~5.3e-17 m).
+# force_tolerance = 1.0e-30 is unreachable; energy_tolerance = 0.0
+# disables that criterion. All three convergence branches are
+# inaccessible, so the phase must terminate on max_iterations.
+initial_step = 1.0e-14
+max_step = 1.0e-14
 step_increase = 1.0
 step_decrease = 0.5
 force_tolerance = 1.0e-30
@@ -1817,6 +1822,177 @@ mode = "all-pairs"
         ((d_hh - r_hh) / r_hh).abs() < rel,
         "H-H distance {d_hh} m differs from r_hh {r_hh} m"
     );
+}
+
+// STEP_FLOOR in atomic units of length (Bohr). Kept in sync with the
+// `STEP_FLOOR` constant on `src/minimizer/steepest_descent.rs`.
+const STEP_FLOOR_BOHR: f64 = 1.0e-6;
+// Bohr → metre conversion (matches src/units/atomic_constants.rs).
+const BOHR_TO_M: f64 = 5.29177210903e-11;
+const STEP_FLOOR_M: f64 = STEP_FLOOR_BOHR * BOHR_TO_M;
+
+// rq-305fefce
+#[test]
+fn sd_rejection_cascade_terminates_with_step_floor() {
+    // Ar pair placed slightly inside the LJ minimum (r < r_min): F_max
+    // is significant (well above any ForceZero threshold), and any trial
+    // with a huge initial_step overshoots the well entirely and lands at
+    // higher energy → rejected. The default step_decrease (= 0.2) shrinks
+    // `step` fast enough that within a handful of rejections `step`
+    // falls to or below STEP_FLOOR and the phase terminates with
+    // MinimizerConvergence::StepFloor. force_tolerance and
+    // energy_tolerance are set below any value the system can attain so
+    // neither can fire first.
+    let dir = tmp_dir("sd_reject_cascade_step_floor");
+    write_argon_pair_init(&dir, 3.5e-10); // below r_min ≈ 3.82e-10
+    let cfg = argon_min_config_with(
+        3.0e-10,   // initial_step (huge — guaranteed to overshoot)
+        1.0e-9,    // max_step
+        1.0e-30,   // force_tolerance (unreachable)
+        1.0e-30,   // energy_tolerance (unreachable)
+        100,       // max_iterations
+        3.5e-10,   // comment only
+    );
+    let cfg_path = dir.join("argon.in.toml");
+    fs::write(&cfg_path, cfg).unwrap();
+    let summary = run_simulation(&cfg_path).unwrap();
+    let ps = &summary.phases[0];
+    assert_eq!(
+        ps.convergence,
+        Some("step_floor"),
+        "expected step_floor, got {:?}",
+        ps.convergence
+    );
+    assert!(
+        ps.n_steps < 100,
+        "phase should terminate before max_iterations; got {}",
+        ps.n_steps
+    );
+    // min_final_max_force is populated for every minimization phase and
+    // is what the runner surfaces on the summary line when the reason
+    // is step_floor. It must be finite and non-negative.
+    let f_max = ps.min_final_max_force.expect("min phase must set F_max");
+    assert!(f_max.is_finite() && f_max >= 0.0, "F_max = {}", f_max);
+}
+
+// rq-7782386f
+#[test]
+fn sd_initial_step_at_or_below_floor_terminates_at_iter_zero() {
+    // initial_step set below STEP_FLOOR: check_convergence's step-floor
+    // branch fires against `self.current_step == initial_step` on the
+    // very first call (the runner's synthetic force-only report at
+    // iter 0), so the phase terminates without any trial force
+    // evaluation.
+    let dir = tmp_dir("sd_initial_step_below_floor");
+    write_argon_pair_init(&dir, 3.5e-10);
+    // 1e-7 Bohr = 5.29e-18 m, an order of magnitude below STEP_FLOOR.
+    let below_floor = 0.1 * STEP_FLOOR_M;
+    let cfg = argon_min_config_with(
+        below_floor,
+        1.0e-10,
+        1.0e-30,
+        1.0e-30,
+        10,
+        3.5e-10,
+    );
+    let cfg_path = dir.join("argon.in.toml");
+    fs::write(&cfg_path, cfg).unwrap();
+    let summary = run_simulation(&cfg_path).unwrap();
+    let ps = &summary.phases[0];
+    assert_eq!(ps.convergence, Some("step_floor"));
+    assert_eq!(
+        ps.n_steps, 0,
+        "phase must terminate at iteration 0; got {}",
+        ps.n_steps
+    );
+    // The .minlog contains the step-0 row (plus the header — no other
+    // rows since no trial iterated).
+    let log = fs::read_to_string(dir.join("argon.out.min.minlog")).unwrap();
+    let rows: Vec<_> = log.lines().collect();
+    assert_eq!(rows.len(), 2, "expected header + iter-0 row, got {:?}", rows);
+    assert!(rows[1].starts_with("0,"), "second row must be iter 0");
+}
+
+// rq-391ed193
+#[test]
+fn sd_step_floor_termination_hands_off_to_next_phase() {
+    // A SD phase followed by an MD [[phase]]. The SD phase terminates
+    // with StepFloor (initial_step already below floor). The runner
+    // must treat that as convergence (exit code 0 → run_simulation
+    // returns Ok), and the following MD phase must run to completion.
+    let dir = tmp_dir("sd_step_floor_hand_off");
+    write_argon_pair_init(&dir, 3.5e-10);
+    let cfg = format!(
+        r#"schema_version = 1
+init = "argon.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 100.0
+
+[[minimization]]
+name = "min"
+[minimization.algorithm]
+kind = "steepest-descent"
+initial_step = {below_floor:.16e}
+max_step = 1.0e-10
+force_tolerance = 1.0e-30
+energy_tolerance = 1.0e-30
+max_iterations = 10
+[minimization.output]
+minlog_every = 1
+trajectory_every = 0
+
+[[phase]]
+name = "dyn"
+n_steps = 5
+dt = 1.0e-15
+[phase.integrator]
+kind = "velocity-verlet"
+[phase.output]
+trajectory_every = 0
+log_every = 1
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+kind = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.5e-9
+
+[neighbor_list]
+mode = "all-pairs"
+"#,
+        below_floor = 0.1 * STEP_FLOOR_M,
+    );
+    let cfg_path = dir.join("argon.in.toml");
+    fs::write(&cfg_path, cfg).unwrap();
+    let summary = run_simulation(&cfg_path).unwrap();
+    assert_eq!(summary.phases.len(), 2);
+    let min_ps = &summary.phases[0];
+    assert_eq!(min_ps.convergence, Some("step_floor"));
+    let dyn_ps = &summary.phases[1];
+    assert_eq!(
+        dyn_ps.kind, "md",
+        "second phase must be the MD phase, got {:?}",
+        dyn_ps.kind
+    );
+    assert_eq!(
+        dyn_ps.n_steps, 5,
+        "MD phase must run its configured n_steps; got {}",
+        dyn_ps.n_steps
+    );
+    assert_eq!(
+        dyn_ps.convergence, None,
+        "MD phases carry no convergence token"
+    );
+    // MD phase populates min_final_max_force with None (that field is
+    // minimization-only).
+    assert!(dyn_ps.min_final_max_force.is_none());
 }
 
 // rq-e92c18c6

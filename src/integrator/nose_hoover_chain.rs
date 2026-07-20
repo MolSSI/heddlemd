@@ -29,7 +29,7 @@ pub struct NoseHooverChainParams {
 
 fn default_chain_length() -> u32 { 3 }
 fn default_yoshida_order() -> u32 { 3 }
-fn default_n_resp() -> u32 { 1 }
+fn default_n_resp() -> u32 { 5 }
 
 fn deserialize_params(params: &toml::Value) -> Result<NoseHooverChainParams, ConfigError> {
     params

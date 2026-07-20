@@ -493,6 +493,45 @@ impl Constraint for ShakeConstraintsState {
         Ok(())
     }
 
+    // The step's terminal REPAIR projection: `rattle_velocities` only. The
+    // leading `apply_after_kick` has already projected the velocities and
+    // published the constraint virial; this puts them back on the manifold
+    // after whatever the thermostat and barostat did (RATTLE-last), and must
+    // NOT run `constraint_virial_scatter` — a second scatter would re-add the
+    // whole accumulated `constraint_virial`, position half included, and
+    // double-count the constraint contribution to the pressure. See
+    // `Constraint::reproject_velocities_no_publish`.
+    fn reproject_velocities_no_publish(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        dt: Real,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        if self.group_count == 0 {
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::RATTLE_VELOCITIES)?;
+        rattle_velocities(
+            buffers,
+            &self.group_atoms,
+            &self.group_atom_offset,
+            &self.group_atom_count,
+            &self.group_constraint_offset,
+            &self.group_constraint_count,
+            &self.group_constraints_local_i,
+            &self.group_constraints_local_j,
+            &self.atom_mass,
+            sim_box,
+            dt,
+            &mut self.constraint_virial,
+            self.group_count,
+            self.max_group_atoms,
+        )?;
+        timings.kernel_stop(KernelStage::RATTLE_VELOCITIES)?;
+        Ok(())
+    }
+
     fn apply_initial_velocity_projection(
         &mut self,
         buffers: &mut ParticleBuffers,

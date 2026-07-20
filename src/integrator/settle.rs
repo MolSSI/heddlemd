@@ -403,6 +403,41 @@ impl Constraint for SettleConstraintsState {
         Ok(())
     }
 
+    // The step's terminal REPAIR projection: `settle_velocities` only. The
+    // leading `apply_after_kick` has already projected the velocities and
+    // published the constraint virial; this puts them back on the manifold
+    // after whatever the thermostat and barostat did (RATTLE-last), and must
+    // NOT run `settle_virial_scatter` — a second scatter would re-add the whole
+    // accumulated `constraint_virial`, position half included, and double-count
+    // the constraint contribution to the pressure. See
+    // `Constraint::reproject_velocities_no_publish`.
+    fn reproject_velocities_no_publish(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        dt: Real,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        if self.group_count == 0 {
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::SETTLE_VELOCITIES)?;
+        settle_velocities(
+            buffers,
+            &self.group_atoms,
+            &self.group_atom_offset,
+            &self.group_atom_count,
+            &self.group_m_o,
+            &self.group_m_h,
+            sim_box,
+            dt,
+            &mut self.constraint_virial,
+            self.group_count,
+        )?;
+        timings.kernel_stop(KernelStage::SETTLE_VELOCITIES)?;
+        Ok(())
+    }
+
     fn apply_initial_velocity_projection(
         &mut self,
         buffers: &mut ParticleBuffers,

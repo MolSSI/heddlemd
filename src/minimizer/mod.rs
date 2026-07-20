@@ -45,6 +45,16 @@ pub enum MinimizerConvergence {
     /// `F_max == 0.0` at the accepted positions (already at minimum,
     /// or `particle_count == 0`).
     ForceZero,
+    /// The adaptive step size fell to or below the algorithm's
+    /// minimum-useful floor. Reached when either a rejection cascade
+    /// shrinks `step` past `STEP_FLOOR` — at which point the trial
+    /// position update `step · F / F_max` is an f32 no-op on the
+    /// max-force atom, so no accept can ever fire — or the
+    /// user-configured `initial_step` is itself already at or below
+    /// the floor. Reported as a successful convergence: the runner
+    /// exits code 0, logs the reason and the final `F_max`, then
+    /// proceeds to the next phase.
+    StepFloor,
     /// Iteration cap reached without any physical criterion firing.
     MaxIterations,
 }
@@ -56,6 +66,7 @@ impl MinimizerConvergence {
             MinimizerConvergence::ForceTolerance => "force_tolerance",
             MinimizerConvergence::EnergyTolerance => "energy_tolerance",
             MinimizerConvergence::ForceZero => "force_zero",
+            MinimizerConvergence::StepFloor => "step_floor",
             MinimizerConvergence::MaxIterations => "max_iterations",
         }
     }
@@ -204,6 +215,7 @@ fn ceil_div_block(n: u32) -> u32 {
 
 pub(crate) fn sd_compute_step(
     buffers: &mut ParticleBuffers,
+    sim_box: &SimulationBox,
     step_size: Real,
     inv_f_max: Real,
 ) -> Result<(), GpuError> {
@@ -224,9 +236,13 @@ pub(crate) fn sd_compute_step(
             cfg,
             (
                 &mut buffers.posq,
+                &mut buffers.images_x,
+                &mut buffers.images_y,
+                &mut buffers.images_z,
                 &buffers.forces_x,
                 &buffers.forces_y,
                 &buffers.forces_z,
+                sim_box.lattice_device(),
                 step_size,
                 inv_f_max,
                 n_u32,
@@ -242,6 +258,9 @@ pub(crate) fn sd_snapshot(
     snapshot_x: &mut CudaSlice<Real>,
     snapshot_y: &mut CudaSlice<Real>,
     snapshot_z: &mut CudaSlice<Real>,
+    images_snapshot_x: &mut CudaSlice<i32>,
+    images_snapshot_y: &mut CudaSlice<i32>,
+    images_snapshot_z: &mut CudaSlice<i32>,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -260,9 +279,15 @@ pub(crate) fn sd_snapshot(
             cfg,
             (
                 &buffers.posq,
+                &buffers.images_x,
+                &buffers.images_y,
+                &buffers.images_z,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,
+                images_snapshot_x,
+                images_snapshot_y,
+                images_snapshot_z,
                 n_u32,
             ),
         )
@@ -276,6 +301,9 @@ pub(crate) fn sd_restore(
     snapshot_x: &CudaSlice<Real>,
     snapshot_y: &CudaSlice<Real>,
     snapshot_z: &CudaSlice<Real>,
+    images_snapshot_x: &CudaSlice<i32>,
+    images_snapshot_y: &CudaSlice<i32>,
+    images_snapshot_z: &CudaSlice<i32>,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -294,9 +322,15 @@ pub(crate) fn sd_restore(
             cfg,
             (
                 &mut buffers.posq,
+                &mut buffers.images_x,
+                &mut buffers.images_y,
+                &mut buffers.images_z,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,
+                images_snapshot_x,
+                images_snapshot_y,
+                images_snapshot_z,
                 n_u32,
             ),
         )

@@ -1359,6 +1359,11 @@ pub(crate) fn parse_topology_file(
     let mut atom_excl_lj_scales: Vec<Real> = vec![0.0; total_partner_entries];
     let mut atom_excl_coul_scales: Vec<Real> = vec![0.0; total_partner_entries];
     let mut cursor_e: Vec<u32> = atom_excl_offsets[..particle_count].to_vec();
+    // rq-03faaf24 — exclusion scales are per fragment and may take any
+    // value in [0, 1] (0 fully excluded, 1 full strength, intermediate for
+    // 1-4). Range validation happens at parse time (ScaleOutOfRange); no
+    // further binary/full restriction applies. The exclusion-tile pass
+    // applies each pair's per-fragment scale.
     for e in &effective {
         let pi = e.atom_i as usize;
         let pj = e.atom_j as usize;

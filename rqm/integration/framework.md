@@ -79,7 +79,7 @@ The default registry exposes four thermostats:
 | -------------------- | ----------------------------------------------------------- | --------------------- |
 | `nose-hoover-chain`  | deterministic NVT via MKT Nosé-Hoover-chain Trotter step    | `nose-hoover-chain.md`|
 | `csvr`               | stochastic NVT via canonical sampling velocity rescaling    | `csvr.md`             |
-| `andersen`           | stochastic NVT via per-particle Maxwell-Boltzmann resampling| `andersen.md`         |
+| `andersen`           | stochastic NVT via per-group Maxwell-Boltzmann resampling| `andersen.md`         |
 | `berendsen`          | weak-coupling (equilibration only — not canonical)          | `berendsen.md`        |
 
 A thermostat couples on a fixed cadence — every `coupling_interval`
@@ -164,7 +164,23 @@ untouched by it). The **effective coupling timestep**
 `dt_couple = coupling_interval · dt` keeps a thermostat's relaxation time
 `τ` physically meaningful regardless of how often it couples. `apply_post`
 reduces the full-step kinetic energy — the velocities after the
-integrator's trailing kick — and applies its rescale from it.
+integrator's trailing kick, and, when the plan carries a terminal
+`ConstraintPoint { AfterKick }` and a constraint slot is installed, after
+those velocities have been projected onto the constraint manifold by
+`Constraint::apply_after_kick` — and applies its rescale from it. The
+projection must lead the reduction: the trailing kick leaves the
+velocities off the manifold, and a thermostat that reduced their kinetic
+energy would be coupling to energy the projection is about to delete.
+That leading projection is also the step's **single publish** of the
+constraint virial, and it must lead the terminal `BarostatPoint` for the
+same structural reason: a per-step barostat reduces `buffers.virials`
+inside its own `apply`, and a virial without the constraint contribution
+is catastrophically wrong for rigid molecules. It therefore fires on
+**every** step, not only on coupling steps. The plan's terminal
+`ConstraintPoint { AfterKick }` is then a *repair* projection
+(`Constraint::reproject_velocities_no_publish`), which does not
+re-publish (see `constraint-framework.md`, *Ordering of the velocity
+projections*).
 
 Constraint placement is fully plan-declared: a constraint hook fires
 only where the plan carries a `SubStep::ConstraintPoint` marker (see
@@ -174,8 +190,9 @@ run has no constraint slot, so a constraint-capable integrator emits the
 markers unconditionally and the same plan drives constrained and
 unconstrained runs. A plan-final `ConstraintPoint { phase: AfterKick }`
 velocity projection runs last in the post-force tail — after the
-trailing kick and any thermostat and barostat rescale — so it is the
-last per-particle velocity operation of the step (RATTLE-last).
+trailing kick and any thermostat and barostat rescale — so a velocity
+projection is the last per-particle velocity operation of the step
+(RATTLE-last).
 
 Barostat placement is likewise plan-declared: a per-step barostat's
 `apply` runs only where the plan carries a `SubStep::BarostatPoint`
@@ -194,11 +211,13 @@ dispatched during the walk, where `apply` runs the same full work.
 The plan's trailing run of the trailing kick, any `BarostatPoint`, and
 any `ConstraintPoint { phase: AfterKick }` is the **post-force tail**.
 `run_step` dispatches it as a fixed ordered sequence — trailing kick,
-then `thermostat.apply_post` (on a coupling step, for a wrapped
-thermostat), then `barostat.apply` (for a terminal `BarostatPoint`), then
-`constraint.apply_after_kick` (for a plan-final velocity projection).
-`run_step` walks the whole plan, so the tail is part of that walk, not a
-separate sequence the runner re-encodes.
+then `constraint.apply_after_kick` (the leading projection-and-publish,
+for a plan-final velocity projection; unconditional), then
+`thermostat.apply_post` (on a coupling step, for a wrapped thermostat),
+then `barostat.apply` (for a terminal `BarostatPoint`), then
+`constraint.reproject_velocities_no_publish` (the terminal repair
+projection). `run_step` walks the whole plan, so the tail is part of that
+walk, not a separate sequence the runner re-encodes.
 
 The runner's timestep loop computes the cadence (it owns the step
 counter) and delegates the whole step to `run_step`:
@@ -252,16 +271,26 @@ run_step(.., opts):
                 class_kick*(buffers, force_field.class_forces(c), sub_dt)
             other =>
                 integrator.execute(other, buffers, sim_box, timings)  /* incl. trailing kick */
+    /* leading projection-and-publish: project the post-trailing-kick velocities
+       onto the manifold and publish the constraint virial. Unconditional — the
+       barostat below needs the constraint virial on every step, not only on
+       coupling steps. Fires iff a constraint slot is installed and the plan has
+       a terminal ConstraintPoint { AfterKick }. */
+    if constraint.is_some() && plan has terminal AfterKick { dt: proj_dt }:
+        constraint.apply_after_kick(buffers, sim_box, proj_dt, timings)
     /* trailing wrapped half (coupling step): full-step KE reduce + rescale,
-       after the trailing kick, before the terminal barostat / projection */
+       after the leading projection, before the terminal barostat */
     if wrap: thermostat.apply_post(buffers, opts.coupling_dt, timings)
     /* post-force marker tail: terminal BarostatPoint then terminal AfterKick */
     for sub in plan.steps[tail_start ..]:
         match sub:
             SubStep::BarostatPoint { dt: sub_dt } =>
+                /* reduces buffers.virials — sees the constraint virial published above */
                 barostat.apply(buffers, sim_box, sub_dt, timings)  /* no-op if None / periodic */
             SubStep::ConstraintPoint { phase: AfterKick, dt: sub_dt } =>
-                constraint.apply_after_kick(buffers, sim_box, sub_dt, timings)  /* no-op if None */
+                /* repair projection (RATTLE-last); no virial publish. Falls back to
+                   apply_after_kick when no leading projection ran. */
+                constraint.reproject_velocities_no_publish(buffers, sim_box, sub_dt, timings)
 ```
 
 `run_step` is parameterised by a `RunStepOptions` value (see *Feature
@@ -597,12 +626,18 @@ successfully.
       /// the corresponding half-step velocities. Placed immediately
       /// after a position-updating sub-step.
       AfterDrift,
-      /// `constraint.apply_after_kick(buffers, sim_box, dt, timings)`
-      /// — project velocities onto the constraint manifold. Placed
-      /// after a velocity-updating sub-step. A plan-final `AfterKick`
-      /// marker is fired by `run_step` in the post-force tail, after the
+      /// Project velocities onto the constraint manifold. Placed after
+      /// a velocity-updating sub-step. A plan-final `AfterKick` marker
+      /// is fired by `run_step` in the post-force tail, after the
       /// trailing kick and any thermostat / barostat rescale, so it is
-      /// the last per-particle velocity operation (see *Per-Step
+      /// the last per-particle velocity operation; it dispatches
+      /// `constraint.reproject_velocities_no_publish(...)`, the repair
+      /// projection, because `run_step` has already fired
+      /// `constraint.apply_after_kick(...)` — project *and publish the
+      /// constraint virial* — immediately after the trailing kick, so
+      /// that the terminal `BarostatPoint`'s virial reduction sees it.
+      /// A non-terminal `AfterKick` marker (or one with no leading
+      /// projection) dispatches `apply_after_kick` itself (see *Per-Step
       /// Interface*).
       AfterKick,
   }
@@ -715,8 +750,10 @@ successfully.
 
   `run_step` walks the **whole** plan. It dispatches every interleaved
   `ConstraintPoint` and `BarostatPoint` it encounters, the trailing kick,
-  and the post-force tail (a terminal `BarostatPoint`, then a plan-final
-  `ConstraintPoint { phase: AfterKick }`), each a no-op when the
+  the leading `constraint.apply_after_kick` projection-and-publish at the
+  post-force-marker boundary, and the post-force tail (a terminal
+  `BarostatPoint`, then a plan-final `ConstraintPoint { phase: AfterKick }`
+  dispatched as the repair projection), each a no-op when the
   corresponding slot is absent. There is no skip or deferral flag.
 
   `RunStepOptions::default()` is
@@ -843,10 +880,12 @@ successfully.
     CSVR / Berendsen / Andersen use the full `dt_couple` in their
     relaxation formula and only act on the post side).
   - `apply_post` reduces the kinetic energy of the velocities as they
-    stand when it is called — after the integrator's trailing kick — so
-    the coupling always sees the full-step kinetic energy. It performs
-    that reduction and the subsequent rescale as its own standalone
-    kernel launches.
+    stand when it is called — after the integrator's trailing kick, and
+    after the terminal velocity projection when the run has a constraint
+    slot — so the coupling always sees the full-step *physical* kinetic
+    energy, the one whose degrees of freedom its target is built from. It
+    performs that reduction and the subsequent rescale as its own
+    standalone kernel launches.
   - The thermostat never reads or writes `sim_box`, `force_field`,
     or `buffers.forces_*` / `buffers.virials`.
   - `apply_pre` returns immediately when
@@ -1263,19 +1302,34 @@ successfully.
          periodic.
        - Every other sub-step (including `Total`-sourced kicks, i.e. the
          trailing kick) → `integrator.execute(...)`.
-    3. When `opts.coupling_dt` is `Some(dt_couple)` and the plan carries
+    3. At the post-force-marker boundary — after the trailing kick — fires
+       `constraint.apply_after_kick(...)` with the terminal marker's `dt`,
+       when a constraint slot is installed and the plan has a terminal
+       `SubStep::ConstraintPoint { phase: AfterKick }`. This is the step's
+       **leading** projection: it puts the post-kick velocities back on the
+       constraint manifold *and* publishes the constraint virial into
+       `buffers.virials`. It is **unconditional** — not gated on
+       `opts.coupling_dt` — because the terminal `BarostatPoint` in step 5
+       reduces `buffers.virials` on every step.
+    4. When `opts.coupling_dt` is `Some(dt_couple)` and the plan carries
        no `ThermostatHalf` markers, fires `thermostat.apply_post(buffers,
-       dt_couple, timings)` — after the trailing kick, before the
-       terminal barostat / projection (a no-op when `thermostat` is
-       `None`).
-    4. Walks the post-force marker tail `steps[trailing_post_force_start()..]`:
+       dt_couple, timings)` — after the leading projection, before the
+       terminal barostat (a no-op when `thermostat` is `None`), so it
+       reduces the on-manifold full-step kinetic energy.
+    5. Walks the post-force marker tail `steps[trailing_post_force_start()..]`:
        a terminal `SubStep::BarostatPoint { dt }` → `barostat.apply(...)`
-       (no-op when `barostat` is `None` or periodic); a plan-final
-       `SubStep::ConstraintPoint { phase: AfterKick, dt }` →
-       `constraint.apply_after_kick(...)` (no-op when `constraint` is
-       `None`), so the projection is the last per-particle velocity
-       operation (RATTLE-last).
-  - The wrapped-thermostat halves (steps 1 and 3) fire only for the
+       (no-op when `barostat` is `None` or periodic), whose virial
+       reduction therefore sees the constraint virial published in step 3;
+       then a plan-final `SubStep::ConstraintPoint { phase: AfterKick, dt }`
+       → `constraint.reproject_velocities_no_publish(...)` (no-op when
+       `constraint` is `None`), the *repair* projection, which puts the
+       velocities back on the manifold after the thermostat's and
+       barostat's rescales without re-publishing the virial, so a velocity
+       projection is the last per-particle velocity operation
+       (RATTLE-last). When no leading projection ran in step 3 (no
+       constraint slot), the marker would dispatch `apply_after_kick`
+       itself.
+  - The wrapped-thermostat halves (steps 1 and 4) fire only for the
     default topology (no `ThermostatHalf` markers). A plan that owns its
     thermostat placement receives no wrapping; its `ThermostatHalf`
     markers dispatch during the walk in step 2.
@@ -1617,8 +1671,8 @@ Feature: Pluggable integration framework
     And the trailing kick runs before apply_post in the post-force tail
 
   @rq-f4d73396
-  Scenario: Default coupling interval couples every step
-    Given a thermostat with coupling_interval = 1 (the default)
+  Scenario: Unit coupling interval couples every step
+    Given a thermostat with coupling_interval = 1
     When the runner executes any step
     Then apply_pre and apply_post are called on that step
     And each receives dt_couple = dt
@@ -1886,11 +1940,13 @@ Feature: Pluggable integration framework
        ForceEval, KickHalf, ConstraintPoint { phase: AfterKick }]
     When run_step is called once with Some(constraint)
     Then the recorded hook order is exactly
-      [apply_before_drift, apply_after_drift, apply_after_kick]
+      [apply_before_drift, apply_after_drift, apply_after_kick,
+       reproject_velocities_no_publish]
     And apply_before_drift and apply_after_drift are dispatched in run_step's
-      main-region walk, while the trailing apply_after_kick is dispatched in
-      run_step's post-force tail after the trailing kick — all within the one
-      run_step call
+      main-region walk, while apply_after_kick is dispatched at the post-force
+      marker boundary immediately after the trailing kick and
+      reproject_velocities_no_publish is dispatched by the plan's terminal
+      AfterKick marker — all within the one run_step call
     When run_step is called once with the same plan and constraint = None
     Then no constraint hook fires and the step completes with Ok(())
 

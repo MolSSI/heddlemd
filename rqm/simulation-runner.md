@@ -436,39 +436,69 @@ the simulation box.
     `[simulation].cuda_graphs_disable = true`).** For each step `s`
     in `1 ..= P.n_steps`:
 
-    a. If `thermostat.is_some()`,
-       `thermostat.apply_pre(&mut buffers, P.dt, &mut timings)`.
-    b. `integrator.step(&mut buffers, &mut sim_box, &mut force_field,
-       P.dt, &mut timings)`.
-    c. If `thermostat.is_some()`,
-       `thermostat.apply_post(&mut buffers, P.dt, &mut timings)`.
-    d. If `barostat.is_some()`,
-       `barostat.apply(&mut buffers, &mut sim_box, P.dt, &mut timings)`.
+    a. One call to
+       `run_step(integrator, &mut buffers, &mut sim_box, &mut force_field,
+       constraint, thermostat, barostat, P.dt, &mut timings, opts)` — the
+       single plan-walk entry point and the only executor of the step's
+       per-particle work (`integration/framework.md`). The runner supplies
+       `opts.coupling_dt = Some(coupling_interval as Real * P.dt)` on a
+       coupling step (`thermostat.is_some()` and
+       `s % coupling_interval == 0`) and `None` otherwise; the runner owns
+       the step counter and the coupling decision, `run_step` owns the
+       ordering. `run_step` dispatches the one canonical per-step sequence:
 
-    The force evaluation inside `integrator.step` (step b) runs at
+       1. The wrapped thermostat's `apply_pre`, on the step's entry
+          velocities, before the walk (default topology only — a plan
+          carrying `ThermostatHalf` markers owns its own thermostat
+          placement and receives no wrapping).
+       2. The plan walk: force evaluations, kicks and drifts including the
+          trailing kick, and any interleaved thermostat / constraint /
+          barostat markers.
+       3. At the post-force-marker boundary, after the trailing kick: on
+          every step of a constrained run,
+          `constraint.apply_after_kick(...)` — putting the velocities back
+          on the constraint manifold, which the trailing kick knocked them
+          off, and publishing the constraint virial into `buffers.virials`.
+          This is the step's single publication of that virial, and it is
+          unconditional (not gated on the coupling cadence). Then the
+          wrapped thermostat's `apply_post`, so it couples to the physical,
+          on-manifold full-step kinetic energy (see
+          `integration/constraint-framework.md`).
+       4. The post-force marker tail: a terminal `BarostatPoint` runs
+          `barostat.apply(...)` — whose virial reduction therefore sees the
+          constraint virial published in step 3 — then a plan-final
+          `ConstraintPoint { AfterKick }` runs
+          `constraint.reproject_velocities_no_publish(...)`, the repair
+          projection that restores the manifold after the thermostat's and
+          barostat's rescales (RATTLE-last) without re-publishing the
+          virial.
+
+    The force evaluations inside `run_step` (step a) run at
     `AggregateLevel::ForcesAndScalars` — computing the total potential
     energy and virial — only when the step produces a log row
     (`P.output.log_every > 0` and `s % P.output.log_every == 0`) or a
-    barostat is active; otherwise it runs at
-    `AggregateLevel::ForcesOnly`. A trajectory frame carries positions
+    barostat is active; otherwise they run at
+    `AggregateLevel::ForcesOnly`. The runner signals this through
+    `opts.runner_needs_scalars`. A trajectory frame carries positions
     and velocities, and the thermostat reduces kinetic energy from
     velocities independently, so neither requires force-kernel scalars.
     The CUDA graph path selects between its forces-only and
     forces+scalars graphs on the same condition (see `cuda-graphs.md`).
 
-    The loop variable `s` is local to the phase and gates trajectory
-    and log writes below; it is not passed to any slot.
+    The loop variable `s` is local to the phase and gates the coupling
+    decision above and the trajectory and log writes below; it is not
+    passed to any slot.
 
-    e. If `P.output.trajectory_every > 0` and
+    b. If `P.output.trajectory_every > 0` and
        `s % P.output.trajectory_every == 0`, download positions (and
        velocities when configured) and call
        `write_frame(step=s, ...)`. The `Time=` attribute is computed
        as `s as f64 * P.dt` — phase-local time.
-    f. If `P.output.log_every > 0` and
+    c. If `P.output.log_every > 0` and
        `s % P.output.log_every == 0`, download velocities, compute KE
        and T, optionally compute total PE (when extras are non-empty),
        and call `write_row(s, s as f64 * P.dt, ke, t, &extras)`.
-    g. Possibly emit a progress line (see *Progress reporting*).
+    d. Possibly emit a progress line (see *Progress reporting*).
 
     `force_field.step` invokes `NeighborListState::pre_step` once per
     call, so the displacement check fires on every physical step.
@@ -486,6 +516,14 @@ the simulation box.
     where `next_log` / `next_traj` are the steps until the next log
     / trajectory cadence boundary. Each batch invokes
     `graph_loop.launch(stream)` exactly `batch` times in sequence.
+
+    When the eligible phase has a graph-compatible thermostat, each
+    per-step launch selects the coupling-variant graph on coupling steps
+    (`s % coupling_interval == 0`) and a non-coupling variant otherwise;
+    the thermostat's device-side coupling is recorded into the coupling
+    variant, so it replays in-graph and coupling steps are ordinary
+    replays, not batch boundaries. See `cuda-graphs.md`'s *Batched Replay
+    Loop*.
 
     At each batch boundary the runner runs `nl.pre_step`
     (displacement check + optional rebuild) and then, if the new

@@ -16,7 +16,7 @@ use heddle_md::forces::topology::{Angle, Dihedral};
 use heddle_md::forces::{
     AngleList, Bond, BondList, DihedralList, ExclusionList, ForceField, HarmonicAngleBuilder,
     HarmonicBondBuilder, MorseBondedBuilder, PeriodicDihedralBuilder, PotentialRegistry,
-    SpmeRealBuilder,
+    SpmeExclusionBuilder, SpmeRealBuilder,
 };
 use heddle_md::forces::{AggregateLevel, LennardJonesBuilder};
 use heddle_md::gpu::{GpuContext, ParticleBuffers};
@@ -169,6 +169,11 @@ pub struct ConsistencyFixture {
     pub continuity_tol: Tolerance,
     pub r_switch: f64,
     pub cutoff: f64,
+    /// The fragment declares `CutoffHandling::Unbounded`: it has no cutoff to be
+    /// continuous across and is required *not* to vanish beyond one, so the
+    /// switch/cutoff continuity check does not apply. See
+    /// `rqm/forces/potential-consistency-harness.md`.
+    pub unbounded: bool,
     pub fd_step: f64,
     pub scale_eps: f64,
     pub coord_fd_step: f64,
@@ -178,6 +183,11 @@ pub struct ConsistencyFixture {
 }
 
 const HARNESS_BOX: Real = 40.0;
+
+/// `erf(0.6 r) / r` at r = 1 and r = 2 — the closed form of the SPME
+/// excluded-pair correction's measured energy in the fixture below.
+const REF_U_1: f64 = 6.038560908479259e-01;
+const REF_U_2: f64 = 4.551569891148177e-01;
 
 impl ConsistencyFixture {
     fn base(label: &'static str, shape: PotentialShape, samples: Vec<f64>, geometry: GeometryFn, build: BuildFn) -> Self {
@@ -192,6 +202,7 @@ impl ConsistencyFixture {
             continuity_tol: Tolerance::new(0.0, 1.0e-4),
             r_switch: 0.0,
             cutoff: 0.0,
+            unbounded: false,
             fd_step: 1.0e-3,
             scale_eps: 1.0e-3,
             coord_fd_step: 1.0e-3,
@@ -254,6 +265,73 @@ impl ConsistencyFixture {
     /// A pairwise van-der-Waals / screened-Coulomb fixture. `register`
     /// populates the single-builder registry; `pair_interactions`, charges,
     /// and `spme` supply its activation data.
+    /// A fixture for a `FragmentPasses::CorrectionOnly` fragment.
+    ///
+    /// Such a fragment is evaluated only by the correction pass, which walks the
+    /// modified-pair list — so the fixture carries an exclusion between the two
+    /// atoms, and what the harness measures is `(scale_coul - 1) x evaluate`.
+    /// The finite-difference, Newton and virial invariants are unaffected by
+    /// that constant factor; a reference point must account for it.
+    ///
+    /// The correction pass only launches when a neighbour list exists, and a
+    /// neighbour list only exists when some slot reports a cutoff. A
+    /// `CorrectionOnly` fragment reports none (it has no cutoff — that is the
+    /// point of it), so the fixture registers a zero-epsilon Lennard-Jones slot
+    /// alongside it: it supplies the cutoff and contributes exactly zero energy
+    /// and zero force, leaving the measurement attributable to the fragment
+    /// under test.
+    #[allow(clippy::too_many_arguments)]
+    pub fn pair_correction(
+        label: &'static str,
+        register: impl Fn(&mut PotentialRegistry) + 'static,
+        particle_types: Vec<ParticleTypeConfig>,
+        pair_interactions: Vec<PairInteractionConfig>,
+        charges: Vec<Real>,
+        spme: Option<SpmeConfig>,
+        scale_coul: Real,
+        cutoff: f64,
+        samples: Vec<f64>,
+    ) -> Self {
+        let geometry: GeometryFn = Box::new(|r| vec![[0.0, 0.0, 0.0], [r, 0.0, 0.0]]);
+        let type_indices = vec![0u32, if particle_types.len() > 1 { 1 } else { 0 }];
+        let build: BuildFn = Box::new(move |gpu| {
+            let mut reg = PotentialRegistry::new();
+            reg.register(Box::new(heddle_md::forces::LennardJonesBuilder));
+            register(&mut reg);
+            let sim_box = SimulationBox::new(
+                &gpu.device, HARNESS_BOX, HARNESS_BOX, HARNESS_BOX, 0.0, 0.0, 0.0,
+            )
+            .unwrap();
+            let exclusions =
+                super::host_exclusions_from_entries(2, &[(0, 1, 1.0, scale_coul)]);
+            let ff = ForceField::new(
+                &reg,
+                gpu,
+                2,
+                &sim_box,
+                &particle_types,
+                &pair_interactions,
+                &[],
+                &[],
+                &[],
+                spme.as_ref(),
+                &charges,
+                &BondList::empty(2),
+                &AngleList::empty(0),
+                &DihedralList::empty(0),
+                &exclusions,
+                &NeighborListConfig::AllPairs,
+            )
+            .expect("build pair-correction ForceField");
+            (ff, sim_box, vec![1.0 as Real; 2], charges.clone(), type_indices.clone())
+        });
+        let mut f = Self::base(label, PotentialShape::Pair, samples, geometry, build);
+        f.cutoff = cutoff;
+        f.r_switch = cutoff;
+        f.unbounded = true;
+        f
+    }
+
     pub fn pair(
         label: &'static str,
         register: impl Fn(&mut PotentialRegistry) + 'static,
@@ -483,7 +561,11 @@ pub fn check_consistency(fixture: &ConsistencyFixture, ev: &mut dyn Evaluator) {
     check_force_energy(fixture, ev);
     check_newton(fixture, ev);
     check_virial(fixture, ev);
-    if fixture.shape == PotentialShape::Pair {
+    // An `Unbounded` fragment has no cutoff to be continuous across, and is
+    // required NOT to vanish beyond one: the SPME excluded-pair correction
+    // offsets a cutoff-free reciprocal-space mesh sum, so a non-zero force at
+    // large r is the specified behaviour, not a defect.
+    if fixture.shape == PotentialShape::Pair && !fixture.unbounded {
         check_pair_continuity(fixture, ev);
     }
     check_reference_points(fixture, ev);
@@ -676,6 +758,51 @@ pub fn builtin_consistency_fixtures() -> Vec<ConsistencyFixture> {
             5.0, // r_switch == cutoff → smoothness check skipped
             vec![1.0, 1.5, 2.0, 3.0, 4.0],
         ),
+    );
+
+    // SPME excluded-pair correction. The reciprocal mesh carries erf(a*r)/r for
+    // every pair including the excluded ones; this fragment removes the unwanted
+    // share. It is a CorrectionOnly, Unbounded fragment, so the harness measures
+    // `(scale_coul - 1) x evaluate` and the continuity check does not apply.
+    //
+    // alpha = 0.6, k_C = 1 (atomic units), charges (+1, -1) so qq = -1, and
+    // scale_coul = 0 (a full exclusion). The measured energy is therefore
+    //     (0 - 1) * 1 * (-1) * erf(0.6 r) / r  =  +erf(0.6 r) / r
+    // The reference point pins the closed form, which no finite-difference check
+    // could: a wrong U with its matching wrong F still satisfies F = -grad U.
+    out.push(
+        ConsistencyFixture::pair_correction(
+            "spme_exclusion",
+            |reg| reg.register(Box::new(SpmeExclusionBuilder)),
+            vec![lj_type("P", 1.0), lj_type("M", -1.0)],
+            // Zero-epsilon LJ: supplies the neighbour list's cutoff and
+            // contributes exactly nothing. Every unordered type pair must be
+            // declared (the loader's config invariant).
+            vec![
+                PairInteractionConfig::lennard_jones(("P", "P"), 1.0, 0.0, 5.0, Some(5.0)),
+                PairInteractionConfig::lennard_jones(("M", "M"), 1.0, 0.0, 5.0, Some(5.0)),
+                PairInteractionConfig::lennard_jones(("P", "M"), 1.0, 0.0, 5.0, Some(5.0)),
+            ],
+            vec![1.0 as Real, -1.0],
+            Some(SpmeConfig { alpha: 0.6, r_cut_real: 5.0, grid: [16, 16, 16], spline_order: 5 }),
+            0.0, // scale_coul: a full exclusion
+            5.0,
+            vec![0.5, 1.0, 2.0, 3.0, 6.0], // 6.0 is BEYOND the cutoff: still corrected
+        )
+        .with_reference_points(vec![
+            ReferencePoint {
+                coordinate: 1.0,
+                energy: Some(REF_U_1),
+                coord_force: None,
+                tol: Tolerance { rel: 2e-2, abs: 2e-3 },
+            },
+            ReferencePoint {
+                coordinate: 2.0,
+                energy: Some(REF_U_2),
+                coord_force: None,
+                tol: Tolerance { rel: 2e-2, abs: 2e-3 },
+            },
+        ]),
     );
 
     // Morse bond: De=2, a=1.5, re=1. rq-f417a0f5

@@ -213,31 +213,40 @@ impl CudaGraphExec {
 }
 
 /// Phase-owned executable graphs for the batched replay loop. Holds the
-/// always-present forces+scalars graph and, for phases without a
-/// barostat, the forces-only graph. `launch` selects between them by the
-/// per-step `scalars` flag. See `rqm/cuda-graphs.md` *Capture Lifecycle*
-/// and *Batched Replay Loop*.
+/// cells of the coupling × scalars matrix, indexed `graphs[coupling][scalars]`.
+/// `launch` selects a cell by the per-step `coupling` and `scalars` flags.
+/// See `rqm/cuda-graphs.md` *Capture Lifecycle* and *Batched Replay Loop*.
 // rq-6887c76d
 #[derive(Debug)]
 pub struct GraphLoop {
-    /// The forces+scalars (`_fev`) graph. Always captured.
-    pub forces_and_scalars: CudaGraphExec,
-    /// The forces-only (`_f`) graph. `Some` when no barostat is active
-    /// for the phase, `None` otherwise (a barostat consumes the per-step
-    /// virial, so every step must evaluate scalars).
-    pub forces_only: Option<CudaGraphExec>,
+    /// The one-step graphs of the coupling × scalars matrix, indexed
+    /// `graphs[coupling as usize][scalars as usize]`. The first index
+    /// selects the coupling variant (`1`, the step with the thermostat's
+    /// device-side coupling recorded) or the non-coupling variant (`0`); the
+    /// second selects forces+scalars (`1`, the `_fev` pair kernel plus the
+    /// PE and virial reductions) or forces-only (`0`, the `_f` pair kernel).
+    /// A cell is `Some` only when the phase produces that step shape: the
+    /// coupling row iff a graph-eligible thermostat is present, the
+    /// non-coupling row iff the phase has non-coupling steps, and the
+    /// forces-only column iff no per-step barostat is active.
+    pub graphs: [[Option<CudaGraphExec>; 2]; 2],
 }
 
 impl GraphLoop {
-    /// Launch the graph for one physical step. Uses the forces+scalars
-    /// graph when `scalars` is true or when no forces-only graph was
-    /// captured; otherwise the forces-only graph.
+    /// Launch the graph for one physical step: `graphs[coupling][scalars]`,
+    /// falling back to `graphs[coupling][1]` (the row's forces+scalars cell)
+    /// when the forces-only cell is `None` (a per-step barostat evaluates
+    /// scalars every step). The selected cell is `Some` for the step shape
+    /// the replay loop requests (coupling steps occur only with a thermostat;
+    /// non-coupling steps only when a non-coupling row was captured).
     // rq-6887c76d
-    pub fn launch(&self, scalars: bool) -> Result<(), GraphError> {
-        match (scalars, self.forces_only.as_ref()) {
-            (false, Some(forces_only)) => forces_only.launch(),
-            _ => self.forces_and_scalars.launch(),
-        }
+    pub fn launch(&self, coupling: bool, scalars: bool) -> Result<(), GraphError> {
+        let row = &self.graphs[coupling as usize];
+        row[scalars as usize]
+            .as_ref()
+            .or(row[true as usize].as_ref())
+            .expect("matrix cell captured for the requested step shape")
+            .launch()
     }
 }
 

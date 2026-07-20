@@ -30,9 +30,16 @@ trajectories across runs on the same GPU.
 ## Algorithm <!-- rq-adba6f8a -->
 
 The thermostat is invoked through `apply_post(buffers, dt, timings)`
-after the integrator's `step()` returns. The integrator has already
-completed its velocity-Verlet substeps; the thermostat operates on
-the post-step velocities. For each invocation with timestep `dt`:
+at the runner's post-force-marker boundary. The integrator has already
+completed its velocity-Verlet substeps, including the trailing kick, and
+on a constrained run the runner has already projected the velocities back
+onto the constraint manifold
+(`Constraint::apply_after_kick`, see
+`constraint-framework.md`). The thermostat therefore operates on the
+full-step, on-manifold velocities, so the `K_old` it reduces is the
+physical kinetic energy the run reports — the one whose degree-of-freedom
+count `N_f` its target is built from. For each invocation with timestep
+`dt`:
 
 1. Compute the instantaneous kinetic energy `K_old` via the shared
    `compute_kinetic_energy` helper (`nose-hoover-chain.md`).
@@ -62,9 +69,10 @@ never downloads `K_old`.
 3. Apply the rescale as a standalone `rescale_velocities` kernel
    launched from `apply_post`: `v_i ← λ · v_i` for every particle `i`
    and axis. Berendsen contributes no composed post-force fragment —
-   its kinetic-energy reduction reads the full-step (post-trailing-kick)
-   velocities, a fusion barrier that keeps the rescale out of the
-   composed kernel (`framework.md`, `docs/architecture.md`).
+   its kinetic-energy reduction reads the full-step velocities
+   (post-trailing-kick, and post-constraint-projection on a constrained
+   run), a fusion barrier that keeps the rescale out of the composed
+   kernel (`framework.md`, `docs/architecture.md`).
 
 4. Update the running
    `cumulative_injection += K_old · (λ² − 1)`. The accumulator
@@ -92,11 +100,12 @@ Berendsen does nothing.
 
 On a coupling step the Berendsen thermostat's `apply_post` runs the
 following in fixed order, as its own kernel launches, after the
-integrator's trailing kick:
+integrator's trailing kick and after the runner's leading velocity
+projection (constrained runs only):
 
 | Order | Step              | Kernel / call                                     | Operation                                                                     | Stage label                  |
 | ----- | ----------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------- |
-| 1     | KE reduce         | `compute_kinetic_energy_on_device`                | writes `ke_scratch` device buffer (full-step `K`); no dtoh                    | `KineticEnergyReduce`        |
+| 1     | KE reduce         | `compute_kinetic_energy_on_device`                | writes `ke_scratch` device buffer (full-step, on-manifold `K`); no dtoh       | `KineticEnergyReduce`        |
 | 2     | Compute factor    | `berendsen_compute_factor`                        | reads `ke_scratch` + slot scalars; writes `factor_device` and accumulator delta | `BerendsenComputeFactor`     |
 | 3     | Velocity rescale  | `rescale_velocities`                              | `v ← λ · v` per particle                                                       | `BerendsenRescaleVelocities` |
 

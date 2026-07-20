@@ -230,6 +230,19 @@ pub struct NeighborListState {
     /// dtoh-free and relies on the per-batch status read for growth.
     /// rq-67a09135
     has_probed: bool,
+    /// Modified canonical atom pairs `(a, b)` with `a < b`, captured once at
+    /// construction from the exclusion topology. Kept host-side for
+    /// diagnostics and for the device upload below. Empty when no slot
+    /// consumes exclusions. rq-8945395f
+    excluded_pairs: Vec<(u32, u32)>,
+    /// Device-resident canonical modified pairs `[a0, b0, a1, b1, …]`
+    /// (`a < b`), uploaded once from `excluded_pairs`. Consumed by the
+    /// JIT-composed correction pass, which recomputes each modified pair's
+    /// scaled contribution directly. Length `2 * n_modified` (>= 2).
+    /// rq-8945395f rq-5f871bd5
+    modified_pairs_dev: CudaSlice<u32>,
+    /// Number of canonical modified pairs `E`. rq-8945395f
+    n_modified: u32,
 }
 
 /// Default fraction of a packed-neighbour capacity at which a build is
@@ -342,6 +355,7 @@ fn alloc_packed_neighbor_data(
     let interacting_atoms = device
         .alloc_zeros::<u32>(cap_alloc * 32)
         .map_err(GpuError::from)?;
+    // [0] = tile count, [1] = single-pair count.
     let interaction_count = device.alloc_zeros::<u32>(2).map_err(GpuError::from)?;
     let neighbor_status = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
     let iblock_count = device
@@ -567,6 +581,9 @@ impl NeighborListState {
             }),
             rebuild_generation: 0,
             has_probed: false,
+            excluded_pairs: Vec::new(),
+            modified_pairs_dev: gpu.device.alloc_zeros::<u32>(2).map_err(GpuError::from)?,
+            n_modified: 0,
         })
     }
 
@@ -652,6 +669,9 @@ impl NeighborListState {
             }),
             rebuild_generation: 0,
             has_probed: false,
+            excluded_pairs: Vec::new(),
+            modified_pairs_dev: gpu.device.alloc_zeros::<u32>(2).map_err(GpuError::from)?,
+            n_modified: 0,
         })
     }
 
@@ -778,7 +798,44 @@ impl NeighborListState {
             // Trivial mode pre-populates the packed list on the host and
             // never runs the construction probe.
             has_probed: true,
+            excluded_pairs: Vec::new(),
+            modified_pairs_dev: gpu.device.alloc_zeros::<u32>(2).map_err(GpuError::from)?,
+            n_modified: 0,
         })
+    }
+
+    /// Records the modified canonical atom pairs `(a, b)` (`a < b`) — every
+    /// pair whose scale differs from `1` in some fragment — that the
+    /// correction pass adjusts, and uploads them to the device as the
+    /// fixed `modified_pairs` list (interleaved `[a, b, …]`, length
+    /// `2 · E`). Called once after construction by the force field; a slot
+    /// that consumes no exclusions leaves this empty. rq-8945395f
+    pub fn set_excluded_pairs(&mut self, pairs: Vec<(u32, u32)>) -> Result<(), GpuError> {
+        let n = pairs.len() as u32;
+        let mut flat: Vec<u32> = Vec::with_capacity(pairs.len().max(1) * 2);
+        for &(a, b) in &pairs {
+            flat.push(a);
+            flat.push(b);
+        }
+        if flat.is_empty() {
+            flat.push(0);
+            flat.push(0);
+        }
+        self.modified_pairs_dev = self.device.htod_sync_copy(&flat)?;
+        self.n_modified = n;
+        self.excluded_pairs = pairs;
+        Ok(())
+    }
+
+    /// The device-resident modified-pair list (interleaved `[a, b, …]`).
+    /// rq-8945395f
+    pub fn modified_pairs_device(&self) -> &CudaSlice<u32> {
+        &self.modified_pairs_dev
+    }
+
+    /// The number of modified pairs `E`. rq-8945395f
+    pub fn n_modified(&self) -> u32 {
+        self.n_modified
     }
 
     /// Returns the sorted-particle-ids buffer the packed-neighbour

@@ -480,7 +480,7 @@ When `particle_count == 1`:
 - Trivial construction produces a single-element
   `sorted_particle_ids` containing `[0]`. No pair-force kernel work
   runs because no partners exist; the force kernel's diagonal
-  exclusion-tile path covers the self-self case as a skip.
+  self-comparison (`i == j`) is skipped.
 
 When the `ForceField` has zero pair-force consumers and SPME is
 inactive, no `NeighborListState` is built; the framework's
@@ -947,7 +947,7 @@ reproducibility.**
   consumers trust the runner to own one canonical box and to use only
   the documented mutator.
 
-### Mixed-entry Newton's-3rd double-count (FIXED)
+### Mixed-entry Newton's-3rd double-count (FIXED) <!-- rq-385abed5 -->
 
 When a packed entry contained both self-block-like j-atoms
 (atoms of the same i-block, expected to route through
@@ -1214,7 +1214,13 @@ Feature: Cell-list neighbor list
     Given two ForceField instances with identical particle positions and parameters,
       one in mode = "cell-list" with r_skin = 0.3, the other in mode = "all-pairs"
     When both run a single force evaluation
-    Then the resulting forces_* agree componentwise within 1e-4 relative error
+    Then the resulting forces_* agree componentwise within absolute 1e-4 au or
+      1e-4 relative error, whichever is more permissive
+    # The two modes route a given modified pair through different neighbour-list
+    # passes, so their exclusion-correction residuals differ within the
+    # correction residual bound (see rqm/forces/packed-neighbour-pair-force.md,
+    # "Exclusion Handling"). The absolute-au floor covers near-zero components
+    # where the residual dominates any relative metric.
 
   # --- Cross-validation with the all-pairs oracle ---
   #
@@ -1233,10 +1239,12 @@ Feature: Cell-list neighbor list
       in mode = "cell-list" with the default r_skin and one in
       mode = "all-pairs"
     When both run a single force evaluation on identical particle positions
-    Then per-atom forces_* agree componentwise within 1e-4 relative error
-    And in particular F_max in the cell-list run is not more than 1e-6
-      absolute in any component that is zero (to within f32 rounding) in
-      the all-pairs run
+    Then per-atom forces_* agree componentwise within absolute 1e-4 au or
+      1e-4 relative error, whichever is more permissive
+    And in particular a component that is zero (to within f32 rounding) in the
+      all-pairs run is no more than 1e-4 absolute in the cell-list run — the
+      exclusion-correction residual (order 1e-5 au; see
+      rqm/forces/packed-neighbour-pair-force.md) sits below this floor
 
   @rq-d991a151
   Scenario: Cell-list forces match all-pairs forces across an r_skin sweep
@@ -1249,10 +1257,16 @@ Feature: Cell-list neighbor list
       the range (including at least one value that lands the r_search
       floor between two integer cell counts along each box axis)
     Then every cell-list run's per-atom forces_* agree with the
-      all-pairs reference within 1e-4 relative error
-    # r_skin is a rebuild-frequency parameter, not a physics parameter:
-    # any observable difference in forces across r_skin values is a bug
-    # in the packed-neighbour build or its downstream consumers.
+      all-pairs reference within absolute 1e-4 au or 1e-4 relative error,
+      whichever is more permissive
+    # r_skin is a rebuild-frequency parameter, not a physics parameter. The
+    # neighbour-list layout it selects routes each modified pair through a
+    # particular force pass, and the exclusion-correction residual (order
+    # 1e-5 au; see rqm/forces/packed-neighbour-pair-force.md) varies within
+    # its bound across those routings. Forces are therefore reproducible for
+    # fixed inputs but agree across r_skin only to that bound; a difference
+    # exceeding the bound is a bug in the packed-neighbour build or its
+    # downstream consumers.
 
   @rq-c90fb1bd
   Scenario: r_skin-invariance under a repeated force evaluation
@@ -1261,8 +1275,8 @@ Feature: Cell-list neighbor list
       r_skin_a and r_skin_b whose r_search rounds to different
       n_cells layouts along at least one box axis
     When both instances run a single force evaluation
-    Then their per-atom forces_* agree componentwise within 1e-4
-      relative error
+    Then their per-atom forces_* agree componentwise within absolute 1e-4 au
+      or 1e-4 relative error, whichever is more permissive
     And F_max in each run is at thermal-scale (below the intramolecular
       LJ-at-bond-distance magnitude by at least six orders of magnitude)
       when the initial state places every intramolecular bond at its

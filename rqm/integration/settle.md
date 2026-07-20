@@ -112,13 +112,33 @@ geometry `(ra, rb, rc)`:
    mass exactly and restores all three intramolecular distances to f32
    round-off in a single evaluation — there is no iteration and no convergence
    tolerance. After the reset, the half-step velocity of every atom is updated
-   by `v_i ← v_i + (r_i^constrained − r_i^unconstrained) / dt`, the constrained
-   positions are written back to `positions_*` in the same lattice image the
-   atom occupied before the call, and the per-atom position-level
-   constraint-virial contribution is written into
+   by `v_i ← v_i + (r_i^constrained − r_i^unconstrained) / dt`, each
+   constrained position is wrapped back into the primary image of the
+   simulation box (with `images_x/y/z` advanced on any crossing, exactly as
+   the drift kernel does — see `wrap_and_count_triclinic` in
+   `kernels/pbc.cuh`) before being written to `positions_*`, and the per-atom
+   position-level constraint-virial contribution is written into
    `constraint_virial[base + i]` as
    `(m_i / dt²) · ((r_i^constrained − r_i^unconstrained) · r_i^COM)`, where
    `r_i^COM = r_i^constrained − com`.
+
+   The re-wrap matters. Drift wraps every atom into the primary image, so
+   the raw current position `cur[a]` the correction is applied to sits
+   inside; the correction itself is small (`~1e-3 a_0` RMS at 298 K with
+   `dt = 2 fs`), but for an H that landed just inside a face after drift a
+   correction of that size in the outward direction can push it just past
+   the face. Without the re-wrap the position sits outside the primary
+   image until the *next* step's drift wraps it — long enough for the
+   trajectory writer to catch it, which breaks the "every trajectory frame
+   is a valid init file" round-trip documented in `io/trajectory-output.md`
+   and the primary-image invariant on `positions_x/y/z` in
+   `particle-state.md`. Advancing the image counters on any wrap keeps
+   `unwrapped = wrapped + N·L` exact for unwrapped-coordinate analyses
+   (diffusion, MSD). The re-wrap is a translation by an integer combination
+   of lattice vectors and is therefore invariant under every downstream
+   consumer's minimum-image reconstruction, so it does not perturb the
+   constraint distances or the virial. Bit-exactness is preserved: the wrap
+   uses `floor(s + 0.5)` on the deterministic post-correction position.
 
 3. `apply_after_kick` invokes `settle_velocities`, which projects the
    post-kick velocities onto the velocity manifold of the constrained
@@ -211,12 +231,36 @@ contains at least one group:
 |---|---|---|
 | `apply_before_drift` | `settle_snapshot` | Reads current `positions_*`; writes `snapshot_*`. |
 | `apply_after_drift` | `settle_positions` | Reads `snapshot_*`, current `positions_*`, current `velocities_*`. Writes reset `positions_*`, updated `velocities_*`, position-level half of `constraint_virial`. |
-| `apply_after_kick` | `settle_velocities`, `settle_virial_scatter` | Reads current constrained `positions_*` and post-kick `velocities_*`. Writes velocity-reset `velocities_*`, accumulates velocity-level half of `constraint_virial`, scatters `constraint_virial` into `particle_virials` for the barostat to consume. |
+| `apply_after_kick` | `settle_velocities`, `settle_virial_scatter` | The **leading** projection, fired immediately after the trailing kick. Reads current constrained `positions_*` and post-kick `velocities_*`. Writes velocity-reset `velocities_*`, accumulates velocity-level half of `constraint_virial`, scatters `constraint_virial` into `particle_virials` for the barostat to consume. |
+| `reproject_velocities_no_publish` | `settle_velocities` | The **terminal** repair projection, dispatched by the plan's terminal `ConstraintPoint { AfterKick }`. The same projection as `apply_after_kick` — but **no** `settle_virial_scatter`: it does not publish the virial. |
 | `apply_position_projection_only` | `settle_positions_no_velocity` | Reads and writes `positions_*` only; does not touch velocities or virials. |
 
 When the slot has zero groups (a topology with no SETTLE water groups, or a
 config that omits `[constraints]` entirely), every hook is a no-op and no
 kernel is launched.
+
+On **every** step of a run with a terminal `ConstraintPoint { AfterKick }`
+the runner drives the velocity projection through *two* different hooks
+(see `framework.md`, *Per-Step Interface*): `apply_after_kick` immediately
+after the trailing kick — putting the velocities on the manifold and
+publishing the constraint virial before the thermostat reduces the kinetic
+energy and before the barostat reduces the virial — and then the plan's
+terminal `ConstraintPoint { AfterKick }`, which calls
+`reproject_velocities_no_publish`. The launch counts per step are
+therefore:
+
+- `settle_velocities` — **twice**;
+- `settle_virial_scatter` — **once** (only from `apply_after_kick`).
+
+Neither count is conditional on the thermostat's coupling cadence: the
+leading projection is unconditional, so an unthermostatted run, a
+non-coupling step, and a coupling step all launch the same two
+`settle_velocities` and one `settle_virial_scatter`. The terminal
+projection costs ~nothing physically — the velocities it receives are
+already on the manifold (a uniform thermostat or barostat rescale
+preserves it), so its impulse, and hence its virial contribution, is zero.
+It stays load-bearing for a whole-group Andersen resample and for a
+barostat velocity rescale, neither of which preserves the manifold.
 
 ## Constraint Virial <!-- rq-93f8e094 -->
 
@@ -239,6 +283,31 @@ is scattered into the global `particle_virials` array by
 `particle_virials` across all atoms; the result is the analytic `−2 K_rot` of
 a rigid rotor for each group (see `berendsen-barostat.md`,
 `c-rescale-barostat.md`).
+
+**Publish once, and publish before the barostat reads.** This is the
+contract that splits `apply_after_kick` from
+`reproject_velocities_no_publish`. Every velocity projection *accumulates*
+its velocity-level virial onto `constraint_virial`; only the leading
+`apply_after_kick` *publishes* — runs `settle_virial_scatter` — and it does
+so exactly once per step. Both halves of the split are load-bearing:
+
+- A per-step barostat's own virial reduction runs at the plan's terminal
+  `BarostatPoint`, i.e. *between* the two projections. The publish must
+  therefore precede it, or the barostat reduces the force virial alone. For
+  rigid water the two very nearly cancel — for 8192 SPC/E molecules the
+  constraint virial is −456 Ha against a +412 Ha force virial — so a
+  barostat blind to the constraint contribution estimates tens of thousands
+  of atmospheres rather than tens, and drives the box away without bound.
+- Nothing clears `constraint_virial` between `settle_positions` (which
+  writes the position-level half) and `settle_velocities` (which
+  accumulates the velocity-level half onto it). A second scatter, from the
+  terminal projection, would therefore publish the position half a second
+  time as well, double-counting the *whole* constraint virial in the
+  pressure.
+
+The leading `apply_after_kick` is thus the single publication point, on
+every step alike, and the barostat's in-step reduction always sees this
+step's constraint virial.
 
 The arithmetic uses centre-of-mass-relative positions (rather than lab-frame
 absolute positions) for f32 stability. At molecular-cluster scales
@@ -396,6 +465,9 @@ extern "C" __global__ void settle_snapshot(
 
 extern "C" __global__ void settle_positions(
     Real4 *posq,
+    int *images_x,                    // advanced on any wrap of the corrected position
+    int *images_y,
+    int *images_z,
     Real *velocities_x,
     Real *velocities_y,
     Real *velocities_z,
@@ -438,6 +510,9 @@ extern "C" __global__ void settle_virial_scatter(
 
 extern "C" __global__ void settle_positions_no_velocity(
     Real4 *posq,
+    int *images_x,                    // advanced on any wrap of the corrected position
+    int *images_y,
+    int *images_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -658,8 +733,12 @@ Feature: SETTLE rigid-water constraints
     When apply_after_drift is called with dt = 82.68 atu (~ 2 fs)
     Then every constraint distance, computed under minimum image, equals its target r0
       to within 1.0e-4 a_0 relative
-    And the per-atom global positions remain in the same lattice image they occupied
-      before the call (no spurious wrap of any atom)
+    And every atom's written position lies inside the primary image of the simulation
+      box (its fractional coordinates lie in [-1/2, +1/2))
+    And for any atom whose written position crossed a face relative to its pre-call
+      position, the corresponding image counter images_x/y/z has been advanced by the
+      integer number of lattice vectors that were subtracted; other atoms' image
+      counters are unchanged
     And the mass-weighted centre of mass, computed by bringing every atom into atom 0's
       image, equals the COM of the unconstrained post-drift positions to within 1.0e-3 a_0
 

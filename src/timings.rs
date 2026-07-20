@@ -185,6 +185,15 @@ impl Accumulator {
 pub enum GraphVariant {
     ForcesOnly,
     ForcesAndScalars,
+    // rq-6887c76d — the coupling cells of the coupling × scalars matrix (a
+    // step with the thermostat's device-side coupling recorded), at the
+    // forces-only and forces+scalars force-evaluation levels. Their
+    // per-stage stop counts are tracked separately so the thermostat
+    // kernels, which run only in the coupling cells, do not clobber the
+    // non-coupling counts, and the scalar reductions accrue only from the
+    // forces+scalars cells.
+    CouplingForcesOnly,
+    CouplingForcesAndScalars,
 }
 
 #[derive(Debug)]
@@ -203,6 +212,11 @@ struct KernelStageState {
     /// `kernel_stop` count per replay of the forces+scalars graph,
     /// committed by `end_capture(GraphVariant::ForcesAndScalars)`.
     captured_stops_forces_and_scalars: u32,
+    /// `kernel_stop` count per replay of the coupling-variant graph,
+    /// committed by `end_capture(GraphVariant::CouplingForcesOnly)`.
+    captured_stops_coupling_forces_only: u32,
+    /// committed by `end_capture(GraphVariant::CouplingForcesAndScalars)`.
+    captured_stops_coupling_forces_and_scalars: u32,
     /// Representative per-replay duration (ns) for this stage under graph
     /// mode, snapshotted from the instrumented calibration steps the
     /// runner executes before the replay loop (see
@@ -252,6 +266,8 @@ impl Timings {
                     captured_stops_per_replay: 0,
                     captured_stops_forces_only: 0,
                     captured_stops_forces_and_scalars: 0,
+                    captured_stops_coupling_forces_only: 0,
+                    captured_stops_coupling_forces_and_scalars: 0,
                     representative_ns: 0,
                 },
             );
@@ -297,6 +313,14 @@ impl Timings {
                     state.captured_stops_forces_and_scalars =
                         state.captured_stops_per_replay;
                 }
+                GraphVariant::CouplingForcesOnly => {
+                    state.captured_stops_coupling_forces_only =
+                        state.captured_stops_per_replay;
+                }
+                GraphVariant::CouplingForcesAndScalars => {
+                    state.captured_stops_coupling_forces_and_scalars =
+                        state.captured_stops_per_replay;
+                }
             }
         }
     }
@@ -339,6 +363,12 @@ impl Timings {
                 GraphVariant::ForcesOnly => state.captured_stops_forces_only,
                 GraphVariant::ForcesAndScalars => {
                     state.captured_stops_forces_and_scalars
+                }
+                GraphVariant::CouplingForcesOnly => {
+                    state.captured_stops_coupling_forces_only
+                }
+                GraphVariant::CouplingForcesAndScalars => {
+                    state.captured_stops_coupling_forces_and_scalars
                 }
             } as u64;
             if stops == 0 {

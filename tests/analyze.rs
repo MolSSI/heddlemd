@@ -123,6 +123,75 @@ fn write_bundle(dir: &Path) -> PathBuf {
     analysis
 }
 
+// --- Unit handling ---
+
+/// Same bundle, but declaring SI input. Every other analyze test uses
+/// `units = "atomic"`, where the user→engine conversion is the identity — so
+/// none of them can see a missing conversion.
+fn si_sim_toml() -> String {
+    minimal_sim_toml().replace(r#"units = "atomic""#, r#"units = "si""#)
+}
+
+/// `r_max` is written in the run's user unit system, but every distance the RDF
+/// touches — the frame positions, the box, the bin width — is in atomic units,
+/// because the conversion happens at the I/O boundary. If `r_max` is consumed
+/// raw, then under `units = "si"` it is compared against Bohr-scale distances:
+/// an `r_max` of 8e-10 (metres, i.e. 8 Å) becomes an effective cutoff of 8e-10
+/// *Bohr*, every pair separation exceeds it, nothing bins, and the RDF comes out
+/// silently empty — with the `r_max <= min_perp_width / 2` guard passing
+/// vacuously, since it compares the same two mismatched units.
+///
+/// This bundle puts a single pair at 3 Å inside a 2 nm box, well within
+/// `r_max = 8 Å`, so exactly one pair must be counted.
+#[test]
+fn rdf_r_max_is_interpreted_in_the_configs_unit_system() {
+    let dir = tmp_path("rdf_si_units");
+    std::fs::write(dir.join("sim.in.toml"), si_sim_toml()).unwrap();
+    write_two_atom_init(&dir, 3.0e-10);
+    write_one_frame_trajectory(&dir, 3.0e-10);
+    let analysis = dir.join("sim.in.analysis");
+    // r_max = 8 Å over 8 bins => dr = 1 Å; the 3 Å pair lands in bin 3.
+    std::fs::write(&analysis, rdf_analysis_body("ar-ar", 8.0e-10, 8)).unwrap();
+
+    let summary = run_analyses(&analysis).unwrap();
+    assert_eq!(summary.frames_consumed, 1);
+
+    let csv = std::fs::read_to_string(dir.join("sim.out.ar-ar.csv")).unwrap();
+    let rows: Vec<(f64, f64, u64)> = csv
+        .lines()
+        .skip(1)
+        .map(|l| {
+            let c: Vec<&str> = l.split(',').collect();
+            (
+                c[0].parse::<f64>().unwrap(),
+                c[1].parse::<f64>().unwrap(),
+                c[2].parse::<u64>().unwrap(),
+            )
+        })
+        .collect();
+
+    let total: u64 = rows.iter().map(|&(_, _, c)| c).sum();
+    assert_eq!(
+        total, 1,
+        "expected the single 3 Å pair to be binned; got {total} counts. \
+         Zero means r_max was consumed as a raw SI number and compared against \
+         atomic-unit distances, so nothing fell inside the cutoff."
+    );
+
+    let (r, g, _) = rows
+        .iter()
+        .copied()
+        .find(|&(_, _, c)| c > 0)
+        .expect("no populated bin");
+    // The `r` column comes back out in the user's unit system — metres here, so
+    // the 3 Å pair reports at ~3e-10, not at its atomic-unit value (~5.67).
+    assert!(
+        (r - 3.5e-10).abs() < 1.0e-10,
+        "populated bin at r = {r:e} m; expected the 1 Å-wide bin covering 3 Å"
+    );
+    assert!(g > 0.0, "g(r) must be positive in the populated bin");
+}
+
 // --- Filename convention ---
 
 // rq-a1735ae4

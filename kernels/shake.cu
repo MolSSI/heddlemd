@@ -107,6 +107,9 @@ __device__ static inline void weighted_com(
 // this is ~330 B per thread, comfortably in registers.
 extern "C" __global__ void shake_positions(
     Real4 *posq,
+    int *images_x,
+    int *images_y,
+    int *images_z,
     Real *velocities_x,
     Real *velocities_y,
     Real *velocities_z,
@@ -335,11 +338,32 @@ extern "C" __global__ void shake_positions(
   __syncthreads();
 
   // Coalesced write-back of final positions, velocities, and virial.
+  //
+  // Positions are re-wrapped into the primary image on write and image
+  // counters are advanced on any crossing, mirroring the drift kernel and
+  // SETTLE's position projection. The SHAKE iteration's cumulative
+  // correction can push an atom that landed just inside a face after drift
+  // just past it; without this wrap the position sits outside the primary
+  // image until the next step's drift wraps it, breaking the "every
+  // trajectory frame is a valid init file" round-trip and the
+  // primary-image invariant on `positions_x/y/z`. The wrap is a
+  // translation by an integer combination of lattice vectors and is
+  // therefore invariant under every downstream consumer's minimum-image
+  // reconstruction, so it does not perturb the constraint distances or
+  // the virial. See `rqm/integration/shake.md` step 2.
   for (unsigned int t = threadIdx.x; t < n_block_atoms; t += blockDim.x) {
     unsigned int i = group_atoms[atom_base + t];
     Real4 pq;
     pq.x = s_px[t]; pq.y = s_py[t]; pq.z = s_pz[t]; pq.w = s_w[t];
+    int nx = images_x[i];
+    int ny = images_y[i];
+    int nz = images_z[i];
+    wrap_and_count_triclinic(pq.x, pq.y, pq.z, nx, ny, nz,
+                             lx, ly, lz, xy, xz, yz);
     posq[i] = pq;
+    images_x[i] = nx;
+    images_y[i] = ny;
+    images_z[i] = nz;
     velocities_x[i] = s_vx[t];
     velocities_y[i] = s_vy[t];
     velocities_z[i] = s_vz[t];
@@ -561,6 +585,9 @@ extern "C" __global__ void constraint_virial_scatter(
 // off-manifold positions rather than at a snapshot.
 extern "C" __global__ void shake_positions_no_velocity(
     Real4 *posq,
+    int *images_x,
+    int *images_y,
+    int *images_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -674,6 +701,16 @@ extern "C" __global__ void shake_positions_no_velocity(
       pq.y += dyg;
       pq.z += dzg;
     }
+    // Re-wrap and advance image counters — same rationale as the matching
+    // block in `shake_positions`. See `rqm/integration/shake.md` step 4.
+    int nx = images_x[i];
+    int ny = images_y[i];
+    int nz = images_z[i];
+    wrap_and_count_triclinic(pq.x, pq.y, pq.z, nx, ny, nz,
+                             lx, ly, lz, xy, xz, yz);
     posq[i] = pq;
+    images_x[i] = nx;
+    images_y[i] = ny;
+    images_z[i] = nz;
   }
 }

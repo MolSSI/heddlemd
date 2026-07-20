@@ -29,6 +29,7 @@ pub use dihedral::{PeriodicDihedralBuilder, PeriodicDihedralState};
 pub use jit_composed::{
     AngleForceFragment, AngleScratchView, ArgKind, BondedForceFragment, BondedScratchView,
     CutoffHandling, DihedralForceFragment, DihedralScratchView, ElemTy, ForceLaunchBuilder,
+    FragmentPasses,
     ForceLaunchContext, JitComposedAngleForce, JitComposedBondedForce,
     JitComposedDihedralForce, JitComposedPairForce, KernelArg,
     KernelArgBinder, KernelArgSchema, KernelArgType, KernelElem, PairForceBindContext,
@@ -37,7 +38,7 @@ pub use jit_composed::{
 };
 pub use spme::{
     SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,
-    SpmeRealBuilder, SpmeReciprocalBuilder,
+    SpmeExclusionBuilder, SpmeRealBuilder, SpmeReciprocalBuilder,
 };
 pub use angle::{HARMONIC_ANGLE_KIND, HarmonicAngleParams};
 pub use dihedral::{PERIODIC_DIHEDRAL_KIND, PeriodicDihedralParams};
@@ -96,11 +97,15 @@ pub trait Potential: std::fmt::Debug + Send {
     /// the device's default stream with no host-side state mutation
     /// and no use of secondary streams. Determines whether phases
     /// using this potential run under CUDA graph mode; see
-    /// `cuda-graphs.md`. Default `true`. Potentials that launch
-    /// kernels on streams other than the default (e.g. SPME
-    /// reciprocal's `recip_stream`) override to `false`: work on
-    /// uncaptured streams executes immediately and is not part of the
-    /// captured graph, so replays would produce stale forces.
+    /// `cuda-graphs.md`. Default `true`, kept by every in-tree
+    /// potential — including `spme_reciprocal`, whose cuFFT plans and
+    /// kernels are all bound to the device's default stream, so its
+    /// whole pipeline is captured. A potential overrides to `false`
+    /// when its `compute` launches kernels on a secondary stream (work
+    /// on uncaptured streams executes immediately and is not part of
+    /// the captured graph, so replays would produce stale forces) or
+    /// performs host-side work between launches (a host<->device copy
+    /// or host arithmetic on a read-back value).
     fn graph_compatible(&self) -> bool {
         true
     }
@@ -389,6 +394,7 @@ impl Builtins for dyn PotentialBuilder {
             Box::new(LennardJonesBuilder),
             Box::new(SpmeRealBuilder),
             Box::new(SpmeReciprocalBuilder),
+            Box::new(SpmeExclusionBuilder),
             Box::new(MorseBondedBuilder),
             Box::new(HarmonicBondBuilder),
             Box::new(HarmonicAngleBuilder),
@@ -651,7 +657,7 @@ impl ForceField {
             .iter()
             .filter_map(|s| s.max_cutoff())
             .fold(None::<Real>, |acc, c| Some(acc.map_or(c, |a| a.max(c))));
-        let neighbor_list = if let Some(r_cut) = aggregated_cutoff {
+        let mut neighbor_list = if let Some(r_cut) = aggregated_cutoff {
             match neighbor_list_config {
                 NeighborListConfig::CellList { r_skin } => Some(
                     NeighborListState::new_cell_list(
@@ -671,6 +677,27 @@ impl ForceField {
         } else {
             None
         };
+
+        // Capture the modified canonical pairs — any pair whose scale
+        // differs from 1 in some fragment — for the per-rebuild
+        // exclusion-tile builder. A pair with every fragment scale 1 is
+        // not modified and contributes no tile bit; the exclusion-tile
+        // pass reads each flagged pair's per-fragment scale at evaluation
+        // time. rq-8945395f rq-03faaf24
+        if let Some(nl) = neighbor_list.as_mut() {
+            let mut modified_pairs: Vec<(u32, u32)> = exclusion_list
+                .entries
+                .iter()
+                .filter(|e| e.scale_lj != 1.0 || e.scale_coul != 1.0)
+                .map(|e| {
+                    let (a, b) = (e.atom_i.min(e.atom_j), e.atom_i.max(e.atom_j));
+                    (a, b)
+                })
+                .collect();
+            modified_pairs.sort_unstable();
+            modified_pairs.dedup();
+            nl.set_excluded_pairs(modified_pairs)?;
+        }
 
         // Collect each shape's participants from `jit_participant`. A
         // slot's single `JitParticipant` variant determines its shape
@@ -716,10 +743,17 @@ impl ForceField {
             // as `HEDDLE_JIT_MAX_CUTOFF_SQUARED` for the per-pair prune.
             let jit_max_cutoff = aggregated_cutoff
                 .expect("aggregated_cutoff is Some when jit_fragments is non-empty");
+            // CellList mode handles exclusions through the per-tile
+            // bitmask (compose the exclusion-free evaluator + exclusion-
+            // tile pass); all-pairs mode folds the per-pair exclusion
+            // scale into the evaluator. rq-fa0b3d10
+            let use_exclusion_bitmask =
+                matches!(neighbor_list_config, NeighborListConfig::CellList { .. });
             Some(JitComposedPairForce::compile_and_load(
                 &device,
                 &jit_fragments,
                 jit_max_cutoff,
+                use_exclusion_bitmask,
             )?)
         };
         // JIT compose the fast-class bonded module.
@@ -1130,7 +1164,6 @@ impl ForceField {
             unsafe {
                 jit.launch(n_iblocks, write_scalars, launch_builder)?;
             }
-            timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
 
             // Sparse-tile single-pair pass. The neighbour-list builder
             // routes (i-block, j-block) candidates with
@@ -1173,6 +1206,45 @@ impl ForceField {
                     }
                 }
             }
+
+            // Correction pass. One thread per modified pair over the fixed
+            // modified-pair list; adds each fragment's
+            // `(exclusion_scale - 1) x evaluate`, so summed with the
+            // full-strength contribution the bulk / single-pair passes
+            // already added, the net is `scale x evaluate`. Neighbour-mode
+            // independent; runs whenever any pair is modified. rq-fa0b3d10
+            let modified_opt = self
+                .neighbor_list
+                .as_ref()
+                .map(|nl| (nl.modified_pairs_device(), nl.n_modified()));
+            if let Some((modified_pairs, n_modified)) = modified_opt {
+                if n_modified > 0 {
+                    let mut correct_builder = ForceLaunchBuilder::new();
+                    correct_builder.push_device_buffer(&buffers.posq);
+                    correct_builder.push_device_buffer(&buffers.type_indices);
+                    correct_builder.push_device_buffer(modified_pairs);
+                    correct_builder.push_scalar(n_modified);
+                    correct_builder.push_device_buffer(sim_box.lattice_device());
+                    correct_builder.push_device_buffer(&self.fast_total_forces_fp_x);
+                    correct_builder.push_device_buffer(&self.fast_total_forces_fp_y);
+                    correct_builder.push_device_buffer(&self.fast_total_forces_fp_z);
+                    correct_builder
+                        .push_device_buffer(&self.fast_total_potential_energies_fp);
+                    correct_builder.push_device_buffer(&self.fast_total_virials_fp);
+                    for &slot_idx in &self.jit_slot_indices {
+                        self.pair_force_participant(slot_idx)
+                            .bind_pair_force_args(&bind_ctx, &mut correct_builder);
+                    }
+                    correct_builder.push_scalar(n as u32);
+                    unsafe {
+                        jit.launch_correction(n_modified, write_scalars, correct_builder)?;
+                    }
+                }
+            }
+            // The JIT_COMPOSED_PAIR_FORCE stage spans all three fast-class
+            // pair-force passes (bulk, single-pair, correction), so it
+            // reflects the whole pair-force cost per step.
+            timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
 
             // Finalize: convert fixed-point sums to Real and add into
             // the existing fast-class Real accumulator buffers.

@@ -372,7 +372,9 @@ fn single_scale_form_sets_both_lj_and_coul_scales_equally() {
     assert_eq!(el.entries[0].scale_coul, 0.5);
 }
 
-// rq-1fde7
+// rq-1fde7 rq-ea4617e1
+// A fractional four-column exclusion (LJ 0.5, Coulomb 0.833) loads
+// without error and records the two per-fragment scales independently.
 #[test]
 fn four_column_form_sets_lj_and_coul_scales_independently() {
     let dir = tmp_path("four_col");

@@ -230,10 +230,29 @@ The host `[f32; 6]` lattice fields and the device-resident
   The generation counter tracks every change to the lattice — both
   host-initiated writes (`set_lattice`, `rescale_isotropic`) and
   device-initiated writes (`lattice_device_mut`,
-  `multiply_lattice_isotropic`). Downstream slots (the neighbor list's
-  cached cell layout, the SPME reciprocal slot's cached influence
-  function) refresh when the generation differs from their cached
-  value; they never query the host lattice fields directly.
+  `multiply_lattice_isotropic`). Downstream slots refresh when the
+  generation differs from their cached value.
+
+  What they refresh *from* is not uniform, and the difference is
+  load-bearing:
+
+  - The SPME reciprocal slot recomputes its influence function from the
+    **device** lattice, so a device-initiated write is enough.
+  - The neighbor list's cached cell layout derives its integer cell
+    counts from the **host** widths
+    (`compute_cell_layout` → `perpendicular_widths()`). A
+    device-initiated write leaves those stale.
+
+  So a device-initiated write is *not* self-sufficient: a caller that
+  mutates the lattice on device and then drives a force evaluation
+  before the runner's next flush must call `flush_from_device` in
+  between. The Monte-Carlo barostat is exactly that caller — its trial
+  move scales the box and evaluates the trial energy within a single
+  `apply_move` — and it flushes accordingly
+  (`integration/mc-barostat.md`, step 6). Per-step barostats
+  (Berendsen, c-rescale, MTK) scale by a factor within an ULP or two of
+  1 each step, so a one-step-stale host width cannot change an integer
+  cell count; they rely on the runner's once-per-output-row flush.
 
 Kernels that *read* the lattice (LJ, Coulomb, SPME real, SPME force
 gather, SPME influence recompute, neighbor-list build, position drift,

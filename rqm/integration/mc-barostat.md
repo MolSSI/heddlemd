@@ -31,6 +31,22 @@ internal coordinates — and therefore the intramolecular and constraint
 energies — invariant. The molecules the barostat scales are the
 connectivity-derived `MoleculeList` described in `forces/topology.md`.
 
+Leaving the internal coordinates invariant takes more than translating a
+molecule's atoms by a common vector, because the atoms are stored wrapped
+into the primary image: a molecule straddling a box face has its atoms on
+opposite sides, so its true bond vector is the raw coordinate difference
+*plus a box vector*, and every consumer (SETTLE, the exclusion
+correction, the pair kernel) recovers it by minimum image against the box
+it is handed. A common translation preserves the raw differences but not
+the reconstruction: rescale the box to `L'` and the same atoms now
+reconstruct to a bond that is off by `ΔL`. The scale kernel therefore
+reconstructs each molecule contiguously under the **pre-scale** box,
+translates it, and re-wraps under the **post-scale** box, so the internal
+geometry is carried through exactly. (Getting this wrong is not a small
+error: for rigid SPC/E water the distorted pairs carry ±0.85/±0.42 e at
+~1 Å, and the spurious energy is systematic in `ΔL` — it always favours
+expansion, so the box runs away without bound.)
+
 The barostat preserves velocities exactly (a volume move is a
 configurational Monte-Carlo move; it never touches `velocities_*`) and
 uses a counter-based Philox-4×32-10 RNG with two uniform draws per
@@ -166,10 +182,16 @@ For each invocation:
    with `accepted = false` and no trial energy is evaluated. It counts as
    an attempted move. (An expanding move always passes this guard.)
 
-6. **Apply the trial.** Multiply all six lattice parameters by `scale`
-   (`sim_box.multiply_lattice_isotropic(scale)`; bumps the generation),
-   and scale every molecule's centre of mass by `scale` with the
-   `mc_barostat_scale_molecule_com` kernel.
+6. **Apply the trial.** Scale every molecule's centre of mass by `scale`
+   with the `mc_barostat_scale_molecule_com` kernel, **then** multiply all
+   six lattice parameters by `scale`
+   (`sim_box.multiply_lattice_isotropic(scale)`; bumps the generation) and
+   flush the host mirror, which that call leaves stale.
+
+   The order matters: the kernel must be handed the *pre-scale* lattice,
+   since it reconstructs each molecule contiguously under the old box and
+   re-wraps under the new one (which it derives from `scale` itself). See
+   *Why centre-of-mass scaling* above.
 
    The kernel computes each molecule's mass-weighted centre of mass by
    reconstructing the molecule as a contiguous rigid body about a
@@ -188,11 +210,30 @@ For each invocation:
    Each molecule's atoms are then translated rigidly by
    `(scale − 1) · COM_molecule`, so the molecular centre of mass scales
    about the origin while every intramolecular displacement is unchanged.
-   The fractional coordinates of each molecule's centre of mass are
-   invariant under the joint box-and-position scale, so no PBC wrap is
-   applied and image flags carry over unchanged; a subsequent integration
-   step re-wraps any atom the translation carried outside the primary
-   image.
+
+   "Unchanged" is a claim about the molecule's *reconstructed* geometry,
+   and it is not free. The atoms are stored wrapped into the primary
+   image, so a molecule straddling a box face has its atoms in different
+   images: their true separation is the stored difference plus an image
+   offset `k · L`. Translating both atoms by a common vector preserves the
+   stored difference — but the box is scaled at the same time, so the
+   offset becomes `k · (scale · L)` and the reconstructed bond is
+   stretched by `(scale − 1) · k · L`. The kernel therefore writes back the
+   *reconstructed* position (`ref + d_i + shift`, with `d_i` the
+   minimum-image displacement under the **pre-scale** box) and re-wraps it
+   under the **post-scale** box, which it derives from `scale`. Wrapping
+   adds integer multiples of the new box vectors, which every consumer's
+   minimum-image step undoes exactly, so `d_i` survives the move intact.
+
+   This is why the kernel runs *before* `multiply_lattice_isotropic`: it
+   needs the pre-scale lattice to reconstruct against. Skipping the
+   reconstruction is a silent, systematic error — it is odd in
+   `(scale − 1)`, so expansion stretches and contraction compresses, which
+   biases every Metropolis test in the same direction and walks the box
+   away without bound. Regression test:
+   `com_uses_min_image_for_boundary_straddling_molecule`, which judges the
+   moved molecule in the *scaled* box (judging it in the pre-move box
+   cannot see the defect).
 
 7. **Trial energy.** Evaluate the force field at the trial configuration
    with `force_field.step(buffers, sim_box, timings,

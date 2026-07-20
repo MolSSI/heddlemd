@@ -2172,7 +2172,7 @@ tau = 1.0e-13"#,
     // params carry the optional fields at their default values.
     assert_eq!(t.params.get("chain_length").and_then(|v| v.as_integer()), Some(3));
     assert_eq!(t.params.get("yoshida_order").and_then(|v| v.as_integer()), Some(3));
-    assert_eq!(t.params.get("n_resp").and_then(|v| v.as_integer()), Some(1));
+    assert_eq!(t.params.get("n_resp").and_then(|v| v.as_integer()), Some(5));
 }
 
 #[test]
@@ -4917,16 +4917,16 @@ r_switch = 9.0e-10
 
 // --- Thermostat coupling_interval ---
 
-// rq-732daa1b — the kind-agnostic coupling_interval defaults to 1 when a
+// rq-732daa1b — the kind-agnostic coupling_interval defaults to 25 when a
 // thermostat section omits it.
 #[test]
-fn thermostat_coupling_interval_defaults_to_one() {
+fn thermostat_coupling_interval_defaults_to_twenty_five() {
     let dir = tmp_path("coupling_default");
     let body = minimal_config()
         + "\n[phase.thermostat]\nkind = \"csvr\"\ntemperature = 300.0\ntau = 1.0e-13\nseed = 42\n";
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.phases[0].as_md().unwrap().coupling_interval, 1);
+    assert_eq!(cfg.phases[0].as_md().unwrap().coupling_interval, 25);
     // The peeled field is not left in the thermostat's params.
     let t = cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap();
     assert!(t.params.get("coupling_interval").is_none());

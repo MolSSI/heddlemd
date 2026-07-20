@@ -6,48 +6,65 @@ thermostat slots (see `framework.md`); selected by
 `kind = "andersen"` in the config's `[thermostat]` section.
 
 The thermostat runs once per timestep, as a post-only hook
-(`apply_post`); its `apply_pre` is the trait default no-op. Every
-particle is independently and randomly assigned a new velocity drawn
-from the Maxwell-Boltzmann distribution at the user-specified
-temperature with probability `p = collision_rate · dt`. Particles
-that are not selected retain the velocity produced by the symplectic
-step. Repeated application produces the canonical distribution
-exactly.
+(`apply_post`); its `apply_pre` is the trait default no-op. Each rigid
+group (the connectivity-derived molecule partition; every atom is its own
+group on an unconstrained monatomic run) is independently and randomly
+selected with probability `p = collision_rate · dt`, and a selected
+group's atoms all receive fresh velocities drawn from the
+Maxwell-Boltzmann distribution at the user-specified temperature. Groups
+that are not selected retain the velocity produced by the symplectic step.
+Under holonomic constraints the terminal velocity projection then maps a
+selected group's fresh velocity onto its constraint manifold; the
+whole-group resample is what makes that projection a correct
+constrained-Maxwell-Boltzmann draw (see *Composition with a constraint
+slot*). Repeated application produces the canonical distribution exactly.
 
-The thermostat preserves no momentum: per-particle resampling makes
-each draw independent, so the centre-of-mass momentum drifts
-stochastically. Time-correlation functions are distorted by the
-collisions in proportion to `collision_rate`. Andersen is the
-strongest sampler in the registry — it converges to the canonical
-distribution from any starting condition — and the weakest at
-preserving the underlying dynamics.
+The thermostat preserves no momentum: a resampled group's centre-of-mass
+momentum is drawn afresh, so the total centre-of-mass momentum drifts
+stochastically. Time-correlation functions are distorted by the collisions
+in proportion to `collision_rate`. Andersen is the strongest sampler in
+the registry — it converges to the canonical distribution from any
+starting condition — and the weakest at preserving the underlying
+dynamics.
 
 ## Algorithm <!-- rq-e15cc5ac -->
 
 The thermostat is invoked through `apply_post(buffers, dt, timings)`
-after the integrator's `step()` returns. The integrator has already
-completed its velocity-Verlet substeps; the thermostat operates on
-the post-step velocities. For each invocation with timestep `dt`:
+at the runner's post-force-marker boundary. The integrator has already
+completed its velocity-Verlet substeps, including the trailing kick, and
+on a constrained run the runner has already projected the velocities back
+onto the constraint manifold
+(`Constraint::apply_after_kick`, see
+`constraint-framework.md`). Andersen does not couple to the global
+kinetic energy at all — it resamples velocities from Maxwell-Boltzmann —
+so that leading projection does not change what the thermostat couples
+to; it does mean the `K_old` reduction below is measured on the projected,
+on-manifold velocities. For each invocation with timestep `dt`:
 
 1. Compute the instantaneous kinetic energy `K_old` via the shared
    `compute_kinetic_energy` helper (`nose-hoover-chain.md`).
-2. For each particle `i`:
-   - Draw a uniform `U_i ∈ (0, 1)` from a counter-based Philox-4×32-10
-     stream (see *RNG* below).
-   - If `U_i < p` where `p = clamp(collision_rate · dt, 0, 1)`:
-     replace the particle's velocity with a fresh Maxwell-Boltzmann
-     sample at temperature `T`:
+2. For each **rigid group** `G` — the connectivity-derived molecule
+   partition of `forces/topology.md` (a monatomic run's groups are all
+   singletons):
+   - Draw a uniform `U_G ∈ (0, 1)` from a counter-based Philox-4×32-10
+     stream keyed on the group's lowest-indexed atom (see *RNG* below).
+   - If `U_G < p` where `p = clamp(collision_rate · dt, 0, 1)`:
+     replace the velocity of **every atom** of `G` with a fresh
+     Maxwell-Boltzmann sample at temperature `T`:
      `v_i ← σ_i · (ξ_x, ξ_y, ξ_z)` with `σ_i = sqrt(T / m_i)` (`k_B = 1`
      in the engine's atomic units; `T` carries `k_B · T` in Hartrees)
      and `ξ_a ~ N(0, 1)` independently per axis.
-   - Otherwise leave `v_i` unchanged.
+   - Otherwise leave every atom of `G` unchanged.
 3. Compute the instantaneous kinetic energy `K_new` via the same
    helper, and update the running
    `cumulative_injection += K_new − K_old`. Used by the
    `andersen_conserved` log column.
 
-The per-particle resampling runs as the standalone
-`andersen_resample` kernel launched from `apply_post`. Like every
+The collision decision and resample are **per group**, not per atom, and
+this is required for correctness under holonomic constraints — see
+*Composition with a constraint slot*. The resampling runs as the
+standalone `andersen_resample_grouped` kernel launched from
+`apply_post`. Like every
 thermostat, Andersen runs its post-force work as standalone launches on
 coupling steps (`framework.md`, `docs/architecture.md`); it is never
 part of a composed kernel. All of the thermostat's work — including a
@@ -69,6 +86,54 @@ and its collision probability uses the effective timestep
 `dt_couple = coupling_interval · dt`, so resampling less often raises
 the per-attempt collision probability correspondingly.
 
+### Composition with a constraint slot <!-- rq-225a5959 -->
+
+**The collision must resample a whole rigid group at a time.** A rigid
+group's equilibrium velocity distribution is not the full 3-per-atom
+Maxwell-Boltzmann — it is that distribution restricted to the group's
+velocity manifold (the subspace where every constraint's time derivative
+is zero). The correct way to draw from it is to draw a full,
+unconstrained Maxwell-Boltzmann velocity for the whole group and project
+that onto the manifold: a mass-metric orthogonal projection of an
+isotropic Gaussian onto the `D`-dimensional manifold has expected kinetic
+energy `(D/2) · k_B T`, which is exactly the manifold's equipartition, so
+the projected draw is the constrained-Maxwell-Boltzmann sample. Resampling
+**all** of a group's atoms and letting the step's terminal velocity
+projection map the result onto the manifold does precisely this.
+
+Resampling a *single* atom of a group does not. The fresh single-atom
+velocity is combined with the group's other, unchanged (already
+on-manifold) velocities, and the projection of that mixed state is not a
+draw from the manifold-Maxwell-Boltzmann: part of the injected energy
+lands in the constrained directions and the projection discards it, so
+the fixed point of the sparse single-atom process runs cold. The deficit
+shrinks as the collision rate rises — as more of a group's atoms are
+resampled per step the process approaches the whole-group resample, and
+at the massive limit (`p = 1`, every atom every step) the two coincide
+and the temperature is correct. A correct thermostat must hit its
+setpoint at *every* coupling rate, so the per-group resample is the
+required form; the per-atom form is a rate-dependent bug.
+
+The plan's terminal `ConstraintPoint { AfterKick }` — which runs *after*
+`apply_post` (see `framework.md`, *Per-Step Interface*) — is what applies
+the manifold projection, and a constrained Andersen run depends on it
+(RATTLE-last; see `constraint-framework.md`). It is load-bearing for
+Andersen in a way it is not for the uniform-rescale thermostats: a global
+rescale `v ← α · v` commutes with the projection (it scales the
+constrained-direction components the leading projection has already
+zeroed, so the terminal projection is a no-op for CSVR, Berendsen, and
+NHC), whereas a fresh group resample has a generically non-zero
+component along the group's constrained directions and must be projected
+back.
+
+That repair projection applies a real impulse, and the constraint virial
+of that impulse is **dropped**: the terminal hook does not publish, so
+only the leading projection's virial (published before the barostat reads
+it) enters the pressure. This is an accepted approximation. The impulse
+answers a stochastic velocity resample rather than a physical force, so it
+carries no meaningful contribution to the mechanical pressure of the
+system.
+
 ## Per-Step Kernel Sequence <!-- rq-7843f188 -->
 
 On a coupling step the Andersen thermostat's `apply_post` runs the
@@ -77,7 +142,7 @@ following in fixed order, all as its own kernel launches:
 | Order | Step      | Kernel / call           | Operation                                            | Stage label           |
 | ----- | --------- | ----------------------- | ---------------------------------------------------- | --------------------- |
 | 1     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_old`                            | `KineticEnergyReduce` |
-| 2     | Resample  | `andersen_resample`     | per-particle Bernoulli + Maxwell-Boltzmann draw      | `AndersenResample`    |
+| 2     | Resample  | `andersen_resample_grouped` | per-group Bernoulli + whole-group Maxwell-Boltzmann draw | `AndersenResample` |
 | 3     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_new`                            | `KineticEnergyReduce` |
 
 All three steps run inside `apply_post`. `kinetic_energy_reduce` is
@@ -88,19 +153,34 @@ sequence.
 
 ### Resample Kernel <!-- rq-a060db3f -->
 
-`andersen_resample` is a per-particle kernel (block 256, grid
-`ceil(n/256)`) owned by this slot. Each thread:
+`andersen_resample_grouped` is a per-group kernel (block 256, grid
+`ceil(n_groups / 256)`) owned by this slot. Each thread handles one rigid
+group of the connectivity-derived molecule partition (uploaded once at
+phase setup by `Thermostat::init_run`; singletons for a run with no bonds
+and no constraints). Each thread:
 
-- performs a Bernoulli draw against the clamped collision probability
-  `p_collision`; if the particle is selected, draws three Gaussian
-  samples scaled by `sqrt(kT / masses[i])` and writes the new velocity
-  components, using a slot-prefixed `__device__` Philox routine;
+- performs one Bernoulli draw against the clamped collision probability
+  `p_collision`, keyed on the group's lowest-indexed atom's stable
+  particle id; if the group is selected, resamples **every** atom of the
+  group, drawing three Gaussians per atom scaled by `sqrt(kT / masses[a])`
+  keyed on that atom's stable id, using a slot-prefixed `__device__`
+  Philox routine;
 - the kernel increments the device draw counter exactly once per launch
-  (via a single thread in the first block), so repeated launches
-  consume disjoint, reproducible Philox streams.
+  (via a single thread in the first block), so repeated launches consume
+  disjoint, reproducible Philox streams.
 
-Its arguments are the slot's `draw_counter_device` buffer, `seed`,
-`p_collision` (clamped to `[0, 1]`), and `kT`.
+Keying the per-atom Gaussians on each atom's stable id, and the group
+decision on the group's lowest stable id, makes the resample independent
+of the neighbour-list atom ordering and bit-identical run to run. For a
+singleton group the decision and the draw are keyed on that atom's own id,
+so the grouped kernel is bit-identical to a per-atom resample on an
+unconstrained run.
+
+Its arguments are the group tables (`mol_atom_offsets`,
+`mol_atom_indices`, `n_groups`), the slot's `draw_counter_device` buffer,
+`seed`, `p_collision` (clamped to `[0, 1]`), and `kT`. A separate
+per-particle `andersen_resample` kernel exists for direct kernel-level
+tests but is not on the thermostat's per-step path.
 
 ## Parameters <!-- rq-eb0bc993 -->
 
@@ -111,8 +191,10 @@ The matching builder deserialises a typed `AndersenParams` from the `[thermostat
   Required. Finite and strictly positive. Independent of
   `simulation.temperature`, which governs the initial-velocity
   sampler.
-- `collision_rate: f64` — per-particle stochastic collision frequency
-  `ν` in inverse atomic time units (`1 / (hbar / E_h)`). Required.
+- `collision_rate: f64` — the stochastic collision frequency `ν` in
+  inverse atomic time units (`1 / (hbar / E_h)`), at which each rigid group
+  (each atom, on a monatomic run) is independently selected for a resample.
+  Required.
   Finite and `≥ 0` (`0` degenerates to NVE — no resampling — and is
   permitted as a diagnostic mode). Typical values for liquid water are
   `10¹¹–10¹² s⁻¹`, i.e. `~2.4e-6 – 2.4e-5` in atomic units (collision
@@ -168,9 +250,10 @@ decisions and produce byte-identical post-step velocities.
 Two runs with identical `(seed, temperature, collision_rate)` and
 identical initial particle state on the same GPU produce
 byte-identical trajectory and log files. Philox is stateless; the
-per-particle Bernoulli decision is a pure function of `(seed,
-draw_counter, particle_id)`; and the Maxwell-Boltzmann draws use the
-same per-axis convention as `langevin-baoab.md`.
+per-group Bernoulli decision is a pure function of `(seed, draw_counter,
+group's first atom's particle_id)` and each atom's Maxwell-Boltzmann draw a
+pure function of `(seed, draw_counter, particle_id)`, using the same
+per-axis convention as `langevin-baoab.md`.
 
 ## Andersen conserved quantity <!-- rq-bfa0cc5a -->
 
@@ -230,6 +313,10 @@ above.
     kinetic-energy reduction; reused across calls.
   - `most_recent_ke: f64` — last kinetic energy computed during the
     current `apply_post` invocation.
+  - `mol_atom_offsets: CudaSlice<u32>`, `mol_atom_indices: CudaSlice<u32>`,
+    `n_groups: usize` — the rigid-group partition the grouped resample
+    kernel walks. Constructed as singletons (`n_groups == particle_count`)
+    and replaced by the connectivity-derived partition in `init_run`.
 
   All fields private; the slot's public surface is the `Thermostat`
   trait methods and construction via `AndersenBuilder`. The
@@ -251,25 +338,55 @@ declared in `framework.md`:
 - `log_column_names() -> &'static ["andersen_conserved"]`. <!-- rq-1163481e -->
 - `log_column_values(ke, pe) -> vec![ke + pe − cumulative_injection]`. <!-- rq-6d2daea0 -->
 
+It also overrides `init_run(&MoleculeList)` to upload the
+connectivity-derived rigid-group partition (`mol_atom_offsets`,
+`mol_atom_indices`, `n_groups`) that the grouped resample kernel walks.
+The runner calls it once at phase setup, with the same `MoleculeList` it
+hands the barostat.
+
 `apply_pre` is left at its trait default (no-op).
 
 ### CUDA Kernels <!-- rq-b7c6d7d8 -->
 
-`kernels/andersen.cu` declares one `extern "C"` kernel and
+`kernels/andersen.cu` declares two `extern "C"` kernels and
 `#include`s `kernels/philox.cuh` for the shared Philox device-side
-helpers:
+helpers. The thermostat launches the grouped kernel; the per-particle
+kernel is retained for direct kernel-level tests.
 
 ```c
-extern "C" __global__ void andersen_resample(
-    float *velocities_x, float *velocities_y, float *velocities_z,
-    const float *masses,
+// Per-group resample — the one the thermostat launches. One thread per group.
+extern "C" __global__ void andersen_resample_grouped(
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
+    const Real *masses,
     const unsigned int *particle_ids,
+    const unsigned int *mol_atom_offsets,   // length n_groups + 1
+    const unsigned int *mol_atom_indices,   // length N, storage indices per group
+    const unsigned long long *draw_counter,
     unsigned int seed_lo, unsigned int seed_hi,
-    unsigned int draw_counter_lo, unsigned int draw_counter_hi,
-    float p_collision,        // clamped to [0, 1] by the host
-    float kt,                 // k_B * temperature, in J
+    Real p_collision,         // clamped to [0, 1] by the host
+    Real kt,                  // k_B * temperature, atomic units
+    unsigned int n_groups);
+
+// Per-particle resample — retained for kernel-level tests.
+extern "C" __global__ void andersen_resample(
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
+    const Real *masses,
+    const unsigned int *particle_ids,
+    const unsigned long long *draw_counter,
+    unsigned int seed_lo, unsigned int seed_hi,
+    Real p_collision,
+    Real kt,
     unsigned int n);
 ```
+
+The grouped kernel maps one thread to each group
+`g = blockIdx.x · blockDim.x + threadIdx.x` (returning if `g ≥ n_groups`),
+reads the group's atom slice `[mol_atom_offsets[g], mol_atom_offsets[g+1])`
+from `mol_atom_indices`, makes one Bernoulli draw keyed on the group's
+first atom's `particle_id` (draw kind 3), and on a hit resamples every
+atom of the group, each atom's three Gaussians keyed on that atom's own
+`particle_id` (draw kinds 0/1/2). The per-particle kernel below is the
+singleton case of this. Its per-thread logic:
 
 Each thread maps to one particle `i = blockIdx.x · blockDim.x +
 threadIdx.x`. If the index is `≥ n` the thread returns. Otherwise:
@@ -626,4 +743,38 @@ Feature: Andersen stochastic thermostat
     When thermostat.apply_post(...) is called once
     Then the sample variance of each velocity component
       is within 5% of k_B · T / m
+
+  # --- Per-group resampling ---
+
+  @rq-19a0f468
+  Scenario: A group resamples all its atoms or none of them
+    Given 512 rigid groups of 3 atoms, all velocities set to a sentinel
+    And group tables offsets [0,3,6,...] and indices [0,1,2,...]
+    When andersen_resample_grouped is launched with p_collision = 0.5
+    Then within every group either all three atoms changed or none did
+    And at least one group fired and at least one group did not
+
+  @rq-172d6d41
+  Scenario: The grouped kernel with singletons matches the per-particle kernel
+    Given an N-particle unconstrained system and a singleton partition
+      (offsets [0,1,2,...,N], indices [0,1,...,N-1])
+    When andersen_resample_grouped and andersen_resample are each launched
+      with the same seed, draw_counter, p_collision, and kt on identical inputs
+    Then the post-call velocities agree byte-for-byte
+
+  @rq-9642e7c7
+  Scenario: An unconstrained monatomic run reaches its setpoint at every collision rate
+    Given a Lennard-Jones argon fluid with an Andersen thermostat at T_set
+    When it is run to steady state at collision_rate 1e12 and 1e14 /s
+    Then the mean temperature is within 3% of T_set at both rates
+
+  # --- Correctness under constraints ---
+
+  @rq-5d1345d0
+  Scenario: A constrained rigid-water run reaches its setpoint at every collision rate
+    Given dense rigid SPC/E water under SETTLE with an Andersen thermostat at T_set
+    When it is run to steady state at collision_rate 2e12, 1e13, and 5e13 /s
+    Then the mean temperature is within 3% of T_set at every rate
+    # A per-atom resample would run cold at low rate and approach T_set only
+    # toward the massive limit; the per-group resample is rate-independent.
 ```

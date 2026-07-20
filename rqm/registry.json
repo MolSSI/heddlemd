@@ -606,7 +606,16 @@
     "decl": "## Exclusion Handling",
     "file": "forces/packed-neighbour-pair-force",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Exclusion Handling",
     "type": "section"
   },
@@ -706,6 +715,13 @@
     ],
     "title": "Two independent calls produce byte-identical accumulators",
     "type": "scenario"
+  },
+  "rq-04d04426": {
+    "decl": "- `SlotCase` — one row of a conformance table.",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "SlotCase",
+    "type": "api-item"
   },
   "rq-04fda32f": {
     "decl": "Scenario: Explicit init velocities override sampled velocities",
@@ -937,6 +953,18 @@
     "title": "Reject [constraints] with an integrator that does not support them",
     "type": "scenario"
   },
+  "rq-064d2401": {
+    "decl": "Scenario: The scalar virial is invariant under the splitting parameter",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The scalar virial is invariant under the splitting parameter",
+    "type": "scenario"
+  },
   "rq-06772617": {
     "decl": "Scenario: Reject non-positive compressibility",
     "file": "integration/berendsen-barostat",
@@ -1055,6 +1083,13 @@
     ],
     "title": "Barostat",
     "type": "api-item"
+  },
+  "rq-077f82c6": {
+    "decl": "Scenario: Correction pass takes the min-image path",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Correction pass takes the min-image path",
+    "type": "scenario"
   },
   "rq-077fb357": {
     "decl": "Scenario: Dihedral composed module is compiled at ForceField::new when at least one dihedral slot is active",
@@ -1438,6 +1473,14 @@
     ],
     "title": "ShakeConstraintsState::new rejects a constraint with i == j",
     "type": "scenario"
+  },
+  "rq-0a0d6c8f": {
+    "decl": "### Stability and the initial condition",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "Stability and the initial condition",
+    "type": "section"
   },
   "rq-0a18c7c2": {
     "decl": "Scenario: Missing temperature rejected",
@@ -1862,6 +1905,14 @@
     "refs": [],
     "title": "__device__",
     "type": "api-item"
+  },
+  "rq-0d1e3b7a": {
+    "decl": "### erf evaluation",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "erf evaluation",
+    "type": "section"
   },
   "rq-0d413b82": {
     "decl": "Scenario: mtk_velocity_half_kick with exp_minus_alpha=1.0, phi_v_dt_half=0.5 reduces to a half-VV kick",
@@ -2877,6 +2928,14 @@
     "title": "Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
     "type": "scenario"
   },
+  "rq-12d901cf": {
+    "decl": "## Conformance Is Not Waivable",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Conformance Is Not Waivable",
+    "type": "section"
+  },
   "rq-13070c27": {
     "decl": "- `__device__ __forceinline__ Real Real_fabs(Real x);`",
     "file": "precision",
@@ -3123,6 +3182,13 @@
     "title": "device() returns the Arc<CudaDevice> the box was constructed against",
     "type": "scenario"
   },
+  "rq-14b1bb15": {
+    "decl": "- `run_barostat_case(case: &SlotCase)` — writes and runs the dense-water preset",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "run_barostat_case",
+    "type": "api-item"
+  },
   "rq-14b8e042": {
     "decl": "Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces",
     "file": "performance-analysis",
@@ -3359,6 +3425,13 @@
     "title": "find_blocks_with_interactions",
     "type": "api-item"
   },
+  "rq-16c7957d": {
+    "decl": "Scenario: The leading publish precedes the per-step barostat's virial reduction",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "The leading publish precedes the per-step barostat's virial reduction",
+    "type": "scenario"
+  },
   "rq-16dc6d77": {
     "decl": "Scenario: step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
     "file": "forces/jit-composed-pair-force",
@@ -3371,6 +3444,18 @@
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
     "title": "step() with two bonded slots launches the bonded composed kernel twice",
+    "type": "scenario"
+  },
+  "rq-17119008": {
+    "decl": "Scenario: Every registered thermostat has a conformance case",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Every registered thermostat has a conformance case",
     "type": "scenario"
   },
   "rq-1727d6bd": {
@@ -3393,6 +3478,18 @@
     ],
     "title": "`kinetic_energy_reduce`",
     "type": "section"
+  },
+  "rq-172d6d41": {
+    "decl": "Scenario: The grouped kernel with singletons matches the per-particle kernel",
+    "file": "integration/andersen",
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The grouped kernel with singletons matches the per-particle kernel",
+    "type": "scenario"
   },
   "rq-174505f0": {
     "decl": "### Counter packing",
@@ -3749,6 +3846,18 @@
     "title": "Device-resident lattice mirror",
     "type": "section"
   },
+  "rq-1987903e": {
+    "decl": "Scenario: A diverging slot is reported as divergence, not as a bad mean",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A diverging slot is reported as divergence, not as a bad mean",
+    "type": "scenario"
+  },
   "rq-19916fb0": {
     "decl": "- `rescale_positions(buffers: &mut ParticleBuffers, factor: f32) -> Result<(), GpuError>`",
     "file": "integration/berendsen-barostat",
@@ -3760,6 +3869,18 @@
     ],
     "title": "rescale_positions",
     "type": "api-item"
+  },
+  "rq-19a0f468": {
+    "decl": "Scenario: A group resamples all its atoms or none of them",
+    "file": "integration/andersen",
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A group resamples all its atoms or none of them",
+    "type": "scenario"
   },
   "rq-19c1c994": {
     "decl": "## Minimal Systems",
@@ -3826,6 +3947,14 @@
     ],
     "title": "Missing pressure rejected",
     "type": "scenario"
+  },
+  "rq-1a32807d": {
+    "decl": "## Out of Scope",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-1a3ec0c8": {
     "decl": "- `SimulationBox::fractional_coords(&self, position: [f32; 3]) -> [f32; 3]`",
@@ -4575,6 +4704,13 @@
     "title": "A settle [constraints] row with the wrong atom count is rejected by the parser",
     "type": "scenario"
   },
+  "rq-1ead4839": {
+    "decl": "Scenario: SD accepted trial that crosses a face wraps positions and advances images",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD accepted trial that crosses a face wraps positions and advances images",
+    "type": "scenario"
+  },
   "rq-1eaff437": {
     "decl": "Scenario: collision_rate = 0 leaves velocities unchanged by the resample",
     "file": "integration/andersen",
@@ -4585,6 +4721,18 @@
       }
     ],
     "title": "collision_rate = 0 leaves velocities unchanged by the resample",
+    "type": "scenario"
+  },
+  "rq-1eb2642b": {
+    "decl": "Scenario: The density check accepts a conforming density",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The density check accepts a conforming density",
     "type": "scenario"
   },
   "rq-1ed32e10": {
@@ -5215,6 +5363,14 @@
     "title": "Config angle_type with an unclaimed kind is rejected",
     "type": "scenario"
   },
+  "rq-225a5959": {
+    "decl": "### Composition with a constraint slot",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "Composition with a constraint slot",
+    "type": "section"
+  },
   "rq-22755b52": {
     "decl": "### Schema",
     "file": "analysis/framework",
@@ -5531,7 +5687,7 @@
     "type": "anchor"
   },
   "rq-24e3c49a": {
-    "decl": "Scenario: The AfterKick projection fires after the per-step barostat rescale (RATTLE-last)",
+    "decl": "Scenario: The terminal repair projection fires after the per-step barostat rescale (RATTLE-last)",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -5539,7 +5695,7 @@
         "kind": "code"
       }
     ],
-    "title": "The AfterKick projection fires after the per-step barostat rescale (RATTLE-last)",
+    "title": "The terminal repair projection fires after the per-step barostat rescale (RATTLE-last)",
     "type": "scenario"
   },
   "rq-24f280af": {
@@ -5758,6 +5914,13 @@
     "title": "scatter places each atom inside its cell's slice",
     "type": "scenario"
   },
+  "rq-26734dec": {
+    "decl": "Scenario: Modified pairs in the neighbour-list output are unique",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Modified pairs in the neighbour-list output are unique",
+    "type": "scenario"
+  },
   "rq-2674f18a": {
     "decl": "Scenario: Explicit `trajectory` overrides phase-derived default",
     "file": "analysis/framework",
@@ -5821,7 +5984,16 @@
     "decl": "### Slot eligibility",
     "file": "cuda-graphs",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slot eligibility",
     "type": "section"
   },
@@ -5845,7 +6017,7 @@
     "type": "scenario"
   },
   "rq-26dce0f6": {
-    "decl": "Scenario: A phase without a barostat captures both graphs",
+    "decl": "Scenario: A thermostatted phase without a per-step barostat captures all four cells",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -5857,7 +6029,7 @@
         "kind": "code"
       }
     ],
-    "title": "A phase without a barostat captures both graphs",
+    "title": "A thermostatted phase without a per-step barostat captures all four cells",
     "type": "scenario"
   },
   "rq-26ff4aea": {
@@ -5958,6 +6130,18 @@
     ],
     "title": "run_step",
     "type": "api-item"
+  },
+  "rq-27add068": {
+    "decl": "Scenario: A per-fragment exclusion applies each fragment's scale independently",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A per-fragment exclusion applies each fragment's scale independently",
+    "type": "scenario"
   },
   "rq-27b28332": {
     "decl": "Scenario: entry_point_args are generated from the slot's argument schema",
@@ -6439,6 +6623,14 @@
     "title": "SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
     "type": "scenario"
   },
+  "rq-2aea3450": {
+    "decl": "## Feature API",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-2af44cf4": {
     "decl": "Scenario: Per-step loop computes ForcesAndScalars on a log step",
     "file": "cuda-graphs",
@@ -6510,6 +6702,13 @@
     ],
     "title": "apply",
     "type": "api-item"
+  },
+  "rq-2b42cf54": {
+    "decl": "Scenario: A near-coincident excluded pair tends to the closed-form limit",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "A near-coincident excluded pair tends to the closed-form limit",
+    "type": "scenario"
   },
   "rq-2b4a324a": {
     "decl": "Scenario: Exclusion scale NaN rejected",
@@ -7108,6 +7307,13 @@
     "title": "A group whose declared atoms field exceeds MAX_GROUP_ATOMS is rejected at config load",
     "type": "scenario"
   },
+  "rq-2fa29d25": {
+    "decl": "Scenario: The leading projection fires on a non-coupling step",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "The leading projection fires on a non-coupling step",
+    "type": "scenario"
+  },
   "rq-2fbcb56c": {
     "decl": "Scenario: SettleWater group with the wrong atom count is rejected",
     "file": "integration/constraint-framework",
@@ -7183,6 +7389,18 @@
     ],
     "title": "SlotOutputView",
     "type": "api-item"
+  },
+  "rq-305fefce": {
+    "decl": "Scenario: Rejection cascade shrinks step below STEP_FLOOR and terminates with StepFloor",
+    "file": "minimization/steepest-descent",
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Rejection cascade shrinks step below STEP_FLOOR and terminates with StepFloor",
+    "type": "scenario"
   },
   "rq-306def4b": {
     "decl": "Scenario: Atomic-mode file passes lattice, positions, and velocities through unchanged",
@@ -7649,6 +7867,13 @@
     "title": "Refuse to run with multiple types",
     "type": "scenario"
   },
+  "rq-350b8807": {
+    "decl": "Scenario: A modified pair appears at full strength in the neighbour-list output",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "A modified pair appears at full strength in the neighbour-list output",
+    "type": "scenario"
+  },
   "rq-351976f8": {
     "decl": "Scenario: step() with one dihedral slot launches the dihedral composed kernel once and the reduction once",
     "file": "forces/jit-composed-intramolecular",
@@ -8035,6 +8260,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-37d3cd28": {
+    "decl": "Scenario: The correction pass is skipped when no pair is modified",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "The correction pass is skipped when no pair is modified",
+    "type": "scenario"
+  },
   "rq-37e6f318": {
     "decl": "Scenario: Two independent runs produce byte-identical outputs",
     "file": "integration/velocity-verlet",
@@ -8145,6 +8377,14 @@
     ],
     "title": "Langevin BAOAB rejects friction=0",
     "type": "scenario"
+  },
+  "rq-385abed5": {
+    "decl": "### Mixed-entry Newton's-3rd double-count (FIXED)",
+    "file": "forces/neighbor-list",
+    "level": 3,
+    "refs": [],
+    "title": "Mixed-entry Newton's-3rd double-count (FIXED)",
+    "type": "section"
   },
   "rq-386cfae3": {
     "decl": "Scenario: vv_kick on an empty state is a no-op",
@@ -8282,6 +8522,18 @@
     "title": "Reject when explicit IDs have the wrong length",
     "type": "scenario"
   },
+  "rq-391ed193": {
+    "decl": "Scenario: StepFloor termination is treated as convergence, not error",
+    "file": "minimization/steepest-descent",
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "StepFloor termination is treated as convergence, not error",
+    "type": "scenario"
+  },
   "rq-392ac5d3": {
     "decl": "Scenario: Each constraint group is one molecule",
     "file": "forces/topology",
@@ -8410,6 +8662,13 @@
     "refs": [],
     "title": "Algorithm",
     "type": "section"
+  },
+  "rq-39ce1e28": {
+    "decl": "Scenario: shake_positions writes every atom into the primary image when a correction",
+    "file": "integration/shake",
+    "refs": [],
+    "title": "shake_positions writes every atom into the primary image when a correction",
+    "type": "scenario"
   },
   "rq-3a1eea58": {
     "decl": "Scenario: Scale = 1.0 is equivalent to no exclusion",
@@ -8733,7 +8992,12 @@
     "decl": "## Activation Policy",
     "file": "cuda-graphs",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Activation Policy",
     "type": "section"
   },
@@ -9079,6 +9343,14 @@
     "title": "Append rows in source order",
     "type": "scenario"
   },
+  "rq-3effe629": {
+    "decl": "### Evaluation",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Evaluation",
+    "type": "section"
+  },
   "rq-3f01c746": {
     "decl": "Scenario: bond_type kind with no claiming builder is rejected",
     "file": "io/config-schema",
@@ -9155,6 +9427,18 @@
     ],
     "title": "NamedSlotConfig",
     "type": "api-item"
+  },
+  "rq-3fea9eed": {
+    "decl": "Scenario: Uncharged atoms carry no correction",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Uncharged atoms carry no correction",
+    "type": "scenario"
   },
   "rq-402b55fc": {
     "decl": "- `KernelArgSchema`, `KernelArg`, `KernelArgType`, `KernelArgBinder`,",
@@ -9441,6 +9725,18 @@
     "title": "MoleculeList",
     "type": "api-item"
   },
+  "rq-4240aedb": {
+    "decl": "Scenario: The temperature check rejects a mean far from the setpoint",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The temperature check rejects a mean far from the setpoint",
+    "type": "scenario"
+  },
   "rq-4241d94b": {
     "decl": "## Constraint Handling",
     "file": "minimization/steepest-descent",
@@ -9588,7 +9884,7 @@
     "type": "api-item"
   },
   "rq-44385733": {
-    "decl": "Scenario: ForceField carries no per-excluded-pair state",
+    "decl": "Scenario: ForceField carries the device modified-pair list",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -9596,7 +9892,7 @@
         "kind": "code"
       }
     ],
-    "title": "ForceField carries no per-excluded-pair state",
+    "title": "ForceField carries the device modified-pair list",
     "type": "scenario"
   },
   "rq-443a91da": {
@@ -9831,6 +10127,13 @@
     "refs": [],
     "title": "Constraint Virial",
     "type": "section"
+  },
+  "rq-4625ed82": {
+    "decl": "Scenario: A thermostatted phase does not shorten the displacement-flag cadence",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "A thermostatted phase does not shorten the displacement-flag cadence",
+    "type": "scenario"
   },
   "rq-4656e089": {
     "decl": "## Empty State",
@@ -10244,15 +10547,26 @@
     "type": "section"
   },
   "rq-49f6bbfb": {
-    "decl": "Scenario: A thermostat coupling every step also runs on the per-step path",
+    "decl": "Scenario: A thermostat coupling every step captures only the coupling row",
     "file": "cuda-graphs",
     "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
       {
         "file": "tests/post_force_composition.rs",
         "kind": "code"
       }
     ],
-    "title": "A thermostat coupling every step also runs on the per-step path",
+    "title": "A thermostat coupling every step captures only the coupling row",
+    "type": "scenario"
+  },
+  "rq-49f7f762": {
+    "decl": "Scenario: An entry modified only in its Lennard-Jones scale contributes no Coulomb correction",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "An entry modified only in its Lennard-Jones scale contributes no Coulomb correction",
     "type": "scenario"
   },
   "rq-49fe5f2e": {
@@ -10359,6 +10673,18 @@
     "title": "ParticleBuffers",
     "type": "api-item"
   },
+  "rq-4aad39c8": {
+    "decl": "Scenario: A fractional 1-4 pair nets a scaled force",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fractional 1-4 pair nets a scaled force",
+    "type": "scenario"
+  },
   "rq-4ab1c94e": {
     "decl": "Scenario: A Custom operation reading only base resources always validates",
     "file": "integration/op-model",
@@ -10410,7 +10736,12 @@
   "rq-4b40604b": {
     "decl": "Scenario: Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "type": "scenario"
   },
@@ -10781,6 +11112,14 @@
     "title": "IntegratorStepWithConstraintExt::step_with_constraint installs hooks on a constraint-accepting state",
     "type": "scenario"
   },
+  "rq-4e5d3508": {
+    "decl": "### Coincident and near-coincident pairs",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Coincident and near-coincident pairs",
+    "type": "section"
+  },
   "rq-4e9e09f0": {
     "decl": "Scenario: apply_post launches the expected kernel set",
     "file": "integration/csvr",
@@ -10816,6 +11155,14 @@
       }
     ],
     "title": "Parameters",
+    "type": "section"
+  },
+  "rq-4ef62aca": {
+    "decl": "### Types",
+    "file": "integration/slot-conformance-harness",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
     "type": "section"
   },
   "rq-4ef89c50": {
@@ -11032,6 +11379,13 @@
     "title": "MtkNptIntegrator",
     "type": "api-item"
   },
+  "rq-50967ef2": {
+    "decl": "Scenario: Two GPU runs produce byte-identical forces with exclusions",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Two GPU runs produce byte-identical forces with exclusions",
+    "type": "scenario"
+  },
   "rq-50b50f8d": {
     "decl": "Scenario: flush_from_device refreshes host fields from the device buffer",
     "file": "simulation-box",
@@ -11173,7 +11527,7 @@
     "type": "section"
   },
   "rq-5214bef3": {
-    "decl": "Scenario: Composer emits no exclusion-correction entry points",
+    "decl": "Scenario: Composer emits correction entry points",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -11181,7 +11535,7 @@
         "kind": "code"
       }
     ],
-    "title": "Composer emits no exclusion-correction entry points",
+    "title": "Composer emits correction entry points",
     "type": "scenario"
   },
   "rq-5214e3b3": {
@@ -11564,7 +11918,7 @@
     "type": "section"
   },
   "rq-54aec894": {
-    "decl": "Scenario: Packed-neighbour pass dispatches to the exclusion-scaled evaluator",
+    "decl": "Scenario: Packed-neighbour pass dispatches to the scale-free evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -11572,7 +11926,7 @@
         "kind": "code"
       }
     ],
-    "title": "Packed-neighbour pass dispatches to the exclusion-scaled evaluator",
+    "title": "Packed-neighbour pass dispatches to the scale-free evaluator",
     "type": "scenario"
   },
   "rq-54b99519": {
@@ -11602,6 +11956,13 @@
     "refs": [],
     "title": "run_neighbor_pre_step = false uses the no-neighbor-check force path",
     "type": "scenario"
+  },
+  "rq-550acba3": {
+    "decl": "- `assert_thermostat_coverage(cases: &[SlotCase])` and",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "assert_thermostat_coverage",
+    "type": "api-item"
   },
   "rq-550aebeb": {
     "decl": "### Extra columns",
@@ -12332,6 +12693,13 @@
     "title": "Analyze lint flow",
     "type": "section"
   },
+  "rq-5a708d61": {
+    "decl": "- `check_mean_temperature(phase: &PhaseSummary, target: f64, rel_tol: f64, label: &str, note: &str)`",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "check_mean_temperature",
+    "type": "api-item"
+  },
   "rq-5a7e597e": {
     "decl": "Scenario: A symplectic integrator emits ForceEval with ForcesOnly by default",
     "file": "integration/framework",
@@ -12430,6 +12798,18 @@
     "file": "precision",
     "refs": [],
     "title": "f64 build resolves Real to f64",
+    "type": "scenario"
+  },
+  "rq-5b2a1cde": {
+    "decl": "Scenario: Coupling steps replay a coupling cell, non-coupling steps a non-coupling cell",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Coupling steps replay a coupling cell, non-coupling steps a non-coupling cell",
     "type": "scenario"
   },
   "rq-5b4519e9": {
@@ -12647,6 +13027,13 @@
     ],
     "title": "ResourceSet",
     "type": "api-item"
+  },
+  "rq-5d1345d0": {
+    "decl": "Scenario: A constrained rigid-water run reaches its setpoint at every collision rate",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "A constrained rigid-water run reaches its setpoint at every collision rate",
+    "type": "scenario"
   },
   "rq-5d18fa01": {
     "decl": "Scenario: shake_positions updates half-step velocities consistently with the position correction",
@@ -12975,6 +13362,18 @@
     "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
     "type": "scenario"
   },
+  "rq-5f3cf6c9": {
+    "decl": "Scenario: The preset refuses a box narrower than the cell list allows",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The preset refuses a box narrower than the cell list allows",
+    "type": "scenario"
+  },
   "rq-5f4fc894": {
     "decl": "Scenario: Custom external slot that does host arithmetic disables itself",
     "file": "cuda-graphs",
@@ -13038,6 +13437,18 @@
     "title": "Default build resolves Real to f32",
     "type": "scenario"
   },
+  "rq-5fc7b67f": {
+    "decl": "Scenario: Unit-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Unit-interval thermostatted phase runs in graph mode and matches per-step bit-for-bit on a regular packing",
+    "type": "scenario"
+  },
   "rq-5fcdc437": {
     "decl": "Scenario: Atom with no angles gets zero accumulator",
     "file": "forces/harmonic-angle",
@@ -13088,11 +13499,26 @@
     "title": "check_min_perpendicular_width flags direction \"c\" when only w_c fails",
     "type": "scenario"
   },
+  "rq-601f9a1f": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-6024a35a": {
     "decl": "- `AngleForceFragment` — same shape as `BondedForceFragment`,",
     "file": "forces/framework",
     "refs": [],
     "title": "AngleForceFragment",
+    "type": "api-item"
+  },
+  "rq-6028de4d": {
+    "decl": "- `SystemBuilder::dense_spce_water(side: usize) -> SystemBuilder`",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "SystemBuilder",
     "type": "api-item"
   },
   "rq-603b4597": {
@@ -13246,6 +13672,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-610c023c": {
+    "decl": "Scenario: Temperature is converted out of atomic units",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Temperature is converted out of atomic units",
+    "type": "scenario"
   },
   "rq-6112a43b": {
     "decl": "## Determinism",
@@ -13582,6 +14020,14 @@
     "title": "run_md_phase",
     "type": "api-item"
   },
+  "rq-63e9ef08": {
+    "decl": "## Cases",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Cases",
+    "type": "section"
+  },
   "rq-63f3e0b9": {
     "decl": "## Feature API",
     "file": "simulation-box",
@@ -13718,6 +14164,14 @@
     "refs": [],
     "title": "SettleError",
     "type": "api-item"
+  },
+  "rq-64e75744": {
+    "decl": "### Units",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Units",
+    "type": "section"
   },
   "rq-64e90d53": {
     "decl": "Scenario: Atomic-mode round-trip is the identity for every column",
@@ -13983,6 +14437,13 @@
     "title": "Default build does not pass -DREAL_F64 to nvcc",
     "type": "scenario"
   },
+  "rq-673e25a5": {
+    "decl": "Scenario: A coupling step is not a batch boundary",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "A coupling step is not a batch boundary",
+    "type": "scenario"
+  },
   "rq-6745e7c5": {
     "decl": "Scenario: Each subsystem's XKernels::load returns its kernel handle",
     "file": "build-pipeline",
@@ -14157,6 +14618,14 @@
       {
         "file": "src/gpu/graph.rs",
         "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
       }
     ],
     "title": "GraphLoop",
@@ -14253,6 +14722,13 @@
     ],
     "title": "Composed-Kernel Structure",
     "type": "section"
+  },
+  "rq-69354a0e": {
+    "decl": "- `registered_thermostat_kinds() -> Vec<&'static str>` and",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "registered_thermostat_kinds",
+    "type": "api-item"
   },
   "rq-693ce6fa": {
     "decl": "# Feature: Cell-List Spatial Pre-Step",
@@ -14476,11 +14952,11 @@
     "type": "scenario"
   },
   "rq-6b22e2c4": {
-    "decl": "### Ordering of the terminal velocity projection",
+    "decl": "### Ordering of the velocity projections",
     "file": "integration/constraint-framework",
     "level": 3,
     "refs": [],
-    "title": "Ordering of the terminal velocity projection",
+    "title": "Ordering of the velocity projections",
     "type": "section"
   },
   "rq-6b38fe0b": {
@@ -14573,6 +15049,25 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Two independent rebuilds with identical positions produce identical lists",
+    "type": "scenario"
+  },
+  "rq-6bfa82f7": {
+    "decl": "- `check_no_nan(phase: &PhaseSummary, label: &str)` — panics if any physics sample",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "check_no_nan",
+    "type": "api-item"
+  },
+  "rq-6c125bac": {
+    "decl": "Scenario: Every registered barostat has a conformance case",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Every registered barostat has a conformance case",
     "type": "scenario"
   },
   "rq-6c3cddc1": {
@@ -14779,6 +15274,18 @@
     "refs": [],
     "title": "Algorithm",
     "type": "section"
+  },
+  "rq-6d2c1446": {
+    "decl": "Scenario: The density check rejects a collapsed box",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The density check rejects a collapsed box",
+    "type": "scenario"
   },
   "rq-6d2daea0": {
     "decl": "- `log_column_values(ke, pe) -> vec![ke + pe − cumulative_injection]`.",
@@ -14999,6 +15506,13 @@
     "title": "Displacement-check kernel uses minimum-image displacement",
     "type": "scenario"
   },
+  "rq-6e2b074e": {
+    "decl": "- `run_thermostat_case(case: &SlotCase)` — writes and runs the dense-water preset",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "run_thermostat_case",
+    "type": "api-item"
+  },
   "rq-6e51f09c": {
     "decl": "- `compute_kinetic_energy(masses: &[f32], vx: &[f32], vy: &[f32], vz: &[f32]) -> f64`",
     "file": "io/log-output",
@@ -15074,7 +15588,12 @@
     "decl": "### Final summary",
     "file": "minimization/steepest-descent",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Final summary",
     "type": "section"
   },
@@ -15132,7 +15651,12 @@
   "rq-6f09d7e3": {
     "decl": "Scenario: nose-hoover-chain phase falls back to per-step launches",
     "file": "cuda-graphs",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
     "title": "nose-hoover-chain phase falls back to per-step launches",
     "type": "scenario"
   },
@@ -15348,6 +15872,13 @@
     "title": "Construct CsvrThermostat for a SETTLE'd water system",
     "type": "scenario"
   },
+  "rq-70cf9aa8": {
+    "decl": "- `builtin_barostat_cases() -> Vec<SlotCase>` — the conformance table for",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "builtin_barostat_cases",
+    "type": "api-item"
+  },
   "rq-70e9fd38": {
     "decl": "Scenario: A trajectory frame can be re-parsed by load_init_state",
     "file": "io/trajectory-output",
@@ -15379,6 +15910,18 @@
     "refs": [],
     "title": "Numerical Behaviour",
     "type": "section"
+  },
+  "rq-716752a7": {
+    "decl": "Scenario: A barostat holds liquid density",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A barostat holds liquid density",
+    "type": "scenario"
   },
   "rq-71f469ae": {
     "decl": "## Chain state",
@@ -15551,15 +16094,19 @@
     "type": "scenario"
   },
   "rq-732daa1b": {
-    "decl": "Scenario: [thermostat] coupling_interval defaults to 1 when omitted",
+    "decl": "Scenario: [thermostat] coupling_interval defaults to 25 when omitted",
     "file": "io/config-schema",
     "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
       {
         "file": "tests/io_config.rs",
         "kind": "code"
       }
     ],
-    "title": "[thermostat] coupling_interval defaults to 1 when omitted",
+    "title": "[thermostat] coupling_interval defaults to 25 when omitted",
     "type": "scenario"
   },
   "rq-73497463": {
@@ -15673,6 +16220,13 @@
     ],
     "title": "Progress reporting",
     "type": "section"
+  },
+  "rq-74331978": {
+    "decl": "Scenario: `r_max` is interpreted in the config's unit system",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "`r_max` is interpreted in the config's unit system",
+    "type": "scenario"
   },
   "rq-743ae35c": {
     "decl": "Scenario: check_min_perpendicular_width reports the first failing direction when multiple fail",
@@ -15914,6 +16468,18 @@
     "title": "KernelArg",
     "type": "api-item"
   },
+  "rq-754c7ddb": {
+    "decl": "Scenario: A case for an unregistered kind fails coverage",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A case for an unregistered kind fails coverage",
+    "type": "scenario"
+  },
   "rq-7564b1e7": {
     "decl": "Scenario: log_column_names returns [\"pressure\", \"box_volume\"]",
     "file": "integration/berendsen-barostat",
@@ -16080,6 +16646,13 @@
       }
     ],
     "title": "apply_pre and apply_post launch the expected kernel calls for default chain parameters",
+    "type": "scenario"
+  },
+  "rq-761758ad": {
+    "decl": "Scenario: The erfc and erf fragments compose to the bare Coulomb force",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "The erfc and erf fragments compose to the bare Coulomb force",
     "type": "scenario"
   },
   "rq-761f26c6": {
@@ -16272,6 +16845,18 @@
     "refs": [],
     "title": "BondedForceFragment",
     "type": "api-item"
+  },
+  "rq-7782386f": {
+    "decl": "Scenario: initial_step at or below STEP_FLOOR terminates at iteration 0 with StepFloor",
+    "file": "minimization/steepest-descent",
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "initial_step at or below STEP_FLOOR terminates at iteration 0 with StepFloor",
+    "type": "scenario"
   },
   "rq-779092ca": {
     "decl": "- `TimingsError` — error type. Variants:",
@@ -16705,18 +17290,6 @@
       }
     ],
     "title": "Builder validate_params rejects an unknown field",
-    "type": "scenario"
-  },
-  "rq-7a0a23e3": {
-    "decl": "Scenario: shake_positions handles a water group straddling a periodic boundary",
-    "file": "integration/shake",
-    "refs": [
-      {
-        "file": "tests/shake.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "shake_positions handles a water group straddling a periodic boundary",
     "type": "scenario"
   },
   "rq-7a124d43": {
@@ -17522,6 +18095,18 @@
     "title": "LintReport API short-circuits and carries the structured error",
     "type": "scenario"
   },
+  "rq-805728c8": {
+    "decl": "Scenario: The preset's input files are byte-identical across calls",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The preset's input files are byte-identical across calls",
+    "type": "scenario"
+  },
   "rq-8057cb7e": {
     "decl": "Scenario: Reject row with infinite velocity",
     "file": "io/init-state-file",
@@ -17535,10 +18120,15 @@
     "type": "scenario"
   },
   "rq-80c6a964": {
-    "decl": "Scenario: Fully-excluded pair nets to zero on the fixed-point accumulator",
+    "decl": "Scenario: A fully-excluded pair nets to within the correction residual",
     "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Fully-excluded pair nets to zero on the fixed-point accumulator",
+    "refs": [
+      {
+        "file": "tests/neighbor_list_correctness.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fully-excluded pair nets to within the correction residual",
     "type": "scenario"
   },
   "rq-80d00b52": {
@@ -17607,6 +18197,13 @@
       }
     ],
     "title": "Reject chain_length = 0",
+    "type": "scenario"
+  },
+  "rq-8129be9f": {
+    "decl": "Scenario: The box guard compares like with like",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "The box guard compares like with like",
     "type": "scenario"
   },
   "rq-812e88d5": {
@@ -17964,7 +18561,7 @@
     "type": "api-item"
   },
   "rq-841a4bd3": {
-    "decl": "Scenario: Cell-list forces at equilibrium match all-pairs forces to f32 tolerance",
+    "decl": "Scenario: Cell-list forces at equilibrium match all-pairs forces within the correction residual",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -17972,7 +18569,7 @@
         "kind": "code"
       }
     ],
-    "title": "Cell-list forces at equilibrium match all-pairs forces to f32 tolerance",
+    "title": "Cell-list forces at equilibrium match all-pairs forces within the correction residual",
     "type": "scenario"
   },
   "rq-8443c065": {
@@ -18023,6 +18620,13 @@
       }
     ],
     "title": "Missing seed rejected",
+    "type": "scenario"
+  },
+  "rq-84a2c415": {
+    "decl": "Scenario: SD rejected trial with a mid-trial wrap restores both positions and images",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD rejected trial with a mid-trial wrap restores both positions and images",
     "type": "scenario"
   },
   "rq-84b2667f": {
@@ -18077,6 +18681,14 @@
     "level": 3,
     "refs": [],
     "title": "PTX Module Loading",
+    "type": "section"
+  },
+  "rq-85c252a7": {
+    "decl": "### Functions",
+    "file": "integration/slot-conformance-harness",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
     "type": "section"
   },
   "rq-85e9b9da": {
@@ -18169,7 +18781,7 @@
     "type": "scenario"
   },
   "rq-867630af": {
-    "decl": "Scenario: GraphLoop.launch routes by the scalars flag",
+    "decl": "Scenario: GraphLoop.launch routes by the coupling and scalars indices",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -18177,7 +18789,7 @@
         "kind": "code"
       }
     ],
-    "title": "GraphLoop.launch routes by the scalars flag",
+    "title": "GraphLoop.launch routes by the coupling and scalars indices",
     "type": "scenario"
   },
   "rq-86aa2be7": {
@@ -18413,13 +19025,6 @@
     "title": "Full per-kernel timings on cuda_graphs_disable",
     "type": "scenario"
   },
-  "rq-8840662f": {
-    "decl": "Scenario: Per-fragment exclusion scale yields per-fragment net contribution",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Per-fragment exclusion scale yields per-fragment net contribution",
-    "type": "scenario"
-  },
   "rq-884b5cd6": {
     "decl": "- `neighbor_displacement_check_flag(particle_buffers, reference_x, reference_y, reference_z, sim_box, threshold_sq, neighbor_status) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
@@ -18588,6 +19193,22 @@
     "refs": [],
     "title": "Source-Fragment Contract — Bonded Shape",
     "type": "section"
+  },
+  "rq-8945395f": {
+    "decl": "- The device-resident `modified_pairs` buffer (length `2 · E`) is",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "- The device-resident `modified_pairs` buffer (length `2 · E`) is",
+    "type": "anchor"
   },
   "rq-894c16c4": {
     "decl": "Scenario: Defaults populate the output section when [output] is omitted",
@@ -18805,6 +19426,18 @@
     "title": "check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths",
     "type": "scenario"
   },
+  "rq-8ae4a9f1": {
+    "decl": "Scenario: Composer emits a correction evaluator that applies scale minus one",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Composer emits a correction evaluator that applies scale minus one",
+    "type": "scenario"
+  },
   "rq-8b1827a9": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/nose-hoover-chain",
@@ -18903,6 +19536,18 @@
     "title": "minimum_image of the zero displacement is zero",
     "type": "scenario"
   },
+  "rq-8c06ce9c": {
+    "decl": "Scenario: The temperature check accepts a conforming mean",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The temperature check accepts a conforming mean",
+    "type": "scenario"
+  },
   "rq-8c0c385b": {
     "decl": "Scenario: A marker-bearing plan suppresses the runner's default thermostat wrapping",
     "file": "integration/framework",
@@ -18936,7 +19581,7 @@
     "type": "section"
   },
   "rq-8c24f057": {
-    "decl": "Scenario: GraphLoop.launch ignores the scalars flag when forces_only is None",
+    "decl": "Scenario: GraphLoop.launch falls back to the forces+scalars cell when the forces-only cell is None",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -18944,8 +19589,16 @@
         "kind": "code"
       }
     ],
-    "title": "GraphLoop.launch ignores the scalars flag when forces_only is None",
+    "title": "GraphLoop.launch falls back to the forces+scalars cell when the forces-only cell is None",
     "type": "scenario"
+  },
+  "rq-8c5337af": {
+    "decl": "## Units",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Units",
+    "type": "section"
   },
   "rq-8c630ad6": {
     "decl": "Scenario: Charge-zero atoms issue no atomicAdd<i64> against rho_fixed",
@@ -19024,6 +19677,14 @@
       }
     ],
     "title": "Test Harness",
+    "type": "section"
+  },
+  "rq-8d4fb00d": {
+    "decl": "## Excluded-pair correction",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "Excluded-pair correction",
     "type": "section"
   },
   "rq-8d5a8d9c": {
@@ -19421,7 +20082,7 @@
     "type": "scenario"
   },
   "rq-90538790": {
-    "decl": "Scenario: Dispatch loop calls all three constraint hooks in marker order",
+    "decl": "Scenario: Dispatch loop calls every constraint hook in marker order",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -19429,7 +20090,7 @@
         "kind": "code"
       }
     ],
-    "title": "Dispatch loop calls all three constraint hooks in marker order",
+    "title": "Dispatch loop calls every constraint hook in marker order",
     "type": "scenario"
   },
   "rq-908e8418": {
@@ -19582,10 +20243,15 @@
     "type": "scenario"
   },
   "rq-91c02dd8": {
-    "decl": "Scenario: A thermostatted phase is graph-ineligible and runs per-step",
+    "decl": "Scenario: A device-side thermostat other than csvr also captures a coupling row",
     "file": "cuda-graphs",
-    "refs": [],
-    "title": "A thermostatted phase is graph-ineligible and runs per-step",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A device-side thermostat other than csvr also captures a coupling row",
     "type": "scenario"
   },
   "rq-91c4727a": {
@@ -19691,6 +20357,19 @@
       }
     ],
     "title": "`[[pair_interactions]]` (array of tables)",
+    "type": "section"
+  },
+  "rq-9254d227": {
+    "decl": "## The Preset",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [
+      {
+        "file": "tests/common/e2e.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The Preset",
     "type": "section"
   },
   "rq-9255c192": {
@@ -20204,6 +20883,18 @@
     "title": "MtkNpt builder owns both its thermostat and its barostat",
     "type": "scenario"
   },
+  "rq-95bdc1a2": {
+    "decl": "Scenario: The correction is reproducible run to run",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The correction is reproducible run to run",
+    "type": "scenario"
+  },
   "rq-95be04ff": {
     "decl": "Scenario: settle_positions writes a non-zero position-level constraint virial",
     "file": "integration/settle",
@@ -20231,7 +20922,7 @@
     "type": "scenario"
   },
   "rq-95f0812c": {
-    "decl": "Scenario: Single-pair pass dispatches to the exclusion-scaled evaluator",
+    "decl": "Scenario: Single-pair pass dispatches to the scale-free evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -20239,7 +20930,7 @@
         "kind": "code"
       }
     ],
-    "title": "Single-pair pass dispatches to the exclusion-scaled evaluator",
+    "title": "Single-pair pass dispatches to the scale-free evaluator",
     "type": "scenario"
   },
   "rq-963604a4": {
@@ -20264,6 +20955,13 @@
       }
     ],
     "title": "settle_positions converges at production-scale dt with thermal-amplitude displacements",
+    "type": "scenario"
+  },
+  "rq-9642e7c7": {
+    "decl": "Scenario: An unconstrained monatomic run reaches its setpoint at every collision rate",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "An unconstrained monatomic run reaches its setpoint at every collision rate",
     "type": "scenario"
   },
   "rq-964b59fd": {
@@ -20379,6 +21077,13 @@
     ],
     "title": "TrajectoryFrameHeader",
     "type": "api-item"
+  },
+  "rq-9746fb53": {
+    "decl": "Scenario: shake_positions handles a water group straddling a periodic boundary",
+    "file": "integration/shake",
+    "refs": [],
+    "title": "shake_positions handles a water group straddling a periodic boundary",
+    "type": "scenario"
   },
   "rq-975b5ae0": {
     "decl": "Scenario: Newton's third law is bit-exact for non-boundary displacements",
@@ -20585,6 +21290,13 @@
     "title": "Harmonic slot selects only harmonic bonds from a mixed list",
     "type": "scenario"
   },
+  "rq-9910f6e0": {
+    "decl": "Scenario: shake_positions_no_velocity re-wraps and updates image counters",
+    "file": "integration/shake",
+    "refs": [],
+    "title": "shake_positions_no_velocity re-wraps and updates image counters",
+    "type": "scenario"
+  },
   "rq-9913daee": {
     "decl": "## Compatibility Rules",
     "file": "integration/framework",
@@ -20694,6 +21406,13 @@
     "refs": [],
     "title": "Feature: End-to-End Test Harness and Coverage",
     "type": "file"
+  },
+  "rq-99fc9152": {
+    "decl": "- `builtin_thermostat_cases() -> Vec<SlotCase>` — the conformance table for",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "builtin_thermostat_cases",
+    "type": "api-item"
   },
   "rq-9a19bfa3": {
     "decl": "- `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>`",
@@ -20977,6 +21696,18 @@
     "title": "Exclusion scales default to 0.0 when both columns omitted",
     "type": "scenario"
   },
+  "rq-9c1eb803": {
+    "decl": "Scenario: Graph run with a coupling variant matches the fully per-step run bit-for-bit on a regular packing",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "tests/post_force_composition.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Graph run with a coupling variant matches the fully per-step run bit-for-bit on a regular packing",
+    "type": "scenario"
+  },
   "rq-9c22145d": {
     "decl": "Scenario: from_config combines an un-overridden pair via Lorentz-Berthelot",
     "file": "forces/lj-pair-force",
@@ -21174,6 +21905,13 @@
     "title": "Two runs of spme_recip_reduce_partials on identical inputs are byte-identical",
     "type": "scenario"
   },
+  "rq-9d34c158": {
+    "decl": "- `heddle_jit_composed_pair_force_correct_f` /",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "heddle_jit_composed_pair_force_correct_f",
+    "type": "api-item"
+  },
   "rq-9d523d38": {
     "decl": "Scenario: SI-mode .xyz lattice and positions are converted to Bohr",
     "file": "io/unit-system",
@@ -21310,6 +22048,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-9de687da": {
+    "decl": "- `__device__ __forceinline__ Real Real_erf(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-9df1eedb": {
     "decl": "Scenario: Bond row with wrong column count",
@@ -21696,6 +22441,13 @@
     "title": "Determinism Guarantees",
     "type": "section"
   },
+  "rq-9fe2a0cf": {
+    "decl": "- `check_mean_temperature_value(mean: f64, target: f64, rel_tol: f64, label: &str, note: &str)`",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "check_mean_temperature_value",
+    "type": "api-item"
+  },
   "rq-9ff4fd10": {
     "decl": "Scenario: Reject upload when host particle count differs from buffers",
     "file": "particle-state",
@@ -21995,6 +22747,18 @@
     "title": "harmonic bond_type rejects extra fields",
     "type": "scenario"
   },
+  "rq-a22870b8": {
+    "decl": "Scenario: A registered thermostat with no case fails coverage",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A registered thermostat with no case fails coverage",
+    "type": "scenario"
+  },
   "rq-a2454a72": {
     "decl": "Scenario: apply_post on empty CSVR state is a no-op",
     "file": "integration/csvr",
@@ -22142,6 +22906,18 @@
     "title": "Accept the lower boundary -L/2 along an axis (orthorhombic)",
     "type": "scenario"
   },
+  "rq-a37db23a": {
+    "decl": "Scenario: A fully excluded pair has no net Coulomb interaction",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fully excluded pair has no net Coulomb interaction",
+    "type": "scenario"
+  },
   "rq-a39234ba": {
     "decl": "Scenario: A steady-state rebuild copies no interaction count to the host",
     "file": "forces/neighbor-list",
@@ -22249,7 +23025,12 @@
     "decl": "### Packed-Neighbour Pass",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Packed-Neighbour Pass",
     "type": "section"
   },
@@ -22553,7 +23334,7 @@
     "type": "scenario"
   },
   "rq-a78ba267": {
-    "decl": "Scenario: The AfterKick projection fires in the post-force tail after the trailing kick",
+    "decl": "Scenario: The leading projection-and-publish fires immediately after the trailing kick",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -22561,7 +23342,7 @@
         "kind": "code"
       }
     ],
-    "title": "The AfterKick projection fires in the post-force tail after the trailing kick",
+    "title": "The leading projection-and-publish fires immediately after the trailing kick",
     "type": "scenario"
   },
   "rq-a7aac794": {
@@ -22569,6 +23350,18 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Cell counts reflect perpendicular widths for a tilted box",
+    "type": "scenario"
+  },
+  "rq-a7adc7c9": {
+    "decl": "Scenario: A system with no exclusions carries no correction",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A system with no exclusions carries no correction",
     "type": "scenario"
   },
   "rq-a7ecc7be": {
@@ -22594,6 +23387,13 @@
     ],
     "title": "Lossy run includes lossy kick rows and excludes lossless rows",
     "type": "scenario"
+  },
+  "rq-a828920c": {
+    "decl": "- `mean_density(phase: &PhaseSummary, n_mol: usize) -> f64` — the mean of the",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "mean_density",
+    "type": "api-item"
   },
   "rq-a82a275a": {
     "decl": "Scenario: Reject max_step < initial_step",
@@ -22751,7 +23551,7 @@
     "type": "scenario"
   },
   "rq-a90e4189": {
-    "decl": "Scenario: A plan with no AfterKick marker never fires apply_after_kick",
+    "decl": "Scenario: A plan with no AfterKick marker fires no velocity projection at all",
     "file": "integration/constraint-framework",
     "refs": [
       {
@@ -22759,7 +23559,7 @@
         "kind": "code"
       }
     ],
-    "title": "A plan with no AfterKick marker never fires apply_after_kick",
+    "title": "A plan with no AfterKick marker fires no velocity projection at all",
     "type": "scenario"
   },
   "rq-a91f1e58": {
@@ -22807,6 +23607,14 @@
       }
     ],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-a95634e8": {
+    "decl": "### No cutoff",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "No cutoff",
     "type": "section"
   },
   "rq-a9642241": {
@@ -23206,6 +24014,13 @@
     "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
+  "rq-abf2db9a": {
+    "decl": "- `__device__ __forceinline__ Real Real_erfc(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
+  },
   "rq-ac035b90": {
     "decl": "- `ParticleState::particle_count(&self) -> usize`",
     "file": "particle-state",
@@ -23313,10 +24128,10 @@
     "type": "scenario"
   },
   "rq-acc595b8": {
-    "decl": "Scenario: Eligible phase captures a graph at phase start",
+    "decl": "Scenario: Eligible thermostatted NVT phase captures all four matrix cells at phase start",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Eligible phase captures a graph at phase start",
+    "title": "Eligible thermostatted NVT phase captures all four matrix cells at phase start",
     "type": "scenario"
   },
   "rq-accf1a4b": {
@@ -23669,6 +24484,19 @@
     "title": "Real-space slot produces zero outside r_cut_real",
     "type": "scenario"
   },
+  "rq-af8c5af7": {
+    "decl": "## Coverage",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Coverage",
+    "type": "section"
+  },
   "rq-af9257bb": {
     "decl": "Scenario: rescale_isotropic multiplies all six lattice parameters",
     "file": "integration/berendsen-barostat",
@@ -23797,7 +24625,7 @@
     "type": "api-item"
   },
   "rq-b099ff28": {
-    "decl": "Scenario: Composer emits an exclusion-scaled evaluator",
+    "decl": "Scenario: Composer emits a scale-free bulk evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [
       {
@@ -23805,7 +24633,7 @@
         "kind": "code"
       }
     ],
-    "title": "Composer emits an exclusion-scaled evaluator",
+    "title": "Composer emits a scale-free bulk evaluator",
     "type": "scenario"
   },
   "rq-b0a520ac": {
@@ -24099,7 +24927,12 @@
     "decl": "### Single-Pair Pass",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Single-Pair Pass",
     "type": "section"
   },
@@ -24311,6 +25144,14 @@
     "title": "B-spline correction factors are finite for odd spline orders",
     "type": "scenario"
   },
+  "rq-b3f8bbce": {
+    "decl": "### Reproducibility",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
+  },
   "rq-b3ffde38": {
     "decl": "Scenario: Dihedral row with non-integer index",
     "file": "forces/topology",
@@ -24371,10 +25212,10 @@
     "type": "section"
   },
   "rq-b49bfdff": {
-    "decl": "Scenario: Packed-neighbour pass applies exclusion_scale inline",
+    "decl": "Scenario: Packed-neighbour and single-pair passes do no exclusion work",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Packed-neighbour pass applies exclusion_scale inline",
+    "title": "Packed-neighbour and single-pair passes do no exclusion work",
     "type": "scenario"
   },
   "rq-b4bb7096": {
@@ -24903,6 +25744,14 @@
     "title": "Positions visibly evolve over the 100-step lossless forward run",
     "type": "scenario"
   },
+  "rq-b8818dd3": {
+    "decl": "### The two projections are different hooks",
+    "file": "integration/constraint-framework",
+    "level": 3,
+    "refs": [],
+    "title": "The two projections are different hooks",
+    "type": "section"
+  },
   "rq-b8a61f12": {
     "decl": "## RNG Counter Contract",
     "file": "cuda-graphs",
@@ -25027,6 +25876,18 @@
     ],
     "title": "Invariants",
     "type": "section"
+  },
+  "rq-ba1b0ef5": {
+    "decl": "Scenario: A modified pair beyond the cutoff is still corrected",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A modified pair beyond the cutoff is still corrected",
+    "type": "scenario"
   },
   "rq-ba281906": {
     "decl": "Scenario: SPME reciprocal stream uses single-precision cuFFT plans in the default build",
@@ -25694,6 +26555,13 @@
     "title": "Empty State and degenerate cases",
     "type": "section"
   },
+  "rq-bf4b0145": {
+    "decl": "- `Expect` — what a slot is required to do on the dense-water system.",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "Expect",
+    "type": "api-item"
+  },
   "rq-bf5df23e": {
     "decl": "### Dimensioned Types and the Convert Trait",
     "file": "io/unit-system",
@@ -25817,6 +26685,13 @@
     "title": "MTK-NPT phase runs per-step with standalone launches",
     "type": "scenario"
   },
+  "rq-c057bf03": {
+    "decl": "Scenario: The modified-pair list is uploaded once and never rebuilt",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "The modified-pair list is uploaded once and never rebuilt",
+    "type": "scenario"
+  },
   "rq-c0668cb7": {
     "decl": "## Gherkin Scenarios",
     "file": "forces/spme",
@@ -25857,6 +26732,18 @@
     ],
     "title": "Types",
     "type": "section"
+  },
+  "rq-c0c0f112": {
+    "decl": "Scenario: A non-positive mean volume is an error, not a division",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A non-positive mean volume is an error, not a division",
+    "type": "scenario"
   },
   "rq-c0cfc5d6": {
     "decl": "Scenario: Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
@@ -25903,6 +26790,13 @@
     ],
     "title": "Class-Combine Kernel",
     "type": "section"
+  },
+  "rq-c107b97d": {
+    "decl": "- `FragmentPasses` — declares which pair passes evaluate a fragment.",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "FragmentPasses",
+    "type": "api-item"
   },
   "rq-c118d720": {
     "decl": "Scenario: validate_against surfaces a claiming potential builder's validate_params error",
@@ -26163,6 +27057,13 @@
     ],
     "title": "Functions",
     "type": "section"
+  },
+  "rq-c3b0c28f": {
+    "decl": "- `mean_temperature_k(phase: &PhaseSummary) -> f64` — the mean of the phase's",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "mean_temperature_k",
+    "type": "api-item"
   },
   "rq-c3b3ec99": {
     "decl": "Scenario: A plan with no ConstraintPoint markers fires no constraint hooks",
@@ -26429,6 +27330,22 @@
       }
     ],
     "title": ".minlog reports accepted=0 for rejected iterations",
+    "type": "scenario"
+  },
+  "rq-c4ba5005": {
+    "decl": "Scenario: A non-log coupling step replays the coupling forces-only cell",
+    "file": "cuda-graphs",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/graph_scalar_selection.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A non-log coupling step replays the coupling forces-only cell",
     "type": "scenario"
   },
   "rq-c4cc1d99": {
@@ -26722,7 +27639,7 @@
     "type": "scenario"
   },
   "rq-c6c56cdc": {
-    "decl": "Scenario: A phase with a barostat captures only the forces+scalars graph",
+    "decl": "Scenario: A per-step-barostat phase captures no forces-only cell",
     "file": "cuda-graphs",
     "refs": [
       {
@@ -26734,7 +27651,7 @@
         "kind": "code"
       }
     ],
-    "title": "A phase with a barostat captures only the forces+scalars graph",
+    "title": "A per-step-barostat phase captures no forces-only cell",
     "type": "scenario"
   },
   "rq-c6ee2fb9": {
@@ -26843,6 +27760,26 @@
     "title": "Bond-free run omits morse_bond_force and reduce_bond_forces",
     "type": "scenario"
   },
+  "rq-c7f4d96b": {
+    "decl": "# Feature: Slot Conformance Harness",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/common/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/common/slot_conformance.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Slot Conformance Harness",
+    "type": "file"
+  },
   "rq-c7fc10c5": {
     "decl": "Scenario: Two independent runs of apply_after_kick produce byte-identical state",
     "file": "integration/shake",
@@ -26853,6 +27790,18 @@
       }
     ],
     "title": "Two independent runs of apply_after_kick produce byte-identical state",
+    "type": "scenario"
+  },
+  "rq-c811e838": {
+    "decl": "Scenario: The total electrostatic energy is invariant under the splitting parameter",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The total electrostatic energy is invariant under the splitting parameter",
     "type": "scenario"
   },
   "rq-c814659f": {
@@ -27446,6 +28395,14 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-cbf4f13e": {
+    "decl": "## Reproducibility Scope",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Reproducibility Scope",
+    "type": "section"
+  },
   "rq-cc12f2d8": {
     "decl": "Scenario: Zero temperature is accepted",
     "file": "io/config-schema",
@@ -27464,6 +28421,14 @@
     "refs": [],
     "title": "Feature: CUDA Build Pipeline and Smoke Test Kernel",
     "type": "file"
+  },
+  "rq-cc3206c5": {
+    "decl": "## Discriminating Power",
+    "file": "integration/slot-conformance-harness",
+    "level": 2,
+    "refs": [],
+    "title": "Discriminating Power",
+    "type": "section"
   },
   "rq-cc34e758": {
     "decl": "### Chain sub-step",
@@ -27610,6 +28575,14 @@
     "refs": [],
     "title": "Toggling the f64 feature forces a kernel recompile",
     "type": "scenario"
+  },
+  "rq-cd4193f0": {
+    "decl": "### Snapshot and restore",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Snapshot and restore",
+    "type": "section"
   },
   "rq-cd4827b8": {
     "decl": "- `KernelArgType` — the CUDA type of one kernel parameter. Fixes the",
@@ -28015,6 +28988,13 @@
     ],
     "title": "Reject an entry missing `between`",
     "type": "scenario"
+  },
+  "rq-d00435b1": {
+    "decl": "- `check_mean_density_value(mean: f64, lo: f64, hi: f64, label: &str, note: &str)`",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "check_mean_density_value",
+    "type": "api-item"
   },
   "rq-d0240417": {
     "decl": "Scenario: run_step with default options walks every sub-step via the neighbour-checked force path",
@@ -29755,15 +30735,15 @@
     "type": "scenario"
   },
   "rq-dce6f4cf": {
-    "decl": "Scenario: A thermostatted phase is graph-ineligible and runs on the per-step path",
+    "decl": "Scenario: A thermostatted phase replays a coupling cell on coupling steps",
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "tests/post_force_composition.rs",
+        "file": "src/runner.rs",
         "kind": "code"
       }
     ],
-    "title": "A thermostatted phase is graph-ineligible and runs on the per-step path",
+    "title": "A thermostatted phase replays a coupling cell on coupling steps",
     "type": "scenario"
   },
   "rq-dceedbbb": {
@@ -29824,6 +30804,13 @@
     ],
     "title": "A CSVR thermostat run is byte-identical across runs",
     "type": "scenario"
+  },
+  "rq-dd6935c7": {
+    "decl": "- `SpmeExclusionFragment` — the correction-pass fragment the reciprocal slot",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SpmeExclusionFragment",
+    "type": "api-item"
   },
   "rq-dd6fe266": {
     "decl": "Scenario: Reject n_resp = 0",
@@ -30063,6 +31050,13 @@
     "refs": [],
     "title": "PACKED_MIN_BLOCKS_PER_SM",
     "type": "api-item"
+  },
+  "rq-df25c307": {
+    "decl": "Scenario: A thermostatted rigid-water run reaches its temperature setpoint",
+    "file": "e2e-testing",
+    "refs": [],
+    "title": "A thermostatted rigid-water run reaches its temperature setpoint",
+    "type": "scenario"
   },
   "rq-df305128": {
     "decl": "Scenario: Log file header includes pressure, box_volume, and c_rescale_conserved when C-rescale is the configured barostat",
@@ -30938,6 +31932,18 @@
     "title": "log_column_names returns [\"pressure\", \"box_volume\", \"c_rescale_conserved\"]",
     "type": "scenario"
   },
+  "rq-e5dd8842": {
+    "decl": "Scenario: A 1-4 pair retains exactly its scaled Coulomb interaction",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A 1-4 pair retains exactly its scaled Coulomb interaction",
+    "type": "scenario"
+  },
   "rq-e5e3443f": {
     "decl": "Scenario: Force is C¹ continuous at r_cut",
     "file": "forces/lj-pair-force",
@@ -31181,7 +32187,12 @@
   "rq-e7fc1920": {
     "decl": "Scenario: Per-fragment exclusion tables apply independently to that fragment's contribution",
     "file": "forces/jit-composed-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-fragment exclusion tables apply independently to that fragment's contribution",
     "type": "scenario"
   },
@@ -31405,10 +32416,10 @@
     "type": "scenario"
   },
   "rq-e954f09e": {
-    "decl": "Scenario: Graph-mode and non-graph-mode runs are byte-identical (GPU)",
+    "decl": "Scenario: Graph-mode and non-graph-mode runs agree on a regularly-packed system (GPU)",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Graph-mode and non-graph-mode runs are byte-identical (GPU)",
+    "title": "Graph-mode and non-graph-mode runs agree on a regularly-packed system (GPU)",
     "type": "scenario"
   },
   "rq-e963f27a": {
@@ -31581,6 +32592,18 @@
     "title": "cuFFT smoke test is skipped when SPME is not configured",
     "type": "scenario"
   },
+  "rq-ea4617e1": {
+    "decl": "Scenario: A fractional exclusion scale loads without error",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A fractional exclusion scale loads without error",
+    "type": "scenario"
+  },
   "rq-ea67c26b": {
     "decl": "Scenario: Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
     "file": "forces/spme",
@@ -31654,6 +32677,18 @@
     "file": "precision",
     "refs": [],
     "title": "Image flags do not widen under f64",
+    "type": "scenario"
+  },
+  "rq-eb7c5c08": {
+    "decl": "Scenario: A thermostat holds its setpoint",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A thermostat holds its setpoint",
     "type": "scenario"
   },
   "rq-eb943277": {
@@ -31944,6 +32979,13 @@
     "title": "Slot Participation",
     "type": "section"
   },
+  "rq-ed7c24da": {
+    "decl": "- `check_mean_density(phase: &PhaseSummary, n_mol: usize, lo: f64, hi: f64, label: &str, note: &str)`",
+    "file": "integration/slot-conformance-harness",
+    "refs": [],
+    "title": "check_mean_density",
+    "type": "api-item"
+  },
   "rq-ed8dcaee": {
     "decl": "Scenario: Round-trip preserves a representative Real value under f64",
     "file": "precision",
@@ -32043,6 +33085,18 @@
     ],
     "title": "`[phase.thermostat]` (optional)",
     "type": "section"
+  },
+  "rq-ee1ce29c": {
+    "decl": "Scenario: Coincident excluded atoms produce no non-finite value",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "tests/spme_exclusion.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Coincident excluded atoms produce no non-finite value",
+    "type": "scenario"
   },
   "rq-ee43a3fe": {
     "decl": "## Out of Scope",
@@ -32316,6 +33370,18 @@
       }
     ],
     "title": "r_skin values that shift n_cells preserve pair-emission uniqueness",
+    "type": "scenario"
+  },
+  "rq-efb5ebb3": {
+    "decl": "Scenario: Density is derived from the box volume in Bohr^3",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Density is derived from the box volume in Bohr^3",
     "type": "scenario"
   },
   "rq-efba2cce": {
@@ -33109,7 +34175,7 @@
     "type": "scenario"
   },
   "rq-f4d73396": {
-    "decl": "Scenario: Default coupling interval couples every step",
+    "decl": "Scenario: Unit coupling interval couples every step",
     "file": "integration/framework",
     "refs": [
       {
@@ -33117,7 +34183,7 @@
         "kind": "code"
       }
     ],
-    "title": "Default coupling interval couples every step",
+    "title": "Unit coupling interval couples every step",
     "type": "scenario"
   },
   "rq-f4ebf12a": {
@@ -33532,6 +34598,18 @@
     "title": "Compressed bond produces a repulsive force",
     "type": "scenario"
   },
+  "rq-f797fd2c": {
+    "decl": "Scenario: A registered barostat with no case fails coverage",
+    "file": "integration/slot-conformance-harness",
+    "refs": [
+      {
+        "file": "tests/slot_conformance.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A registered barostat with no case fails coverage",
+    "type": "scenario"
+  },
   "rq-f79d1ac5": {
     "decl": "Scenario: Generation tick with unchanged n_cells_total still triggers rebuild when displacement exceeds threshold",
     "file": "forces/neighbor-list",
@@ -33789,10 +34867,10 @@
     "type": "scenario"
   },
   "rq-f986ba18": {
-    "decl": "Scenario: Graph-mode run with a mid-phase re-capture is byte-identical to per-step",
+    "decl": "Scenario: Graph-mode run with a mid-phase re-capture matches per-step on a regular packing",
     "file": "cuda-graphs",
     "refs": [],
-    "title": "Graph-mode run with a mid-phase re-capture is byte-identical to per-step",
+    "title": "Graph-mode run with a mid-phase re-capture matches per-step on a regular packing",
     "type": "scenario"
   },
   "rq-f9d0621d": {
@@ -33832,6 +34910,23 @@
     "level": 3,
     "refs": [],
     "title": "PTX Module Loading",
+    "type": "section"
+  },
+  "rq-fa0b3d10": {
+    "decl": "### Correction Pass",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Correction Pass",
     "type": "section"
   },
   "rq-fa14a87f": {

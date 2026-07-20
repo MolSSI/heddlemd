@@ -106,10 +106,22 @@ stores Bohr internally and the writer applies the output-direction
 length conversion before formatting each column. Positions are
 written in their current (live) wrapped value: each particle lies
 inside the primary image of the simulation box (its fractional
-coordinates are in `[-1/2, 1/2)³`; see `simulation-box.md`). The
-integrator's drift kernels enforce this invariant on the device state,
-so positions read out for the trajectory are always already-wrapped.
-For an orthorhombic box this reduces to `pos_x ∈ [-lx/2, lx/2)` etc.
+coordinates are in `[-1/2, 1/2)³`; see `simulation-box.md`). Every
+kernel that mutates positions in place re-wraps into the primary image
+on write and advances `images_x/y/z` on any crossing, so positions read
+out for the trajectory are already-wrapped and every trajectory frame
+is a valid init file. The mutators are:
+
+- the drift kernels in `kernels/integrate.cu`;
+- SETTLE's position-projection kernels `settle_positions` and
+  `settle_positions_no_velocity` in `kernels/settle.cu`;
+- SHAKE's position-projection kernels `shake_positions` and
+  `shake_positions_no_velocity` in `kernels/shake.cu`;
+- the steepest-descent minimizer's `sd_compute_step` in
+  `kernels/minimize.cu`.
+
+For an orthorhombic box the primary-image condition reduces to
+`pos_x ∈ [-lx/2, lx/2)` etc.
 
 Image columns (when `Properties` declares `image:I:3`) are the per-
 particle integer image triple `(images_x[i], images_y[i],

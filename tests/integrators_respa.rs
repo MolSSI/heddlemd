@@ -747,6 +747,11 @@ kind = "{kind}"
 
 [phase.thermostat]
 kind = "counting-thermostat"
+# coupling_interval = 1 so the marker-free default wrapping couples on
+# every one of the 3 steps (the default interval is 25). Inert for the
+# marker-bearing plan, whose ThermostatHalf markers drive coupling
+# independently of the interval.
+coupling_interval = 1
 
 [[particle_types]]
 name = "Ar"
