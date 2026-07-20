@@ -7,8 +7,5 @@ description: Establish or revise the project's high-level goals and architecture
 
 Read `.riprap/managed/skills/rr-architecture/SKILL.md` completely and follow it as the authoritative
 workflow. It is agent-neutral so Riprap has one maintained implementation. When applying it in
-Codex:
-
-- Treat `$rr-plan` and `$rr-implement` as the Codex equivalents of `/rr-plan` and `/rr-implement`.
-- Read `AGENTS.md` for project guidance when the shared workflow refers to `CLAUDE.md`.
-- Use Codex's available user-input mechanism when the workflow refers to `AskUserQuestion`.
+OpenCode, read `AGENTS.md` for project guidance when needed and use OpenCode's question tool when
+the workflow requires user input.

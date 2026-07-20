@@ -7,5 +7,4 @@ description: Implement a feature from its requirements document, including tests
 
 Read `.riprap/managed/skills/rr-implement/SKILL.md` completely and follow it as the authoritative
 workflow. It is agent-neutral so Riprap has one maintained implementation. When applying it in
-Codex, treat `$rr-plan` as the equivalent of `/rr-plan`, and read `AGENTS.md` for project guidance
-when needed.
+OpenCode, read `AGENTS.md` for project guidance when needed.

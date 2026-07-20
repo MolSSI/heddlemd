@@ -1,7 +1,0 @@
-FROM localhost/riprap-agent:candidate
-ARG CLAUDE_VERSION
-ARG CODEX_VERSION
-ARG TOOLING_IMAGE_ID
-LABEL io.riprap.claude-version="${CLAUDE_VERSION}" \
-      io.riprap.codex-version="${CODEX_VERSION}" \
-      io.riprap.tooling-image-id="${TOOLING_IMAGE_ID}"
