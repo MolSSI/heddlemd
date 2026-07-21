@@ -3,7 +3,7 @@
 A barostat couples the system to a pressure bath by rescaling the box (and
 the positions in it). It is a **named-selection** registry slot
 (`[phase.barostat] kind = "..."`), composed with `velocity-verlet` and a
-thermostat for NPT. Read the [overview](README.md) first.
+thermostat for NPT. Read the [overview](index.md) first.
 
 There are two shapes, and you implement exactly one:
 

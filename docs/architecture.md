@@ -428,8 +428,9 @@ box periodicity is selected.
 
 Step-by-step guides for adding each kind of plugin — thermostats,
 integrators, barostats, pair potentials, and bonded potentials — with the
-exact files to create and edit, live in `docs/extending/`. The notes below
-are the architectural summary those guides build on.
+exact files to create and edit, live in the **Extending HeddleMD** section
+of the user guide (`book/src/extending/`). The notes below are the
+architectural summary those guides build on.
 
 New pair force models (e.g., Buckingham, tabulated) follow the fused
 warp-per-particle pattern specified in `rqm/forces/pair-force-kernel.md`:

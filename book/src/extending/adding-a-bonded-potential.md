@@ -4,7 +4,7 @@ A bonded potential is an intramolecular interaction keyed by explicit atom
 indices from the topology file — a bond (2 atoms), an angle (3), or a
 dihedral (4). Like pair potentials, they are **compositionally activated**
 via a params claim, and JIT-composed into a shared intramolecular kernel.
-Read the [overview](README.md) and skim
+Read the [overview](index.md) and skim
 [Adding a pair potential](adding-a-pair-potential.md) first — the builder,
 claim, and fragment machinery are the same; only the functor contract and the
 absence of a neighbor list differ.

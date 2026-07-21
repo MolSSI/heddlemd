@@ -20,3 +20,12 @@
 # Reference
 
 - [Command-Line Interface](./reference/cli.md)
+
+# Extending HeddleMD
+
+- [Overview](./extending/index.md)
+- [Adding a thermostat](./extending/adding-a-thermostat.md)
+- [Adding an integrator](./extending/adding-an-integrator.md)
+- [Adding a barostat](./extending/adding-a-barostat.md)
+- [Adding a pair potential](./extending/adding-a-pair-potential.md)
+- [Adding a bonded potential](./extending/adding-a-bonded-potential.md)

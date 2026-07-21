@@ -66,8 +66,10 @@ adds the same contributions in the same order, with no order-dependent
 atomic operations — and no precision is sacrificed to do it (there is no
 fixed-point quantization). The same discipline applies to the sums that
 produce log quantities such as kinetic energy. The mechanics of how this
-is arranged on the GPU are an implementation matter; they will be covered
-in the planned developer guide, and today live in `docs/architecture.md`.
+is arranged on the GPU are an implementation matter that lives in
+`docs/architecture.md`; the determinism rules a new kernel must preserve
+are summarized in the [Extending HeddleMD](../extending/index.md) section
+of this book.
 
 ### Fast math and the guarantee
 

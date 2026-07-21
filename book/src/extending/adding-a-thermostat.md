@@ -3,7 +3,7 @@
 A thermostat couples the system to a temperature bath. It is a
 **named-selection** registry slot: the user picks it with
 `[phase.thermostat] kind = "..."`, composed with the `velocity-verlet`
-integrator. Read the [overview](README.md) first for the registry, config,
+integrator. Read the [overview](index.md) first for the registry, config,
 CUDA, and determinism machinery this page builds on.
 
 Templates in the tree, easiest first:
@@ -192,7 +192,7 @@ lookup), `src/registries.rs`, `build.rs`, or `src/gpu/device.rs`.
 
 ### If you need a bespoke device kernel
 
-Follow the Andersen pattern (see the [overview](README.md) CUDA section):
+Follow the Andersen pattern (see the [overview](index.md) CUDA section):
 add `kernels/my_thermostat.cu` (auto-compiled to `crate::kernels::MY_THERMOSTAT`),
 a `gpu_kernels!` block in `my_thermostat.rs`, one field in the
 `define_kernels!` manifest in `src/gpu/device.rs`, and a `gpu_launch!`

@@ -46,7 +46,10 @@ in [Reproducibility](guide/reproducibility.md).
   analysis, and what reproducibility does and does not guarantee.
 - **Reference** documents the command-line interface.
 
-This book is the user-facing guide. A companion developer guide covering
-the engine's internal design — the GPU compute pipeline and the
-deterministic-reduction strategy — is planned separately; until then the
-internals live in `docs/architecture.md` in the repository.
+This book is the user-facing guide; its [Extending
+HeddleMD](extending/index.md) section is the developer guide for adding new
+physics — thermostats, integrators, barostats, and pair or bonded
+potentials — to the engine. The engine's internal design that those
+extensions build on — the GPU compute pipeline and the
+deterministic-reduction strategy — lives in `docs/architecture.md` in the
+repository.

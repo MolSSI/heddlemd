@@ -44,12 +44,12 @@ Every quantity that affects the physics lives in the TOML config, in
 Inputs can be checked on a login node with `heddlemd lint` before a job
 reaches the queue.
 
-**Documentation.** The full user guide is the mdBook under
-[`book/`](book/) — install, first simulation, configuration reference,
-init and output file formats, analysis, and the precise scope of the
-reproducibility guarantee. Start at
-[`book/src/introduction.md`](book/src/introduction.md) (or render it with
-`mdbook serve book`). For the internal design — the GPU compute pipeline
+**Documentation.** The full user guide is published at
+<https://molssi.github.io/heddlemd/> — install, first simulation,
+configuration reference, init and output file formats, analysis, and the
+precise scope of the reproducibility guarantee. Its source is the mdBook
+under [`book/`](book/); render it locally with `mdbook serve book`. For the
+internal design — the GPU compute pipeline
 and the deterministic-reduction strategy — see
 [`docs/architecture.md`](docs/architecture.md). Every behaviour the engine
 ships with is canonically described under [`rqm/`](rqm/); the source tree
@@ -119,13 +119,13 @@ bonded or constrained systems):
   parameters, neighbor scheme, and one or more `[[phase]]` /
   `[[minimization]]` blocks — each with its own steps, timestep,
   integrator, and optional thermostat/barostat/output. See the
-  [Configuration Reference](book/src/guide/configuration.md).
+  [Configuration Reference](https://molssi.github.io/heddlemd/guide/configuration.html).
 - An **extended-XYZ init file** (`*.in.xyz`) carrying the particle count,
   simulation box, per-particle type names, positions, and optionally
   velocities. Absent velocities are sampled from a Maxwell-Boltzmann
   distribution at the configured temperature using a deterministic RNG,
   with centre-of-mass drift removed. See the
-  [Init Files guide](book/src/guide/init-files.md).
+  [Init Files guide](https://molssi.github.io/heddlemd/guide/init-files.html).
 
 ## Validating without running
 
@@ -136,7 +136,7 @@ any files. Designed for HPC contexts where a long queue makes
 trial-and-error iteration expensive: lint on a login node and fix the
 report up front. Add `--with-gpu` to extend the lint through device
 initialisation and force-field allocation when a GPU is available. See the
-[CLI Reference](book/src/reference/cli.md) for the full specification.
+[CLI Reference](https://molssi.github.io/heddlemd/reference/cli.html) for the full specification.
 
 ## Reproducibility
 
@@ -149,7 +149,7 @@ wall-clock measurements vary run-to-run and would corrupt the comparison
 if mixed with the deterministic outputs. Cross-hardware reproducibility is
 not a goal; CUDA permits FMA-contraction differences between GPUs. The
 full scope and its limits are documented in the
-[Reproducibility guide](book/src/guide/reproducibility.md).
+[Reproducibility guide](https://molssi.github.io/heddlemd/guide/reproducibility.html).
 
 ## Precision
 

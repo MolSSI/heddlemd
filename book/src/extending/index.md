@@ -1,10 +1,10 @@
 # Extending HeddleMD
 
-This directory is the developer guide for adding new physics to the
+This section is the developer guide for adding new physics to the
 engine: a new thermostat, integrator, barostat, pair potential, bonded
 potential, and so on. It is written for someone modifying the engine
-source, not for someone running simulations — for the latter, see the
-user guide in `book/`.
+source, not for someone running simulations — the rest of this book
+covers running simulations.
 
 Almost every capability in HeddleMD is a **plugin behind an open
 registry**. Adding one means implementing a small trait and registering

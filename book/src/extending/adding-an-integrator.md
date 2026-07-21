@@ -3,7 +3,7 @@
 An integrator is the core time-stepping algorithm — the velocity kicks,
 position drifts, and in-step force evaluation that make one timestep. It
 is a **named-selection** registry slot (`[phase.integrator] kind = "..."`).
-Read the [overview](README.md) first.
+Read the [overview](index.md) first.
 
 The distinctive thing about an integrator is that it does **not** run a
 timestep imperatively. It returns a `StepPlan` — an ordered list of typed
@@ -109,7 +109,7 @@ runtime veto.
 Reuse the existing `integrate.cu` kernels where you can — `vv_kick`,
 `vv_kick_drift`, and the class-kick kernels are re-exported from
 `crate::gpu`, so a standard symplectic integrator needs no new CUDA. If you
-add one, follow the [overview](README.md) CUDA section. Keep RNG state in a
+add one, follow the [overview](index.md) CUDA section. Keep RNG state in a
 **device-resident counter** (like Langevin's `draw_counter_device`) so it
 survives CUDA-graph replay deterministically; a host counter would freeze
 under capture and break reproducibility.

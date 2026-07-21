@@ -5,7 +5,7 @@ neighbor list — a new van-der-Waals form such as Buckingham, for example.
 Unlike thermostats and integrators, potentials are **not** named-selected:
 they are **compositionally activated**. Every registered `PotentialBuilder`
 is consulted, and each returns a slot when the config data it consumes is
-present. Read the [overview](README.md) first.
+present. Read the [overview](index.md) first.
 
 The template is Lennard-Jones (`src/forces/lj.rs`). A fast-class pair
 potential is **JIT-composed**: rather than launching its own kernel, it
