@@ -387,7 +387,19 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/output.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/phases.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -427,7 +439,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       }
     ],
@@ -443,7 +455,11 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -533,7 +549,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -1332,7 +1348,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -1944,7 +1960,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -2477,7 +2493,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
         "kind": "code"
       }
     ],
@@ -2759,7 +2775,11 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -4219,7 +4239,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -4860,7 +4880,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -5344,7 +5364,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -5986,7 +6006,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       },
       {
@@ -6021,7 +6041,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       },
       {
@@ -6120,7 +6140,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       },
       {
@@ -6580,7 +6600,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -6636,7 +6656,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -6767,7 +6787,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -7431,7 +7451,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/lint.rs",
         "kind": "code"
       }
     ],
@@ -7666,7 +7686,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/lint.rs",
         "kind": "code"
       }
     ],
@@ -7926,7 +7946,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       }
     ],
@@ -8571,7 +8591,7 @@
     "file": "minimization/steepest-descent",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
         "kind": "code"
       }
     ],
@@ -8994,7 +9014,11 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -9212,7 +9236,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
         "kind": "code"
       }
     ],
@@ -10551,7 +10575,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       },
       {
@@ -11307,7 +11331,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/lint.rs",
         "kind": "code"
       }
     ],
@@ -12805,7 +12829,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -12895,7 +12919,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       }
     ],
@@ -13977,7 +14001,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -14013,7 +14037,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
         "kind": "code"
       }
     ],
@@ -14263,7 +14287,7 @@
     "level": 4,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       }
     ],
@@ -14518,7 +14542,11 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -14620,7 +14648,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       },
       {
@@ -15233,7 +15261,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       },
       {
@@ -15590,7 +15618,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/cli.rs",
         "kind": "code"
       }
     ],
@@ -16214,7 +16242,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -16704,7 +16732,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -16757,7 +16785,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -16896,7 +16924,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       }
     ],
@@ -16921,7 +16949,11 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/phases.rs",
         "kind": "code"
       }
     ],
@@ -17846,7 +17878,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/cli.rs",
         "kind": "code"
       }
     ],
@@ -18444,7 +18476,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/cli.rs",
         "kind": "code"
       }
     ],
@@ -19790,7 +19822,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -19876,7 +19908,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       }
     ],
@@ -22208,7 +22240,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       },
       {
@@ -22236,7 +22268,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/lint.rs",
         "kind": "code"
       }
     ],
@@ -22406,7 +22438,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
         "kind": "code"
       }
     ],
@@ -23251,7 +23283,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -23412,7 +23444,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/lint.rs",
         "kind": "code"
       }
     ],
@@ -23445,7 +23477,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -24147,7 +24179,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -24546,7 +24578,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       }
     ],
@@ -24848,7 +24880,11 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -26378,7 +26414,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       },
       {
@@ -27337,7 +27373,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       },
       {
@@ -27643,7 +27679,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       },
       {
@@ -29308,7 +29344,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/cli.rs",
         "kind": "code"
       }
     ],
@@ -29904,7 +29940,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -30544,7 +30580,15 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/phases.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -30739,7 +30783,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -30764,7 +30808,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -31390,7 +31434,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       },
       {
@@ -31562,7 +31606,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -31957,7 +32001,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -32028,7 +32072,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -32585,7 +32629,7 @@
     "file": "forces/spme",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -32920,7 +32964,7 @@
     "file": "cuda-graphs",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -33079,7 +33123,11 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/phases.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/step.rs",
         "kind": "code"
       }
     ],
@@ -33341,7 +33389,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/setup.rs",
         "kind": "code"
       }
     ],
@@ -34656,7 +34704,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/cli.rs",
         "kind": "code"
       }
     ],
@@ -35350,7 +35398,7 @@
         "kind": "code"
       },
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/mod.rs",
         "kind": "code"
       },
       {
@@ -35669,7 +35717,7 @@
     "file": "simulation-runner",
     "refs": [
       {
-        "file": "src/runner.rs",
+        "file": "src/runner/lint.rs",
         "kind": "code"
       }
     ],
