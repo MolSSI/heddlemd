@@ -58,7 +58,6 @@ pub struct BerendsenThermostat {
     /// `K_old · (λ² − 1)` per step. `flush_pending_injection`
     /// drains and zeroes it before each log row.
     cumulative_injection_delta: CudaSlice<f64>,
-    most_recent_ke: f64,
 }
 
 impl BerendsenThermostat {
@@ -92,7 +91,6 @@ impl BerendsenThermostat {
             ke_scratch,
             factor_device,
             cumulative_injection_delta,
-            most_recent_ke: 0.0,
         })
     }
 

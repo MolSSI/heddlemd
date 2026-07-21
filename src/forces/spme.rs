@@ -599,21 +599,14 @@ pub struct SpmeRealSpaceState {
     exclusions: Arc<DeviceExclusionList>,
     alpha: Real,
     r_cut_real: Real,
-    particle_count: usize,
 }
 
 impl SpmeRealSpaceState {
-    pub fn new(
-        particle_count: usize,
-        alpha: Real,
-        r_cut_real: Real,
-        exclusions: Arc<DeviceExclusionList>,
-    ) -> Self {
+    pub fn new(alpha: Real, r_cut_real: Real, exclusions: Arc<DeviceExclusionList>) -> Self {
         SpmeRealSpaceState {
             exclusions,
             alpha,
             r_cut_real,
-            particle_count,
         }
     }
 }
@@ -1144,7 +1137,6 @@ impl PotentialBuilder for SpmeRealBuilder {
         };
         let params = SpmeParameters::from(spme_cfg);
         let state = SpmeRealSpaceState::new(
-            cx.particle_count,
             params.alpha,
             params.r_cut_real,
             cx.device_exclusions.clone(),
