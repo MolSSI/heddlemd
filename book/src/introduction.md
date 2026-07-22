@@ -46,10 +46,11 @@ in [Reproducibility](guide/reproducibility.md).
   analysis, and what reproducibility does and does not guarantee.
 - **Reference** documents the command-line interface.
 
-This book is the user-facing guide; its [Extending
-HeddleMD](extending/index.md) section is the developer guide for adding new
-physics — thermostats, integrators, barostats, and pair or bonded
-potentials — to the engine. The engine's internal design that those
-extensions build on — the GPU compute pipeline and the
-deterministic-reduction strategy — lives in `docs/architecture.md` in the
+This book is the user-facing guide; its [Developer
+Guide](developer/index.md) is for contributors working on the engine
+itself. It frames the engine's internal design — the GPU compute pipeline
+and the deterministic-reduction strategy — and, in its [Extending
+HeddleMD](extending/index.md) sub-section, walks through adding new physics
+such as thermostats, integrators, barostats, and pair or bonded potentials.
+The exhaustive design reference lives in `docs/architecture.md` in the
 repository.

@@ -67,9 +67,9 @@ atomic operations — and no precision is sacrificed to do it (there is no
 fixed-point quantization). The same discipline applies to the sums that
 produce log quantities such as kinetic energy. The mechanics of how this
 is arranged on the GPU are an implementation matter that lives in
-`docs/architecture.md`; the determinism rules a new kernel must preserve
-are summarized in the [Extending HeddleMD](../extending/index.md) section
-of this book.
+`docs/architecture.md`; the [Developer Guide](../developer/index.md) frames
+that design, and the determinism rules a new kernel must preserve are
+summarized in its [Extending HeddleMD](../extending/index.md) sub-section.
 
 ### Fast math and the guarantee
 
