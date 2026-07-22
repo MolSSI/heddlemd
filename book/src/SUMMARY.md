@@ -25,6 +25,7 @@
 
 - [Overview](./developer/index.md)
   - [Schedules and CUDA Graphs](./developer/schedule.md)
+  - [Testing Extension Components](./developer/testing.md)
   - [Extending HeddleMD](./extending/index.md)
     - [Adding a thermostat](./extending/adding-a-thermostat.md)
     - [Adding an integrator](./extending/adding-an-integrator.md)

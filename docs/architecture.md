@@ -426,7 +426,7 @@ box periodicity is selected.
 
 ## Extensibility
 
-Step-by-step guides for adding each kind of plugin — thermostats,
+Step-by-step guides for adding each kind of registry item — thermostats,
 integrators, barostats, pair potentials, and bonded potentials — with the
 exact files to create and edit, live in the **Extending HeddleMD** section
 of the user guide (`book/src/extending/`). The notes below are the

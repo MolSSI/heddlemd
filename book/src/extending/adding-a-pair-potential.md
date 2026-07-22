@@ -229,6 +229,20 @@ functor is a runtime-compiled string; there is no new kernel).
 
 ## Test the potential
 
+Add a `ConsistencyFixture::pair(...)` entry to
+`builtin_consistency_fixtures()` in `tests/common/consistency.rs`. Use the
+potential's fragment label, register only the builder under test, and provide
+sample distances in the physically important and switched regions. Include
+at least one analytical `ReferencePoint`: finite-difference consistency alone
+cannot detect an energy and force that are both wrong by the same factor.
+
+The shared harness checks force–energy, Newton, virial, reference-point, and
+cutoff invariants through the real GPU force pipeline.
+`assert_fixture_coverage` compares fixture labels with the built-in fragment
+labels, so a built-in pair fragment without a fixture fails the suite. See
+[Testing Extension Components](../developer/testing.md) for the fixture API,
+sample selection, tolerance guidance, and negative controls.
+
 - In-file `#[cfg(test)]` — pin the exact `entry_point_args` /
   `functor_init_source` strings the schema emits, and assert the fragment
   declares `consumes_type_index` and uses `slot(i_type, j_type)`. These run
@@ -256,3 +270,5 @@ functor is a runtime-compiled string; there is no new kernel).
   `Dimension` variant and newtype in `src/units/mod.rs`.
 - [ ] **Tests use the implemented fixed-point scale of `2^48`** (some spec prose says `2^32`);
   the code is authoritative, but you never touch this directly.
+- [ ] **A built-in fragment has a consistency fixture with analytical
+  reference data.**

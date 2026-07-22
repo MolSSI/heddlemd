@@ -210,6 +210,19 @@ already exists.
 
 ## Test the potential
 
+Add the potential to `builtin_consistency_fixtures()` in
+`tests/common/consistency.rs` using `ConsistencyFixture::bond`, `angle`, or
+`dihedral` as appropriate. Use the fragment label, register only the builder
+under test, and choose sample coordinates that exercise nonzero forces and
+the important regions of the potential. Add analytical `ReferencePoint`
+values so a consistently mis-scaled energy and force cannot pass unnoticed.
+
+`assert_fixture_coverage` compares the fixture labels with all registered
+built-in fragments. Registering a built-in bonded fragment without the
+corresponding fixture therefore fails the suite. [Testing Extension
+Components](../developer/testing.md) explains the shape-specific geometries,
+invariant checks, tolerances, and CPU negative controls.
+
 - In-file `#[cfg(test)]` — pin the exact `entry_point_args` /
   `functor_init_source` strings from `cubic_arg_schema()`; GPU-free.
 - `tests/forces_cubic_bond.rs` (model on `tests/forces_harmonic_bond.rs`) —
@@ -256,3 +269,5 @@ gets that automatically.
 - [ ] **An empty bond list is a no-op:** `build` returns `Ok(None)` when no bond uses
   your kind, and `compute` early-returns on `bond_count == 0`.
 - [ ] **The `kind` name is unique.** A later same-name registration never shadows a built-in.
+- [ ] **A built-in fragment has the matching bond, angle, or dihedral
+  consistency fixture.**

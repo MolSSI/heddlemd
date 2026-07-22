@@ -216,6 +216,19 @@ builder's predicates; kind dispatch is registry-driven) or `build.rs`.
 
 ## Test the integrator
 
+There is currently no registry-wide physical conformance harness for
+integrators analogous to the potential-consistency or thermostat/barostat
+slot-conformance harnesses. Integrators instead share schedule validation and
+framework tests. Add pure, GPU-free plan assertions to
+`tests/integrator_framework.rs` when the assertion is an invariant that every
+built-in integrator should satisfy; keep method-specific plan and numerical
+tests in the new integrator's test file.
+
+The [testing chapter](../developer/testing.md) explains how shared-contract
+tests complement focused analytical and end-to-end tests. For an integrator,
+the end-to-end portion is particularly important because it exercises carried
+forces and composition with thermostat, barostat, and constraint markers.
+
 `tests/integrators_my_integrator.rs` (model on `tests/integrator_framework.rs`
 and `tests/integrators_respa.rs`):
 

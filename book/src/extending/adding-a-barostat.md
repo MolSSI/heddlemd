@@ -202,6 +202,20 @@ registry lookup) or `src/runner.rs` (barostat dispatch is generic).
 
 ## Test the barostat
 
+Use both focused component tests and the shared slot-conformance harness. For
+a built-in barostat, add a `SlotCase` to `builtin_barostat_cases()` in
+`tests/common/slot_conformance.rs`. The case names the registered `kind`, uses
+`Expect::HoldsDensity` with scientifically justified bounds, and records why
+those bounds are appropriate for the finite constrained-water system.
+
+Add a named test in `tests/slot_conformance.rs` that passes the case to
+`run_barostat_case`, and update the barostat sweep count in that file. Registry
+coverage fails if a built-in barostat has no case, while the sweep-count test
+fails if the case is not driven by a named test. The [testing
+chapter](../developer/testing.md) explains the dense SPC/E system, negative
+controls, and the distinction between conformance bounds and bulk experimental
+accuracy.
+
 `tests/barostats_my.rs` (model on `tests/barostats_c_rescale.rs` /
 `tests/barostats_mc.rs`):
 
@@ -233,3 +247,4 @@ registry lookup) or `src/runner.rs` (barostat dispatch is generic).
 - [ ] **A per-step stochastic barostat keeps its RNG counter on the device** so graph replay
   stays deterministic; a host counter is fine for a periodic move.
 - [ ] **The `kind` name is unique.** A later same-name registration never shadows a built-in.
+- [ ] **A built-in barostat has a `SlotCase` and named conformance test.**

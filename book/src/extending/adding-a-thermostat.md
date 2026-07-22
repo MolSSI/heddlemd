@@ -212,6 +212,20 @@ does not need changes to `build.rs` or the aggregate device-kernel manifest.
 
 ## Write the specification and tests
 
+Every built-in thermostat is covered by the shared slot-conformance harness in
+`tests/common/slot_conformance.rs`. Add a `SlotCase` to
+`builtin_thermostat_cases()` that names the new `kind`, specifies an
+`Expect::HoldsTemperature` tolerance, and explains the choice of tolerance.
+Then add a named test in `tests/slot_conformance.rs` that passes the case to
+`run_thermostat_case`, and update the thermostat sweep count in that file.
+
+The coverage check compares the case table with
+`ThermostatRegistry::with_builtins()`, so registering a built-in thermostat
+without a case fails the test suite. The harness runs dense SPC/E water with
+SETTLE constraints; it is intended to expose coupling to the wrong degrees of
+freedom. See [Testing Extension Components](../developer/testing.md) for the
+system, negative controls, and tolerance guidance.
+
 Add `rqm/integration/my-thermostat.md`. Use
 `rqm/integration/csvr.md` as a structural example and document:
 
@@ -245,4 +259,5 @@ minimum, test:
 - [ ] Stochastic device work uses a device-resident Philox counter.
 - [ ] Parameter units and physical domains are validated.
 - [ ] The builder is declared, re-exported, and added to the built-in roster.
+- [ ] A built-in thermostat has a `SlotCase` and named slot-conformance test.
 - [ ] Physics, configuration, empty-state, and determinism tests are present.

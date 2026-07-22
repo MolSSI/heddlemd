@@ -192,6 +192,12 @@ method, add a neighboring specification that records its equations,
 parameters, execution sequence, limitations, determinism requirements, and
 behavior for an empty particle set.
 
+The [Testing Extension Components](../developer/testing.md) chapter explains
+the potential-consistency and thermostat/barostat conformance harnesses. Read
+it before adding a built-in potential, thermostat, or barostat: registry
+coverage tests require every built-in to declare an appropriate shared
+fixture or conformance case.
+
 Tests normally cover three layers:
 
 1. **Configuration:** valid values, invalid domains, unknown fields, and unit

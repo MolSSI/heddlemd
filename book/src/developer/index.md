@@ -13,6 +13,8 @@ interfaces in more detail:
 
 - [Schedules and CUDA Graphs](schedule.md) explains how HeddleMD represents
   and runs a timestep.
+- [Testing Extension Components](testing.md) explains the shared physical
+  test harnesses and how they complement focused component tests.
 - [Extending HeddleMD](../extending/index.md) explains how to add a thermostat,
   integrator, barostat, or potential.
 - `docs/architecture.md` in the repository is the detailed design reference.
