@@ -156,6 +156,10 @@ in which things happen or which state an operation observes. The schedule is
 the authoritative description of the physics; fusion is only permitted to
 make it cheaper, not to redefine it.
 
+How that schedule is then launched on the GPU — step by step, or recorded
+once into a replayable CUDA graph — and what that choice means for
+reproducibility is the subject of [Schedules and CUDA Graphs](schedule.md).
+
 ## Adding new physics, and where to go next
 
 Because every capability is entered into one of the registries, adding
