@@ -1,21 +1,28 @@
 # Adding a pair potential
 
-A pair potential is a short-range, non-bonded interaction evaluated over the
-neighbor list — a new van-der-Waals form such as Buckingham, for example.
-Unlike thermostats and integrators, potentials are **not** named-selected:
-they are **compositionally activated**. Every registered `PotentialBuilder`
-is consulted, and each returns a slot when the config data it consumes is
-present. Read the [overview](index.md) first.
+A pair potential describes a short-range, non-bonded interaction evaluated
+for atom pairs in the neighbor list. Buckingham dispersion-repulsion is one
+example. Read the [extension overview](index.md) first for the shared Rust,
+configuration, unit-conversion, and determinism terminology.
 
-The template is Lennard-Jones (`src/forces/lj.rs`). A fast-class pair
+Potentials differ from integrators and thermostats because a force field can
+contain several of them at once. HeddleMD therefore asks every registered
+`PotentialBuilder` whether the configuration contains interactions it owns.
+Each matching builder constructs one runtime component, and the force field
+combines all active components.
+
+## Choose the closest example
+
+Use Lennard-Jones in `src/forces/lj.rs` as the primary example. A fast pair
 potential is **JIT-composed**: rather than launching its own kernel, it
 contributes a fragment of CUDA C++ source that the framework concatenates
 with every other active pair potential's fragment into one `nvrtc`-compiled
 pair-force kernel. Your job is to (a) write a builder that activates on
 `[[pair_interactions]]` entries of your `kind`, and (b) write the per-pair
-functor source.
+functor source. JIT composition means that the framework combines active CUDA
+source fragments and compiles the resulting kernel at run time.
 
-## How activation and routing work
+## Connect configuration to the builder
 
 - **Activation is by presence.** Your builder's `build(cx)` scans
   `cx.pair_interactions` for entries whose `kind` matches yours; if there are
@@ -33,13 +40,13 @@ functor source.
   everything else (including `r_switch`) lives in the opaque `params` your
   typed struct deserializes.
 
-## The CUDA fragment
+## Implement the one-pair calculation
 
-The composed-kernel scaffolding lives in `src/forces/jit_composed.rs` as
-Rust string templates — there is no `.cuh` file to include (the reference to
-`kernels/pair_compute.cuh` in `docs/architecture.md` is stale). Your fragment
-is a Rust `String` of CUDA C++ that the composer drops into the shared
-translation unit.
+The composition framework lives in `src/forces/jit_composed.rs`. A potential
+returns its CUDA C++ fragment as a Rust `String`; the composer inserts it into
+a shared CUDA translation unit. There is no separate
+`kernels/pair_compute.cuh` file to include. The example below shows the fixed
+functor interface; use `src/forces/lj.rs` for the complete Rust-side wiring.
 
 `pair_force_fragment()` returns a `PairForceFragment` with a functor struct
 and three `__device__` methods whose signatures are fixed by the composer's
@@ -83,7 +90,7 @@ struct BuckinghamPairFunctor {
 };
 ```
 
-Conventions that are easy to get wrong:
+The generated kernel expects the following conventions:
 
 - **`factor` is already divided by `r`** — it is `-(1/r)·dU/dr`, because the
   composer multiplies it by the raw displacement components, not the unit
@@ -99,7 +106,9 @@ Conventions that are easy to get wrong:
   (`BuckinghamPairFunctor`, `heddle_buck_*`), and reuse shared preamble
   helpers like `heddle_jit_exclusion_scale` rather than redefining them.
 
-**Do not hand-write `entry_point_args` or `functor_init_source`.** Define one
+### Generate the argument interface from one schema
+
+Do not hand-write `entry_point_args` or `functor_init_source`. Define one
 `KernelArgSchema` (via `KernelArgSchema::pair_force(...)`) and generate both
 from it — `schema.entry_point_args()` and `schema.functor_init_source()` —
 and route `bind_pair_force_args` through a `KernelArgBinder` built from the
@@ -113,7 +122,7 @@ Set `consumes_type_index: true` on the fragment so the composer supplies
 argument — don't bind it yourself), and `cutoff:` to `CutoffHandling::Uniform`
 when every pair shares one cutoff, else `PerPair`.
 
-## Determinism
+## Rely on deterministic framework accumulation
 
 You get bit-exact summation for free: the composer converts each per-pair
 `(factor, energy, virial)` to integer fixed-point and `atomicAdd`s into
@@ -123,15 +132,12 @@ one triple from `r` and the per-type params, with no state carried across
 pairs and no float accumulation of your own. All summation belongs to the
 framework.
 
-## Manifest
+## Implement the Rust types
 
-### New file
-
-**`src/forces/buckingham.rs`** — mirrors `lj.rs`: a `KIND` const, the typed
-`Params` (with `Convert` derive), a resolve helper, the `State`
-(`Potential` + `PairForcePotential`), the `arg_schema()`, the `Builder`
-(`PotentialBuilder`), and the `..._pair_force_fragment()` function. Key
-pieces:
+Create `src/forces/buckingham.rs`. It should follow `lj.rs` and contain the
+kind and label constants, typed parameters, resolved state, argument schema,
+potential traits, builder, and CUDA fragment. The following code is an
+abbreviated outline rather than a directly compilable example.
 
 ```rust
 pub const BUCKINGHAM_KIND: &str = "buckingham";
@@ -197,13 +203,15 @@ row-major `ti*n_types+tj`, uploaded with `htod_or_empty`) — copy
 `LennardJonesParameterTable` in `src/gpu/kernels.rs`, or keep it local to
 `buckingham.rs`.
 
-**`rqm/forces/buckingham-pair-force.md`** — the spec; follow
+## Register and document the potential
+
+Add `rqm/forces/buckingham-pair-force.md`; follow
 `rqm/forces/lj-pair-force.md` and cross-reference
 `rqm/forces/jit-composed-pair-force.md` and
 `rqm/forces/packed-neighbour-pair-force.md` rather than restating the shared
 kernel contract.
 
-### Existing files to edit
+Then edit the following existing files:
 
 - **`src/forces/mod.rs`** — three lines: `pub mod buckingham;`, the
   `pub use buckingham::{...}` re-export, and `Box::new(BuckinghamBuilder)` in
@@ -219,7 +227,7 @@ kernel contract.
 open-shaped and routing is claim-driven), `build.rs`, or any `.cu` file (the
 functor is a runtime-compiled string; there is no new kernel).
 
-### Tests
+## Test the potential
 
 - In-file `#[cfg(test)]` — pin the exact `entry_point_args` /
   `functor_init_source` strings the schema emits, and assert the fragment
@@ -231,20 +239,20 @@ functor is a runtime-compiled string; there is no new kernel).
   writes non-zero forces.
 - `tests/io_config.rs` — a `kind = "buckingham"` parse test.
 
-## Gotchas
+## Completion checklist
 
-- **`compute()` is bypassed for JIT pair slots** — make it `unreachable!()`
+- [ ] **`compute()` is bypassed for JIT pair slots** — make it `unreachable!()`
   and put all physics in the fragment.
-- **`max_cutoff()` must be `Some`** — it feeds the shared neighbor-list cutoff
+- [ ] **`max_cutoff()` returns `Some`** because it feeds the shared neighbor-list cutoff
   and the JIT prune constant; `None` drops your interaction or panics.
-- **Consume the shared neighbor list and the shared exclusion list** — clone
+- [ ] **The shared neighbor and exclusion lists are used** — clone
   `cx.device_exclusions` (an `Arc`); never allocate your own
   `DeviceExclusionList`. Bind only your per-type param buffers and the
   exclusion buffers.
-- **Dimensional caveat.** `A` (Energy) and `ρ` (Length) convert cleanly, but
+- [ ] **The units of every parameter are documented.** `A` (Energy) and `ρ` (Length) convert cleanly, but
   `C₆` carries energy·length⁶, which has no dimension newtype. Either keep it
   a plain `f64` (a `Convert` no-op) and document that it must be supplied in
   atomic units regardless of the file's `units` selector, or add a new
   `Dimension` variant and newtype in `src/units/mod.rs`.
-- **The fixed-point scale is `2^48` in code** (some spec prose says `2^32`);
+- [ ] **Tests use the implemented fixed-point scale of `2^48`** (some spec prose says `2^32`);
   the code is authoritative, but you never touch this directly.

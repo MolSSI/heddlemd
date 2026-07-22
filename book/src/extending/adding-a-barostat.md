@@ -1,26 +1,37 @@
 # Adding a barostat
 
-A barostat couples the system to a pressure bath by rescaling the box (and
-the positions in it). It is a **named-selection** registry slot
-(`[phase.barostat] kind = "..."`), composed with `velocity-verlet` and a
-thermostat for NPT. Read the [overview](index.md) first.
+A barostat couples a system to a pressure bath by changing the simulation box
+and the particle or molecular positions within it. The user selects a
+separate barostat with `[phase.barostat] kind = "..."`; it can be combined
+with velocity Verlet and a thermostat to perform NPT dynamics.
 
-There are two shapes, and you implement exactly one:
+Read the [extension overview](index.md) first for the shared builder,
+configuration, unit-conversion, and GPU terminology.
+
+## Choose the execution model
+
+HeddleMD supports two kinds of barostat operation. Decide which model matches
+the physical algorithm before implementing the trait:
 
 - **Per-step** (`periodicity() == EveryStep`, the default) — override
   `apply`, which runs every step at a `BarostatPoint` in the plan. It reads
   the current virial and kinetic energy, computes a scale factor, mutates
-  the box, and rescales positions. Templates: `berendsen_barostat.rs`
-  (equilibration-only) and `c_rescale_barostat.rs` (canonical, stochastic).
+  the box, and rescales positions. Use `berendsen_barostat.rs` as the simpler
+  equilibration-only example or `c_rescale_barostat.rs` as a canonical,
+  stochastic example.
 - **Periodic** (`periodicity() == EveryNSteps(f)`) — override `apply_move`,
   a host-orchestrated Monte-Carlo-style move run every `f` steps at a batch
-  boundary. It gets `&mut ForceField` because it evaluates the energy at a
-  trial box. Template: `mc_barostat.rs`.
+  boundary. It receives mutable access to the force field because it must
+  evaluate the energy of a trial box. Use `mc_barostat.rs` as the example.
+
+Implement `apply` for a per-step barostat or `apply_move` for a periodic
+barostat. Do not put both algorithms into one implementation.
 
 ## Per-step barostats
 
-`apply(&mut self, buffers, sim_box, dt, timings)` does the whole per-step
-job in one call:
+The runner calls `apply(&mut self, buffers, sim_box, dt, timings)` at the
+barostat point in every timestep. A typical implementation performs these
+operations:
 
 1. Reduce the kinetic energy and the total virial into your own length-1
    device scratch buffers (`compute_kinetic_energy_on_device`,
@@ -32,7 +43,9 @@ job in one call:
 3. Rescale positions with the device-resident factor
    (`rescale_positions_device_factor`).
 
-**Where the fresh virial comes from.** The per-particle virial shares are
+### How the barostat receives a current virial
+
+The per-particle virial shares are
 only current if the step's `ForceEval` ran at `AggregateLevel::ForcesAndScalars`.
 You get this without the integrator having to know: when a per-step barostat
 is active, the runner sets `runner_needs_scalars`, which upgrades every
@@ -40,20 +53,28 @@ is active, the runner sets `runner_needs_scalars`, which upgrades every
 for the phase. So c-rescale/Berendsen work even with plain velocity-Verlet
 (which otherwise emits `ForcesOnly`).
 
-**Plan placement.** `apply` fires only at a `SubStep::BarostatPoint` marker.
+### Where the barostat appears in a timestep
+
+`apply` runs only at a `SubStep::BarostatPoint` marker.
 `velocity-verlet` emits a terminal one, placed *before* the final
 `AfterKick` velocity projection so a RATTLE projection stays last. If a
 per-step barostat is configured with an integrator whose plan carries no
 `BarostatPoint`, phase setup fails with `BarostatPlacementMissing`.
 
-**Box generation.** Mutating the lattice through `sim_box.lattice_device_mut()`
-bumps the box generation counter, which the neighbor-list and SPME pipelines
-observe to rebuild/re-sort on the next step. You get that for free.
+### Notify dependent calculations when the box changes
+
+Mutating the lattice through `sim_box.lattice_device_mut()`
+bumps the box generation counter. The neighbor-list pipeline observes that
+counter and rebuilds on the next step. SPME then observes the neighbor-list
+rebuild generation and re-sorts its cached particle order. You get that for
+free.
 
 ## Periodic barostats
 
+The runner calls
 `apply_move(&mut self, force_field, buffers, sim_box, constraint, dt, timings)`
-runs a full trial move on the host cadence:
+at the requested host interval. A Monte Carlo volume move normally follows
+this sequence:
 
 1. Read the current potential energy `U_old` (the runner guarantees the
    pre-move step evaluated `ForcesAndScalars`).
@@ -72,11 +93,11 @@ constrained water. A periodic barostat needs **no** `BarostatPoint` marker
 and does no per-step work, so it stays `graph_compatible` (its move runs
 between graph replays).
 
-> Note: the `constraint` argument to `apply_move` is currently always passed
-> as `None` by the runner. If your move needs to reproject constraints after
+> Current limitation: the runner currently passes `None` for the `constraint`
+> argument to `apply_move`. If your move needs to reproject constraints after
 > scaling, that wiring does not exist yet — treat it as a limitation.
 
-## Determinism and RNG
+## Preserve determinism in stochastic methods
 
 For a stochastic barostat, draw from Philox keyed by a config `seed`. A
 per-step barostat must keep its counter **on device** (the c-rescale pattern:
@@ -85,12 +106,12 @@ so it survives CUDA-graph replay. A periodic barostat may use a host counter
 since its move isn't captured. Same `(seed, counter)` → same draw → identical
 box trajectory.
 
-## Manifest
+## Implement the Rust types
 
-### New files
-
-**`src/integrator/my_barostat.rs`** — params struct, state, `Barostat` impl,
-and builder. Per-step skeleton (c-rescale-shaped, reusing existing kernels):
+Create `src/integrator/my_barostat.rs` containing the typed parameters,
+runtime state, `Barostat` implementation, and builder. The following per-step
+skeleton is abbreviated and is not directly compilable; the comments stand in
+for the method-specific equations, launches, and error mapping.
 
 ```rust
 use serde::Deserialize;
@@ -158,14 +179,16 @@ For a **periodic** barostat, instead override `periodicity()` →
 (taking `&mut ForceField`); leave `apply` at the no-op default. See
 `mc_barostat.rs`.
 
-**`rqm/integration/my-barostat.md`** — the spec; follow
+## Register and document the barostat
+
+Add `rqm/integration/my-barostat.md`; follow
 `rqm/integration/c-rescale-barostat.md` (per-step) or
 `rqm/integration/mc-barostat.md` (periodic), and add a row to the barostat
 table in `rqm/integration/framework.md`.
 
-### Existing files to edit
+Then edit the following existing files:
 
-- **`src/integrator/mod.rs`** — three lines: `pub mod my_barostat;`, the
+- **`src/integrator/mod.rs`** — declare `pub mod my_barostat;`, add the
   `pub use my_barostat::{MyBarostat, MyBarostatBuilder};` re-export, and
   `Box::new(MyBarostatBuilder)` in the `vec![...]` of
   `impl Builtins for dyn BarostatBuilder` (roster at ~line 1230). This is the
@@ -177,7 +200,7 @@ table in `rqm/integration/framework.md`.
 **No change needed** to `src/io/config.rs` (validate/convert are called by
 registry lookup) or `src/runner.rs` (barostat dispatch is generic).
 
-### Tests
+## Test the barostat
 
 `tests/barostats_my.rs` (model on `tests/barostats_c_rescale.rs` /
 `tests/barostats_mc.rs`):
@@ -196,17 +219,17 @@ registry lookup) or `src/runner.rs` (barostat dispatch is generic).
   are untouched by a move, and rigid-molecule geometry is invariant under a
   scale.
 
-## Gotchas
+## Completion checklist
 
-- **Choose your shape and override the matching method** — `apply` (per-step)
+- [ ] **The execution model and method agree** — `apply` (per-step)
   *or* `apply_move` (periodic), consistent with `periodicity()`.
-- **A per-step barostat needs a `BarostatPoint` in the integrator plan**, or
+- [ ] **A per-step barostat has a `BarostatPoint` in the integrator plan**, or
   setup fails with `BarostatPlacementMissing`. `velocity-verlet` provides one.
-- **Guard `apply`/`apply_move` on `particle_count == 0`** and don't mutate the
+- [ ] **`apply` or `apply_move` handles `particle_count == 0`** and does not mutate the
   box in that case.
-- **Canonical vs equilibration-only** — state which in the spec. A canonical
+- [ ] **The specification identifies the ensemble behavior.** A canonical
   barostat should carry conserved-quantity bookkeeping in its log column;
   Berendsen is explicitly equilibration-only.
-- **Keep the RNG counter on-device for a per-step barostat** so graph replay
+- [ ] **A per-step stochastic barostat keeps its RNG counter on the device** so graph replay
   stays deterministic; a host counter is fine for a periodic move.
-- **A later same-`kind` registration never shadows a built-in.**
+- [ ] **The `kind` name is unique.** A later same-name registration never shadows a built-in.

@@ -1,28 +1,31 @@
 # Adding a bonded potential
 
-A bonded potential is an intramolecular interaction keyed by explicit atom
-indices from the topology file — a bond (2 atoms), an angle (3), or a
-dihedral (4). Like pair potentials, they are **compositionally activated**
-via a params claim, and JIT-composed into a shared intramolecular kernel.
-Read the [overview](index.md) and skim
-[Adding a pair potential](adding-a-pair-potential.md) first — the builder,
-claim, and fragment machinery are the same; only the functor contract and the
-absence of a neighbor list differ.
+A bonded potential describes an intramolecular interaction whose atom indices
+come explicitly from the topology: two atoms for a bond, three for an angle,
+or four for a dihedral. It does not search the neighbor list.
 
-This page walks through adding a **bond** potential (say a `"cubic"` bond
-alongside the built-in harmonic and Morse). Templates: `src/forces/harmonic_bond.rs`
-and `src/forces/morse.rs`. The angle and dihedral variants are identical in
-shape — see the table at the end.
+Read the [extension overview](index.md) and [Adding a pair
+potential](adding-a-pair-potential.md) first. Bonded and pair potentials use
+the same builder, parameter-claim, and run-time CUDA composition machinery.
+This guide concentrates on the different topology and reduction contracts.
 
-## What's the same as a pair potential, what's different
+## Choose the closest example
 
-Same: a `#[derive(Clone)] Builder` implementing `PotentialBuilder` with a
+This page uses a `"cubic"` bond as its running example. Begin with
+`src/forces/harmonic_bond.rs` for the simplest complete pattern or
+`src/forces/morse.rs` for another two-particle potential. Angle and dihedral
+implementations follow the same workflow but use different functor signatures;
+the table near the end identifies their examples.
+
+## Understand the bonded execution path
+
+The following pieces are the same as for a pair potential: a cloneable builder implementing `PotentialBuilder` with a
 `params_claim`, `validate_params`, `convert_params`, and `build`; a `State`
 implementing `Potential`; a CUDA functor emitted as a Rust source string and
 compiled by `nvrtc`; registration by adding one line to the potential
 `Builtins` roster.
 
-Different:
+The important differences are:
 
 - **The claim category is `BondType`** (or `AngleType` / `DihedralType`), and
   it matches the `kind` field of `[[bond_types]]` entries.
@@ -39,7 +42,7 @@ Different:
   already exists and is re-exported from `crate::gpu`; the per-bond physics
   is the JIT source string.
 
-## The topology side
+## Map topology entries to the potential
 
 The user declares `[[bond_types]] name = "CT-CT" kind = "cubic"` with a
 `params` inline table, and references it by name from the `.topology` file's
@@ -59,7 +62,7 @@ implicit non-bonded exclusion, derived kind-agnostically from the full bond
 list), and — for dihedrals — **1-4 scaling** from the dihedral type's common
 `scale_lj_14` / `scale_coul_14` fields.
 
-## The CUDA functor
+## Implement the one-bond calculation
 
 The bond functor computes one bond's contribution from the scalar distance.
 The composer's generated entry point computes the minimum-image displacement
@@ -87,7 +90,7 @@ struct CubicBondFunctor {
 };
 ```
 
-Conventions:
+The generated entry point expects these conventions:
 
 - **`fmag` is `−(dU/dr)/r`** (already divided by `r`). The entry point writes
   force `fmag·(dx,dy,dz)` onto atom `i` and its negation onto atom `j`
@@ -97,12 +100,14 @@ Conventions:
 - Use the precision shim (`Real`, `R(x)`, `Real_*`) and a unique struct/helper
   prefix, exactly as for pair fragments.
 
+### Generate the argument interface from one schema
+
 As with pair potentials, generate `entry_point_args` and
 `functor_init_source` from one `KernelArgSchema` (built with
 `KernelArgSchema::intramolecular(...)`) and route `bind_bonded_force_args`
 through a `KernelArgBinder` on the same schema.
 
-## Determinism
+## Preserve the fixed reduction order
 
 Each bond is processed by one thread that writes only its own two scratch
 slots — no cross-thread contention. The reduction then sums each atom's bonds
@@ -111,15 +116,11 @@ sum is bit-identical run to run. Bonded potentials therefore need no
 fixed-point accumulator (unlike the pair path). Keep `evaluate` a pure
 per-bond function.
 
-## Manifest
+## Implement the Rust types
 
-### New file
-
-**`src/forces/cubic_bond.rs`** — mirrors `harmonic_bond.rs`: `KIND`/`LABEL`
-consts, typed `Params` (with `Convert` derive), `State`
-(`Potential` + `BondedPotential`), `arg_schema()`, `Builder`
-(`PotentialBuilder`), and the `..._bonded_force_fragment()` function. Key
-pieces:
+Create `src/forces/cubic_bond.rs` and follow `harmonic_bond.rs` for the
+complete implementation. The following code is an abbreviated outline rather
+than a directly compilable example.
 
 ```rust
 pub const CUBIC_BOND_KIND: &str = "cubic";
@@ -188,10 +189,12 @@ impl PotentialBuilder for CubicBondBuilder {
 }
 ```
 
-**`rqm/forces/cubic-bond.md`** — the spec; follow `rqm/forces/harmonic-bond.md`
+## Register and document the potential
+
+Add `rqm/forces/cubic-bond.md`; follow `rqm/forces/harmonic-bond.md`
 and cross-reference `rqm/forces/jit-composed-intramolecular.md`.
 
-### Existing files to edit
+Then edit the following existing files:
 
 - **`src/forces/mod.rs`** — three lines: `pub mod cubic_bond;`, the
   `pub use cubic_bond::{...}` re-export, and `Box::new(CubicBondBuilder)` in
@@ -205,7 +208,7 @@ routing is claim-driven — an unclaimed kind is `UnknownKind`), `build.rs`,
 `src/gpu/device.rs`, or any `.cu` file. `PotentialParamsCategory::BondType`
 already exists.
 
-### Tests
+## Test the potential
 
 - In-file `#[cfg(test)]` — pin the exact `entry_point_args` /
   `functor_init_source` strings from `cubic_arg_schema()`; GPU-free.
@@ -217,7 +220,7 @@ already exists.
   validates; an unknown kind yields `ConfigError::UnknownKind { slot:
   "bond_types" }`.
 
-## Angle and dihedral variants
+## Adapt the pattern for angles and dihedrals
 
 Same recipe; swap the capability trait, claim category, fragment type, scratch
 view, and reduction kernel:
@@ -240,16 +243,16 @@ carry the `scale_lj_14` / `scale_coul_14` common fields, consumed centrally
 by the topology loader to derive scaled 1-4 exclusions — a new dihedral kind
 gets that automatically.
 
-## Gotchas
+## Completion checklist
 
-- **`compute()` runs the reduction, and only the reduction.** It is not
+- [ ] **`compute()` runs the reduction, and only the reduction.** It is not
   bypassed like a pair slot. Anything extra double-applies forces.
-- **`max_cutoff()` must be `None`** — a non-`None` value inflates the shared
+- [ ] **`max_cutoff()` returns `None`** because a non-`None` value inflates the shared
   neighbor-list cutoff for no reason.
-- **`fmag` is `−(dU/dr)/r`** (pre-divided); **`u_k` / `w_k` are full values**
+- [ ] **`fmag` is `−(dU/dr)/r`** (pre-divided); **`u_k` / `w_k` are full values**
   (the entry point splits them). These two are the most common mistakes.
-- **Param tables are sized to the full `bond_types.len()` and indexed by the
+- [ ] **Parameter tables are sized to the full `bond_types.len()` and indexed by the
   global type index** — don't compact them to the filtered subset.
-- **Empty bond list → no-op:** `build` returns `Ok(None)` when no bond uses
+- [ ] **An empty bond list is a no-op:** `build` returns `Ok(None)` when no bond uses
   your kind, and `compute` early-returns on `bond_count == 0`.
-- **A later same-`kind` registration never shadows a built-in.**
+- [ ] **The `kind` name is unique.** A later same-name registration never shadows a built-in.

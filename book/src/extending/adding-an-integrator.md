@@ -1,21 +1,24 @@
 # Adding an integrator
 
-An integrator is the core time-stepping algorithm — the velocity kicks,
-position drifts, and in-step force evaluation that make one timestep. It
-is a **named-selection** registry slot (`[phase.integrator] kind = "..."`).
-Read the [overview](index.md) first.
+An integrator defines the ordered velocity updates, position updates, and
+force evaluations that make up one timestep. The user selects it by name with
+`[phase.integrator] kind = "..."`.
 
-The distinctive thing about an integrator is that it does **not** run a
-timestep imperatively. It returns a `StepPlan` — an ordered list of typed
-`SubStep`s — and the runner's single `run_step` executor walks it. This
-lets the runner insert thermostat, barostat, and constraint hooks at the
-points the plan declares, validate the schedule's data dependencies, and
-capture it into a CUDA graph.
+Read the [extension overview](index.md) first. This guide assumes you
+understand its descriptions of builders, runtime components, host and device
+work, and CUDA-graph compatibility.
 
-Templates:
+Unlike a conventional integrator routine, a HeddleMD integrator does not run
+the whole timestep itself. It describes the timestep by returning a
+`StepPlan`, which is an ordered list of typed `SubStep` values. The shared
+runner executes that list. This allows the runner to insert configured
+thermostat, barostat, and constraint operations, validate data dependencies,
+and capture compatible device work in a CUDA graph.
+
+## Choose the closest example
 
 - `src/integrator/velocity_verlet.rs` — the canonical symplectic template.
-  Start here.
+  Start here for an integrator with ordinary kick and drift operations.
 - `src/integrator/langevin_baoab.rs` — owns its own thermostat; a `Custom`
   sub-step (the OU step) with a device-resident RNG counter.
 - `src/integrator/mtk_npt.rs` — owns thermostat and barostat; reads virial
@@ -23,13 +26,18 @@ Templates:
 - `src/integrator/respa.rs` — multiple force evaluations per step and
   `KickSource::Class` impulse splitting.
 
-## The StepPlan contract
+Before writing Rust, express the algorithm as an ordered list of operations
+and identify which forces each velocity update consumes. This makes it much
+easier to construct a valid `StepPlan`.
+
+## Describe the timestep with a StepPlan
 
 `plan(dt) -> StepPlan` must be a **pure function** of `dt` and the
-integrator's static configuration — the same shape every call. The runner
-probes it once per phase (to pick the thermostat topology and CUDA-graph
-eligibility) and calls it once per step to walk. It launches no kernels and
-allocates no buffers.
+integrator's fixed configuration. In this context, pure means that it does not
+modify the integrator, launch kernels, allocate buffers, or depend on a
+per-step counter. It must return the same sequence of operation types every
+time. The runner relies on that stable sequence when validating the phase and
+recording CUDA graphs.
 
 The canonical symplectic (velocity-Verlet family) shape reads `F(t)`
 before the force evaluation and `F(t+dt)` after it:
@@ -44,29 +52,29 @@ BarostatPoint                        // terminal; no-op without a per-step baros
 ConstraintPoint { AfterKick }        // project velocities — RATTLE-last
 ```
 
-Load-bearing details:
+The following rules explain how that sequence is executed:
 
 - **`execute()` never sees `ForceEval`.** Only the runner holds the
   `ForceField`, so it dispatches force evaluation itself. Your `execute`
   handles the kicks, drifts, and any integrator-private `Custom` steps, and
   returns `IntegratorError::UnexpectedSubStep` for anything it shouldn't
   receive.
-- **The F(t) cache.** At step entry the runner treats the cached forces as
+- **Forces at the start of a step are already available.** At step entry the runner treats the cached forces as
   valid `F(t)` (left by the previous step's trailing `ForceEval`, or the
   runner's one warm-up evaluation before the loop). So the leading
   `KickDrift` legitimately reads `F(t)` — **do not prepend a `ForceEval` to
   "prime" forces**; that would double-evaluate, and the schedule validator
   already assumes carried-in forces are valid.
-- **Markers are no-ops without their slot.** Emit `ConstraintPoint`,
+- **Placement markers are harmless when no matching component is configured.** Emit `ConstraintPoint`,
   `BarostatPoint`, and (if you own thermostat placement) `ThermostatHalf`
   markers unconditionally, so one plan drives constrained and unconstrained,
   NVE and NPT runs alike. Order matters: a terminal `BarostatPoint` goes
   **before** the final `AfterKick` velocity projection (RATTLE-last).
-- **`AggregateLevel`** on the `ForceEval` picks the cheap `ForcesOnly` path
+- **`AggregateLevel` controls which force-derived quantities are calculated.** On the `ForceEval`, it selects the cheap `ForcesOnly` path
   unless the integrator itself needs energy/virial every step (NPT
   integrators emit `ForcesAndScalars`). Use `None` to defer to the runner,
   which upgrades to `ForcesAndScalars` on steps that log or write a frame.
-- **`KickSource::Total` vs `Class`.** `Total` reads the combined force
+- **`KickSource` identifies the force buffer used by a kick.** `Total` reads the combined force
   buffer and is executed by the integrator. `Class(Fast|Slow)` reads one
   class accumulator and is dispatched by the runner — use it only for
   multiple-timestep (RESPA) impulse splitting.
@@ -79,10 +87,11 @@ a fixed resource footprint; a `Custom` step declares its own `reads`/`writes`
 `Custom` step's label-and-footprint as a single enum, like MTK's `MtkStep`,
 so `execute` re-derives the same footprint it declared.
 
-## Compatibility predicates
+## Declare compatibility with other components
 
-The builder answers predicates the config loader and runner consult, each
-taking the parsed params so the answer can depend on configuration:
+The builder provides several methods that tell the configuration loader which
+combinations are valid. These methods receive the parsed parameters, so an
+answer may depend on the selected mode:
 
 | Predicate | Default | If it returns the non-default, the loader/runner… |
 | --- | --- | --- |
@@ -99,12 +108,12 @@ does host-side scalar arithmetic or a device→host copy between launches
 per-step barostat is configured with a plan that carries no `BarostatPoint`
 — so a barostat-hosting integrator must emit one.
 
-To let tests drive your integrator with a constraint slot, also implement
-the `ConstraintCapableIntegrator` trait (orthogonal to the
-`supports_constraints` predicate); its `check_accepts_constraints_now` is a
-runtime veto.
+If the integrator supports constraints, also implement
+`ConstraintCapableIntegrator`. The builder predicate says that the
+configuration is supported; this runtime trait lets the constraint framework
+exercise the constructed integrator and reject a state-dependent case.
 
-## Determinism and CUDA
+## Reuse device kernels and preserve determinism
 
 Reuse the existing `integrate.cu` kernels where you can — `vv_kick`,
 `vv_kick_drift`, and the class-kick kernels are re-exported from
@@ -114,13 +123,13 @@ add one, follow the [overview](index.md) CUDA section. Keep RNG state in a
 survives CUDA-graph replay deterministically; a host counter would freeze
 under capture and break reproducibility.
 
-## Manifest
+## Implement the Rust types
 
-### New files
-
-**`src/integrator/my_integrator.rs`** — the whole integrator: params
-struct, state + `Integrator` impl (`plan`/`execute`, optional log columns),
-and the builder. Skeleton (canonical symplectic, reusing `integrate.cu`):
+The main implementation belongs in a new file such as
+`src/integrator/my_integrator.rs`. It contains the parameter type, runtime
+state, `Integrator` implementation, and builder. The following skeleton is an
+abbreviated outline: comments replace method-specific calculations and error
+mapping, so it is not directly compilable.
 
 ```rust
 use serde::Deserialize;
@@ -186,13 +195,15 @@ impl IntegratorBuilder for MyIntegratorBuilder {
 }
 ```
 
-**`rqm/integration/my-integrator.md`** — the spec; follow
+## Register and document the integrator
+
+Add `rqm/integration/my-integrator.md` for the requirements specification; follow
 `rqm/integration/velocity-verlet.md` and the op-model conventions in
 `rqm/integration/op-model.md`.
 
-### Existing files to edit
+Then edit the following existing files:
 
-- **`src/integrator/mod.rs`** — three lines: `pub mod my_integrator;`, the
+- **`src/integrator/mod.rs`** — declare `pub mod my_integrator;`, add the
   `pub use my_integrator::{MyIntegratorBuilder, MyIntegratorState};`
   re-export, and `Box::new(MyIntegratorBuilder)` in the `vec![...]` of
   `impl Builtins for dyn IntegratorBuilder` (roster at ~line 958).
@@ -203,7 +214,7 @@ impl IntegratorBuilder for MyIntegratorBuilder {
 **No change needed** to `src/io/config.rs` (compatibility checks call your
 builder's predicates; kind dispatch is registry-driven) or `build.rs`.
 
-### Tests
+## Test the integrator
 
 `tests/integrators_my_integrator.rs` (model on `tests/integrator_framework.rs`
 and `tests/integrators_respa.rs`):
@@ -217,18 +228,18 @@ and `tests/integrators_respa.rs`):
 - Empty-state (`particle_count == 0`) construction and step are no-ops.
 - If NVE-like, an energy-drift / determinism end-to-end test.
 
-## Gotchas
+## Completion checklist
 
-- **`plan()` must be pure** — no mutation of `self`, no branching on a
+- [ ] **`plan()` is pure** — no mutation of `self`, no branching on a
   per-step counter. The runner relies on a stable shape for graph capture.
-- **The warm-up force evaluation is the runner's job**, before the loop —
+- [ ] **The warm-up force evaluation remains the runner's job**, before the loop —
   don't prime forces in your plan.
-- **Guard `execute` on `particle_count == 0`**; construction with zero
+- [ ] **`execute` handles `particle_count == 0`**; construction with zero
   particles must still succeed.
-- **`graph_compatible` must be truthful** — any host-side scalar read
+- [ ] **`graph_compatible` reflects the execution path** — any host-side scalar read
   between launches means `false`, or graph replay freezes stale values.
-- **A later same-`kind` registration never shadows a built-in** — pick a
+- [ ] **The `kind` name is unique** — a later same-name registration never shadows a built-in, so pick a
   fresh name.
-- **If params carry physical units**, use `crate::units` dimension newtypes
-  + derive `Convert` + implement `convert_params`, or SI inputs are silently
-  read as atomic units.
+- [ ] **Physical parameters use dimension types**, derive `Convert`, and
+  implement `convert_params`; otherwise SI inputs may be interpreted as
+  atomic units.

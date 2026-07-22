@@ -1,225 +1,248 @@
 # Adding a thermostat
 
-A thermostat couples the system to a temperature bath. It is a
-**named-selection** registry slot: the user picks it with
-`[phase.thermostat] kind = "..."`, composed with the `velocity-verlet`
-integrator. Read the [overview](index.md) first for the registry, config,
-CUDA, and determinism machinery this page builds on.
+A thermostat couples particle motion to a target temperature. This guide
+explains how to add a thermostat that occupies the optional
+`[phase.thermostat]` configuration slot.
 
-Templates in the tree, easiest first:
+Use this extension point when the thermostat is separate from the integrator.
+It can be combined with `velocity-verlet` or `respa`. Do not use it for an
+integrator such as `langevin-baoab` or `mtk-npt`, which owns its thermostat and
+rejects a separately configured thermostat.
 
-- `src/integrator/berendsen.rs` — deterministic, post-only, reuses shared
-  kernels (**no new `.cu` file**). The best starting point.
-- `src/integrator/csvr.rs` — stochastic, reuses shared kernels, keeps a
-  device-side conserved-quantity accumulator.
-- `src/integrator/andersen.rs` — stochastic **with its own kernel**; copy
-  this if you need bespoke device work.
-- `src/integrator/nose_hoover_chain.rs` — the complex case: a leading
-  `apply_pre` half, host-side chain arithmetic, `graph_compatible = false`.
+Read the [extension overview](index.md) first for shared configuration,
+registration, unit-conversion, and determinism conventions.
 
-## What a thermostat has to do
+## Choose the closest example
 
-A thermostat implements the `Thermostat` trait (`src/integrator/mod.rs`):
+Start from the simplest existing thermostat that resembles your algorithm:
 
-- `apply_pre(&mut self, buffers, dt, timings)` — the leading (pre-walk)
-  coupling half. Defaults to a no-op; only symmetric-Trotter thermostats
-  (Nosé-Hoover) override it.
-- `apply_post(&mut self, buffers, dt, timings)` — the trailing coupling.
-  This is the one method you must implement. It reduces the **full-step**
-  kinetic energy of the post-trailing-kick velocities and rescales from
-  it.
-- `log_column_names` / `log_column_values` — optional CSV diagnostic
-  columns (conventionally a `*_conserved` energy column).
+- `src/integrator/berendsen.rs` is the best starting point for a deterministic
+  velocity-rescaling method. Its per-step calculation remains on the GPU.
+- `src/integrator/csvr.rs` demonstrates a stochastic rescaling method, a
+  device-resident Philox counter, and conserved-quantity bookkeeping.
+- `src/integrator/andersen.rs` demonstrates a stochastic method that requires
+  its own CUDA kernel.
+- `src/integrator/nose_hoover_chain.rs` is an advanced example with coupling
+  both before and after integration and host-side chain arithmetic. It cannot
+  be captured in a CUDA graph.
 
-Two things about the runtime contract that shape the code:
+Copying a nearby implementation is preferable to beginning with the full
+skeleton below: the existing file includes complete error handling, timing,
+and tests for its particular execution path.
 
-- **You are called only on coupling steps, and `dt` is already the
-  effective coupling timestep** `coupling_interval · base_dt`. Do not
-  re-scale by the interval. The runner owns the step counter and the
-  wrapping; the `coupling_interval` field is peeled from the config before
-  your builder ever sees the params, so it is not a field in your params
-  struct.
-- **The kinetic-energy reduction is a fusion barrier.** A global reduction
-  can't live inside a per-particle kernel without the order-dependent
-  atomics the reproducibility strategy forbids, so your KE reduce and your
-  rescale each run as their own standalone launches. This is structural —
-  see `docs/architecture.md`.
+## Understand when a thermostat runs
 
-Only `apply_post` is mandatory. Both hooks must early-return `Ok(())` when
-`buffers.particle_count() == 0`.
+A runtime thermostat implements the `Thermostat` trait in
+`src/integrator/mod.rs`. Two methods can couple it to a timestep:
 
-## Reusing the shared kernels (the common case)
+- `apply_pre` runs before the integrator walk. Its default implementation does
+  nothing. Override it only when the mathematical splitting requires an
+  initial coupling operation, as in a symmetric Nosé–Hoover scheme.
+- `apply_post` runs after the trailing velocity update. Every separately
+  configured thermostat must implement this method.
 
-A temperature-rescaling thermostat needs no new CUDA. The `nose_hoover`
-PTX module already exports the two kernels every rescale thermostat reuses,
-wrapped in `src/gpu/kernels.rs`:
+The runner calls these methods only on coupling steps. The `dt` argument is
+already the effective coupling time,
+`coupling_interval * simulation_timestep`. Do not multiply it by the coupling
+interval again. The runner removes `coupling_interval` before passing the
+remaining parameter table to your builder.
 
-- `compute_kinetic_energy(buffers, &mut ke_scratch)` — the deterministic
-  full-step KE reduction (`ke_scratch` is a length-1 device buffer you
-  allocate once in your constructor).
-- `rescale_velocities(buffers, lambda)` (uniform host factor) and
-  `rescale_velocities_device_factor(...)` (factor left on device).
+Both methods must return `Ok(())` without launching a kernel when
+`buffers.particle_count() == 0`. Empty particle sets are used by framework
+tests and must remain valid.
 
-So `apply_post` is: reduce KE → compute the rescale factor `λ` on the host
-→ `rescale_velocities`. Berendsen is exactly this shape.
+Thermostats may also provide `log_column_names` and `log_column_values` for
+diagnostic or conserved-quantity columns. Follow the naming and unit
+conventions of the closest existing thermostat.
 
-If you keep the factor on device and never copy a scalar back per step,
-your thermostat stays `graph_compatible = true` (the default). If you read
-device scalars into host fields between launches — as Nosé-Hoover does for
-its chain — override `graph_compatible` to `false`.
+## Implement a velocity-rescaling thermostat
 
-## Determinism and RNG
+Most rescaling thermostats perform three operations:
 
-For a stochastic thermostat, draw noise from the counter-based Philox
-generator, never from wall-clock or thread state. The reproducible pattern
-(see CSVR and Andersen) is a **device-resident per-slot draw counter** that
-the kernel reads and increments, so every launch — and every CUDA-graph
-replay — draws a fresh, deterministic stream. Store the `seed` as a plain
-`u64` field in your params struct (it is dimensionless, so the `Convert`
-derive leaves it alone) and split it into `seed_lo`/`seed_hi` for the
-kernel. The host-side `philox_4x32_10` in `src/integrator/philox.rs` is
-bit-identical to the device helper in `kernels/philox.cuh`.
+1. Calculate the kinetic energy after the integrator's final velocity update.
+2. Calculate a velocity scale factor, conventionally called `lambda`, from
+   the kinetic energy, target temperature, coupling time, and method-specific
+   parameters.
+3. Multiply every particle velocity by that factor.
 
-## Manifest
+The kinetic-energy calculation is a global reduction and the velocity update
+is a per-particle operation. They must remain separate kernel launches; trying
+to combine the reduction with the velocity update would require the
+order-dependent synchronization that HeddleMD avoids.
 
-### New files
+### Preferred path: keep intermediate values on the GPU
 
-**`src/integrator/my_thermostat.rs`** — the whole slot: the typed params
-struct, the state object, the `Thermostat` impl, and the builder. Skeleton
-(Berendsen-shaped, no new kernel):
+Use this path when the scale-factor calculation can be expressed as a CUDA
+kernel:
+
+1. Allocate a one-element `CudaSlice<Real>` for the kinetic energy and another
+   for the scale factor when constructing the thermostat.
+2. Call `compute_kinetic_energy_on_device`. It writes the result into the
+   kinetic-energy buffer without copying it to Rust.
+3. Launch a small method-specific kernel that reads the kinetic energy and
+   writes the scale factor.
+4. Call `rescale_velocities_device_factor` with the scale-factor buffer.
+
+Because all per-step operations remain on the device, this form can retain the
+default `graph_compatible() == true`. Berendsen and CSVR follow this pattern.
+
+### Alternative path: calculate the factor on the host
+
+If the algorithm requires substantial CPU-side state or arithmetic, call
+`compute_kinetic_energy`, which performs the same deterministic reduction and
+then copies the scalar result to the host. Calculate `lambda` in Rust and pass
+it to `rescale_velocities`.
+
+This device-to-host copy and intervening Rust calculation cannot be recorded
+as an uninterrupted CUDA graph. The builder must therefore override
+`graph_compatible` and return `false`. Nosé–Hoover chain is the relevant
+example.
+
+Do not mix the two paths accidentally. In particular, calling the
+host-returning `compute_kinetic_energy` while leaving graph compatibility at
+its default is incorrect.
+
+## Add stochastic sampling safely
+
+Stochastic thermostats use the counter-based Philox generator. Store the
+configured seed as a `u64`; it is dimensionless and is not changed by unit
+conversion.
+
+For per-step CUDA work, allocate a one-element draw counter on the device. The
+sampling kernel reads and advances that counter. A captured CUDA graph then
+advances the random stream on every replay. A counter stored only in Rust
+would be captured with a fixed value and would repeat random draws.
+
+Use `src/integrator/csvr.rs` or `src/integrator/andersen.rs` as the complete
+pattern. The host implementation in `src/integrator/philox.rs` and the device
+helper in `kernels/philox.cuh` produce matching draws for the same keys.
+
+## Define the Rust types
+
+The implementation file normally contains four pieces:
+
+1. A typed parameter struct with physical dimension types.
+2. A runtime thermostat holding converted parameters and device buffers.
+3. An implementation of `Thermostat` for that runtime type.
+4. A builder implementing `KindedBuilder` and `ThermostatBuilder`.
+
+The following is an abbreviated outline, not compilable code:
 
 ```rust
-use serde::Deserialize;
-use crate::gpu::{GpuContext, GpuError, ParticleBuffers,
-                 compute_kinetic_energy, rescale_velocities};
-use crate::io::config::ConfigError;
-use crate::registry::{KindedBuilder, convert_params_in_place};
-use crate::timings::{KernelStage, Timings};
-use crate::precision::Real;
-use super::{Thermostat, ThermostatBuilder, ThermostatError};
-
-#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
+#[derive(
+    Debug,
+    Clone,
+    serde::Deserialize,
+    serde::Serialize,
+    crate::units::Convert,
+)]
 #[serde(deny_unknown_fields)]
-pub struct MyThermostatParams {
-    pub temperature: crate::units::Temperature, // dimensioned → converted
-    pub tau: crate::units::Time,                // dimensioned → converted
-    // pub seed: u64,                            // stochastic only; Convert no-op
+struct MyThermostatParams {
+    temperature: crate::units::Temperature,
+    tau: crate::units::Time,
 }
 
-#[derive(Debug)]
-pub struct MyThermostat {
+struct MyThermostat {
     temperature: f64,
     tau: f64,
-    g_dof: u32,                         // thermal DOF: (3N − n_constraints − 3).max(1)
-    ke_scratch: cudarc::driver::CudaSlice<Real>, // length-1, allocated once
+    kinetic_energy: cudarc::driver::CudaSlice<Real>,
+    scale_factor: cudarc::driver::CudaSlice<Real>,
 }
 
 impl Thermostat for MyThermostat {
-    // apply_pre defaults to no-op — override only for a leading half.
-    fn apply_post(&mut self, buffers: &mut ParticleBuffers, dt: Real,
-                  timings: &mut Timings) -> Result<(), ThermostatError> {
-        if buffers.particle_count() == 0 { return Ok(()); }        // mandatory
-        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let lambda = /* relaxation factor from k, dt, tau, g_dof */ 1.0;
-        timings.kernel_start(KernelStage::MY_THERMOSTAT_RESCALE)?;
-        rescale_velocities(buffers, lambda as Real)?;
-        timings.kernel_stop(KernelStage::MY_THERMOSTAT_RESCALE)?;
+    fn apply_post(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        dt: Real,
+        timings: &mut Timings,
+    ) -> Result<(), ThermostatError> {
+        if buffers.particle_count() == 0 {
+            return Ok(());
+        }
+
+        // Time and launch the deterministic kinetic-energy reduction.
+        compute_kinetic_energy_on_device(buffers, &mut self.kinetic_energy)?;
+
+        // Launch a method-specific kernel that computes self.scale_factor.
+
+        // Time and apply the device-resident scale factor.
+        rescale_velocities_device_factor(buffers, &self.scale_factor)?;
         Ok(())
     }
-
-    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
-        &[("mythermostat_conserved", crate::units::Dimension::Energy)]
-    }
-    fn log_column_values(&self, ke: f64, pe: f64) -> Vec<f64> { vec![ke + pe] }
 }
 
-#[derive(Debug, Clone)]  // Clone is required (registry_builder_clone! needs it)
-pub struct MyThermostatBuilder;
+#[derive(Debug, Clone)]
+struct MyThermostatBuilder;
 
 impl KindedBuilder for MyThermostatBuilder {
-    fn kind_name(&self) -> &'static str { "my-thermostat" }  // the TOML `kind`
-    fn convert_params(&self, units: crate::units::UnitSystem, params: &mut toml::Value)
-        -> Result<(), ConfigError> {
-        convert_params_in_place::<MyThermostatParams>(units, params)
+    fn kind_name(&self) -> &'static str {
+        "my-thermostat"
     }
-}
 
-impl ThermostatBuilder for MyThermostatBuilder {
-    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
-        let p: MyThermostatParams = params.clone().try_into()
-            .map_err(/* → ConfigError */)?;
-        // domain checks: temperature/tau finite & strictly positive …
-        Ok(())
-    }
-    // graph_compatible defaults to true; override to false if apply_* does
-    // host arithmetic between launches or a per-step dtoh copy.
-    fn build(&self, gpu: &GpuContext, particle_count: usize, n_constraints: usize,
-             params: &toml::Value) -> Result<Box<dyn Thermostat>, ThermostatError> {
-        let p: MyThermostatParams = params.clone().try_into().map_err(/* … */)?;
-        // g_dof = ((3*particle_count) − n_constraints − 3).max(1);
-        // ke_scratch = gpu.device.alloc_zeros::<Real>(1)?;
-        Ok(Box::new(/* MyThermostat { … } */))
+    fn convert_params(
+        &self,
+        units: crate::units::UnitSystem,
+        params: &mut toml::Value,
+    ) -> Result<(), ConfigError> {
+        convert_params_in_place::<MyThermostatParams>(units, params)
     }
 }
 ```
 
-**`rqm/integration/my-thermostat.md`** — the requirements spec. Mirror
-`rqm/integration/csvr.md`'s section order (Algorithm, Per-Step Kernel
-Sequence, Parameters, RNG if stochastic, conserved quantity, Empty State,
-Feature API, Determinism, Gherkin scenarios).
+In `validate_params`, deserialize `MyThermostatParams` and reject non-finite
+or non-positive temperatures and timescales. In `build`, deserialize the
+already converted values, compute the thermal degrees of freedom consistently
+with the existing thermostats, allocate device buffers once, and return
+`Box<dyn Thermostat>`.
 
-### Existing files to edit
+## Register the thermostat
 
-- **`src/integrator/mod.rs`** — three lines:
-  - `pub mod my_thermostat;` (with the other `pub mod` lines, ~15–30).
-  - `pub use my_thermostat::{MyThermostat, MyThermostatBuilder};` (with the
-    other re-exports, ~32–50).
-  - Add `Box::new(MyThermostatBuilder)` to the `vec![...]` in
-    `impl Builtins for dyn ThermostatBuilder` (the roster at ~line 1075).
-    This alone makes `kind = "my-thermostat"` resolvable.
+In `src/integrator/mod.rs`:
 
-- **`src/integrator/nose_hoover_chain.rs`** — only if you added a distinct
-  rescale timing stage: add one line (e.g.
-  `MY_THERMOSTAT_RESCALE = "my_thermostat_rescale",`) to the `stages { … }`
-  block of that file's `gpu_kernels!` invocation. (Reusing the existing
-  `KINETIC_ENERGY_REDUCE` stage avoids even this.)
+1. Declare the module with `pub mod my_thermostat;`.
+2. Re-export the runtime type and builder with the other thermostat exports.
+3. Add `Box::new(MyThermostatBuilder)` to the built-in thermostat roster.
 
-**No change needed** to `src/io/config.rs` (kind dispatch is
-registry-driven; `validate_params` and `convert_params` are called by
-lookup), `src/registries.rs`, `build.rs`, or `src/gpu/device.rs`.
+The roster entry makes `kind = "my-thermostat"` resolvable. No central
+configuration enum or dispatch statement needs to change.
 
-### If you need a bespoke device kernel
+If you add a CUDA file, also follow the kernel wiring described in the
+[extension overview](index.md). A thermostat that reuses existing kernels
+does not need changes to `build.rs` or the aggregate device-kernel manifest.
 
-Follow the Andersen pattern (see the [overview](index.md) CUDA section):
-add `kernels/my_thermostat.cu` (auto-compiled to `crate::kernels::MY_THERMOSTAT`),
-a `gpu_kernels!` block in `my_thermostat.rs`, one field in the
-`define_kernels!` manifest in `src/gpu/device.rs`, and a `gpu_launch!`
-wrapper in `src/gpu/kernels.rs` re-exported from `src/gpu/mod.rs`.
+## Write the specification and tests
 
-### Tests
+Add `rqm/integration/my-thermostat.md`. Use
+`rqm/integration/csvr.md` as a structural example and document:
 
-- `tests/integrators_my_thermostat.rs` — model on `tests/integrators_csvr.rs`:
-  drive `apply_post` over `ParticleBuffers`, assert the post-rescale kinetic
-  energy relaxes toward the target, and assert the `particle_count == 0`
-  no-op.
-- `tests/integrator_framework.rs` — add a lint assertion that
-  `ThermostatRegistry::with_builtins()` contains a builder with
-  `kind_name() == "my-thermostat"`.
-- Config round-trip / unit-conversion cases in `tests/io_config.rs` and
-  `tests/unit_conversion.rs`.
+- the physical equations and coupling location;
+- parameters, units, and domain restrictions;
+- the per-step kernel sequence;
+- random-number keys and counter advancement, if stochastic;
+- any conserved or diagnostic quantity;
+- empty-system behavior and CUDA-graph compatibility;
+- the determinism guarantee.
 
-## Gotchas
+Add an integration test modeled on the closest existing thermostat. At a
+minimum, test:
 
-- **A later same-kind registration never shadows a built-in.** `lookup`
-  returns the first match and built-ins are seeded first, so registering
-  another `"my-thermostat"` after the built-ins is dead code — the built-in
-  wins. Choose a fresh `kind`, or build the registry from `Registry::new()`
-  with explicit `register_*` calls to replace one.
-- **`dt` is already `coupling_interval · base_dt`** on the coupling steps
-  you're called — don't re-scale.
-- **Allocate all device scratch in the constructor**, never per step;
-  `ke_scratch` must be length 1.
-- **`graph_compatible` must be truthful** — return `false` if you read a
-  device scalar to the host between launches.
+- builder discovery and successful construction;
+- valid, invalid, unknown, and unit-converted parameters;
+- no work for an empty particle set;
+- relaxation or sampling toward the expected temperature;
+- the analytical scale factor for a controlled state;
+- repeated-run identity for stochastic methods;
+- the declared CUDA-graph compatibility.
+
+## Completion checklist
+
+- [ ] The method belongs in a separate thermostat slot rather than an
+      integrator-owned thermostat.
+- [ ] `dt` is used as the effective coupling time without additional scaling.
+- [ ] Device scratch is allocated during construction, not during a step.
+- [ ] `apply_post` handles an empty particle set without launching work.
+- [ ] Host/device transfers agree with the `graph_compatible` declaration.
+- [ ] Stochastic device work uses a device-resident Philox counter.
+- [ ] Parameter units and physical domains are validated.
+- [ ] The builder is declared, re-exported, and added to the built-in roster.
+- [ ] Physics, configuration, empty-state, and determinism tests are present.

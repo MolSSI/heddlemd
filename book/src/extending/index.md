@@ -1,17 +1,12 @@
 # Extending HeddleMD
 
-This sub-section of the [Developer Guide](../developer/index.md) covers
-adding new physics to the engine: a new thermostat, integrator, barostat,
-pair potential, bonded potential, and so on. It is written for someone
-modifying the engine source, not for someone running simulations — the
-rest of this book covers running simulations.
+This section explains how to add new physical models to HeddleMD. It is aimed
+at scientists who are comfortable describing a molecular-dynamics algorithm
+but may be new to Rust and CUDA. Before continuing, read the [Developer Guide
+overview](../developer/index.md), especially its explanations of host and
+device code, Rust traits, device buffers, and deterministic reductions.
 
-Almost every capability in HeddleMD is a **plugin behind an open
-registry**. Adding one means implementing a small trait and registering
-a builder for it; you never edit a central `match` over kinds, and you
-never touch unrelated potentials or integrators. This page explains the
-machinery all of the "how to add X" pages rely on. Read it once, then
-jump to the page for the thing you are adding:
+Choose the guide that matches the physical role of your new method:
 
 - [Adding a thermostat](adding-a-thermostat.md)
 - [Adding an integrator](adding-an-integrator.md)
@@ -19,215 +14,193 @@ jump to the page for the thing you are adding:
 - [Adding a pair potential](adding-a-pair-potential.md)
 - [Adding a bonded potential](adding-a-bonded-potential.md)
 
-## The seven registries
+The guides use the same overall workflow: choose a nearby built-in, describe
+and validate the configuration, implement the runtime behavior, register the
+builder, and test both the physics and the framework contract.
 
-The engine holds seven registries, bundled in `Registries`
-(`src/registries.rs`). Each stores boxed *builder* trait objects and is
-extended by registering more builders before a run starts.
+## Shared terminology
 
-| Registry | Builder trait | Selection model | Built-in roster (`Builtins::builtins`) |
+| Term | Meaning in HeddleMD |
+| --- | --- |
+| Registry | A collection of builders for one category of component |
+| Builder | A small object that validates configuration and constructs a runtime component |
+| Slot | A constructed component used in a simulation, such as one thermostat |
+| Params | The configuration values owned by a builder |
+| Roster | The list of builders included with HeddleMD |
+| Host | Rust code and memory on the CPU |
+| Device | CUDA code and memory on the GPU |
+| Scratch buffer | Reusable temporary device memory allocated during construction |
+| Reduction | An operation that combines many values into one, such as total kinetic energy |
+
+## Decide how the component is selected
+
+HeddleMD has seven registries, collected in `Registries` in
+`src/registries.rs`:
+
+| Component | Builder trait | How configuration selects it | Built-in roster |
 | --- | --- | --- | --- |
-| Integrators | `IntegratorBuilder` | named | `src/integrator/mod.rs` |
-| Thermostats | `ThermostatBuilder` | named | `src/integrator/mod.rs` |
-| Barostats | `BarostatBuilder` | named | `src/integrator/mod.rs` |
-| Constraint types | `ConstraintBuilder` | named | `src/integrator/constraint.rs` |
-| Minimizers | `MinimizerBuilder` | named | `src/minimizer/mod.rs` |
-| Analyses | `AnalysisBuilder` | named | `src/analysis/mod.rs` |
-| Potentials | `PotentialBuilder` | compositional | `src/forces/mod.rs` |
+| Integrator | `IntegratorBuilder` | By name | `src/integrator/mod.rs` |
+| Thermostat | `ThermostatBuilder` | By name | `src/integrator/mod.rs` |
+| Barostat | `BarostatBuilder` | By name | `src/integrator/mod.rs` |
+| Constraint type | `ConstraintBuilder` | By name | `src/integrator/constraint.rs` |
+| Minimizer | `MinimizerBuilder` | By name | `src/minimizer/mod.rs` |
+| Analysis | `AnalysisBuilder` | By name | `src/analysis/mod.rs` |
+| Potential | `PotentialBuilder` | By the configured interactions | `src/forces/mod.rs` |
 
-All seven share one generic container, `Registry<B>`
-(`src/registry.rs`); the framework is specified in
-`rqm/registry-framework.md`.
+The first six use **named selection**. For example, the configuration
+`[phase.thermostat] kind = "csvr"` asks the thermostat registry for the
+builder whose `kind_name()` is `"csvr"`. Only one thermostat and one
+integrator can occupy their respective slots in a phase.
 
-### Two selection models
+Potentials use **compositional activation** because a force field normally
+contains several contributions. Every potential builder examines the
+configuration. It returns a component when its interaction type is present
+and returns no component otherwise. The force field is the sum of all active
+potential components.
 
-- **Named selection** (six registries). The config names a `kind`
-  string; the registry looks up the single builder whose `kind_name()`
-  matches and builds from it. This is the model for choices that are
-  mutually exclusive — one integrator per phase, one thermostat, one
-  barostat. Named-selection builder traits carry the `KindedBuilder`
-  supertrait (which supplies `kind_name()` and unit conversion).
+## Understand the builder and runtime component
 
-- **Compositional activation** (the potential registry only). No `kind`
-  selects a single builder; instead *every* registered builder is
-  consulted and each returns `Some(slot)` when the configuration data it
-  consumes is present. A force field is the sum of all the potentials
-  that activated. `PotentialBuilder` deliberately does **not** carry
-  `KindedBuilder`, so `PotentialRegistry` has no `lookup` — the type
-  system enforces the distinction between the two models.
+Most extensions contain two conceptually different Rust types:
 
-## Anatomy of a builder
+1. The **builder** is small and normally contains no fields. It owns the
+   configuration schema, validates values, and constructs the component.
+2. The **runtime component** holds parameters, device buffers, and any state
+   that changes during a simulation. It implements `Thermostat`, `Barostat`,
+   `Integrator`, or `Potential`.
 
-Every builder is a small, stateless, cloneable factory. The pattern is
-the same across all seven registries:
+For named components, the builder also implements `KindedBuilder`, which
+supplies the configuration name and unit conversion. A typical declaration is
+`struct MyThermostatBuilder;`: the trailing semicolon defines a zero-field
+struct. `#[derive(Clone)]` is sufficient for the registry's generated cloning
+support.
 
-1. **A unit (zero-field) struct** — e.g. `struct CsvrBuilder;` — deriving
-   `Clone` and `Debug`. Boxed-trait-object cloning is generated for you
-   by the `registry_builder_clone!` macro (invoked once per builder trait
-   in that subsystem's `mod.rs`), so you never write a `box_clone`
-   method — `#[derive(Clone)]` is enough.
+## Define and validate configuration parameters
 
-2. **The `KindedBuilder` impl** (named-selection registries only) —
-   supplies `kind_name()` (the TOML `kind` lookup key) and
-   `convert_params()` (unit conversion; see below).
+Named slots are initially parsed into a `kind` string and an untyped
+`toml::Value` containing the remaining parameters. The selected builder owns
+the interpretation of that value. Its `validate_params` method should:
 
-3. **The builder-trait impl** — `validate_params()` (config-load-time
-   domain checks), `build()` (construct the boxed slot on the GPU), and
-   any capability predicates the subsystem defines (for integrators:
-   `owns_thermostat`, `owns_barostat`, `supports_constraints`,
-   `graph_compatible`).
+1. Deserialize the TOML value into a typed parameter struct.
+2. Reject unknown fields with `#[serde(deny_unknown_fields)]`.
+3. Check physical and numerical restrictions, such as finite positive
+   temperatures, timescales, and cutoffs.
+4. Return a user-facing `ConfigError` that identifies the invalid field.
 
-4. **The slot type** — the actual `Thermostat` / `Integrator` /
-   `Barostat` / `Potential` object the builder constructs, holding the
-   device buffers and per-step kernel launches.
+Potentials route parameter tables through a **parameter claim**. A claim is a
+category and kind pair, such as `(PairInteraction, "buckingham")`. It tells
+the loader which builder validates and converts each interaction entry.
 
-### Registering the builder
+### Preserve physical units
 
-Two ways, and you usually want the first:
-
-- **A built-in** — add `Box::new(YourBuilder)` to the relevant
-  `Builtins::builtins()` roster (the table above says which file). For a
-  potential, the roster's **order is the slot evaluation order**, so
-  insert it at the right position. This is the only place the built-in
-  set is defined; there is no parallel enum to update.
-
-- **An out-of-tree extension** — an embedder building on the library
-  constructs `Registries` and calls `register_integrator`,
-  `register_thermostat`, `register_potential`, … before
-  `run_simulation_with_registries`. Registration appends, and a later
-  registration never shadows an earlier builder of the same kind, so a
-  custom builder cannot override a built-in of the same `kind` — pick a
-  fresh name.
-
-Both paths flow through the same construction dispatch, so a registered
-custom builder behaves exactly like a built-in.
-
-## Configuration plumbing
-
-The config layer is open-shaped and registry-driven — this is why adding
-a kind needs no central config edit.
-
-- A slot section (`[phase.integrator]`, `[phase.thermostat]`,
-  `[phase.barostat]`) parses to a `SlotConfig { kind: String, params:
-  toml::Value }` (`src/io/config.rs`). `params` holds every field of the
-  section except `kind`, untyped. The engine core never inspects
-  `params`; the builder owns its schema.
-
-- At load time the loader looks the builder up by `kind` and calls its
-  `validate_params(&params)`. An unknown `kind` surfaces as
-  `IntegratorError::UnknownKind` / `ConfigError::UnknownKind` — you get
-  that for free the moment your builder is (not) in the roster.
-
-- Each builder deserialises its own **typed params struct** from
-  `params` inside `validate_params` and again in `build`. Validation
-  guarantees the deserialise in `build` succeeds, so a failure there is
-  an internal error, not a user error.
-
-Potentials are activated compositionally rather than selected, so their
-per-entry parameters (in `[[pair_interactions]]`, `[[bond_types]]`, …)
-are routed by a **params claim** — a `(category, kind)` pair the builder
-returns from `params_claim()` — instead of a registry lookup. The
-mechanics are the same (`validate_params`, `convert_params` per claimed
-entry); see the potential pages and `rqm/forces/framework.md`.
-
-### Unit conversion
-
-Config values arrive in the user's unit system (SI or Hartree atomic)
-and must be converted to atomic units before `build`. You do **not**
-write conversion code by hand. Make each unit-bearing params field a
-**dimension newtype** from `crate::units` (`Temperature`, `Time`,
-`Energy`, `Length`, `Pressure`, …) and derive `Convert`:
+Configuration values may be expressed in SI or Hartree atomic units. Values
+must be converted to atomic units before the runtime component is built. Use
+the dimension types in `crate::units` rather than representing every value as
+a plain `f64`:
 
 ```rust
-#[derive(Debug, Clone, Deserialize, serde::Serialize, crate::units::Convert)]
-pub struct CsvrParams {
-    pub temperature: crate::units::Temperature, // converted
-    pub tau: crate::units::Time,                // converted
-    pub seed: u64,                              // dimensionless, untouched
+#[derive(
+    Debug,
+    Clone,
+    serde::Deserialize,
+    serde::Serialize,
+    crate::units::Convert,
+)]
+#[serde(deny_unknown_fields)]
+struct MyParams {
+    temperature: crate::units::Temperature,
+    tau: crate::units::Time,
+    seed: u64,
 }
 ```
 
-The `Convert` derive (in the `heddle-md-derive` crate) recurses through
-each field, calling `Convert::from_user` on the dimension newtypes and
-leaving plain scalars alone. Your `convert_params` implementation is then
-the one-liner `convert_params_in_place::<YourParams>(units, params)`
-(`src/registry.rs`). See `rqm/io/unit-system.md`.
+`Temperature` and `Time` are converted according to the user's unit system.
+The dimensionless integer seed is left unchanged. For a named builder,
+`convert_params` can normally delegate to
+`convert_params_in_place::<MyParams>(units, params)`.
 
-## CUDA kernel wiring
+Do not manually apply conversion factors in `build`. That duplicates policy
+and makes it easy for SI and atomic-unit inputs to behave differently.
 
-Most new features need one or more device kernels. The build is fully
-declarative — there is no per-kernel entry in a makefile.
+## Add GPU work only when necessary
 
-1. **Write the `.cu` file** in `kernels/`. `build.rs` discovers every
-   `kernels/*.cu` automatically, compiles it to PTX with `nvcc`, and
-   generates a `&str` PTX constant named after the file stem in
-   upper-case (e.g. `kernels/andersen.cu` → `crate::kernels::ANDERSEN`).
-   Use the precision shim in `kernels/precision.cuh` (`Real`, etc.) so
-   the same source compiles for both the `f32` and future `f64` builds.
+First look for an existing launch wrapper in `src/gpu/kernels.rs`. Many new
+thermostats and integrators can reuse the kinetic-energy, rescaling, kick, and
+drift kernels already provided by HeddleMD.
 
-2. **Declare a subsystem kernel handle set** with the `gpu_kernels!`
-   macro in your subsystem's Rust file. It lists the kernel entry-point
-   names and their timing stages:
+If the physical method requires a new CUDA kernel, the wiring is:
 
-   ```rust
-   crate::gpu_kernels! {
-       module: "andersen",
-       ptx: crate::kernels::ANDERSEN,
-       struct: AndersenKernels,
-       kernels: [andersen_resample],
-       stages: { ANDERSEN_RESAMPLE = "andersen_resample" },
-   }
-   ```
+1. Add a `.cu` file under `kernels/`. `build.rs` discovers it and compiles it
+   to embedded PTX automatically.
+2. Declare its kernel handles with `gpu_kernels!` in the appropriate Rust
+   subsystem file.
+3. Add that handle set to the `define_kernels!` manifest in
+   `src/gpu/device.rs`.
+4. Add a launch wrapper in `src/gpu/kernels.rs` and re-export it from
+   `src/gpu/mod.rs`.
 
-3. **Register the handle set** by adding a field to the `define_kernels!`
-   manifest in `src/gpu/device.rs`. That manifest is the single source of
-   truth for both the aggregate `Kernels` struct and the timings-stage
-   order, so the two can never drift.
+Use the types and mathematical functions from `kernels/precision.cuh`, such
+as `Real`, `R(x)`, and `Real_sqrt`, instead of spelling the precision as
+`float` or `double`. Launch wrappers should use the project's `gpu_launch!`
+conventions and should not contain their own timing calls; the caller brackets
+the launch with the appropriate timing stage.
 
-4. **Write a launch wrapper** in `src/gpu/kernels.rs` using the
-   `gpu_launch!` macro, which supplies the empty-`N` guard, launch config,
-   and error mapping. Kernel timing is bracketed **externally** (by the
-   runner / CUDA-graph capture) — a launch wrapper must contain no timing
-   calls (there is a test that enforces this).
+Pair and bonded potentials are a special case: their physical calculation is
+usually supplied as a CUDA source fragment that the framework combines and
+compiles at run time. Their individual guides explain that mechanism.
 
-A purely host-side feature (rare) can skip all of this. If your feature
-reuses kernels that already exist (e.g. an integrator that only needs the
-existing kick/drift kernels), you skip steps 1–3 and just launch them.
+## Preserve reproducibility
 
-## Determinism: the rule you cannot break
+Every new component must preserve HeddleMD's fixed-GPU reproducibility
+guarantee. In particular:
 
-Bit-wise reproducibility on a fixed GPU is the engine's load-bearing
-guarantee (`docs/architecture.md`). Any new kernel must preserve it:
+- Do not accumulate floating-point values in an order determined by thread
+  arrival. Avoid multi-writer floating-point `atomicAdd`.
+- Use existing deterministic reductions for kinetic energy, virial, and
+  force contributions.
+- Make per-particle or per-interaction CUDA functions pure: their outputs
+  should depend only on their inputs, not on mutable shared state.
+- For stochastic per-step device work, use Philox with an explicit seed and a
+  device-resident counter. A host counter does not advance correctly when a
+  captured CUDA graph is replayed.
+- Allocate device scratch during construction and reuse it.
 
-- **No order-dependent float accumulation.** Never `atomicAdd` into a
-  float that more than one thread contributes to. Per-particle force sums
-  use either a fixed-topology reduction or the fixed-point (integer)
-  accumulators, whose integer adds are associative and therefore
-  order-independent (see `rqm/forces/packed-neighbour-pair-force.md`).
-- **Fixed summation order.** Any reduction a slot performs (a per-bond
-  sum, a kinetic-energy reduction) must sum in an order fixed by data
-  (particle/bond index), not by thread arrival.
-- **Seeded, counter-based RNG.** Stochastic features draw noise from the
-  counter-based `philox` generator (`src/integrator/philox.rs`) keyed by
-  an explicit config `seed` and a per-slot step counter, never from
-  wall-clock or thread-id state.
+Run the same simulation twice and compare outputs in an end-to-end
+reproducibility test when the new algorithm changes per-step numerical work.
 
-Two runs of the same config on the same GPU must produce byte-identical
-trajectory and log files. When in doubt, add a reproducibility test (run
-twice, `diff` the outputs).
+## Register the builder
 
-## Specs and tests
+To include a component with HeddleMD, add its builder to the appropriate
+`Builtins::builtins()` roster shown in the table above. Module declarations
+and public re-exports are separate Rust steps; the feature-specific guide
+lists each required edit.
 
-- **Requirements specs** live under `rqm/`, one file per feature
-  (`rqm/integration/csvr.md`, `rqm/forces/lj-pair-force.md`, …). Each is
-  tagged with `rq-` identifiers and carries Gherkin scenarios. Add a spec
-  file for a substantial new feature and follow the neighbouring one's
-  shape; the per-feature pages point at the closest template.
-- **Tests** live in `tests/` (integration / end-to-end) and in
-  `#[cfg(test)]` modules next to the code (unit). The registries have
-  **lint tests** that assert invariants across every built-in (for
-  example, that every integrator accepting a per-step barostat emits a
-  `BarostatPoint`); if you add a built-in, make sure it satisfies them.
+Libraries embedding HeddleMD can also create `Registries` and call methods
+such as `register_thermostat` or `register_potential` before invoking
+`run_simulation_with_registries`. Registration appends to the registry. A
+named registry uses the first builder matching a `kind`, so a later builder
+with the same name does not replace an earlier built-in. Potential registries
+are different: every builder is consulted during construction, while the
+first matching parameter claim owns validation and conversion. A duplicate
+potential claim can therefore construct an additional component without
+owning its configuration processing. Use distinct names and parameter claims
+unless constructing the corresponding registry from empty components.
 
-Each per-feature page ends with the concrete manifest — the files to
-create and the exact existing lines to edit — for that extension point.
+## Document and test the extension
+
+Requirements specifications live under `rqm/`. For a substantial physical
+method, add a neighboring specification that records its equations,
+parameters, execution sequence, limitations, determinism requirements, and
+behavior for an empty particle set.
+
+Tests normally cover three layers:
+
+1. **Configuration:** valid values, invalid domains, unknown fields, and unit
+   conversion.
+2. **Framework integration:** registry discovery, successful construction,
+   empty-system behavior, and compatibility checks.
+3. **Physics and numerics:** a known analytical case, conservation or target
+   behavior where appropriate, and deterministic repeated runs.
+
+Each feature-specific guide ends with a concise file checklist. Use it after
+understanding the implementation path, rather than treating it as a substitute
+for the preceding explanation.
