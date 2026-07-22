@@ -138,7 +138,25 @@ pub(crate) fn run_md_phase_inner(
     // state that a preceding position/box mutation invalidated, with no
     // intervening force evaluation (see `op-model.md`). The plan shape is
     // static, so one check per phase covers every step.
-    probe_plan.validate().map_err(|source| {
+    //
+    // rq-b83f8ae6 — the validation context reflects the phase's pressure
+    // coupling: a per-step barostat makes the plan's `BarostatPoint` marker
+    // active (mutating), and a weak-coupling barostat tolerates the cached
+    // forces its terminal rescale leaves stale for the next step. A
+    // periodic (Monte-Carlo) barostat is inert per step, and an integrator
+    // that owns its coupling (mtk-npt) has no barostat slot, so both leave
+    // the marker inert.
+    let validation_ctx = match barostat.as_ref() {
+        Some(b)
+            if b.periodicity() == crate::integrator::BarostatPeriodicity::EveryStep =>
+        {
+            crate::integrator::StepValidationContext::per_step_barostat(
+                b.tolerates_stale_cached_forces(),
+            )
+        }
+        _ => crate::integrator::StepValidationContext::no_barostat(),
+    };
+    probe_plan.validate(&validation_ctx).map_err(|source| {
         (
             RunnerError::InvalidSchedule {
                 integrator: phase.integrator.kind.clone(),

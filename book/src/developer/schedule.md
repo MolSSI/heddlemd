@@ -60,7 +60,9 @@ wall clock — and an MD run issues them millions of times.
 itself (no extra library) that lets you *record* a sequence of GPU
 operations once and then replay the whole sequence with a single launch.
 HeddleMD records one physical step's kernel sequence into a graph at the
-start of a phase, then replays that graph once per step. The ~15–20 per-step
+start of a phase (one stage of a run — see [Phases: the stages of a
+run](index.md#phases-the-stages-of-a-run)), then replays that graph once per
+step. The ~15–20 per-step
 launches collapse into a single `cuGraphLaunch`, and the per-launch driver
 overhead essentially disappears. Picture it as recording a macro of one
 step's GPU work and replaying the macro, instead of re-issuing every command

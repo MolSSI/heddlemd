@@ -39,7 +39,7 @@ pub use langevin_baoab::{LangevinBaoabBuilder, LangevinBaoabState};
 pub use mc_barostat::{McBarostat, McBarostatBuilder};
 pub use mtk_npt::{MtkNptBuilder, MtkNptIntegrator};
 // rq-0bc28d40
-pub use op_model::{OpFootprint, Resource, ResourceSet, ScheduleError};
+pub use op_model::{OpFootprint, Resource, ResourceSet, ScheduleError, StepValidationContext};
 pub use nose_hoover_chain::{
     NoseHooverChainBuilder, NoseHooverChainThermostat, nhc_chain_sub_step,
 };
@@ -322,6 +322,19 @@ impl SubStep {
         }
     }
 
+    // rq-2e035fd8 — the footprint the validator uses for this operation
+    // under `ctx`. Equals `footprint()` for every operation except a
+    // `BarostatPoint` when no per-step barostat is active, for which the
+    // marker is inert and carries the empty footprint. See `op-model.md`.
+    pub fn effective_footprint(&self, ctx: &StepValidationContext) -> OpFootprint {
+        match self {
+            SubStep::BarostatPoint { .. } if !ctx.per_step_barostat_active => {
+                OpFootprint::new(&[], &[])
+            }
+            _ => self.footprint(),
+        }
+    }
+
     // rq-dbbffa7d — `true` iff this sub-step is a trailing post-force
     // marker: a terminal constraint velocity projection or a barostat
     // point. The runner dispatches the trailing run of these in its
@@ -350,18 +363,24 @@ impl StepPlan {
     }
 
     // rq-129c5de9
-    /// Validate the schedule's data dependencies against the carried-in
-    /// valid set: every operation must read only currently-valid
-    /// resources, where a write to `Positions` or `Box` invalidates the
-    /// force-derived resources until a force evaluation reproduces them.
-    /// Returns the first [`ScheduleError`], or `Ok(())` for a
-    /// dependency-correct schedule (including the empty plan). Pure:
-    /// launches no kernels and touches no device buffers. See
-    /// `op-model.md`.
-    pub fn validate(&self) -> Result<(), ScheduleError> {
-        op_model::validate_footprints(
-            self.steps.iter().map(|s| (s.variant_name(), s.footprint())),
-        )
+    /// Validate the schedule's data dependencies as a repeating loop,
+    /// under `ctx`. An intra-step pass rejects an operation that reads
+    /// force-derived state a preceding position/box mutation invalidated
+    /// with no intervening force evaluation (`ReadsStaleResource`); a
+    /// cross-step pass rejects a schedule whose leading operations read
+    /// forces its own terminal operations invalidate, unless a
+    /// weak-coupling barostat in `ctx` tolerates that staleness
+    /// (`ReadsStaleCachedForce`). Returns the first [`ScheduleError`], or
+    /// `Ok(())` for a dependency-correct schedule (including the empty
+    /// plan). Pure: a function of the plan and `ctx` only; launches no
+    /// kernels and touches no device buffers. See `op-model.md`.
+    pub fn validate(&self, ctx: &StepValidationContext) -> Result<(), ScheduleError> {
+        let ops: Vec<(&'static str, OpFootprint)> = self
+            .steps
+            .iter()
+            .map(|s| (s.variant_name(), s.effective_footprint(ctx)))
+            .collect();
+        op_model::validate_footprints(&ops, ctx)
     }
 
     // rq-9fbba3be
@@ -1216,6 +1235,18 @@ pub trait Barostat: std::fmt::Debug + Send {
         _timings: &mut Timings,
     ) -> Result<(), BarostatError> {
         Ok(())
+    }
+
+    // rq-c8be316e — whether this barostat's terminal per-step rescale
+    // leaves the next step's leading force consumers reading pre-rescale
+    // (stale) forces, accepted as a bounded weak-coupling approximation.
+    // Default `false` (strict cross-step loop-consistency required). The
+    // weak-coupling `berendsen` and `c-rescale` barostats override to
+    // `true`; the periodic Monte-Carlo barostat keeps the default. The
+    // runner reads this to build the schedule `StepValidationContext`. See
+    // `op-model.md`.
+    fn tolerates_stale_cached_forces(&self) -> bool {
+        false
     }
 
     /// Perform a periodic barostat's host-orchestrated move at a batch

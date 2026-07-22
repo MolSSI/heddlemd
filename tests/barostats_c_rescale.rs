@@ -674,3 +674,10 @@ fn different_seeds_produce_different_trajectories() {
     let b = run_once(&gpu, &px, &vx, &masses, &virials, 2);
     assert_ne!(a, b);
 }
+
+#[test] // rq-011858f8
+fn c_rescale_tolerates_stale_cached_forces() {
+    let gpu = init_device().unwrap();
+    let baro = build_c_rescale(&gpu, 4, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
+    assert!(baro.tolerates_stale_cached_forces());
+}

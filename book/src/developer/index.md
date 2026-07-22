@@ -46,6 +46,34 @@ runs of the same input are designed to produce byte-for-byte identical output.
 That reproducibility requirement affects how reductions, random numbers, and
 timestep operations are implemented.
 
+## Phases: the stages of a run
+
+A single HeddleMD run is divided into one or more **phases**, each a
+self-contained stage that runs the simulation loop above for a fixed number of
+steps. A phase is the unit the user configures: every `[[phase]]` (and every
+`[[minimization]]`) block in the input file is one phase, and phases execute in
+the order they appear. Particle state — positions, velocities, and the box —
+carries over from one phase to the next, so the phases of a run form a
+continuous trajectory.
+
+Each phase fixes its own method for its whole duration: one integrator, at most
+one thermostat, at most one barostat, its own timestep, and its own output
+cadences. A typical run uses several phases to do different jobs with different
+settings — for example, an energy **minimization** to relax the starting
+geometry, then an **equilibration** phase under a thermostat, then a
+**production** phase (perhaps adding a barostat for constant pressure) that
+writes the trajectory you analyze. The [Configuration
+Reference](../guide/configuration.md#phase) describes the `[[phase]]` schema in
+full.
+
+The developer guide refers to "a phase" constantly, and the reason it is the
+natural unit is exactly that its method is fixed for its whole span. Anything
+the engine only needs to prepare once — validating the integrator's schedule
+(see [Validating Timestep Dependencies](op-model.md)), recording a CUDA graph
+(see [Schedules and CUDA Graphs](schedule.md)) — is set up once at the start of
+each phase and reused for every step of that phase, because the operations that
+setup depends on cannot change until the next phase begins.
+
 ## Host code and device code
 
 HeddleMD uses two languages with different responsibilities:

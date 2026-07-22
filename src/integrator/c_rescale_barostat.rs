@@ -166,6 +166,13 @@ impl CRescaleBarostat {
 }
 
 impl Barostat for CRescaleBarostat {
+    // rq-c8be316e — the terminal isotropic cell rescale is weak-coupling;
+    // the next step's leading half-kick consumes the pre-rescale forces, a
+    // bounded second-order approximation. See `op-model.md`.
+    fn tolerates_stale_cached_forces(&self) -> bool {
+        true
+    }
+
     // rq-1179e42f rq-2b405d23
     fn apply(
         &mut self,

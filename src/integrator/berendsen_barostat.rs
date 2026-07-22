@@ -120,6 +120,13 @@ impl BerendsenBarostat {
 const MU_MIN: f64 = 1.0e-6;
 
 impl Barostat for BerendsenBarostat {
+    // rq-c8be316e — the terminal isotropic box rescale is weak-coupling;
+    // the next step's leading half-kick consumes the pre-rescale forces, a
+    // bounded second-order approximation. See `op-model.md`.
+    fn tolerates_stale_cached_forces(&self) -> bool {
+        true
+    }
+
     // rq-1179e42f rq-29dda250
     fn apply(
         &mut self,

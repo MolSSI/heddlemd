@@ -560,3 +560,11 @@ fn graph_and_non_graph_runs_are_byte_identical() {
     let ln = std::fs::read(dn.join("sim.out.run.log")).unwrap();
     assert_eq!(lg, ln, "graph-mode and per-step MC barostat runs differ");
 }
+
+#[test] // rq-6814860a
+fn mc_does_not_tolerate_stale_cached_forces() {
+    let gpu = init_device().unwrap();
+    let slot = mc_params("pressure = 3.4e-9\ntemperature = 9.4e-4\nseed = 1\n");
+    let baro = build_mc(&gpu, 12, &slot);
+    assert!(!baro.tolerates_stale_cached_forces());
+}

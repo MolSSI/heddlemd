@@ -4,8 +4,9 @@ The [Schedules and CUDA Graphs](schedule.md) page introduced a timestep as a
 single ordered list of operations — a `StepPlan` — and mentioned in passing
 that, before a run begins, HeddleMD checks that list for "dependency
 mistakes." This page explains that check in full: what it protects against,
-how it works, and — through a complete worked example — how it catches a
-realistic multiple-timestep (RESPA) bug before the simulation ever runs.
+how it works, and — through two worked examples — how it catches both a
+*within-step* multiple-timestep (RESPA) bug and an *across-step* barostat bug
+before the simulation ever runs.
 
 The check is worth understanding for anyone adding or modifying an
 integrator, because an integrator's whole job is to produce a correct
@@ -72,47 +73,53 @@ single class — say, only the fast forces — refreshes *only that class*. It
 does not revive the slow forces. This is exactly what multiple-timestep
 integration needs, and it is exactly where the bug below hides.
 
-## The check: walking the plan in order
+## The check: two passes over the plan
 
-The check walks the operations from first to last, keeping track of which
-computed force state is currently valid. Think of it as reading the recipe top
-to bottom and, at each step, asking "does this step use an ingredient that is
-still fresh?"
+The heart of the check is a single **walk** over the operations from first to
+last, keeping track of which computed force state is currently valid. Think of
+it as reading a recipe top to bottom and, at each step, asking "does this step
+use an ingredient that is still fresh?"
 
-It works like this:
+The walk starts from some set of forces assumed valid, and then, for each
+operation in order:
 
-1. **Start of the step.** The walk begins assuming the forces are valid —
-   all of them, including the fast and slow accumulators. This reflects
-   reality: a step inherits fresh forces from the previous step's final force
-   evaluation (or, for the very first step, from the warm-up evaluation before
-   the loop). So an integrator is entitled to read forces at the very top of a
-   step without recomputing them.
-
-2. **For each operation, in order:**
-   - **Check its reads.** Every piece of state the operation reads must
-     currently be valid. If it reads a force that has gone stale, the check
-     fails here and reports the offending operation.
-   - **Mark forces stale if the atoms moved.** If the operation writes the
-     positions or the box, every kind of computed force is now stale — mark
-     them all invalid.
-   - **Record what it produces.** If the operation is a force evaluation,
-     mark the forces it computed as valid again.
+- **Check its reads.** Every piece of state the operation reads must currently
+  be valid. If it reads a force that has gone stale, the walk stops and reports
+  the offending operation.
+- **Mark forces stale if the atoms moved.** If the operation writes the
+  positions or the box, every kind of computed force is now stale — mark them
+  all invalid.
+- **Record what it produces.** If the operation is a force evaluation, mark the
+  forces it computed as valid again.
 
 The reads are checked *before* the same operation marks anything stale, so a
 fused kick-and-drift — which reads the forces and *then* moves the atoms —
 correctly reads the still-valid forces first and only afterward invalidates
 them.
 
-Each step is checked on its own, starting from the "forces are valid" state.
-The check does not try to carry staleness across the boundary between one
-timestep and the next; a barostat that changes the box at the very end of a
-step is fine, because the next step begins by recomputing forces as usual.
-What the check is looking for is a stale read *within* a single step — a force
-consumer placed after the atoms moved, with no force evaluation in between.
+A timestep is not run once: the same plan is replayed on every step. So the
+walk is run **twice**, from two different starting points, to catch two
+different kinds of mistake.
 
-## A worked example: a RESPA multiple-timestep bug
+- **The within-step pass** starts by assuming *all* forces are valid — which is
+  true on the very first step, whose forces come from a warm-up evaluation
+  before the loop begins. This pass catches a force consumer placed after a
+  move *inside the same step* with no force evaluation between them. Its failure
+  is a *stale resource* error.
+- **The across-step pass** recognizes that from the second step onward a step
+  does *not* start with all forces valid — it starts with only the forces the
+  *previous* run of the plan actually left valid at its end. So this pass starts
+  the walk from "the forces this plan leaves valid at its end" and checks it
+  again. It catches a plan whose *opening* operations read forces that the
+  plan's own *closing* operations invalidated. Its failure is a *stale cached
+  forces* error.
 
-Here is the check earning its keep on a real class of mistake.
+A plan must pass both. The two worked examples below show one bug each: the
+first fails the within-step pass, the second fails the across-step pass.
+
+## Worked example 1: a within-step RESPA bug
+
+Here is the within-step pass earning its keep on a real class of mistake.
 
 ### Background: splitting the forces
 
@@ -216,23 +223,106 @@ no error. The plan is accepted and the simulation runs.
 
 The lesson generalizes beyond RESPA: any time an integrator moves the atoms
 and later consumes a force, there must be a force evaluation in between for
-the force class it consumes. The check enforces exactly that, and the separate
-tracking of fast and slow forces is what lets it distinguish a correct
-multiple-timestep schedule from one that kicks on a stale accumulator.
+the force class it consumes. The within-step pass enforces exactly that, and
+the separate tracking of fast and slow forces is what lets it distinguish a
+correct multiple-timestep schedule from one that kicks on a stale accumulator.
+
+## Worked example 2: an across-step barostat bug
+
+The within-step pass sees each step as a self-contained recipe. But a step is
+run over and over, and a mistake can hide in the *seam* between one step and the
+next. That is what the across-step pass is for.
+
+### The plan
+
+A constant-pressure (NPT) step ends by letting a **barostat** rescale the
+simulation box — and every atom's position with it — to nudge the system
+toward its target pressure. A minimal velocity-Verlet NPT step looks like:
+
+```text
+1.  kick-and-drift from total force   (first half-kick, then move the atoms)
+2.  evaluate forces
+3.  half-kick from total force        (second half-kick)
+4.  barostat point                    (rescale the box and every position)
+```
+
+Read on its own, this step is fine. Operation 1 reads the leftover forces from
+the previous step, operation 2 refreshes them for the new positions, operation
+3 uses those fresh forces, and operation 4 rescales at the very end. The
+within-step pass is satisfied — nothing after operation 4 reads a force.
+
+(The barostat point only rescales when a barostat is actually configured. On a
+constant-volume NVE or NVT run the same operation is present but does nothing —
+it is a placeholder — so it moves no atoms and none of what follows applies.)
+
+### The bug across the boundary
+
+But the step repeats. When it runs again, operation 1 reads forces — and those
+forces are the ones operation 2 computed *last* time, **before** operation 4
+rescaled the box and shifted every atom. They describe the configuration the
+system was in before the last rescale, not the one it is in now. The leading
+half-kick pushes the atoms with slightly wrong forces, and it does so on every
+step.
+
+The across-step pass catches this. It first asks: *what forces does this plan
+leave valid at its end?* Walking the plan, operation 2 makes the forces valid,
+but operation 4 moves the atoms afterward — so by the end of the plan, **no**
+forces are valid. It then re-walks the plan starting from that leftover set (no
+valid forces) and immediately hits operation 1 reading the total force, which
+is not valid. The check stops and reports, in spirit:
+
+> The operation at index 0 (`KickDrift`) reads stale cached forces (the total
+> force): the schedule's own terminal operations invalidated it, with no
+> trailing force evaluation.
+
+The two ways to fix it are named in the message itself.
+
+### Two ways to make it valid
+
+1. **Add a force evaluation after the barostat.** Append "evaluate forces" as a
+   fifth operation. Now the plan leaves fresh forces at its end, the leading
+   half-kick of the next step reads valid forces, and the across-step pass is
+   satisfied. This is exactly correct — but it pays for a *second* full force
+   evaluation every step, a steep price for what is usually a tiny correction.
+
+2. **Declare the barostat weak-coupling tolerant.** The built-in pressure-
+   coupling barostats (`berendsen`, `c-rescale`) rescale by a very small factor
+   each step, so letting the next step's leading half-kick consume the
+   slightly-stale forces is a bounded, standard approximation — the same one
+   long-established MD codes make. Such a barostat reports that it *tolerates
+   stale cached forces*, and the across-step pass then accepts the leftover
+   forces and lets the plan through. The exception is now written down in the
+   barostat's own code, rather than left as an unstated assumption that a reader
+   has to know about.
+
+An integrator that instead makes a *large* configuration change at the end of a
+step and does **not** declare tolerance is exactly the case the across-step pass
+exists to reject. And a barostat handled the measure-preserving way — where the
+box update happens in the *middle* of the step, before the force evaluation,
+rather than after it (as the `mtk-npt` integrator does) — leaves its forces
+valid at the plan's end and needs no tolerance at all.
 
 ## When the check runs, and why it is cheap
 
 The check runs **once per simulation phase, at setup** — after the integrator
-produces its plan and before the timestep loop starts. If the plan fails, the
+produces its plan and before the timestep loop starts. (A *phase* is one stage
+of a run, with one fixed choice of integrator, thermostat, and barostat; see
+[Phases: the stages of a run](index.md#phases-the-stages-of-a-run).) If the plan fails, the
 phase is aborted with an error carrying the offending operation and resource,
 and the loop never runs. There is no per-step cost.
 
+Along with the plan, the check is handed a small amount of phase context: **is
+a per-step barostat configured**, and if so **does it tolerate stale cached
+forces**. The first tells the across-step pass whether the barostat point
+actually rescales (so an NVE/NVT plan is not wrongly flagged); the second tells
+it whether to accept the leftover forces a weak-coupling rescale leaves behind.
+
 It is inexpensive and safe to run at startup because it reads **only the plan
-itself**: the list of operations and their declared footprints. It launches no
-GPU work and touches no positions, velocities, or forces. For the same reason
-it is easy to test directly — the test suite feeds it hand-written plans,
-correct and incorrect, and checks that it accepts or rejects each one, all
-without a GPU.
+and that context** — the list of operations, their declared footprints, and two
+true/false facts about the barostat. It launches no GPU work and touches no
+positions, velocities, or forces. For the same reason it is easy to test
+directly — the test suite feeds it hand-written plans, correct and incorrect,
+and checks that it accepts or rejects each one, all without a GPU.
 
 ## What the check does and does not cover
 
@@ -253,6 +343,12 @@ A few boundaries are worth knowing when you extend the engine.
   dependency check. The ordering rule that a constraint must publish its
   virial before a barostat reads it, for instance, is enforced elsewhere in
   the runner, not by this walk.
+
+- **Weak-coupling tolerance covers only forces.** When a barostat declares that
+  it tolerates stale cached forces, that applies to the *forces* alone. Keeping
+  the neighbour list valid across a box change is a separate concern, handled by
+  the rebuild trigger described in the neighbour-list documentation, not by this
+  check.
 
 - **This is a correctness check, not an optimization.** The check never
   reorders, merges, or removes operations. Every operation still runs as its

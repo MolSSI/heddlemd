@@ -138,6 +138,18 @@
     "title": "Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
     "type": "scenario"
   },
+  "rq-009c28e2": {
+    "decl": "Scenario: The same RESPA plan validates under a tolerant barostat",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The same RESPA plan validates under a tolerant barostat",
+    "type": "scenario"
+  },
   "rq-009eed1b": {
     "decl": "Scenario: NVT graph phase evaluates force-kernel scalars only on log steps",
     "file": "cuda-graphs",
@@ -197,6 +209,22 @@
       }
     ],
     "title": "rescale_positions does not modify velocities, forces, masses, or images",
+    "type": "scenario"
+  },
+  "rq-011858f8": {
+    "decl": "Scenario: Weak-coupling barostats declare force-staleness tolerance",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/barostats_berendsen.rs",
+        "kind": "code"
+      },
+      {
+        "file": "tests/barostats_c_rescale.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Weak-coupling barostats declare force-staleness tolerance",
     "type": "scenario"
   },
   "rq-011b7cea": {
@@ -884,6 +912,18 @@
       }
     ],
     "title": "Reject zero ly",
+    "type": "scenario"
+  },
+  "rq-060b1323": {
+    "decl": "Scenario: A terminal box mutation under a tolerant barostat validates",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A terminal box mutation under a tolerant barostat validates",
     "type": "scenario"
   },
   "rq-060b1fab": {
@@ -2870,7 +2910,7 @@
     "type": "section"
   },
   "rq-129c5de9": {
-    "decl": "- `StepPlan::validate(&self) -> Result<(), ScheduleError>`",
+    "decl": "- `StepPlan::validate(&self, ctx: &StepValidationContext) -> Result<(), ScheduleError>`",
     "file": "integration/op-model",
     "refs": [
       {
@@ -3048,6 +3088,18 @@
       }
     ],
     "title": "[neighbor_list] rejects unknown fields for the chosen mode",
+    "type": "scenario"
+  },
+  "rq-13cb1367": {
+    "decl": "Scenario: effective_footprint reports an active BarostatPoint with its full footprint",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "effective_footprint reports an active BarostatPoint with its full footprint",
     "type": "scenario"
   },
   "rq-13d8e659": {
@@ -4427,7 +4479,7 @@
     "type": "scenario"
   },
   "rq-1c8baf7d": {
-    "decl": "Scenario: A velocity-Verlet plan validates",
+    "decl": "Scenario: A velocity-Verlet plan with an inert BarostatPoint validates",
     "file": "integration/op-model",
     "refs": [
       {
@@ -4435,7 +4487,7 @@
         "kind": "code"
       }
     ],
-    "title": "A velocity-Verlet plan validates",
+    "title": "A velocity-Verlet plan with an inert BarostatPoint validates",
     "type": "scenario"
   },
   "rq-1ca1e95a": {
@@ -5411,6 +5463,18 @@
     "title": "ThermostatHalf is a no-op when no thermostat is configured",
     "type": "scenario"
   },
+  "rq-229f0723": {
+    "decl": "Scenario: A RESPA plan with an untolerated terminal box mutation leaves the slow accumulator stale across the boundary",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A RESPA plan with an untolerated terminal box mutation leaves the slow accumulator stale across the boundary",
+    "type": "scenario"
+  },
   "rq-22a1660e": {
     "decl": "### Source Fragment",
     "file": "forces/periodic-dihedral",
@@ -6325,6 +6389,19 @@
     "title": "Two ForceFields constructed from the same config produce byte-identical composed PTX",
     "type": "scenario"
   },
+  "rq-28c539f5": {
+    "decl": "### Intra-step pass",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Intra-step pass",
+    "type": "section"
+  },
   "rq-28cc7d41": {
     "decl": "Scenario: settle_positions guards a near-degenerate instantaneous geometry",
     "file": "integration/settle",
@@ -7122,6 +7199,18 @@
     "title": "VelocityVerletState implements ConstraintCapableIntegrator",
     "type": "scenario"
   },
+  "rq-2e035fd8": {
+    "decl": "- `SubStep::effective_footprint(&self, ctx: &StepValidationContext) -> OpFootprint`",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SubStep",
+    "type": "api-item"
+  },
   "rq-2e15fed7": {
     "decl": "## Launch Configuration",
     "file": "forces/neighbor-list",
@@ -7706,6 +7795,19 @@
     "refs": [],
     "title": "One row per particle; charge is in the config's unit system",
     "type": "file"
+  },
+  "rq-338550b2": {
+    "decl": "### Cross-step pass",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Cross-step pass",
+    "type": "section"
   },
   "rq-33861244": {
     "decl": "Scenario: LjSpmeRealFusedBuilder is not part of PotentialRegistry::with_builtins",
@@ -10032,6 +10134,18 @@
     "title": "Constraint row with atom index out of range is rejected",
     "type": "scenario"
   },
+  "rq-450484bb": {
+    "decl": "Scenario: effective_footprint reports an inert BarostatPoint as empty",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "effective_footprint reports an inert BarostatPoint as empty",
+    "type": "scenario"
+  },
   "rq-454ad2cf": {
     "decl": "- `HarmonicAngleState` — implements `Potential` with `label() == \"harmonic_angle\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
@@ -11324,6 +11438,14 @@
     "level": 3,
     "refs": [],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-4fed3c90": {
+    "decl": "### The inert `BarostatPoint` footprint",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [],
+    "title": "The inert `BarostatPoint` footprint",
     "type": "section"
   },
   "rq-4ff84310": {
@@ -14606,6 +14728,18 @@
       }
     ],
     "title": "Reject reordered Properties columns",
+    "type": "scenario"
+  },
+  "rq-6814860a": {
+    "decl": "Scenario: The Monte-Carlo barostat does not declare tolerance",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/barostats_mc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "The Monte-Carlo barostat does not declare tolerance",
     "type": "scenario"
   },
   "rq-681afa90": {
@@ -19816,6 +19950,18 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-8e1ce2f8": {
+    "decl": "Scenario: A plan that begins with a force evaluation is robust to a terminal box mutation",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A plan that begins with a force evaluation is robust to a terminal box mutation",
+    "type": "scenario"
+  },
   "rq-8e239d36": {
     "decl": "### Momentum subtraction",
     "file": "simulation-runner",
@@ -21076,6 +21222,18 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Slot for a pair beyond cutoff is zero",
+    "type": "scenario"
+  },
+  "rq-97093c72": {
+    "decl": "Scenario: A terminal box mutation under an untolerated barostat leaves the next step's forces stale",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A terminal box mutation under an untolerated barostat leaves the next step's forces stale",
     "type": "scenario"
   },
   "rq-971663ba": {
@@ -25742,6 +25900,22 @@
     "title": "spme_recip_apply_influence",
     "type": "api-item"
   },
+  "rq-b83f8ae6": {
+    "decl": "- `StepValidationContext` — the phase context validation is performed",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner/phases.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "StepValidationContext",
+    "type": "api-item"
+  },
   "rq-b8463a3b": {
     "decl": "Scenario: Frame Properties carries image:I:3 when include_images=true and include_velocities=false",
     "file": "io/trajectory-output",
@@ -27950,6 +28124,26 @@
     ],
     "title": "Allocate device buffers from an empty state",
     "type": "scenario"
+  },
+  "rq-c8be316e": {
+    "decl": "- `Barostat::tolerates_stale_cached_forces(&self) -> bool`",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Barostat",
+    "type": "api-item"
   },
   "rq-c8c03ed1": {
     "decl": "# one Fourier term to the total dihedral potential on that quadruple.",
@@ -31136,6 +31330,18 @@
       }
     ],
     "title": "A force read after a drift with no intervening force evaluation is stale",
+    "type": "scenario"
+  },
+  "rq-df64e69a": {
+    "decl": "Scenario: A trailing force evaluation makes a terminal box mutation loop-consistent without tolerance",
+    "file": "integration/op-model",
+    "refs": [
+      {
+        "file": "tests/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A trailing force evaluation makes a terminal box mutation loop-consistent without tolerance",
     "type": "scenario"
   },
   "rq-df6d79a1": {
@@ -35376,6 +35582,19 @@
     ],
     "title": "ConstraintBuilder default supports_position_projection_only returns true",
     "type": "scenario"
+  },
+  "rq-fd52063f": {
+    "decl": "### Weak-coupling tolerance",
+    "file": "integration/op-model",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator/op_model.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Weak-coupling tolerance",
+    "type": "section"
   },
   "rq-fd593357": {
     "decl": "Scenario: Append frames in order",

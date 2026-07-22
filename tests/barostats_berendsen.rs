@@ -768,3 +768,10 @@ fn two_runs_byte_identical() {
     }
     let _ = KB;
 }
+
+#[test] // rq-011858f8
+fn berendsen_tolerates_stale_cached_forces() {
+    let gpu = init_device().unwrap();
+    let baro = build_berendsen_barostat(&gpu, 4, &berendsen_kind(1.0e5, 1.0e-12, 4.5e-10));
+    assert!(baro.tolerates_stale_cached_forces());
+}

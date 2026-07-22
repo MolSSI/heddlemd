@@ -132,8 +132,17 @@ pub enum ScheduleError {
     /// The operation at `index` (named by `SubStep::variant_name()`)
     /// reads `resource`, which is not valid at that point in the
     /// schedule — stale force-derived state, or a resource never produced
-    /// this step.
+    /// this step. Raised by the intra-step pass.
     ReadsStaleResource {
+        index: usize,
+        op: &'static str,
+        resource: Resource,
+    },
+    /// The operation at `index` reads force-derived `resource` at the start
+    /// of a step that the schedule's own terminal operations invalidated,
+    /// with no intervening force evaluation and no weak-coupling tolerance.
+    /// Raised by the cross-step pass.
+    ReadsStaleCachedForce {
         index: usize,
         op: &'static str,
         resource: Resource,
@@ -149,11 +158,60 @@ impl std::fmt::Display for ScheduleError {
                  it was invalidated by an earlier position/box mutation, or never \
                  produced this step (a missing force evaluation)"
             ),
+            ScheduleError::ReadsStaleCachedForce { index, op, resource } => write!(
+                f,
+                "schedule operation #{index} ({op}) reads force-derived resource \
+                 {resource:?} at the start of a step, but the schedule's own terminal \
+                 operations invalidated it (a box/position mutation with no trailing \
+                 force evaluation): the replayed step would consume stale cached forces. \
+                 Append a force evaluation after the mutation, or declare weak-coupling \
+                 tolerance on the barostat"
+            ),
         }
     }
 }
 
 impl std::error::Error for ScheduleError {}
+
+// rq-b83f8ae6
+/// The phase context schedule validation is performed against. The runner
+/// assembles it from the phase's configured slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepValidationContext {
+    /// Whether a per-step barostat is configured for the phase. When
+    /// `false`, a `BarostatPoint` marker is inert (empty footprint).
+    pub per_step_barostat_active: bool,
+    /// Whether the active per-step barostat accepts the force staleness its
+    /// terminal rescale leaves for the next step. Meaningful only when
+    /// `per_step_barostat_active` is `true`.
+    pub tolerates_stale_cached_forces: bool,
+}
+
+impl StepValidationContext {
+    /// No per-step barostat (NVE / NVT, or an integrator that owns its
+    /// pressure coupling): `BarostatPoint` markers are inert.
+    pub fn no_barostat() -> Self {
+        StepValidationContext {
+            per_step_barostat_active: false,
+            tolerates_stale_cached_forces: false,
+        }
+    }
+
+    /// A per-step barostat is active; `tolerates` is its
+    /// `Barostat::tolerates_stale_cached_forces()` value.
+    pub fn per_step_barostat(tolerates: bool) -> Self {
+        StepValidationContext {
+            per_step_barostat_active: true,
+            tolerates_stale_cached_forces: tolerates,
+        }
+    }
+}
+
+impl Default for StepValidationContext {
+    fn default() -> Self {
+        StepValidationContext::no_barostat()
+    }
+}
 
 // rq-c5c17dcd
 /// The carried-in valid set an integrator enters a step with: every base
@@ -168,25 +226,27 @@ pub(crate) fn carried_in_valid_set() -> ResourceSet {
     v
 }
 
-// rq-c5c17dcd
-/// Validate a schedule (as an ordered slice of `(op_name, footprint)`)
-/// against the carried-in valid set. Returns the first
-/// [`ScheduleError`], or `Ok(())` for a dependency-correct schedule.
+/// Walk a schedule (as an ordered slice of `(op_name, footprint)`) from a
+/// given `seed` valid set, checking reads and applying invalidation and
+/// writes. Returns the valid set at the end of the walk, or the first
+/// stale read (built by `make_err`).
 ///
 /// For each operation, in order: every read must currently be valid;
 /// then, if the operation writes `Positions` or `Box`, every derived
-/// resource is invalidated; then the operation's writes become valid.
-/// The read check runs against the valid set as it stands *before* the
+/// resource is invalidated; then the operation's writes become valid. The
+/// read check runs against the valid set as it stands *before* the
 /// operation's own invalidation and writes.
-pub(crate) fn validate_footprints(
-    ops: impl Iterator<Item = (&'static str, OpFootprint)>,
-) -> Result<(), ScheduleError> {
-    let mut valid = carried_in_valid_set();
-    for (index, (op, fp)) in ops.enumerate() {
+fn walk(
+    ops: &[(&'static str, OpFootprint)],
+    seed: ResourceSet,
+    make_err: impl Fn(usize, &'static str, Resource) -> ScheduleError,
+) -> Result<ResourceSet, ScheduleError> {
+    let mut valid = seed;
+    for (index, (op, fp)) in ops.iter().enumerate() {
         // Read check (against the pre-operation valid set).
         for r in fp.reads.iter() {
             if !valid.contains(r) {
-                return Err(ScheduleError::ReadsStaleResource { index, op, resource: r });
+                return Err(make_err(index, op, r));
             }
         }
         // Invalidation: a configuration change makes cached forces stale.
@@ -202,5 +262,46 @@ pub(crate) fn validate_footprints(
             valid.insert(r);
         }
     }
+    Ok(valid)
+}
+
+// rq-c5c17dcd rq-28c539f5 rq-338550b2 rq-fd52063f
+/// Validate a schedule (as an ordered slice of effective `(op_name,
+/// footprint)` pairs) as a repeating loop. Returns the first
+/// [`ScheduleError`], or `Ok(())` for a dependency-correct schedule.
+///
+/// Two passes run the same walk with different seeds:
+///
+/// * **Intra-step pass** — seeded with the carried-in valid set (all forces
+///   valid, as on a phase's warm-up-seeded first step). A stale read here is
+///   a `ReadsStaleResource`.
+/// * **Cross-step pass** — seeded with the derived state the schedule
+///   actually leaves valid at its end (`d_end`, the intra-step walk's end
+///   set), since every step after the first inherits exactly that. A stale
+///   read here is a `ReadsStaleCachedForce`. When the active per-step
+///   barostat tolerates stale cached forces (a weak-coupling terminal
+///   rescale), the next step may treat the pre-rescale forces as valid, so
+///   the cross-step seed is the full carried-in set instead — collapsing
+///   the cross-step pass to the intra-step pass.
+pub(crate) fn validate_footprints(
+    ops: &[(&'static str, OpFootprint)],
+    ctx: &StepValidationContext,
+) -> Result<(), ScheduleError> {
+    // rq-28c539f5 — intra-step pass.
+    let d_end = walk(ops, carried_in_valid_set(), |index, op, resource| {
+        ScheduleError::ReadsStaleResource { index, op, resource }
+    })?;
+    // rq-fd52063f — the carry set the successor step relies on: what this
+    // schedule leaves valid, or the full carried-in set when a weak-coupling
+    // barostat tolerates the staleness its terminal rescale leaves behind.
+    let carry = if ctx.tolerates_stale_cached_forces {
+        carried_in_valid_set()
+    } else {
+        d_end
+    };
+    // rq-338550b2 — cross-step pass.
+    walk(ops, carry, |index, op, resource| {
+        ScheduleError::ReadsStaleCachedForce { index, op, resource }
+    })?;
     Ok(())
 }
