@@ -26,7 +26,8 @@ begins the list is checked against those footprints for dependency
 mistakes. An operation may not, for example, read a force that a preceding
 position update has already invalidated without a force re-evaluation in
 between; such a plan is rejected rather than silently producing wrong
-dynamics.
+dynamics. [Validating Timestep Dependencies](op-model.md) explains this
+check in full and works through a complete example.
 
 This list *is* the definition of the step. An integrator does not run a
 timestep by calling kernels itself; it hands back a `StepPlan`, and the
