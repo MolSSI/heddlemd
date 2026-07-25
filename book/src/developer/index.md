@@ -293,6 +293,8 @@ Most extensible HeddleMD components use three related concepts:
 
 This design avoids a central conditional containing every supported method.
 Adding a built-in generally means implementing the appropriate traits and
-adding its builder to one registry roster. The [Extending
-HeddleMD](../extending/index.md) overview explains this process and introduces
-the configuration and testing conventions shared by all extension points.
+adding its builder to one registry roster. [Registries and Pluggable
+Components](registries.md) explains how this framework works and why; the
+[Extending HeddleMD](../extending/index.md) guides then walk through the
+process for each kind of component, with the configuration and testing
+conventions they share.
