@@ -4,6 +4,10 @@ $keyFile = ".riprap/state/container/agent-build.env"
 $candidateFile = ".riprap/state/container/agent-build.candidate.env"
 $pinFile = ".riprap/user/agent-pin.env"
 $versionPattern = '^[0-9]+\.[0-9]+\.[0-9]+$'
+# Every supported agent name is recognized so a typo is reported as unknown, but only the
+# agents this project installs may be pinned.
+$recognizedNames = @("CLAUDE_VERSION", "CODEX_VERSION", "OPENCODE_VERSION")
+$installedNames = @("CLAUDE_VERSION", "CODEX_VERSION", "OPENCODE_VERSION")
 
 function Fail([string]$Message) {
     # An uncaught exception is reformatted and line-wrapped by Windows PowerShell, making
@@ -25,10 +29,18 @@ function Get-IsoWeekStamp([datetime]$Date = (Get-Date).ToUniversalTime()) {
 
 function Prepare-AgentBuild {
     New-Item -ItemType Directory -Force -Path ".riprap/state/container" | Out-Null
+
     $claudeVersion = "latest"
+
+
     $codexVersion = "latest"
+
+
     $opencodeVersion = "latest"
+
+
     $refresh = Get-IsoWeekStamp
+
 
     if (Test-Path -LiteralPath $pinFile) {
         if (-not (Test-Path -LiteralPath $pinFile -PathType Leaf)) { Fail "$pinFile must be a regular file" }
@@ -40,16 +52,26 @@ function Prepare-AgentBuild {
             $name = $Matches[1]
             $value = $Matches[2]
             # Checks run in a fixed precedence so that every launcher reports the same defect
-            # for the same file: structure, then name, then repetition, then value.
-            if ($name -notin @("CLAUDE_VERSION", "CODEX_VERSION", "OPENCODE_VERSION")) { Fail "$pinFile contains unknown assignment '$name'" }
+            # for the same file: structure, then name, then whether the named agent is installed,
+            # then repetition, then value.
+            if ($name -notin $recognizedNames) { Fail "$pinFile contains unknown assignment '$name'" }
+            if ($name -notin $installedNames) { Fail "${pinFile}: $name names an agent this project does not install" }
             if ($seen.ContainsKey($name)) { Fail "$pinFile contains duplicate $name assignments" }
             if (-not $value) { Fail "${pinFile}: $name has an empty value" }
             if ($value -notmatch $versionPattern) { Fail "${pinFile}: $name must be an exact release version such as 1.2.3, but is '$value'" }
             $seen[$name] = $value
         }
+
         if ($seen.CLAUDE_VERSION) { $claudeVersion = $seen.CLAUDE_VERSION }
+
+
         if ($seen.CODEX_VERSION) { $codexVersion = $seen.CODEX_VERSION }
+
+
         if ($seen.OPENCODE_VERSION) { $opencodeVersion = $seen.OPENCODE_VERSION }
+
+        # While every installed agent is pinned, the build key is fixed rather than tracking the
+        # week, so pinned releases are not reinstalled week after week.
         if ($seen.Count -eq 3) { $refresh = "pinned" }
     }
 
@@ -65,9 +87,19 @@ switch ($args[0]) {
     { $_ -in @($null, "", "prepare") } { Prepare-AgentBuild; break }
     "promote" {
         if (-not (Test-Path -LiteralPath $candidateFile -PathType Leaf)) { Fail "no agent build candidate exists" }
-        if (-not $args[1] -or -not $args[2] -or -not $args[3]) { Fail "promote requires exact Claude, Codex, and OpenCode versions" }
+        if (-not $args[1] -or -not $args[2] -or -not $args[3] -or $false) { Fail "promote requires an exact release version for each installed agent" }
         $contents = (Get-Content -LiteralPath $candidateFile | Where-Object { $_ -notmatch '^INSTALLED_' }) -join "`n"
-        $contents += "`nINSTALLED_CLAUDE_VERSION=$($args[1])`nINSTALLED_CODEX_VERSION=$($args[2])`nINSTALLED_OPENCODE_VERSION=$($args[3])`n"
+        $installed = ""
+
+        $installed += "INSTALLED_CLAUDE_VERSION=$($args[1])`n"
+
+
+        $installed += "INSTALLED_CODEX_VERSION=$($args[2])`n"
+
+
+        $installed += "INSTALLED_OPENCODE_VERSION=$($args[3])`n"
+
+        $contents += "`n" + $installed
         [IO.File]::WriteAllText($keyFile, $contents, [Text.UTF8Encoding]::new($false))
         Remove-Item -LiteralPath $candidateFile -Force
         break

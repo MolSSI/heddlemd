@@ -1,17 +1,26 @@
 ARG RIPRAP_TOOLING_IMAGE
 FROM ${RIPRAP_TOOLING_IMAGE}
 
+
 ARG CLAUDE_VERSION
+
+
 ARG CODEX_VERSION
+
+
 ARG OPENCODE_VERSION
+
 
 # The installers place files beneath HOME, which the tooling image sets to an
 # image-owned path outside /root. Each agent's own configuration home under that
 # path is a credential mount point at run time, so the image leaves nothing there.
+
 RUN set -eu; \
     test -n "$CLAUDE_VERSION"; \
     curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_VERSION"; \
     rm -rf "$HOME/.claude.json" "$HOME/.claude"
+
+
 
 # The installer extracts a release tarball with a bare `tar -xzf`. Under a root-mapped runtime
 # (Podman), GNU tar cannot restore the archive's runner ownership or perform its deferred directory
@@ -25,6 +34,8 @@ RUN set -eu; \
     export TAR_OPTIONS; \
     curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release "$CODEX_VERSION"
 
+
+
 RUN set -eu; \
     test -n "$OPENCODE_VERSION"; \
     if [ "$OPENCODE_VERSION" = latest ]; then version_args=; else version_args="--version $OPENCODE_VERSION"; fi; \
@@ -36,7 +47,10 @@ RUN set -eu; \
 COPY opencode /usr/local/bin/opencode
 RUN chmod 0755 /usr/local/bin/opencode
 
+
+
 ENV CODEX_HOME=/opt/riprap/home/.codex
+
 ENV DISABLE_AUTOUPDATER=1
 
 # Reach the agent programs as any unprivileged user, on the same terms as the toolchain the tooling
